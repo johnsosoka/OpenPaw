@@ -128,15 +128,33 @@ class BuiltinLoader:
 
         return True  # Default enabled
 
+    def _has_config_api_key(self, name: str) -> bool:
+        """Check if config provides an api_key for this builtin."""
+        config = self._get_builtin_config(name)
+        return bool(config.get("api_key"))
+
     def load_tools(self) -> list[Any]:
         """Load all allowed and available tool builtins.
+
+        A tool is available if either:
+        - Its prerequisites are satisfied (env vars set), OR
+        - Its config contains an api_key
 
         Returns:
             List of LangChain-compatible tool instances.
         """
         tools: list[Any] = []
 
-        for name, metadata in self.registry.get_available_tools().items():
+        # Check all registered tools, not just those with satisfied prerequisites
+        all_tools = self.registry.list_all()["tools"]
+        for metadata in all_tools:
+            name = metadata.name
+
+            # Check if available via env vars OR config api_key
+            if not metadata.prerequisites.is_satisfied() and not self._has_config_api_key(name):
+                logger.debug(f"Tool '{name}' not available (no env var or config api_key)")
+                continue
+
             if not self._is_allowed(name, metadata.group):
                 logger.debug(f"Tool '{name}' denied by config")
                 continue
@@ -160,12 +178,25 @@ class BuiltinLoader:
     def load_processors(self) -> list[BaseBuiltinProcessor]:
         """Load all allowed and available processor builtins.
 
+        A processor is available if either:
+        - Its prerequisites are satisfied (env vars set), OR
+        - Its config contains an api_key
+
         Returns:
             List of processor instances.
         """
         processors: list[BaseBuiltinProcessor] = []
 
-        for name, metadata in self.registry.get_available_processors().items():
+        # Check all registered processors, not just those with satisfied prerequisites
+        all_processors = self.registry.list_all()["processors"]
+        for metadata in all_processors:
+            name = metadata.name
+
+            # Check if available via env vars OR config api_key
+            if not metadata.prerequisites.is_satisfied() and not self._has_config_api_key(name):
+                logger.debug(f"Processor '{name}' not available (no env var or config api_key)")
+                continue
+
             if not self._is_allowed(name, metadata.group):
                 logger.debug(f"Processor '{name}' denied by config")
                 continue

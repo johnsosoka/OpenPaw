@@ -46,7 +46,8 @@ class BraveSearchTool(BaseBuiltinTool):
                 "Install with: pip install langchain-community"
             ) from e
 
-        api_key = os.environ.get("BRAVE_API_KEY", "")
+        # Config takes precedence over env var
+        api_key = self.config.get("api_key") or os.environ.get("BRAVE_API_KEY", "")
         count = self.config.get("count", 5)
 
         logger.debug(f"Creating BraveSearch tool with count={count}")

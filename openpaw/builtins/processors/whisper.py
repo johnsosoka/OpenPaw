@@ -54,7 +54,9 @@ class WhisperProcessor(BaseBuiltinProcessor):
                     "Install with: pip install openai"
                 ) from e
 
-            self._client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+            # Config takes precedence over env var
+            api_key = self.config.get("api_key") or os.environ.get("OPENAI_API_KEY")
+            self._client = AsyncOpenAI(api_key=api_key)
         return self._client
 
     async def process_inbound(self, message: Message) -> ProcessorResult:
@@ -72,10 +74,12 @@ class WhisperProcessor(BaseBuiltinProcessor):
             return ProcessorResult(message=message)
 
         transcriptions: list[str] = []
+        errors: list[str] = []
 
         for attachment in audio_attachments:
             if not attachment.data:
                 logger.warning("Audio attachment has no data, skipping")
+                errors.append("Audio attachment has no data")
                 continue
 
             try:
@@ -83,19 +87,34 @@ class WhisperProcessor(BaseBuiltinProcessor):
                 if text:
                     transcriptions.append(text)
                     logger.info(f"Transcribed audio: {text[:50]}...")
+                else:
+                    errors.append("Transcription returned empty")
             except Exception as e:
                 logger.error(f"Failed to transcribe audio: {e}")
+                errors.append(str(e))
 
+        # Handle failure cases
         if not transcriptions:
-            return ProcessorResult(message=message)
-
-        # Append transcriptions to message content
-        transcribed_text = "\n".join(transcriptions)
-
-        if message.content:
-            new_content = f"{message.content}\n\n[Voice message]: {transcribed_text}"
+            # All transcriptions failed - pass error to agent for troubleshooting
+            error_detail = "; ".join(errors) if errors else "Unknown error"
+            new_content = f"[Voice message: Unable to transcribe audio - {error_detail}]"
+            if message.content:
+                new_content = f"{message.content}\n\n{new_content}"
         else:
-            new_content = f"[Voice message]: {transcribed_text}"
+            # Some or all transcriptions succeeded
+            transcribed_text = "\n".join(transcriptions)
+
+            if message.content:
+                new_content = f"{message.content}\n\n[Voice message]: {transcribed_text}"
+            else:
+                new_content = f"[Voice message]: {transcribed_text}"
+
+            # Add note about partial failures
+            if errors:
+                plural = "files" if len(errors) > 1 else "file"
+                error_detail = "; ".join(errors)
+                failure_note = f"\n\n[Note: {len(errors)} audio {plural} could not be transcribed - {error_detail}]"
+                new_content += failure_note
 
         # Create new message with updated content
         updated_message = Message(

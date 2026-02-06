@@ -86,14 +86,13 @@ class ElevenLabsTTSTool(BaseBuiltinTool):
                 return f"[Failed to generate audio: {e}]"
 
         return StructuredTool.from_function(
-            func=lambda text, voice_id=None: generate_speech(text, voice_id),
+            coroutine=generate_speech,
             name="text_to_speech",
             description=(
                 "Convert text to spoken audio. Use this when you want to send a voice message "
                 "or when the user requests audio output. The audio will be attached to your response."
             ),
             args_schema=TTSInput,
-            coroutine=generate_speech,
         )
 
     async def _generate_audio(self, text: str, voice_id: str | None = None) -> bytes:
@@ -113,7 +112,8 @@ class ElevenLabsTTSTool(BaseBuiltinTool):
                 "elevenlabs is required for TTS. Install with: pip install elevenlabs"
             ) from e
 
-        api_key = os.environ.get("ELEVENLABS_API_KEY", "")
+        # Config takes precedence over env var
+        api_key = self.config.get("api_key") or os.environ.get("ELEVENLABS_API_KEY", "")
         client = AsyncElevenLabs(api_key=api_key)
 
         resolved_voice_id = voice_id or self.config.get("voice_id", "21m00Tcm4TlvDq8ikWAM")
@@ -122,10 +122,10 @@ class ElevenLabsTTSTool(BaseBuiltinTool):
 
         logger.debug(f"Generating speech: voice={resolved_voice_id}, model={model_id}")
 
-        audio_generator = await client.generate(
+        audio_generator = client.text_to_speech.convert(
+            voice_id=resolved_voice_id,
             text=text,
-            voice=resolved_voice_id,
-            model=model_id,
+            model_id=model_id,
             output_format=output_format,
         )
 
