@@ -1,7 +1,17 @@
 """Agent workspace loading and management."""
 
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+import yaml
+
+logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from openpaw.core.config import WorkspaceConfig
+    from openpaw.cron.loader import CronDefinition
 
 
 @dataclass
@@ -15,6 +25,8 @@ class AgentWorkspace:
     soul_md: str
     heartbeat_md: str
     skills_path: Path
+    config: "WorkspaceConfig | None" = None
+    crons: "list[CronDefinition]" = field(default_factory=list)
 
     def build_system_prompt(self) -> str:
         """Stitch together workspace files into a system prompt.
@@ -95,6 +107,10 @@ class WorkspaceLoader:
 
         skills_path = workspace_path / self.SKILLS_DIR
 
+        # Load optional workspace config and crons
+        workspace_config = self._load_workspace_config(workspace_path)
+        crons = self._load_crons(workspace_path)
+
         return AgentWorkspace(
             name=workspace_name,
             path=workspace_path,
@@ -103,6 +119,8 @@ class WorkspaceLoader:
             soul_md=self._read_file(workspace_path / "SOUL.md"),
             heartbeat_md=self._read_file(workspace_path / "HEARTBEAT.md"),
             skills_path=skills_path,
+            config=workspace_config,
+            crons=crons,
         )
 
     def _read_file(self, path: Path) -> str:
@@ -110,3 +128,61 @@ class WorkspaceLoader:
         if path.exists():
             return path.read_text(encoding="utf-8")
         return ""
+
+    def _load_workspace_config(self, workspace_path: Path) -> "WorkspaceConfig | None":
+        """Load agent.yaml configuration from workspace if it exists.
+
+        Args:
+            workspace_path: Path to the workspace directory.
+
+        Returns:
+            WorkspaceConfig object or None if agent.yaml doesn't exist.
+        """
+        config_file = workspace_path / "agent.yaml"
+        if not config_file.exists():
+            return None
+
+        with config_file.open() as f:
+            data = yaml.safe_load(f) or {}
+
+        # Import expand_env_vars_recursive at runtime to avoid circular imports
+        from openpaw.core.config import WorkspaceConfig, expand_env_vars_recursive
+
+        # Apply environment variable substitution
+        data = expand_env_vars_recursive(data)
+
+        return WorkspaceConfig(**data)
+
+    def _load_crons(self, workspace_path: Path) -> "list[CronDefinition]":
+        """Load all cron definitions from workspace's crons/ directory.
+
+        Args:
+            workspace_path: Path to the workspace directory.
+
+        Returns:
+            List of CronDefinition objects, empty list if crons/ doesn't exist.
+        """
+        crons_dir = workspace_path / "crons"
+        if not crons_dir.exists() or not crons_dir.is_dir():
+            return []
+
+        # Import at runtime to avoid circular import
+        from openpaw.core.config import expand_env_vars_recursive
+        from openpaw.cron.loader import CronDefinition
+
+        cron_definitions = []
+        for cron_file in sorted(crons_dir.glob("*.yaml")):
+            try:
+                with cron_file.open() as f:
+                    data = yaml.safe_load(f) or {}
+
+                # Apply environment variable substitution
+                data = expand_env_vars_recursive(data)
+
+                cron_definitions.append(CronDefinition(**data))
+            except Exception as e:
+                # Log warning but continue loading other crons
+                logger.warning(f"Failed to load cron file {cron_file.name}: {e}")
+                continue
+
+        return cron_definitions

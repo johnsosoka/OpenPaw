@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from deepagents import create_deep_agent
+from deepagents.backends import FilesystemBackend
 from langchain.chat_models import init_chat_model
 
 from openpaw.workspace.loader import AgentWorkspace
@@ -52,7 +53,11 @@ class AgentRunner:
         self._agent = self._build_agent()
 
     def _build_agent(self) -> Any:
-        """Build the DeepAgent with workspace configuration."""
+        """Build the DeepAgent with workspace configuration.
+
+        Filesystem access is sandboxed to the workspace directory using
+        DeepAgents' FilesystemBackend with virtual_mode=True for security.
+        """
         model_kwargs: dict[str, Any] = {"temperature": self.temperature}
         if self.api_key:
             model_kwargs["api_key"] = self.api_key
@@ -64,12 +69,29 @@ class AgentRunner:
         if self.workspace.skills_path.exists():
             skills_paths.append(str(self.workspace.skills_path))
 
+        # Validate and resolve workspace path for security
+        workspace_root = self.workspace.path.resolve()
+        if not workspace_root.exists():
+            raise ValueError(f"Workspace does not exist: {workspace_root}")
+        if not workspace_root.is_dir():
+            raise ValueError(f"Workspace is not a directory: {workspace_root}")
+
+        logger.debug(f"Sandboxing agent to workspace: {workspace_root}")
+
+        # Configure filesystem backend with workspace directory as root
+        # virtual_mode=True enforces sandboxing (blocks .., ~, and absolute paths outside root)
+        filesystem_backend = FilesystemBackend(
+            root_dir=str(workspace_root),
+            virtual_mode=True,
+        )
+
         agent = create_deep_agent(
             model=model,
             system_prompt=system_prompt,
             tools=self.tools if self.tools else None,
             skills=skills_paths if skills_paths else None,
             checkpointer=self.checkpointer,
+            backend=filesystem_backend,
         )
 
         return agent

@@ -1,0 +1,34 @@
+# Example Cron Job Configuration
+# Cron jobs allow agents to execute scheduled tasks automatically.
+# Place cron definitions in the workspace's crons/ directory.
+
+# Unique identifier for this cron job
+name: daily-summary
+
+# Cron schedule expression (standard cron format)
+# Format: "minute hour day-of-month month day-of-week"
+# Examples:
+#   - "0 9 * * *"      - Every day at 9:00 AM
+#   - "*/15 * * * *"   - Every 15 minutes
+#   - "0 0 * * 0"      - Every Sunday at midnight
+#   - "0 12 1 * *"     - First day of every month at noon
+schedule: "0 9 * * *"
+
+# Enable or disable this job (disabled by default for examples)
+enabled: false
+
+# Prompt to inject when the cron job executes
+# The agent will process this as if it received it from a user
+prompt: |
+  Generate a daily summary of system status and any pending tasks.
+  Review workspace files and provide a concise report.
+
+# Output routing configuration
+output:
+  # Channel to send the agent's response to
+  channel: telegram
+
+  # Channel-specific routing (e.g., Telegram chat ID)
+  # For Telegram: use your user ID or group chat ID
+  # Get this by messaging the bot and checking logs
+  chat_id: null  # Replace with actual chat ID when enabling

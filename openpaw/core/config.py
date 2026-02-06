@@ -1,10 +1,86 @@
 """Configuration management for OpenPaw."""
 
+import copy
+import os
+import re
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
+
+
+def expand_env_vars(value: str) -> str:
+    """Expand ${VAR} patterns in a string with environment variable values.
+
+    Args:
+        value: String potentially containing ${VAR_NAME} patterns.
+
+    Returns:
+        String with all ${VAR_NAME} patterns replaced by their values from os.environ.
+        If a variable is not found, the pattern is left unchanged.
+
+    Examples:
+        >>> os.environ['API_KEY'] = 'secret123'
+        >>> expand_env_vars('Token: ${API_KEY}')
+        'Token: secret123'
+    """
+    pattern = r'\$\{([^}]+)\}'
+
+    def replacer(match: re.Match[str]) -> str:
+        var_name = match.group(1)
+        return os.environ.get(var_name, match.group(0))
+
+    return re.sub(pattern, replacer, value)
+
+
+def expand_env_vars_recursive(obj: Any) -> Any:
+    """Recursively expand environment variables in nested dicts and lists.
+
+    Args:
+        obj: Any Python object (dict, list, str, or other).
+
+    Returns:
+        Object with all string values having ${VAR} patterns expanded.
+
+    Examples:
+        >>> expand_env_vars_recursive({'key': '${HOME}/path', 'nested': {'val': '${USER}'}})
+        {'key': '/home/user/path', 'nested': {'val': 'username'}}
+    """
+    if isinstance(obj, dict):
+        return {key: expand_env_vars_recursive(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [expand_env_vars_recursive(item) for item in obj]
+    elif isinstance(obj, str):
+        return expand_env_vars(obj)
+    else:
+        return obj
+
+
+def merge_configs(global_config: dict[str, Any], workspace_config: dict[str, Any]) -> dict[str, Any]:
+    """Deep merge workspace config over global config.
+
+    Args:
+        global_config: Base configuration dictionary (defaults).
+        workspace_config: Workspace-specific configuration (overrides).
+
+    Returns:
+        Merged configuration with workspace values taking precedence.
+        Nested dicts are merged recursively.
+
+    Examples:
+        >>> global_cfg = {'agent': {'model': 'gpt-4', 'temp': 0.7}}
+        >>> workspace_cfg = {'agent': {'model': 'claude-3'}}
+        >>> merge_configs(global_cfg, workspace_cfg)
+        {'agent': {'model': 'claude-3', 'temp': 0.7}}
+    """
+    result = copy.deepcopy(global_config)
+    for key, value in workspace_config.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = merge_configs(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 
 class QueueConfig(BaseModel):
@@ -57,6 +133,51 @@ class CronJobConfig(BaseModel):
     prompt: str | None = Field(default=None, description="Optional prompt to inject")
 
 
+class WorkspaceModelConfig(BaseModel):
+    """LLM configuration for a workspace agent."""
+
+    provider: str | None = Field(default=None, description="Model provider (anthropic, openai, etc.)")
+    model: str | None = Field(default=None, description="Model identifier")
+    api_key: str | None = Field(default=None, description="API key for the model provider")
+    temperature: float | None = Field(default=None, description="Model temperature")
+    max_turns: int | None = Field(default=None, description="Max agent turns per run")
+
+    model_config = {"extra": "allow"}
+
+
+class WorkspaceChannelConfig(BaseModel):
+    """Channel binding configuration for a workspace agent."""
+
+    type: str | None = Field(default=None, description="Channel type (telegram, slack, etc.)")
+    token: str | None = Field(default=None, description="Channel bot token")
+    allowed_users: list[int] = Field(default_factory=list, description="Allowed user IDs")
+    allowed_groups: list[int] = Field(default_factory=list, description="Allowed group IDs")
+    allow_all: bool = Field(default=False, description="Allow all users (insecure, use with caution)")
+
+    model_config = {"extra": "allow"}
+
+
+class WorkspaceQueueConfig(BaseModel):
+    """Queue configuration overrides for a workspace agent."""
+
+    mode: str | None = Field(default=None, description="Queue mode: steer, followup, collect")
+    debounce_ms: int | None = Field(default=None, description="Debounce delay in milliseconds")
+
+    model_config = {"extra": "allow"}
+
+
+class WorkspaceConfig(BaseModel):
+    """Configuration for a workspace agent (loaded from agent.yaml)."""
+
+    name: str | None = Field(default=None, description="Agent name")
+    description: str | None = Field(default=None, description="Agent description")
+    model: WorkspaceModelConfig = Field(default_factory=WorkspaceModelConfig, description="LLM configuration")
+    channel: WorkspaceChannelConfig = Field(default_factory=WorkspaceChannelConfig, description="Channel binding")
+    queue: WorkspaceQueueConfig = Field(default_factory=WorkspaceQueueConfig, description="Queue overrides")
+
+    model_config = {"extra": "allow"}
+
+
 class Config(BaseModel):
     """Root configuration for OpenPaw."""
 
@@ -71,13 +192,13 @@ class Config(BaseModel):
 
 
 def load_config(path: Path | str) -> Config:
-    """Load configuration from a YAML file.
+    """Load configuration from a YAML file with environment variable expansion.
 
     Args:
         path: Path to the YAML configuration file.
 
     Returns:
-        Parsed Config object.
+        Parsed Config object with all ${VAR} patterns expanded.
 
     Raises:
         FileNotFoundError: If the config file doesn't exist.
@@ -89,5 +210,8 @@ def load_config(path: Path | str) -> Config:
 
     with config_path.open() as f:
         data: dict[str, Any] = yaml.safe_load(f) or {}
+
+    # Expand environment variables in all string values
+    data = expand_env_vars_recursive(data)
 
     return Config(**data)

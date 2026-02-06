@@ -31,20 +31,27 @@ class TelegramChannel(ChannelAdapter):
         token: str | None = None,
         allowed_users: list[int] | None = None,
         allowed_groups: list[int] | None = None,
+        allow_all: bool = False,
+        workspace_name: str = "unknown",
     ):
         """Initialize the Telegram channel.
 
         Args:
             token: Bot token (falls back to TELEGRAM_BOT_TOKEN env var).
-            allowed_users: List of allowed user IDs (empty = allow all).
-            allowed_groups: List of allowed group IDs (empty = allow all).
+            allowed_users: List of allowed user IDs.
+            allowed_groups: List of allowed group IDs.
+            allow_all: If True, allow all users (insecure). If False, requires allowlists.
+            workspace_name: Name of the workspace (for error messages).
         """
-        self.token = token or os.environ.get("TELEGRAM_BOT_TOKEN")
-        if not self.token:
+        resolved_token = token or os.environ.get("TELEGRAM_BOT_TOKEN")
+        if not resolved_token:
             raise ValueError("Telegram bot token required (pass token or set TELEGRAM_BOT_TOKEN)")
+        self.token: str = resolved_token
 
         self.allowed_users = set(allowed_users or [])
         self.allowed_groups = set(allowed_groups or [])
+        self.allow_all = allow_all
+        self.workspace_name = workspace_name
         self._app: Application | None = None  # type: ignore[type-arg]
         self._message_callback: Callable[[Message], Coroutine[Any, Any, None]] | None = None
 
@@ -106,16 +113,33 @@ class TelegramChannel(ChannelAdapter):
         )
 
     def _is_allowed(self, update: Update) -> bool:
-        """Check if the message sender is allowed."""
+        """Check if the message sender is allowed.
+
+        Security model:
+        - If allow_all is True, all users are allowed (insecure)
+        - If allowed_users is set, user must be in the list
+        - If in a group chat and allowed_groups is set, group must be in the list
+        - If neither allow_all nor allowlists are set, deny by default (secure)
+        """
         if not update.effective_user:
             return False
+
+        # Explicit allow-all mode (use with caution)
+        if self.allow_all:
+            return True
 
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id if update.effective_chat else None
 
-        if self.allowed_users and user_id not in self.allowed_users:
+        # Check user allowlist
+        if self.allowed_users:
+            if user_id not in self.allowed_users:
+                return False
+        else:
+            # No user allowlist and not allow_all = deny
             return False
 
+        # Check group allowlist for group chats
         if chat_id and chat_id < 0:
             if self.allowed_groups and chat_id not in self.allowed_groups:
                 return False
@@ -146,10 +170,39 @@ class TelegramChannel(ChannelAdapter):
             },
         )
 
+    async def _send_unauthorized_response(self, update: Update) -> None:
+        """Send a helpful response to unauthorized users with their ID."""
+        if not update.message or not update.effective_user:
+            return
+
+        user_id = update.effective_user.id
+        chat_id = update.effective_chat.id if update.effective_chat else None
+
+        message = (
+            f"⛔ Access denied.\n\n"
+            f"Your user ID: `{user_id}`\n"
+        )
+
+        if chat_id and chat_id < 0:
+            message += f"Group ID: `{chat_id}`\n"
+
+        message += (
+            f"\nTo gain access, add your ID to the allowlist:\n"
+            f"`agent_workspaces/{self.workspace_name}/agent.yaml`\n\n"
+            f"```yaml\n"
+            f"channel:\n"
+            f"  allowed_users:\n"
+            f"    - {user_id}\n"
+            f"```"
+        )
+
+        await update.message.reply_text(message, parse_mode="Markdown")
+        logger.warning(f"Blocked user {user_id} from workspace '{self.workspace_name}'")
+
     async def _handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming text messages."""
         if not self._is_allowed(update):
-            logger.warning(f"Blocked message from unauthorized user: {update.effective_user}")
+            await self._send_unauthorized_response(update)
             return
 
         message = self._to_message(update)
@@ -159,6 +212,7 @@ class TelegramChannel(ChannelAdapter):
     async def _handle_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming commands."""
         if not self._is_allowed(update):
+            await self._send_unauthorized_response(update)
             return
 
         message = self._to_message(update)
@@ -168,6 +222,7 @@ class TelegramChannel(ChannelAdapter):
     async def _handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
         if not self._is_allowed(update):
+            await self._send_unauthorized_response(update)
             return
 
         if update.message:

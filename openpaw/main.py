@@ -5,13 +5,14 @@ import asyncio
 import logging
 import signal
 from pathlib import Path
+from typing import Any
 
 from langgraph.checkpoint.memory import InMemorySaver
 
 from openpaw.channels.base import Message
 from openpaw.channels.telegram import TelegramChannel
 from openpaw.core.agent import AgentRunner
-from openpaw.core.config import Config, load_config
+from openpaw.core.config import Config, load_config, merge_configs
 from openpaw.queue.lane import LaneQueue, QueueItem, QueueMode
 from openpaw.queue.manager import QueueManager
 from openpaw.workspace.loader import WorkspaceLoader
@@ -39,48 +40,144 @@ class OpenPaw:
         self._workspace_loader = WorkspaceLoader(config.workspaces_path)
         self._workspace = self._workspace_loader.load(workspace_name)
 
+        # Merge workspace config with global config if workspace has agent.yaml
+        self._merged_config = self._merge_workspace_config(config, self._workspace)
+
         self._lane_queue = LaneQueue(
             main_concurrency=config.lanes.main_concurrency,
             subagent_concurrency=config.lanes.subagent_concurrency,
             cron_concurrency=config.lanes.cron_concurrency,
         )
 
+        # Use workspace queue config if available, otherwise fall back to global
+        queue_config = self._merged_config.get("queue", {})
         self._queue_manager = QueueManager(
             lane_queue=self._lane_queue,
-            default_mode=QueueMode(config.queue.mode),
-            default_debounce_ms=config.queue.debounce_ms,
-            default_cap=config.queue.cap,
-            default_drop_policy=config.queue.drop_policy,
+            default_mode=QueueMode(queue_config.get("mode", config.queue.mode)),
+            default_debounce_ms=queue_config.get("debounce_ms", config.queue.debounce_ms),
+            default_cap=queue_config.get("cap", config.queue.cap),
+            default_drop_policy=queue_config.get("drop_policy", config.queue.drop_policy),
         )
 
         # Checkpointer for multi-turn conversation memory
         # InMemorySaver persists within session; use SqliteSaver for disk persistence
         self._checkpointer = InMemorySaver()
 
+        # Use merged model config for agent
+        agent_config = self._merged_config.get("model", {})
+        model_str = agent_config.get("model", config.agent.model)
+        if agent_config.get("provider"):
+            model_str = f"{agent_config['provider']}:{agent_config['model']}"
+
         self._agent_runner = AgentRunner(
             workspace=self._workspace,
-            model=config.agent.model,
-            api_key=config.agent.api_key,
-            max_turns=config.agent.max_turns,
-            temperature=config.agent.temperature,
+            model=model_str,
+            api_key=agent_config.get("api_key", config.agent.api_key),
+            max_turns=agent_config.get("max_turns", config.agent.max_turns),
+            temperature=agent_config.get("temperature", config.agent.temperature),
             checkpointer=self._checkpointer,
         )
 
         self._channels: dict[str, TelegramChannel] = {}
+        self._cron_scheduler: Any = None
         self._running = False
 
+    def _merge_workspace_config(self, global_config: Config, workspace: Any) -> dict[str, Any]:
+        """Merge workspace config over global config.
+
+        Args:
+            global_config: Global OpenPaw configuration.
+            workspace: Loaded AgentWorkspace with optional config.
+
+        Returns:
+            Merged configuration dictionary with workspace values taking precedence.
+        """
+        if not workspace.config:
+            return {}
+
+        # Convert global config relevant sections to dict
+        global_dict: dict[str, Any] = {
+            "model": {
+                "provider": None,
+                "model": global_config.agent.model,
+                "api_key": global_config.agent.api_key,
+                "temperature": global_config.agent.temperature,
+                "max_turns": global_config.agent.max_turns,
+            },
+            "queue": {
+                "mode": global_config.queue.mode,
+                "debounce_ms": global_config.queue.debounce_ms,
+            },
+        }
+
+        # Convert workspace config to dict
+        workspace_dict: dict[str, Any] = {}
+        if workspace.config.model:
+            model_dict = workspace.config.model.model_dump(exclude_none=True)
+            if model_dict:
+                workspace_dict["model"] = model_dict
+
+        if workspace.config.queue:
+            queue_dict = workspace.config.queue.model_dump(exclude_none=True)
+            if queue_dict:
+                workspace_dict["queue"] = queue_dict
+
+        if workspace.config.channel:
+            channel_dict = workspace.config.channel.model_dump(exclude_none=True)
+            if channel_dict:
+                workspace_dict["channel"] = channel_dict
+
+        # Merge and return
+        return merge_configs(global_dict, workspace_dict)
+
     async def _setup_channels(self) -> None:
-        """Initialize configured channels."""
-        tg_config = self.config.channels.telegram
-        if tg_config.token:
+        """Initialize configured channels.
+
+        Each workspace MUST define its own channel configuration.
+        Raises an error if no channel is configured.
+        """
+        workspace_channel = self._merged_config.get("channel", {})
+
+        if not workspace_channel:
+            raise ValueError(
+                f"Workspace '{self.workspace_name}' must define channel configuration in agent.yaml"
+            )
+
+        channel_type = workspace_channel.get("type", "telegram")
+        token = workspace_channel.get("token")
+
+        if not token:
+            raise ValueError(
+                f"Workspace '{self.workspace_name}' must define channel.token in agent.yaml"
+            )
+
+        if channel_type == "telegram":
+            allowed_users = workspace_channel.get("allowed_users", [])
+            allowed_groups = workspace_channel.get("allowed_groups", [])
+            allow_all = workspace_channel.get("allow_all", False)
+
             telegram = TelegramChannel(
-                token=tg_config.token,
-                allowed_users=tg_config.allowed_users,
-                allowed_groups=tg_config.allowed_groups,
+                token=token,
+                allowed_users=allowed_users,
+                allowed_groups=allowed_groups,
+                allow_all=allow_all,
+                workspace_name=self.workspace_name,
             )
             telegram.on_message(self._handle_inbound_message)
             self._channels["telegram"] = telegram
             await self._queue_manager.register_handler("telegram", self._process_telegram_messages)
+
+            # Log security mode
+            if allow_all:
+                logger.warning(f"Workspace '{self.workspace_name}': allow_all=true (insecure mode)")
+            elif allowed_users:
+                logger.info(f"Workspace '{self.workspace_name}': Allowlist mode ({len(allowed_users)} users)")
+            else:
+                logger.info(f"Workspace '{self.workspace_name}': No users configured, all requests will be denied")
+
+            logger.info(f"Initialized Telegram channel for workspace: {self.workspace_name}")
+        else:
+            raise ValueError(f"Unsupported channel type: {channel_type}")
 
     async def _handle_inbound_message(self, message: Message) -> None:
         """Handle an inbound message from any channel."""
@@ -166,16 +263,55 @@ class OpenPaw:
             await channel.start()
             logger.info(f"Started channel: {name}")
 
+        # Start cron scheduler if workspace has cron definitions
+        if self._workspace.crons:
+            await self._setup_cron_scheduler()
+
         self._running = True
 
         asyncio.create_task(self._queue_processor())
 
         logger.info("OpenPaw is running. Press Ctrl+C to stop.")
 
+    async def _setup_cron_scheduler(self) -> None:
+        """Initialize and start cron scheduler if workspace has cron jobs."""
+        try:
+            from openpaw.cron.scheduler import CronScheduler
+
+            def agent_factory() -> AgentRunner:
+                """Factory to create fresh agent instances for cron jobs."""
+                return AgentRunner(
+                    workspace=self._workspace,
+                    model=self._agent_runner.model_id,
+                    api_key=self._agent_runner.api_key,
+                    max_turns=self._agent_runner.max_turns,
+                    temperature=self._agent_runner.temperature,
+                    checkpointer=None,  # No checkpointer for cron jobs
+                )
+
+            self._cron_scheduler = CronScheduler(
+                workspace_path=self._workspace.path,
+                agent_factory=agent_factory,
+                channels=self._channels,
+            )
+
+            await self._cron_scheduler.start()
+            logger.info(f"Started cron scheduler with {len(self._workspace.crons)} jobs")
+
+        except ImportError as e:
+            logger.warning(f"Cron scheduler not available: {e}")
+        except Exception as e:
+            logger.error(f"Failed to start cron scheduler: {e}", exc_info=True)
+
     async def stop(self) -> None:
         """Stop OpenPaw gracefully."""
         logger.info("Stopping OpenPaw...")
         self._running = False
+
+        # Stop cron scheduler if running
+        if self._cron_scheduler:
+            await self._cron_scheduler.stop()
+            logger.info("Stopped cron scheduler")
 
         for name, channel in self._channels.items():
             await channel.stop()
