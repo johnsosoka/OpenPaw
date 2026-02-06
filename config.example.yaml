@@ -1,0 +1,39 @@
+# OpenPaw Configuration Example
+# Copy to config.yaml and customize
+
+# Path to agent workspaces directory
+workspaces_path: agent_workspaces
+
+# Command queue settings (inspired by OpenClaw)
+queue:
+  mode: collect          # collect, steer, followup, interrupt
+  debounce_ms: 1000      # Wait before processing collected messages
+  cap: 20                # Max queued messages per session
+  drop_policy: summarize # old, new, summarize
+
+# Lane concurrency limits
+lanes:
+  main_concurrency: 4      # Interactive message processing
+  subagent_concurrency: 8  # Delegated subagent tasks
+  cron_concurrency: 2      # Scheduled jobs
+
+# Channel configurations
+channels:
+  telegram:
+    token: null  # Set via TELEGRAM_BOT_TOKEN env var or here
+    allowed_users: []   # Empty = allow all (list of user IDs)
+    allowed_groups: []  # Empty = allow all (list of group IDs)
+
+# Agent defaults
+agent:
+  model: anthropic:claude-sonnet-4-20250514
+  max_turns: 50
+  temperature: 0.7
+
+# Scheduled jobs (cron)
+cron_jobs: []
+  # - name: daily-summary
+  #   agent: assistant
+  #   schedule: "0 9 * * *"  # 9 AM daily
+  #   enabled: true
+  #   prompt: "Generate a daily summary"
