@@ -7,12 +7,9 @@ import signal
 from pathlib import Path
 
 from openpaw.core.config import load_config
+from openpaw.core.logging import setup_logging
 from openpaw.orchestrator import OpenPawOrchestrator
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 
@@ -65,10 +62,16 @@ async def main() -> None:
 
     args = parser.parse_args()
 
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
-
     config = load_config(args.config)
+
+    # Initialize logging from config
+    log_level = "DEBUG" if args.verbose else config.logging.level
+    setup_logging(
+        level=log_level,
+        directory=config.logging.directory,
+        max_size_mb=config.logging.max_size_mb,
+        backup_count=config.logging.backup_count,
+    )
 
     # Determine which workspaces to load
     if args.all:

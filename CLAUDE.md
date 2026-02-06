@@ -73,7 +73,11 @@ Each workspace is fully isolated with its own channels, queue, agent runner, and
 
 **`openpaw/builtins/`** - Optional capabilities (tools and processors) conditionally loaded based on API key availability. See "Builtins System" section.
 
-**`openpaw/cron/scheduler.py`** - `CronScheduler` uses APScheduler to execute scheduled tasks. Each job builds a fresh agent instance, injects the cron prompt, and routes output to the configured channel.
+**`openpaw/cron/scheduler.py`** - `CronScheduler` uses APScheduler to execute scheduled tasks. Each job builds a fresh agent instance, injects the cron prompt, and routes output to the configured channel. Also handles dynamic tasks from `CronTool`.
+
+**`openpaw/cron/dynamic.py`** - `DynamicCronStore` for persisting agent-scheduled tasks to workspace-local JSON. Includes `DynamicCronTask` dataclass and factory functions.
+
+**`openpaw/heartbeat/scheduler.py`** - `HeartbeatScheduler` for proactive agent check-ins. Supports active hours, HEARTBEAT_OK suppression, and configurable intervals.
 
 ### Agent Workspace Structure
 
@@ -194,6 +198,59 @@ output:
 
 **Enable/Disable**: Set `enabled: false` to disable a cron without deleting the file.
 
+### Dynamic Scheduling (CronTool)
+
+Agents can schedule their own follow-up actions at runtime using the CronTool builtin. This enables autonomous workflows like "remind me in 20 minutes" or "check on this PR every hour".
+
+**Available Tools**:
+- `schedule_at` - Schedule a one-time action at a specific timestamp
+- `schedule_every` - Schedule a recurring action at fixed intervals
+- `list_scheduled` - List all pending scheduled tasks
+- `cancel_scheduled` - Cancel a scheduled task by ID
+
+**Storage**: Tasks persist to `{workspace}/dynamic_crons.json` and survive restarts. One-time tasks are automatically cleaned up after execution or if expired on startup.
+
+**Routing**: Responses are sent back to the first allowed user in the workspace's channel config.
+
+**Configuration** (optional, in `agent.yaml` or global config):
+
+```yaml
+builtins:
+  cron:
+    enabled: true
+    config:
+      min_interval_seconds: 300  # Minimum interval for recurring tasks (default: 5 min)
+      max_tasks: 50              # Maximum pending tasks per workspace
+```
+
+**Example Usage** (by agent):
+- User: "Ping me in 10 minutes to check on the deploy"
+- Agent calls `schedule_at` with timestamp 10 minutes from now
+- Task fires, agent sends reminder to user's chat
+
+### Heartbeat System
+
+The HeartbeatScheduler enables proactive agent check-ins on a configurable schedule. Agents can use this to monitor ongoing tasks, provide status updates, or maintain context without user prompts.
+
+**Configuration** (in `agent.yaml`):
+
+```yaml
+heartbeat:
+  enabled: true
+  interval_minutes: 30           # How often to check in
+  active_hours: "09:00-17:00"    # Only run during these hours (optional)
+  suppress_ok: true              # Don't send message if agent responds "HEARTBEAT_OK"
+  output:
+    channel: telegram
+    chat_id: 123456789
+```
+
+**HEARTBEAT_OK Protocol**: If the agent determines there's nothing to report, it can respond with exactly "HEARTBEAT_OK" and no message will be sent (when `suppress_ok: true`). This prevents noisy "all clear" messages.
+
+**Active Hours**: Heartbeats only fire within the specified window (workspace timezone). Outside active hours, heartbeats are silently skipped.
+
+**Prompt Template**: The heartbeat prompt is defined in the agent's `HEARTBEAT.md` file and can reference the current timestamp.
+
 ### Filesystem Access
 
 Agents have sandboxed filesystem access to their workspace directory via DeepAgents `FilesystemBackend`. This enables:
@@ -210,6 +267,7 @@ OpenPaw provides optional built-in capabilities that are conditionally available
 **Tools** - LangChain-compatible tools the agent can invoke:
 - `brave_search` - Web search via Brave API (requires `BRAVE_API_KEY`)
 - `elevenlabs` - Text-to-speech for voice responses (requires `ELEVENLABS_API_KEY`)
+- `cron` - Agent self-scheduling (no API key required, see "Dynamic Scheduling" section)
 
 **Processors** - Channel-layer message transformers:
 - `whisper` - Audio transcription for voice messages (requires `OPENAI_API_KEY`)
@@ -222,7 +280,8 @@ builtins/
 ├── loader.py         # Workspace-aware loading with allow/deny
 ├── tools/            # LangChain tool implementations
 │   ├── brave_search.py
-│   └── elevenlabs_tts.py
+│   ├── elevenlabs_tts.py
+│   └── cron.py       # Agent self-scheduling
 └── processors/       # Message preprocessors
     └── whisper.py
 ```

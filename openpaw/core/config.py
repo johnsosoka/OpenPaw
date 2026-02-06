@@ -176,6 +176,15 @@ class BuiltinItemConfig(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class CronBuiltinConfig(BuiltinItemConfig):
+    """Configuration for the cron scheduling tool."""
+
+    max_tasks: int = Field(default=50, description="Maximum scheduled tasks per workspace")
+    min_interval_seconds: int = Field(
+        default=300, description="Minimum interval between recurring tasks (5 min default, can be lowered)"
+    )
+
+
 class BuiltinsConfig(BaseModel):
     """Global builtins configuration.
 
@@ -196,6 +205,7 @@ class BuiltinsConfig(BaseModel):
     brave_search: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
     whisper: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
     elevenlabs: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
+    cron: CronBuiltinConfig = Field(default_factory=CronBuiltinConfig)
 
     model_config = {"extra": "allow"}
 
@@ -216,8 +226,23 @@ class WorkspaceBuiltinsConfig(BaseModel):
     brave_search: BuiltinItemConfig | None = None
     whisper: BuiltinItemConfig | None = None
     elevenlabs: BuiltinItemConfig | None = None
+    cron: CronBuiltinConfig | None = None
 
     model_config = {"extra": "allow"}
+
+
+class HeartbeatConfig(BaseModel):
+    """Configuration for the heartbeat scheduler."""
+
+    enabled: bool = Field(default=False, description="Enable periodic heartbeat prompts")
+    interval_minutes: int = Field(default=30, description="Minutes between heartbeat checks")
+    active_hours: str | None = Field(
+        default=None,
+        description="Active hours window (e.g., '08:00-22:00'). None = always active",
+    )
+    suppress_ok: bool = Field(default=True, description="Suppress HEARTBEAT_OK responses from channel")
+    target_channel: str = Field(default="telegram", description="Channel to route heartbeat responses")
+    target_chat_id: int | None = Field(default=None, description="Default chat ID for heartbeat output")
 
 
 class WorkspaceConfig(BaseModel):
@@ -225,6 +250,7 @@ class WorkspaceConfig(BaseModel):
 
     name: str | None = Field(default=None, description="Agent name")
     description: str | None = Field(default=None, description="Agent description")
+    timezone: str = Field(default="UTC", description="Workspace timezone (e.g., 'America/Los_Angeles')")
     model: WorkspaceModelConfig = Field(default_factory=WorkspaceModelConfig, description="LLM configuration")
     channel: WorkspaceChannelConfig = Field(default_factory=WorkspaceChannelConfig, description="Channel binding")
     queue: WorkspaceQueueConfig = Field(default_factory=WorkspaceQueueConfig, description="Queue overrides")
@@ -232,20 +258,33 @@ class WorkspaceConfig(BaseModel):
         default_factory=WorkspaceBuiltinsConfig,
         description="Builtin capability overrides",
     )
+    heartbeat: HeartbeatConfig | None = Field(default=None, description="Per-workspace heartbeat config")
 
     model_config = {"extra": "allow"}
+
+
+class LoggingConfig(BaseModel):
+    """Configuration for logging system."""
+
+    level: str = Field(default="INFO", description="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
+    directory: str = Field(default="logs", description="Directory for log files")
+    max_size_mb: int = Field(default=10, description="Maximum log file size in MB before rotation")
+    backup_count: int = Field(default=5, description="Number of backup log files to keep")
+    per_workspace: bool = Field(default=True, description="Create separate log files per workspace")
 
 
 class Config(BaseModel):
     """Root configuration for OpenPaw."""
 
     workspaces_path: Path = Field(default=Path("agent_workspaces"), description="Path to agent workspaces")
+    logging: LoggingConfig = Field(default_factory=LoggingConfig, description="Logging configuration")
     queue: QueueConfig = Field(default_factory=QueueConfig)
     lanes: LaneConfig = Field(default_factory=LaneConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     builtins: BuiltinsConfig = Field(default_factory=BuiltinsConfig, description="Builtin capabilities config")
     cron_jobs: list[CronJobConfig] = Field(default_factory=list, description="Scheduled agent jobs")
+    heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig, description="Heartbeat scheduler config")
 
     model_config = {"extra": "allow"}
 

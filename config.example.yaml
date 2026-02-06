@@ -4,6 +4,14 @@
 # Path to agent workspaces directory
 workspaces_path: agent_workspaces
 
+# Logging configuration
+logging:
+  level: INFO              # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  directory: logs          # Directory for log files
+  max_size_mb: 10          # Maximum log file size before rotation
+  backup_count: 5          # Number of backup files to keep
+  per_workspace: true      # Create separate log files per workspace
+
 # Command queue settings (inspired by OpenClaw)
 queue:
   mode: collect          # collect, steer, followup, interrupt

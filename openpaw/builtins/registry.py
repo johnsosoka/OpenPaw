@@ -76,6 +76,13 @@ class BuiltinRegistry:
         except ImportError as e:
             logger.debug(f"SSH tool not available: {e}")
 
+        try:
+            from openpaw.builtins.tools.cron import CronToolBuiltin
+
+            self.register_tool(CronToolBuiltin)
+        except ImportError as e:
+            logger.debug(f"Cron tool not available: {e}")
+
         # Processors
         try:
             from openpaw.builtins.processors.whisper import WhisperProcessor

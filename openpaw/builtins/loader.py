@@ -1,6 +1,7 @@
 """Builtin loader for workspace-aware instantiation."""
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from openpaw.builtins.base import BaseBuiltinProcessor
@@ -20,22 +21,30 @@ class BuiltinLoader:
     - Prerequisite checking (API keys, packages)
     - Config merging (workspace overrides global)
     - Instantiation with merged config
+    - Workspace path injection for tools that need it
     """
 
     def __init__(
         self,
         global_config: "BuiltinsConfig | None" = None,
         workspace_config: "WorkspaceBuiltinsConfig | None" = None,
+        workspace_path: Path | None = None,
+        channel_config: dict[str, Any] | None = None,
     ):
         """Initialize the loader.
 
         Args:
             global_config: Global builtins configuration.
             workspace_config: Workspace-specific overrides.
+            workspace_path: Path to the workspace directory (for tools that need it).
+            channel_config: Channel configuration for routing (e.g., telegram allowed_users).
         """
         self.global_config = global_config
         self.workspace_config = workspace_config
+        self.workspace_path = workspace_path
+        self.channel_config = channel_config or {}
         self.registry = BuiltinRegistry.get_instance()
+        self._tool_instances: dict[str, Any] = {}  # Track loaded tool instances
 
     def _is_allowed(self, name: str, group: str | None) -> bool:
         """Check if a builtin is allowed based on allow/deny lists.
@@ -80,6 +89,7 @@ class BuiltinLoader:
         """Get merged configuration for a builtin.
 
         Workspace config overrides global config.
+        Automatically injects workspace_path for tools that need it.
 
         Args:
             name: The builtin name.
@@ -88,6 +98,19 @@ class BuiltinLoader:
             Merged configuration dict.
         """
         config: dict[str, Any] = {}
+
+        # Inject workspace_path for tools that need it
+        if self.workspace_path:
+            config["workspace_path"] = self.workspace_path
+
+        # Inject channel routing config for cron tool
+        if name == "cron" and self.channel_config:
+            channel_type = self.channel_config.get("type", "telegram")
+            config["default_channel"] = channel_type
+            # Use first allowed user as default chat_id for routing
+            allowed_users = self.channel_config.get("allowed_users", [])
+            if allowed_users:
+                config["default_chat_id"] = allowed_users[0]
 
         # Global config
         if self.global_config:
@@ -168,12 +191,29 @@ class BuiltinLoader:
                 config = self._get_builtin_config(name)
                 try:
                     instance = tool_class(config=config)
-                    tools.append(instance.get_langchain_tool())
+                    self._tool_instances[name] = instance  # Store for later access
+                    tool_result = instance.get_langchain_tool()
+                    # Handle tools that return a list (like CronTool with multiple methods)
+                    if isinstance(tool_result, list):
+                        tools.extend(tool_result)
+                    else:
+                        tools.append(tool_result)
                     logger.info(f"Loaded tool builtin: {name}")
                 except Exception as e:
                     logger.warning(f"Failed to load tool '{name}': {e}")
 
         return tools
+
+    def get_tool_instance(self, name: str) -> Any | None:
+        """Get a loaded tool instance by name.
+
+        Args:
+            name: The builtin name (e.g., 'cron').
+
+        Returns:
+            The tool instance, or None if not loaded.
+        """
+        return self._tool_instances.get(name)
 
     def load_processors(self) -> list[BaseBuiltinProcessor]:
         """Load all allowed and available processor builtins.

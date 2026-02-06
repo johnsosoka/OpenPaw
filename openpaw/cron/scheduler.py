@@ -2,13 +2,17 @@
 
 import logging
 from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from openpaw.channels.base import ChannelAdapter
+from openpaw.cron.dynamic import DynamicCronStore, DynamicCronTask
 from openpaw.cron.loader import CronDefinition, CronLoader
 
 logger = logging.getLogger(__name__)
@@ -41,11 +45,14 @@ class CronScheduler:
         self.channels = channels
         self._scheduler: AsyncIOScheduler | None = None
         self._jobs: dict[str, Any] = {}
+        self._dynamic_store = DynamicCronStore(workspace_path)
+        self._dynamic_jobs: dict[str, Any] = {}
 
     async def start(self) -> None:
         """Start the scheduler and register all cron jobs."""
         self._scheduler = AsyncIOScheduler()
 
+        # Load and schedule YAML-defined cron jobs
         loader = CronLoader(self.workspace_path)
         cron_definitions = loader.load_all()
 
@@ -53,6 +60,13 @@ class CronScheduler:
             if cron.enabled:
                 self.add_job(cron)
                 logger.info(f"Registered cron job: {cron.name} ({cron.schedule})")
+
+        # Load and schedule dynamic cron tasks (prune expired first)
+        dynamic_tasks = self._dynamic_store.load()
+        dynamic_tasks = self._prune_expired_tasks(dynamic_tasks)
+        for task in dynamic_tasks:
+            self._schedule_dynamic_task(task)
+            logger.info(f"Loaded dynamic task: {task.id} ({task.task_type})")
 
         self._scheduler.start()
         logger.info("Cron scheduler started")
@@ -130,3 +144,167 @@ class CronScheduler:
             self._scheduler.remove_job(name)
             del self._jobs[name]
             logger.info(f"Removed cron job: {name}")
+
+    def add_dynamic_job(self, task: DynamicCronTask) -> None:
+        """Add a dynamic task to the scheduler.
+
+        Args:
+            task: DynamicCronTask to schedule.
+        """
+        if not self._scheduler:
+            raise RuntimeError("Scheduler not initialized. Call start() first.")
+
+        if task.task_type == "once":
+            # Use DateTrigger for one-shot execution
+            trigger = DateTrigger(run_date=task.run_at)
+        else:
+            # Use IntervalTrigger for recurring execution
+            trigger = IntervalTrigger(seconds=task.interval_seconds)
+
+        job = self._scheduler.add_job(
+            func=self._execute_dynamic_task,
+            trigger=trigger,
+            args=[task],
+            id=f"dynamic_{task.id}",
+            name=f"Dynamic: {task.prompt[:30]}...",
+            replace_existing=True,
+        )
+
+        self._dynamic_jobs[task.id] = job
+        self._dynamic_store.add_task(task)  # Persist to disk
+        logger.info(f"Added dynamic task: {task.id} ({task.task_type})")
+
+    def remove_dynamic_job(self, task_id: str) -> bool:
+        """Remove a dynamic task from the scheduler.
+
+        Args:
+            task_id: Unique task ID to remove.
+
+        Returns:
+            True if removed, False if not found.
+        """
+        if not self._scheduler:
+            raise RuntimeError("Scheduler not initialized. Call start() first.")
+
+        job_id = f"dynamic_{task_id}"
+        if task_id in self._dynamic_jobs:
+            self._scheduler.remove_job(job_id)
+            del self._dynamic_jobs[task_id]
+            self._dynamic_store.remove_task(task_id)
+            logger.info(f"Removed dynamic task: {task_id}")
+            return True
+
+        logger.warning(f"Dynamic task not found: {task_id}")
+        return False
+
+    async def _execute_dynamic_task(self, task: DynamicCronTask) -> None:
+        """Execute a dynamic task.
+
+        For one-shot tasks: remove after execution.
+        For interval tasks: continue recurring.
+
+        Args:
+            task: DynamicCronTask to execute.
+        """
+        logger.info(f"Executing dynamic task: {task.id}")
+
+        try:
+            agent_runner = self.agent_factory()
+
+            # Wrap prompt with context to ensure visible output
+            wrapped_prompt = (
+                f"[Scheduled task - produce a visible response, not just internal thinking]\n\n"
+                f"{task.prompt}"
+            )
+            response = await agent_runner.run(message=wrapped_prompt)
+
+            # Route response using task's stored routing info
+            if task.channel and task.chat_id:
+                channel = self.channels.get(task.channel)
+                if channel:
+                    # Guard against empty responses
+                    if response and response.strip():
+                        session_key = channel.build_session_key(task.chat_id)
+                        await channel.send_message(
+                            session_key=session_key,
+                            content=response,
+                        )
+                        logger.info(f"Dynamic task {task.id} response sent to {task.channel}:{task.chat_id}")
+                    else:
+                        logger.warning(f"Dynamic task {task.id} produced empty response, not sending")
+                else:
+                    logger.warning(f"Channel '{task.channel}' not found for dynamic task {task.id}")
+            else:
+                logger.warning(
+                    f"Dynamic task {task.id} has no routing config. "
+                    f"Response ({len(response) if response else 0} chars) not sent."
+                )
+
+            # Clean up one-shot tasks after execution
+            if task.task_type == "once":
+                # Remove from storage (APScheduler auto-removes DateTrigger jobs)
+                if task.id in self._dynamic_jobs:
+                    del self._dynamic_jobs[task.id]
+                self._dynamic_store.remove_task(task.id)
+
+            logger.info(f"Dynamic task {task.id} completed successfully")
+
+        except Exception as e:
+            logger.error(f"Dynamic task {task.id} failed: {e}", exc_info=True)
+
+    def _prune_expired_tasks(self, tasks: list[DynamicCronTask]) -> list[DynamicCronTask]:
+        """Remove expired one-time tasks that will never execute.
+
+        Args:
+            tasks: List of tasks to filter.
+
+        Returns:
+            List with expired one-time tasks removed.
+        """
+        now = datetime.now(UTC)
+        valid_tasks = []
+        pruned_count = 0
+
+        for task in tasks:
+            # One-time tasks with run_at in the past are expired
+            if task.task_type == "once" and task.run_at:
+                if task.run_at < now:
+                    self._dynamic_store.remove_task(task.id)
+                    pruned_count += 1
+                    continue
+
+            valid_tasks.append(task)
+
+        if pruned_count > 0:
+            logger.info(f"Pruned {pruned_count} expired one-time task(s)")
+
+        return valid_tasks
+
+    def _schedule_dynamic_task(self, task: DynamicCronTask) -> None:
+        """Schedule a task that was loaded from storage.
+
+        Internal helper that schedules without re-persisting to storage.
+
+        Args:
+            task: DynamicCronTask to schedule.
+        """
+        if not self._scheduler:
+            raise RuntimeError("Scheduler not initialized. Call start() first.")
+
+        if task.task_type == "once":
+            # Use DateTrigger for one-shot execution
+            trigger = DateTrigger(run_date=task.run_at)
+        else:
+            # Use IntervalTrigger for recurring execution
+            trigger = IntervalTrigger(seconds=task.interval_seconds)
+
+        job = self._scheduler.add_job(
+            func=self._execute_dynamic_task,
+            trigger=trigger,
+            args=[task],
+            id=f"dynamic_{task.id}",
+            name=f"Dynamic: {task.prompt[:30]}...",
+            replace_existing=True,
+        )
+
+        self._dynamic_jobs[task.id] = job

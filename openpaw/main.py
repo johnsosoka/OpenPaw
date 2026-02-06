@@ -12,11 +12,14 @@ from openpaw.channels.base import Message
 from openpaw.channels.telegram import TelegramChannel
 from openpaw.core.agent import AgentRunner
 from openpaw.core.config import Config, merge_configs
+from openpaw.core.logging import setup_workspace_logger
+from openpaw.heartbeat.scheduler import HeartbeatScheduler
 from openpaw.queue.lane import LaneQueue, QueueItem, QueueMode
 from openpaw.queue.manager import QueueManager
 from openpaw.workspace.loader import WorkspaceLoader
 
-logger = logging.getLogger(__name__)
+# Module-level logger (for general WorkspaceRunner class messages)
+module_logger = logging.getLogger(__name__)
 
 
 class WorkspaceRunner:
@@ -31,6 +34,17 @@ class WorkspaceRunner:
         """
         self.config = config
         self.workspace_name = workspace_name
+
+        # Set up workspace-specific logger if per-workspace logging is enabled
+        if config.logging.per_workspace:
+            self.logger = setup_workspace_logger(
+                workspace_name=workspace_name,
+                directory=config.logging.directory,
+                max_size_mb=config.logging.max_size_mb,
+                backup_count=config.logging.backup_count,
+            )
+        else:
+            self.logger = logging.getLogger(f"{__name__}.{workspace_name}")
 
         self._workspace_loader = WorkspaceLoader(config.workspaces_path)
         self._workspace = self._workspace_loader.load(workspace_name)
@@ -63,9 +77,14 @@ class WorkspaceRunner:
         if self._workspace.config and self._workspace.config.builtins:
             workspace_builtins_config = self._workspace.config.builtins
 
+        # Get channel config for routing (needed by cron tool)
+        workspace_channel_config = self._merged_config.get("channel", {})
+
         self._builtin_loader = BuiltinLoader(
             global_config=config.builtins,
             workspace_config=workspace_builtins_config,
+            workspace_path=self._workspace.path,
+            channel_config=workspace_channel_config,
         )
 
         # Load tools (LangChain tools for agent) and processors (message transformers)
@@ -73,9 +92,9 @@ class WorkspaceRunner:
         self._processors: list[BaseBuiltinProcessor] = self._builtin_loader.load_processors()
 
         if self._builtin_tools:
-            logger.info(f"Loaded {len(self._builtin_tools)} builtin tools for workspace: {workspace_name}")
+            self.logger.info(f"Loaded {len(self._builtin_tools)} builtin tools for workspace: {workspace_name}")
         if self._processors:
-            logger.info(f"Loaded {len(self._processors)} builtin processors for workspace: {workspace_name}")
+            self.logger.info(f"Loaded {len(self._processors)} builtin processors for workspace: {workspace_name}")
 
         # Use merged model config for agent
         agent_config = self._merged_config.get("model", {})
@@ -96,6 +115,7 @@ class WorkspaceRunner:
 
         self._channels: dict[str, TelegramChannel] = {}
         self._cron_scheduler: Any = None
+        self._heartbeat_scheduler: HeartbeatScheduler | None = None
         self._queue_processor_task: asyncio.Task[None] | None = None
         self._running = False
 
@@ -187,18 +207,18 @@ class WorkspaceRunner:
 
             # Log security mode
             if allow_all:
-                logger.warning(f"Workspace '{self.workspace_name}': allow_all=true (insecure mode)")
+                self.logger.warning(f"Workspace '{self.workspace_name}': allow_all=true (insecure mode)")
             elif allowed_users or allowed_groups:
-                logger.info(
+                self.logger.info(
                     f"Workspace '{self.workspace_name}': Allowlist mode "
                     f"({len(allowed_users)} users, {len(allowed_groups)} groups)"
                 )
             else:
-                logger.warning(
+                self.logger.warning(
                     f"Workspace '{self.workspace_name}': Empty allowlist - all requests will be denied"
                 )
 
-            logger.info(f"Initialized Telegram channel for workspace: {self.workspace_name}")
+            self.logger.info(f"Initialized Telegram channel for workspace: {self.workspace_name}")
         else:
             raise ValueError(f"Unsupported channel type: {channel_type}")
 
@@ -211,13 +231,13 @@ class WorkspaceRunner:
                 result = await processor.process_inbound(processed_message)
                 processed_message = result.message
                 if result.skip_agent:
-                    logger.debug(f"Processor {processor.metadata.name} handled message, skipping agent")
+                    self.logger.debug(f"Processor {processor.metadata.name} handled message, skipping agent")
                     return
             except Exception as e:
-                logger.error(f"Processor {processor.metadata.name} failed: {e}")
+                self.logger.error(f"Processor {processor.metadata.name} failed: {e}")
 
         content_preview = processed_message.content[:50] if processed_message.content else "(empty)"
-        logger.info(f"Received message from {processed_message.channel}: {content_preview}...")
+        self.logger.info(f"Received message from {processed_message.channel}: {content_preview}...")
 
         if processed_message.is_command:
             command, args = processed_message.parse_command()
@@ -277,7 +297,7 @@ class WorkspaceRunner:
                 await self._send_pending_audio(channel, session_key)
 
         except Exception as e:
-            logger.error(f"Error processing messages for {session_key}: {e}")
+            self.logger.error(f"Error processing messages for {session_key}: {e}", exc_info=True)
             channel = self._channels.get("telegram")
             if channel:
                 await channel.send_message(session_key, f"Error: {e}")
@@ -290,11 +310,11 @@ class WorkspaceRunner:
             audio_data = ElevenLabsTTSTool.get_any_pending_audio()
             if audio_data:
                 await channel.send_audio(session_key, audio_data, filename="response.mp3")
-                logger.info(f"Sent TTS audio to {session_key}")
+                self.logger.info(f"Sent TTS audio to {session_key}")
         except ImportError:
             pass  # ElevenLabs not available
         except Exception as e:
-            logger.error(f"Failed to send TTS audio: {e}")
+            self.logger.error(f"Failed to send TTS audio: {e}")
 
     async def _queue_processor(self) -> None:
         """Background task processing the lane queue."""
@@ -308,23 +328,27 @@ class WorkspaceRunner:
 
     async def start(self) -> None:
         """Start workspace runner."""
-        logger.info(f"Starting workspace runner: {self.workspace_name}")
+        self.logger.info(f"Starting workspace runner: {self.workspace_name}")
 
         await self._setup_channels()
 
         for name, channel in self._channels.items():
             await channel.start()
-            logger.info(f"Started channel: {name}")
+            self.logger.info(f"Started channel: {name}")
 
-        # Start cron scheduler if workspace has cron definitions
-        if self._workspace.crons:
+        # Start cron scheduler if workspace has cron definitions OR CronTool is loaded
+        cron_tool_loaded = self._builtin_loader.get_tool_instance("cron") is not None
+        if self._workspace.crons or cron_tool_loaded:
             await self._setup_cron_scheduler()
+
+        # Start heartbeat scheduler if enabled
+        await self._setup_heartbeat_scheduler()
 
         self._running = True
 
         self._queue_processor_task = asyncio.create_task(self._queue_processor())
 
-        logger.info(f"Workspace runner '{self.workspace_name}' is running")
+        self.logger.info(f"Workspace runner '{self.workspace_name}' is running")
 
     async def _setup_cron_scheduler(self) -> None:
         """Initialize and start cron scheduler if workspace has cron jobs."""
@@ -351,16 +375,81 @@ class WorkspaceRunner:
             )
 
             await self._cron_scheduler.start()
-            logger.info(f"Started cron scheduler with {len(self._workspace.crons)} jobs")
+            self.logger.info(f"Started cron scheduler with {len(self._workspace.crons)} jobs")
+
+            # Connect CronTool to live scheduler for dynamic task scheduling
+            self._connect_cron_tool_to_scheduler()
 
         except ImportError as e:
-            logger.warning(f"Cron scheduler not available: {e}")
+            self.logger.warning(f"Cron scheduler not available: {e}")
         except Exception as e:
-            logger.error(f"Failed to start cron scheduler: {e}", exc_info=True)
+            self.logger.error(f"Failed to start cron scheduler: {e}", exc_info=True)
+
+    def _connect_cron_tool_to_scheduler(self) -> None:
+        """Connect CronTool builtin to the live CronScheduler.
+
+        This enables dynamic task scheduling - when agents create tasks,
+        they're immediately added to the running scheduler.
+        """
+        try:
+            cron_tool = self._builtin_loader.get_tool_instance("cron")
+            if cron_tool:
+                cron_tool.set_scheduler(self._cron_scheduler)
+                self.logger.info("Connected CronTool to live scheduler")
+            else:
+                self.logger.debug("CronTool not loaded for this workspace")
+        except Exception as e:
+            self.logger.warning(f"Failed to connect CronTool to scheduler: {e}")
+
+    async def _setup_heartbeat_scheduler(self) -> None:
+        """Initialize and start heartbeat scheduler if enabled.
+
+        Checks workspace config first, then falls back to global config.
+        Only starts if heartbeat.enabled is True.
+        """
+        # Get heartbeat config - check workspace first, then global
+        heartbeat_config = None
+        if self._workspace.config and self._workspace.config.heartbeat:
+            heartbeat_config = self._workspace.config.heartbeat
+        elif self.config.heartbeat.enabled:
+            heartbeat_config = self.config.heartbeat
+
+        if not heartbeat_config or not heartbeat_config.enabled:
+            return
+
+        try:
+
+            def agent_factory() -> AgentRunner:
+                """Factory for fresh agent instances."""
+                return AgentRunner(
+                    workspace=self._workspace,
+                    model=self._agent_runner.model_id,
+                    api_key=self._agent_runner.api_key,
+                    max_turns=self._agent_runner.max_turns,
+                    temperature=self._agent_runner.temperature,
+                    checkpointer=None,  # No checkpointer for heartbeat
+                    tools=self._builtin_tools,
+                    region=self._agent_runner.region,
+                )
+
+            self._heartbeat_scheduler = HeartbeatScheduler(
+                workspace_name=self.workspace_name,
+                agent_factory=agent_factory,
+                channels=self._channels,
+                config=heartbeat_config,
+            )
+
+            await self._heartbeat_scheduler.start()
+            self.logger.info(
+                f"Started heartbeat scheduler (interval: {heartbeat_config.interval_minutes}min)"
+            )
+
+        except Exception as e:
+            self.logger.error(f"Failed to start heartbeat scheduler: {e}", exc_info=True)
 
     async def stop(self) -> None:
         """Stop workspace runner gracefully."""
-        logger.info(f"Stopping workspace runner: {self.workspace_name}")
+        self.logger.info(f"Stopping workspace runner: {self.workspace_name}")
         self._running = False
 
         # Cancel queue processor task
@@ -375,10 +464,15 @@ class WorkspaceRunner:
         # Stop cron scheduler if running
         if self._cron_scheduler:
             await self._cron_scheduler.stop()
-            logger.info("Stopped cron scheduler")
+            self.logger.info("Stopped cron scheduler")
+
+        # Stop heartbeat scheduler if running
+        if self._heartbeat_scheduler:
+            await self._heartbeat_scheduler.stop()
+            self.logger.info("Stopped heartbeat scheduler")
 
         for name, channel in self._channels.items():
             await channel.stop()
-            logger.info(f"Stopped channel: {name}")
+            self.logger.info(f"Stopped channel: {name}")
 
-        logger.info(f"Workspace runner '{self.workspace_name}' stopped")
+        self.logger.info(f"Workspace runner '{self.workspace_name}' stopped")
