@@ -72,6 +72,100 @@ class OpenPawOrchestrator:
 
         logger.info("All workspace runners stopped")
 
+    async def start_workspace(self, name: str) -> None:
+        """Start a single workspace runner.
+
+        Args:
+            name: Workspace name to start.
+
+        Raises:
+            ValueError: If workspace is already running.
+        """
+        if name in self.runners:
+            raise ValueError(f"Workspace '{name}' is already running")
+
+        logger.info(f"Starting workspace: {name}")
+        runner = WorkspaceRunner(self.config, name)
+        await runner.start()
+        self.runners[name] = runner
+        logger.info(f"Workspace '{name}' started successfully")
+
+    async def stop_workspace(self, name: str) -> None:
+        """Stop a single workspace runner.
+
+        Args:
+            name: Workspace name to stop.
+        """
+        if name not in self.runners:
+            logger.warning(f"Workspace '{name}' is not running")
+            return
+
+        logger.info(f"Stopping workspace: {name}")
+        runner = self.runners[name]
+        await runner.stop()
+        del self.runners[name]
+        logger.info(f"Workspace '{name}' stopped successfully")
+
+    async def restart_workspace(self, name: str) -> None:
+        """Restart a single workspace runner.
+
+        Args:
+            name: Workspace name to restart.
+        """
+        logger.info(f"Restarting workspace: {name}")
+        await self.stop_workspace(name)
+        await self.start_workspace(name)
+        logger.info(f"Workspace '{name}' restarted successfully")
+
+    async def reload_workspace_config(self, name: str) -> None:
+        """Reload workspace configuration.
+
+        Currently implemented as a full restart since WorkspaceRunner
+        does not support hot config reload.
+
+        Args:
+            name: Workspace name to reload config for.
+        """
+        if name not in self.runners:
+            logger.warning(f"Workspace '{name}' is not running")
+            return
+
+        logger.info(f"Reloading config for workspace '{name}' (triggering restart)")
+        await self.restart_workspace(name)
+
+    async def reload_workspace_prompt(self, name: str) -> None:
+        """Reload workspace prompt files.
+
+        Workspace prompt files (AGENT.md, USER.md, SOUL.md, HEARTBEAT.md)
+        are loaded dynamically at agent invocation time, so no action is
+        needed beyond logging.
+
+        Args:
+            name: Workspace name to reload prompt for.
+        """
+        if name not in self.runners:
+            logger.warning(f"Workspace '{name}' is not running")
+            return
+
+        logger.info(
+            f"Workspace '{name}' will reload prompt files on next agent invocation"
+        )
+
+    async def trigger_cron(self, workspace: str, cron_name: str) -> None:
+        """Trigger a cron job immediately.
+
+        This is a stub for now - full implementation would queue the cron job.
+
+        Args:
+            workspace: Workspace name containing the cron.
+            cron_name: Name of the cron job to trigger.
+        """
+        if workspace not in self.runners:
+            logger.warning(f"Workspace '{workspace}' is not running")
+            return
+
+        logger.info(f"Triggering cron '{cron_name}' in workspace '{workspace}'")
+
     @classmethod
     def discover_workspaces(cls, workspaces_path: Path) -> list[str]:
         """Discover all valid workspaces in the workspaces directory.
