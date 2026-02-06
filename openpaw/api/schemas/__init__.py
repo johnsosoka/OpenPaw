@@ -29,6 +29,19 @@ from openpaw.api.schemas.crons import (
     CronOutputConfig,
     CronTriggerResponse,
 )
+from openpaw.api.schemas.monitoring import (
+    ErrorListResponse,
+    ErrorResponse,
+    HealthResponse,
+    MetricsResponse,
+    QueueStats,
+    QueueStatusResponse,
+    SessionListResponse,
+    SessionResponse,
+    WorkspaceDetailResponse,
+    WorkspaceStateResponse,
+    WorkspaceStatesResponse,
+)
 from openpaw.api.schemas.settings import (
     CategorySettings,
     SettingsImportRequest,
@@ -78,6 +91,18 @@ __all__ = [
     "CronJobUpdate",
     "CronOutputConfig",
     "CronTriggerResponse",
+    # Monitoring schemas
+    "ErrorListResponse",
+    "ErrorResponse",
+    "HealthResponse",
+    "MetricsResponse",
+    "QueueStats",
+    "QueueStatusResponse",
+    "SessionListResponse",
+    "SessionResponse",
+    "WorkspaceDetailResponse",
+    "WorkspaceStateResponse",
+    "WorkspaceStatesResponse",
     # Settings schemas
     "CategorySettings",
     "SettingsImportRequest",

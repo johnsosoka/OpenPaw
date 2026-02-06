@@ -176,10 +176,11 @@ async def get_monitoring_service(
         orchestrator: Optional orchestrator instance
 
     Returns:
-        MonitoringService instance (stub for future implementation)
+        MonitoringService instance
     """
-    # TODO: Import and instantiate MonitoringService once implemented
-    raise NotImplementedError("MonitoringService not yet implemented")
+    from openpaw.api.services.monitoring_service import MonitoringService
+
+    return MonitoringService(session, orchestrator)
 
 
 async def get_migration_service(
