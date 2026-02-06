@@ -117,10 +117,11 @@ async def get_builtin_service(
         encryption: Encryption service
 
     Returns:
-        BuiltinService instance (stub for future implementation)
+        BuiltinService instance
     """
-    # TODO: Import and instantiate BuiltinService once implemented
-    raise NotImplementedError("BuiltinService not yet implemented")
+    from openpaw.api.services.builtin_service import BuiltinService
+
+    return BuiltinService(session, encryption)
 
 
 async def get_cron_service(

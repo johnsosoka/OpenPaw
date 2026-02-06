@@ -1,5 +1,17 @@
 """Pydantic schemas for API request/response models."""
 
+from openpaw.api.schemas.builtins import (
+    AllowlistResponse,
+    AllowlistUpdate,
+    ApiKeyCreate,
+    ApiKeyListResponse,
+    ApiKeyResponse,
+    BuiltinConfigResponse,
+    BuiltinConfigUpdate,
+    BuiltinListResponse,
+    BuiltinPrerequisites,
+    BuiltinResponse,
+)
 from openpaw.api.schemas.settings import (
     CategorySettings,
     SettingsImportRequest,
@@ -23,6 +35,17 @@ from openpaw.api.schemas.workspaces import (
 )
 
 __all__ = [
+    # Builtin schemas
+    "AllowlistResponse",
+    "AllowlistUpdate",
+    "ApiKeyCreate",
+    "ApiKeyListResponse",
+    "ApiKeyResponse",
+    "BuiltinConfigResponse",
+    "BuiltinConfigUpdate",
+    "BuiltinListResponse",
+    "BuiltinPrerequisites",
+    "BuiltinResponse",
     # Settings schemas
     "CategorySettings",
     "SettingsImportRequest",
