@@ -69,7 +69,9 @@ Each workspace is fully isolated with its own channels, queue, agent runner, and
 
 **`openpaw/queue/lane.py`** - Lane-based FIFO queue with configurable concurrency per lane (main, subagent, cron). Supports OpenClaw-style queue modes: `collect`, `steer`, `followup`, `interrupt`.
 
-**`openpaw/channels/telegram.py`** - Telegram bot adapter using `python-telegram-bot`. Converts platform messages to unified `Message` format and handles allowlisting.
+**`openpaw/channels/telegram.py`** - Telegram bot adapter using `python-telegram-bot`. Converts platform messages to unified `Message` format, handles allowlisting, and supports voice/audio messages.
+
+**`openpaw/builtins/`** - Optional capabilities (tools and processors) conditionally loaded based on API key availability. See "Builtins System" section.
 
 **`openpaw/cron/scheduler.py`** - `CronScheduler` uses APScheduler to execute scheduled tasks. Each job builds a fresh agent instance, injects the cron prompt, and routes output to the configured channel.
 
@@ -160,6 +162,56 @@ Agents have sandboxed filesystem access to their workspace directory via DeepAge
 - Organizing workspace-specific data
 
 Access is restricted to the workspace root—agents cannot read/write outside their directory.
+
+### Builtins System
+
+OpenPaw provides optional built-in capabilities that are conditionally available based on API keys. Builtins come in two types:
+
+**Tools** - LangChain-compatible tools the agent can invoke:
+- `brave_search` - Web search via Brave API (requires `BRAVE_API_KEY`)
+- `elevenlabs` - Text-to-speech for voice responses (requires `ELEVENLABS_API_KEY`)
+
+**Processors** - Channel-layer message transformers:
+- `whisper` - Audio transcription for voice messages (requires `OPENAI_API_KEY`)
+
+**`openpaw/builtins/`** - Package structure:
+```
+builtins/
+├── base.py           # BaseBuiltinTool, BaseBuiltinProcessor, BuiltinMetadata
+├── registry.py       # Singleton registry of all builtins
+├── loader.py         # Workspace-aware loading with allow/deny
+├── tools/            # LangChain tool implementations
+│   ├── brave_search.py
+│   └── elevenlabs_tts.py
+└── processors/       # Message preprocessors
+    └── whisper.py
+```
+
+**Configuration** (global or per-workspace):
+
+```yaml
+builtins:
+  allow: []           # Empty = allow all available
+  deny:
+    - group:voice     # Deny entire groups with "group:" prefix
+
+  brave_search:
+    enabled: true
+    config:
+      count: 5
+
+  whisper:
+    enabled: true
+    config:
+      model: whisper-1
+
+  elevenlabs:
+    enabled: true
+    config:
+      voice_id: 21m00Tcm4TlvDq8ikWAM
+```
+
+**Adding New Builtins**: Create a class extending `BaseBuiltinTool` or `BaseBuiltinProcessor`, define `metadata` with prerequisites, and register in `registry.py`.
 
 ### Memory & Summarization
 

@@ -6,6 +6,8 @@ from typing import Any
 
 from langgraph.checkpoint.memory import InMemorySaver
 
+from openpaw.builtins.base import BaseBuiltinProcessor
+from openpaw.builtins.loader import BuiltinLoader
 from openpaw.channels.base import Message
 from openpaw.channels.telegram import TelegramChannel
 from openpaw.core.agent import AgentRunner
@@ -56,6 +58,25 @@ class WorkspaceRunner:
         # InMemorySaver persists within session; use SqliteSaver for disk persistence
         self._checkpointer = InMemorySaver()
 
+        # Load builtins for this workspace
+        workspace_builtins_config = None
+        if self._workspace.config and self._workspace.config.builtins:
+            workspace_builtins_config = self._workspace.config.builtins
+
+        self._builtin_loader = BuiltinLoader(
+            global_config=config.builtins,
+            workspace_config=workspace_builtins_config,
+        )
+
+        # Load tools (LangChain tools for agent) and processors (message transformers)
+        self._builtin_tools = self._builtin_loader.load_tools()
+        self._processors: list[BaseBuiltinProcessor] = self._builtin_loader.load_processors()
+
+        if self._builtin_tools:
+            logger.info(f"Loaded {len(self._builtin_tools)} builtin tools for workspace: {workspace_name}")
+        if self._processors:
+            logger.info(f"Loaded {len(self._processors)} builtin processors for workspace: {workspace_name}")
+
         # Use merged model config for agent
         agent_config = self._merged_config.get("model", {})
         model_str = agent_config.get("model", config.agent.model)
@@ -69,6 +90,7 @@ class WorkspaceRunner:
             max_turns=agent_config.get("max_turns", config.agent.max_turns),
             temperature=agent_config.get("temperature", config.agent.temperature),
             checkpointer=self._checkpointer,
+            tools=self._builtin_tools,
         )
 
         self._channels: dict[str, TelegramChannel] = {}
@@ -180,18 +202,31 @@ class WorkspaceRunner:
 
     async def _handle_inbound_message(self, message: Message) -> None:
         """Handle an inbound message from any channel."""
-        logger.info(f"Received message from {message.channel}: {message.content[:50]}...")
+        # Process through inbound processors (e.g., Whisper transcription)
+        processed_message = message
+        for processor in self._processors:
+            try:
+                result = await processor.process_inbound(processed_message)
+                processed_message = result.message
+                if result.skip_agent:
+                    logger.debug(f"Processor {processor.metadata.name} handled message, skipping agent")
+                    return
+            except Exception as e:
+                logger.error(f"Processor {processor.metadata.name} failed: {e}")
 
-        if message.is_command:
-            command, args = message.parse_command()
+        content_preview = processed_message.content[:50] if processed_message.content else "(empty)"
+        logger.info(f"Received message from {processed_message.channel}: {content_preview}...")
+
+        if processed_message.is_command:
+            command, args = processed_message.parse_command()
             if command == "queue":
-                await self._handle_queue_command(message, args)
+                await self._handle_queue_command(processed_message, args)
                 return
 
         await self._queue_manager.submit(
-            session_key=message.session_key,
-            channel_name=message.channel,
-            message=message,
+            session_key=processed_message.session_key,
+            channel_name=processed_message.channel,
+            message=processed_message,
         )
 
     async def _handle_queue_command(self, message: Message, args: str) -> None:
@@ -236,11 +271,28 @@ class WorkspaceRunner:
             if channel and response:
                 await channel.send_message(session_key, response)
 
+                # Check for pending TTS audio from ElevenLabs tool
+                await self._send_pending_audio(channel, session_key)
+
         except Exception as e:
             logger.error(f"Error processing messages for {session_key}: {e}")
             channel = self._channels.get("telegram")
             if channel:
                 await channel.send_message(session_key, f"Error: {e}")
+
+    async def _send_pending_audio(self, channel: TelegramChannel, session_key: str) -> None:
+        """Check for and send any pending TTS audio."""
+        try:
+            from openpaw.builtins.tools.elevenlabs_tts import ElevenLabsTTSTool
+
+            audio_data = ElevenLabsTTSTool.get_any_pending_audio()
+            if audio_data:
+                await channel.send_audio(session_key, audio_data, filename="response.mp3")
+                logger.info(f"Sent TTS audio to {session_key}")
+        except ImportError:
+            pass  # ElevenLabs not available
+        except Exception as e:
+            logger.error(f"Failed to send TTS audio: {e}")
 
     async def _queue_processor(self) -> None:
         """Background task processing the lane queue."""
@@ -286,6 +338,7 @@ class WorkspaceRunner:
                     max_turns=self._agent_runner.max_turns,
                     temperature=self._agent_runner.temperature,
                     checkpointer=None,  # No checkpointer for cron jobs
+                    tools=self._builtin_tools,  # Pass builtin tools to cron agents
                 )
 
             self._cron_scheduler = CronScheduler(

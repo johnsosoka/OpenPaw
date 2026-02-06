@@ -1,0 +1,163 @@
+"""Central registry for OpenPaw builtins."""
+
+import logging
+from typing import TYPE_CHECKING
+
+from openpaw.builtins.base import BuiltinMetadata
+
+if TYPE_CHECKING:
+    from openpaw.builtins.base import BaseBuiltinProcessor, BaseBuiltinTool
+
+logger = logging.getLogger(__name__)
+
+
+class BuiltinRegistry:
+    """Central registry of all available builtins.
+
+    Supports:
+    - Registration of tool and processor builtins
+    - Lookup by name or group
+    - Availability checking based on prerequisites
+
+    This is a singleton - use get_instance() to access.
+    """
+
+    _instance: "BuiltinRegistry | None" = None
+
+    def __init__(self) -> None:
+        self._tools: dict[str, type[BaseBuiltinTool]] = {}
+        self._processors: dict[str, type[BaseBuiltinProcessor]] = {}
+        self._groups: dict[str, list[str]] = {}
+
+    @classmethod
+    def get_instance(cls) -> "BuiltinRegistry":
+        """Get or create the singleton registry instance."""
+        if cls._instance is None:
+            cls._instance = cls()
+            cls._instance._register_defaults()
+        return cls._instance
+
+    @classmethod
+    def reset(cls) -> None:
+        """Reset the singleton instance. Useful for testing."""
+        cls._instance = None
+
+    def _register_defaults(self) -> None:
+        """Register all built-in builtins.
+
+        Uses lazy imports to avoid loading dependencies for unused builtins.
+        """
+        # Tools
+        try:
+            from openpaw.builtins.tools.brave_search import BraveSearchTool
+
+            self.register_tool(BraveSearchTool)
+        except ImportError as e:
+            logger.debug(f"Brave Search not available: {e}")
+
+        try:
+            from openpaw.builtins.tools.elevenlabs_tts import ElevenLabsTTSTool
+
+            self.register_tool(ElevenLabsTTSTool)
+        except ImportError as e:
+            logger.debug(f"ElevenLabs TTS not available: {e}")
+
+        # Processors
+        try:
+            from openpaw.builtins.processors.whisper import WhisperProcessor
+
+            self.register_processor(WhisperProcessor)
+        except ImportError as e:
+            logger.debug(f"Whisper processor not available: {e}")
+
+    def register_tool(self, tool_class: type["BaseBuiltinTool"]) -> None:
+        """Register a tool builtin.
+
+        Args:
+            tool_class: The tool class to register.
+        """
+        meta = tool_class.metadata
+        self._tools[meta.name] = tool_class
+        if meta.group:
+            self._groups.setdefault(meta.group, []).append(meta.name)
+        logger.debug(f"Registered tool builtin: {meta.name}")
+
+    def register_processor(self, processor_class: type["BaseBuiltinProcessor"]) -> None:
+        """Register a processor builtin.
+
+        Args:
+            processor_class: The processor class to register.
+        """
+        meta = processor_class.metadata
+        self._processors[meta.name] = processor_class
+        if meta.group:
+            self._groups.setdefault(meta.group, []).append(meta.name)
+        logger.debug(f"Registered processor builtin: {meta.name}")
+
+    def get_available_tools(self) -> dict[str, BuiltinMetadata]:
+        """Get all tools with satisfied prerequisites.
+
+        Returns:
+            Dict mapping tool name to metadata for available tools.
+        """
+        return {
+            name: cls.metadata
+            for name, cls in self._tools.items()
+            if cls.metadata.prerequisites.is_satisfied()
+        }
+
+    def get_available_processors(self) -> dict[str, BuiltinMetadata]:
+        """Get all processors with satisfied prerequisites.
+
+        Returns:
+            Dict mapping processor name to metadata for available processors.
+        """
+        return {
+            name: cls.metadata
+            for name, cls in self._processors.items()
+            if cls.metadata.prerequisites.is_satisfied()
+        }
+
+    def get_tool_class(self, name: str) -> type["BaseBuiltinTool"] | None:
+        """Get a tool class by name.
+
+        Args:
+            name: The builtin name.
+
+        Returns:
+            The tool class or None if not found.
+        """
+        return self._tools.get(name)
+
+    def get_processor_class(self, name: str) -> type["BaseBuiltinProcessor"] | None:
+        """Get a processor class by name.
+
+        Args:
+            name: The builtin name.
+
+        Returns:
+            The processor class or None if not found.
+        """
+        return self._processors.get(name)
+
+    def get_group_members(self, group: str) -> list[str]:
+        """Get all builtin names in a group.
+
+        Args:
+            group: The group name (e.g., "web", "voice").
+
+        Returns:
+            List of builtin names in the group.
+        """
+        return self._groups.get(group, [])
+
+    def list_all(self) -> dict[str, list[BuiltinMetadata]]:
+        """List all registered builtins by type.
+
+        Returns:
+            Dict with "tools" and "processors" keys containing metadata lists.
+        """
+        return {
+            "tools": [cls.metadata for cls in self._tools.values()],
+            "processors": [cls.metadata for cls in self._processors.values()],
+        }

@@ -166,6 +166,59 @@ class WorkspaceQueueConfig(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class BuiltinItemConfig(BaseModel):
+    """Configuration for a single builtin capability."""
+
+    enabled: bool = Field(default=True, description="Whether this builtin is active")
+    config: dict[str, Any] = Field(default_factory=dict, description="Builtin-specific settings")
+
+    model_config = {"extra": "allow"}
+
+
+class BuiltinsConfig(BaseModel):
+    """Global builtins configuration.
+
+    Supports OpenClaw-style allow/deny lists with group prefixes (e.g., "group:voice").
+    Deny takes precedence over allow. Empty allow list means allow all available.
+    """
+
+    allow: list[str] = Field(
+        default_factory=list,
+        description="Allowed builtins/groups (empty = allow all available)",
+    )
+    deny: list[str] = Field(
+        default_factory=list,
+        description="Denied builtins/groups (takes precedence over allow)",
+    )
+
+    # Per-builtin configuration
+    brave_search: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
+    whisper: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
+    elevenlabs: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
+
+    model_config = {"extra": "allow"}
+
+
+class WorkspaceBuiltinsConfig(BaseModel):
+    """Per-workspace builtins configuration (overrides global)."""
+
+    allow: list[str] = Field(
+        default_factory=list,
+        description="Additional allowed builtins for this workspace",
+    )
+    deny: list[str] = Field(
+        default_factory=list,
+        description="Builtins to disable for this workspace",
+    )
+
+    # Per-builtin overrides
+    brave_search: BuiltinItemConfig | None = None
+    whisper: BuiltinItemConfig | None = None
+    elevenlabs: BuiltinItemConfig | None = None
+
+    model_config = {"extra": "allow"}
+
+
 class WorkspaceConfig(BaseModel):
     """Configuration for a workspace agent (loaded from agent.yaml)."""
 
@@ -174,6 +227,10 @@ class WorkspaceConfig(BaseModel):
     model: WorkspaceModelConfig = Field(default_factory=WorkspaceModelConfig, description="LLM configuration")
     channel: WorkspaceChannelConfig = Field(default_factory=WorkspaceChannelConfig, description="Channel binding")
     queue: WorkspaceQueueConfig = Field(default_factory=WorkspaceQueueConfig, description="Queue overrides")
+    builtins: WorkspaceBuiltinsConfig = Field(
+        default_factory=WorkspaceBuiltinsConfig,
+        description="Builtin capability overrides",
+    )
 
     model_config = {"extra": "allow"}
 
@@ -186,6 +243,7 @@ class Config(BaseModel):
     lanes: LaneConfig = Field(default_factory=LaneConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
+    builtins: BuiltinsConfig = Field(default_factory=BuiltinsConfig, description="Builtin capabilities config")
     cron_jobs: list[CronJobConfig] = Field(default_factory=list, description="Scheduled agent jobs")
 
     model_config = {"extra": "allow"}

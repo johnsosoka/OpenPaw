@@ -19,6 +19,21 @@ dependencies = [
     "apscheduler (>=3.10.0,<4.0.0)"
 ]
 
+[project.optional-dependencies]
+# Builtins - install specific extras for the builtins you need
+voice = [
+    "openai (>=1.0.0)",      # Whisper transcription
+    "elevenlabs (>=1.0.0)"   # Text-to-speech
+]
+web = [
+    "langchain-community (>=0.4.0)"  # Brave Search
+]
+all-builtins = [
+    "openai (>=1.0.0)",
+    "elevenlabs (>=1.0.0)",
+    "langchain-community (>=0.4.0)"
+]
+
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

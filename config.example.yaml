@@ -30,6 +30,39 @@ agent:
   max_turns: 50
   temperature: 0.7
 
+# Builtin capabilities
+# Builtins are conditionally available based on API keys in environment
+builtins:
+  # OpenClaw-style allow/deny lists
+  # Empty allow = allow all available builtins
+  # Use "group:web" or "group:voice" to allow/deny entire groups
+  allow: []
+  deny: []
+    # - group:voice  # Disable all voice builtins
+
+  # Brave Search - web search capability
+  # Requires: BRAVE_API_KEY environment variable
+  brave_search:
+    enabled: true
+    config:
+      count: 5  # Number of search results
+
+  # Whisper - audio transcription for voice messages
+  # Requires: OPENAI_API_KEY environment variable
+  whisper:
+    enabled: true
+    config:
+      model: whisper-1
+      # language: en  # Optional language hint (auto-detect if not set)
+
+  # ElevenLabs - text-to-speech for voice responses
+  # Requires: ELEVENLABS_API_KEY environment variable
+  elevenlabs:
+    enabled: true
+    config:
+      voice_id: 21m00Tcm4TlvDq8ikWAM  # Default voice
+      model_id: eleven_monolingual_v1
+
 # Scheduled jobs (cron)
 cron_jobs: []
   # - name: daily-summary

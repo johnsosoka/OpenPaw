@@ -15,6 +15,27 @@ class MessageDirection(Enum):
 
 
 @dataclass
+class Attachment:
+    """Represents a message attachment (audio, image, document, etc.).
+
+    Attributes:
+        type: Attachment type (audio, image, document, video).
+        data: Raw binary data (if downloaded).
+        url: Remote URL (if not downloaded).
+        filename: Original filename if available.
+        mime_type: MIME type of the attachment.
+        metadata: Additional type-specific metadata.
+    """
+
+    type: str
+    data: bytes | None = None
+    url: str | None = None
+    filename: str | None = None
+    mime_type: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class Message:
     """Unified message format across all channels.
 
@@ -30,6 +51,7 @@ class Message:
     timestamp: datetime = field(default_factory=datetime.now)
     reply_to_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    attachments: list[Attachment] = field(default_factory=list)
 
     @property
     def is_command(self) -> bool:

@@ -9,7 +9,7 @@ from typing import Any
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-from openpaw.channels.base import ChannelAdapter, Message, MessageDirection
+from openpaw.channels.base import Attachment, ChannelAdapter, Message, MessageDirection
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,7 @@ class TelegramChannel(ChannelAdapter):
         self._app.add_handler(CommandHandler("queue", self._handle_queue_command))
         self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message))
         self._app.add_handler(MessageHandler(filters.COMMAND, self._handle_command))
+        self._app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._handle_voice_message))
 
         await self._app.initialize()
         await self._app.start()
@@ -108,6 +109,47 @@ class TelegramChannel(ChannelAdapter):
             session_key=session_key,
             user_id=str(self._app.bot.id),
             content=content,
+            direction=MessageDirection.OUTBOUND,
+            timestamp=datetime.now(),
+        )
+
+    async def send_audio(
+        self,
+        session_key: str,
+        audio_data: bytes,
+        filename: str = "audio.mp3",
+        **kwargs: Any,
+    ) -> Message:
+        """Send an audio file to a Telegram chat.
+
+        Args:
+            session_key: Session key in format 'telegram:chat_id'.
+            audio_data: Raw audio bytes.
+            filename: Filename for the audio file.
+            **kwargs: Additional telegram.Bot.send_audio kwargs.
+
+        Returns:
+            The sent Message object.
+        """
+        if not self._app:
+            raise RuntimeError("Telegram channel not started")
+
+        from io import BytesIO
+
+        parts = session_key.split(":")
+        chat_id = int(parts[1])
+
+        audio_file = BytesIO(audio_data)
+        audio_file.name = filename
+
+        sent = await self._app.bot.send_audio(chat_id=chat_id, audio=audio_file, **kwargs)
+
+        return Message(
+            id=str(sent.message_id),
+            channel=self.name,
+            session_key=session_key,
+            user_id=str(self._app.bot.id),
+            content=f"[Audio: {filename}]",
             direction=MessageDirection.OUTBOUND,
             timestamp=datetime.now(),
         )
@@ -258,3 +300,77 @@ class TelegramChannel(ChannelAdapter):
         message = self._to_message(update)
         if message and self._message_callback:
             await self._message_callback(message)
+
+    async def _handle_voice_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle incoming voice and audio messages."""
+        if not self._is_allowed(update):
+            await self._send_unauthorized_response(update)
+            return
+
+        message = await self._voice_to_message(update)
+        if message and self._message_callback:
+            await self._message_callback(message)
+
+    async def _voice_to_message(self, update: Update) -> Message | None:
+        """Convert voice/audio message to unified Message format with attachment.
+
+        Downloads the audio file and creates an Attachment for processing
+        by the Whisper transcription processor.
+        """
+        if not update.message or not update.effective_user or not update.effective_chat:
+            return None
+
+        # Get voice or audio file
+        voice = update.message.voice
+        audio = update.message.audio
+
+        if not voice and not audio:
+            return None
+
+        chat_id = update.effective_chat.id
+        session_key = self.build_session_key(chat_id)
+
+        # Download the audio file
+        try:
+            if voice:
+                file = await voice.get_file()
+                mime_type = voice.mime_type or "audio/ogg"
+                duration = voice.duration
+            else:
+                file = await audio.get_file()  # type: ignore[union-attr]
+                mime_type = audio.mime_type or "audio/mpeg"  # type: ignore[union-attr]
+                duration = audio.duration  # type: ignore[union-attr]
+
+            file_bytes = await file.download_as_bytearray()
+
+            attachment = Attachment(
+                type="audio",
+                data=bytes(file_bytes),
+                mime_type=mime_type,
+                metadata={"duration": duration},
+            )
+
+            logger.info(f"Downloaded voice message: {len(file_bytes)} bytes, {duration}s")
+
+        except Exception as e:
+            logger.error(f"Failed to download voice message: {e}")
+            return None
+
+        # Create message with audio attachment
+        return Message(
+            id=str(update.message.message_id),
+            channel=self.name,
+            session_key=session_key,
+            user_id=str(update.effective_user.id),
+            content="",  # Will be filled by Whisper processor
+            direction=MessageDirection.INBOUND,
+            timestamp=update.message.date or datetime.now(),
+            reply_to_id=str(update.message.reply_to_message.message_id) if update.message.reply_to_message else None,
+            metadata={
+                "chat_type": update.effective_chat.type,
+                "username": update.effective_user.username,
+                "first_name": update.effective_user.first_name,
+                "has_voice": True,
+            },
+            attachments=[attachment],
+        )
