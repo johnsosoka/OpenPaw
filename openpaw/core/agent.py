@@ -1,6 +1,7 @@
 """Agent runner integrating DeepAgents with OpenPaw workspace system."""
 
 import logging
+import re
 from typing import Any
 
 from deepagents import create_deep_agent
@@ -11,6 +12,10 @@ from openpaw.workspace.loader import AgentWorkspace
 
 logger = logging.getLogger(__name__)
 
+# Pattern to match thinking tokens like <think>...</think>
+# Non-greedy match, handles multiline content
+THINKING_TAG_PATTERN = re.compile(r"<think>[\s\S]*?</think>\s*", re.IGNORECASE)
+
 
 class AgentRunner:
     """Runs DeepAgents with OpenPaw workspace configuration.
@@ -19,7 +24,25 @@ class AgentRunner:
     - Workspace-based system prompts (AGENT.md, USER.md, SOUL.md, HEARTBEAT.md)
     - DeepAgents native skills from workspace skills/ directory
     - LangGraph checkpointing for multi-turn conversations
+    - Automatic stripping of model thinking tokens (<think>...</think>)
     """
+
+    @staticmethod
+    def _strip_thinking_tokens(text: str) -> str:
+        """Strip thinking tokens from model response.
+
+        Some models (e.g., Bedrock moonshot.kimi-k2-thinking) output internal
+        reasoning wrapped in <think>...</think> tags. These should be removed
+        before showing the response to users.
+
+        Args:
+            text: Raw response text potentially containing thinking tokens.
+
+        Returns:
+            Response text with thinking tokens removed and trimmed.
+        """
+        cleaned = THINKING_TAG_PATTERN.sub("", text)
+        return cleaned.strip()
 
     def __init__(
         self,
@@ -115,7 +138,7 @@ class AgentRunner:
             thread_id: Thread identifier for multi-turn conversations.
 
         Returns:
-            Agent's response text.
+            Agent's response text with thinking tokens stripped.
         """
         config: dict[str, Any] = {}
         if session_id or thread_id:
@@ -133,9 +156,13 @@ class AgentRunner:
         messages = result.get("messages", [])
         if messages:
             last_message = messages[-1]
+            raw_response = ""
             if hasattr(last_message, "content"):
-                return str(last_message.content)
-            return str(last_message)
+                raw_response = str(last_message.content)
+            else:
+                raw_response = str(last_message)
+
+            return self._strip_thinking_tokens(raw_response)
 
         return ""
 
@@ -145,7 +172,11 @@ class AgentRunner:
         session_id: str | None = None,
         thread_id: str | None = None,
     ) -> str:
-        """Synchronous version of run for non-async contexts."""
+        """Synchronous version of run for non-async contexts.
+
+        Returns:
+            Agent's response text with thinking tokens stripped.
+        """
         config: dict[str, Any] = {}
         if session_id or thread_id:
             config["configurable"] = {}
@@ -162,8 +193,12 @@ class AgentRunner:
         messages = result.get("messages", [])
         if messages:
             last_message = messages[-1]
+            raw_response = ""
             if hasattr(last_message, "content"):
-                return str(last_message.content)
-            return str(last_message)
+                raw_response = str(last_message.content)
+            else:
+                raw_response = str(last_message)
+
+            return self._strip_thinking_tokens(raw_response)
 
         return ""
