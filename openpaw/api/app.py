@@ -9,6 +9,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from openpaw.api.routes.monitoring import router as monitoring_router
+from openpaw.api.routes.settings import router as settings_router
+from openpaw.api.routes.workspaces import router as workspaces_router
 from openpaw.db.database import init_db_manager
 from openpaw.orchestrator import OpenPawOrchestrator
 
@@ -81,6 +83,8 @@ def create_app(config: dict[str, Any] | None = None) -> FastAPI:
     # Mount routes at /api/v1
     api_v1 = FastAPI()
     api_v1.include_router(monitoring_router)
+    api_v1.include_router(settings_router)
+    api_v1.include_router(workspaces_router)
 
     # Share state with sub-app so dependencies can access orchestrator, etc.
     api_v1.state = app.state

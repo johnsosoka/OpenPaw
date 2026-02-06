@@ -2,7 +2,7 @@
 
 from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from openpaw.api.services.encryption import EncryptionService
 from openpaw.db.database import get_async_session
 from openpaw.orchestrator import OpenPawOrchestrator
+
+if TYPE_CHECKING:
+    from openpaw.api.services.settings_service import SettingsService
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
@@ -63,7 +66,7 @@ def get_encryption() -> EncryptionService:
     return EncryptionService()
 
 
-# Service provider stubs for future implementation
+# Service provider implementations
 async def get_workspace_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     workspaces_path: Annotated[Path, Depends(get_workspaces_path)],
@@ -78,15 +81,16 @@ async def get_workspace_service(
         orchestrator: Optional orchestrator instance
 
     Returns:
-        WorkspaceService instance (stub for future implementation)
+        WorkspaceService instance
     """
-    # TODO: Import and instantiate WorkspaceService once implemented
-    raise NotImplementedError("WorkspaceService not yet implemented")
+    from openpaw.api.services.workspace_service import WorkspaceService
+
+    return WorkspaceService(session, workspaces_path, orchestrator)
 
 
 async def get_settings_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
-) -> Any:
+) -> "SettingsService":
     """
     Get settings service instance.
 
@@ -94,10 +98,11 @@ async def get_settings_service(
         session: Database session
 
     Returns:
-        SettingsService instance (stub for future implementation)
+        SettingsService instance
     """
-    # TODO: Import and instantiate SettingsService once implemented
-    raise NotImplementedError("SettingsService not yet implemented")
+    from openpaw.api.services.settings_service import SettingsService
+
+    return SettingsService(session)
 
 
 async def get_builtin_service(
@@ -172,6 +177,25 @@ async def get_monitoring_service(
     """
     # TODO: Import and instantiate MonitoringService once implemented
     raise NotImplementedError("MonitoringService not yet implemented")
+
+
+async def get_migration_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    encryption: Annotated[EncryptionService, Depends(get_encryption)],
+) -> Any:
+    """
+    Get migration service instance.
+
+    Args:
+        session: Database session
+        encryption: Encryption service
+
+    Returns:
+        MigrationService instance
+    """
+    from openpaw.api.services.migration_service import MigrationService
+
+    return MigrationService(session, encryption)
 
 
 # Type aliases for annotating dependencies

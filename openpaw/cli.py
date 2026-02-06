@@ -53,8 +53,82 @@ async def run_migrate(args: argparse.Namespace) -> None:
             sys.exit(1)
         finally:
             await db_manager.close()
+    elif args.import_config or args.import_workspaces or args.verify:
+        # Import migration service and dependencies
+        from openpaw.api.services.encryption import EncryptionService
+        from openpaw.api.services.migration_service import MigrationService
+        from openpaw.db.database import get_async_session
+
+        # Get database session and run migration
+        encryption = EncryptionService()
+
+        async for session in get_async_session():
+            migration_service = MigrationService(session, encryption)
+
+            try:
+                # Handle import config
+                if args.import_config:
+                    config_path = Path(args.import_config)
+                    logger.info(f"Importing global config from {config_path}...")
+                    result = await migration_service.import_global_config(
+                        config_path, overwrite=args.overwrite
+                    )
+                    logger.info(
+                        f"Import complete: {result.imported} imported, "
+                        f"{result.skipped} skipped, {len(result.errors)} errors"
+                    )
+                    if result.errors:
+                        for error in result.errors:
+                            logger.error(f"  - {error}")
+
+                # Handle import workspaces
+                if args.import_workspaces:
+                    config = load_config(args.config or Path("config.yaml"))
+                    workspaces_path = config.workspaces_path
+                    logger.info(f"Importing all workspaces from {workspaces_path}...")
+                    results = await migration_service.import_all_workspaces(
+                        workspaces_path, overwrite=args.overwrite
+                    )
+                    total_imported = sum(r.imported for r in results.values())
+                    total_skipped = sum(r.skipped for r in results.values())
+                    total_errors = sum(len(r.errors) for r in results.values())
+                    logger.info(
+                        f"Import complete: {total_imported} imported, "
+                        f"{total_skipped} skipped, {total_errors} errors"
+                    )
+                    for workspace_name, result in results.items():
+                        if result.errors:
+                            logger.error(f"Errors in {workspace_name}:")
+                            for error in result.errors:
+                                logger.error(f"  - {error}")
+
+                # Handle verify
+                if args.verify:
+                    config = load_config(args.config or Path("config.yaml"))
+                    config_path = args.config or Path("config.yaml")
+                    workspaces_path = config.workspaces_path
+                    logger.info("Verifying migration...")
+                    result = await migration_service.verify_migration(
+                        config_path, workspaces_path
+                    )
+                    if result.matches:
+                        logger.info("Verification successful: Database matches YAML config")
+                    else:
+                        logger.warning("Verification failed: Differences found")
+                        for diff in result.differences:
+                            logger.warning(f"  - {diff}")
+
+            except Exception as e:
+                logger.error(f"Migration failed: {e}")
+                sys.exit(1)
+
+            # Only use first session
+            break
     else:
-        logger.error("No migration action specified. Use --init to initialize database.")
+        logger.error(
+            "No migration action specified. Use --init, --import-config, "
+            "--import-workspaces, or --verify"
+        )
         sys.exit(1)
 
 
@@ -156,6 +230,33 @@ async def main() -> None:
         "--init",
         action="store_true",
         help="Initialize the database (create tables)",
+    )
+    migrate_parser.add_argument(
+        "--import-config",
+        type=str,
+        metavar="PATH",
+        help="Import global config.yaml settings to database",
+    )
+    migrate_parser.add_argument(
+        "--import-workspaces",
+        action="store_true",
+        help="Import all workspaces from agent_workspaces directory",
+    )
+    migrate_parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Verify database matches YAML configuration",
+    )
+    migrate_parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite existing database records during import",
+    )
+    migrate_parser.add_argument(
+        "-c",
+        "--config",
+        type=Path,
+        help="Path to configuration file (for import-workspaces and verify)",
     )
     migrate_parser.add_argument(
         "--db-path",

@@ -35,6 +35,7 @@ class WorkspaceRepository(BaseRepository[Workspace]):
             .options(
                 selectinload(Workspace.config),
                 selectinload(Workspace.channel_binding),
+                selectinload(Workspace.cron_jobs),
             )
             .order_by(Workspace.name)
         )
