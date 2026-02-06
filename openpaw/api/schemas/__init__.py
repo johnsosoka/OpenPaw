@@ -12,6 +12,23 @@ from openpaw.api.schemas.builtins import (
     BuiltinPrerequisites,
     BuiltinResponse,
 )
+from openpaw.api.schemas.channels import (
+    ChannelConfigResponse,
+    ChannelConfigUpdate,
+    ChannelTestResponse,
+    ChannelTypeInfo,
+    ChannelTypesResponse,
+)
+from openpaw.api.schemas.crons import (
+    CronExecutionListResponse,
+    CronExecutionResponse,
+    CronJobCreate,
+    CronJobListResponse,
+    CronJobResponse,
+    CronJobUpdate,
+    CronOutputConfig,
+    CronTriggerResponse,
+)
 from openpaw.api.schemas.settings import (
     CategorySettings,
     SettingsImportRequest,
@@ -46,6 +63,21 @@ __all__ = [
     "BuiltinListResponse",
     "BuiltinPrerequisites",
     "BuiltinResponse",
+    # Channel schemas
+    "ChannelConfigResponse",
+    "ChannelConfigUpdate",
+    "ChannelTestResponse",
+    "ChannelTypeInfo",
+    "ChannelTypesResponse",
+    # Cron schemas
+    "CronExecutionListResponse",
+    "CronExecutionResponse",
+    "CronJobCreate",
+    "CronJobListResponse",
+    "CronJobResponse",
+    "CronJobUpdate",
+    "CronOutputConfig",
+    "CronTriggerResponse",
     # Settings schemas
     "CategorySettings",
     "SettingsImportRequest",

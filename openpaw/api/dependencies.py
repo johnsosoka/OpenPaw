@@ -136,10 +136,11 @@ async def get_cron_service(
         orchestrator: Optional orchestrator instance
 
     Returns:
-        CronService instance (stub for future implementation)
+        CronService instance
     """
-    # TODO: Import and instantiate CronService once implemented
-    raise NotImplementedError("CronService not yet implemented")
+    from openpaw.api.services.cron_service import CronService
+
+    return CronService(session, orchestrator)
 
 
 async def get_channel_service(
@@ -156,10 +157,11 @@ async def get_channel_service(
         orchestrator: Optional orchestrator instance
 
     Returns:
-        ChannelService instance (stub for future implementation)
+        ChannelService instance
     """
-    # TODO: Import and instantiate ChannelService once implemented
-    raise NotImplementedError("ChannelService not yet implemented")
+    from openpaw.api.services.channel_service import ChannelService
+
+    return ChannelService(session, encryption, orchestrator)
 
 
 async def get_monitoring_service(
