@@ -91,6 +91,7 @@ class WorkspaceRunner:
             temperature=agent_config.get("temperature", config.agent.temperature),
             checkpointer=self._checkpointer,
             tools=self._builtin_tools,
+            region=agent_config.get("region"),
         )
 
         self._channels: dict[str, TelegramChannel] = {}
@@ -119,6 +120,7 @@ class WorkspaceRunner:
                 "api_key": global_config.agent.api_key,
                 "temperature": global_config.agent.temperature,
                 "max_turns": global_config.agent.max_turns,
+                "region": None,
             },
             "queue": {
                 "mode": global_config.queue.mode,
@@ -339,6 +341,7 @@ class WorkspaceRunner:
                     temperature=self._agent_runner.temperature,
                     checkpointer=None,  # No checkpointer for cron jobs
                     tools=self._builtin_tools,  # Pass builtin tools to cron agents
+                    region=self._agent_runner.region,
                 )
 
             self._cron_scheduler = CronScheduler(

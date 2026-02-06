@@ -41,12 +41,19 @@ cp config.example.yaml config.yaml
 2. Set required environment variables:
 
 ```bash
-export ANTHROPIC_API_KEY="your-key-here"
 export TELEGRAM_BOT_TOKEN="your-telegram-token"
+
+# Model provider (choose one)
+export ANTHROPIC_API_KEY="your-key-here"      # For Anthropic models
+export OPENAI_API_KEY="your-openai-key"        # For OpenAI models
+
+# For AWS Bedrock models (Kimi K2, Claude, Mistral, etc.)
+export AWS_ACCESS_KEY_ID="your-access-key"
+export AWS_SECRET_ACCESS_KEY="your-secret-key"
+export AWS_REGION="us-east-1"
 
 # Optional builtins
 export BRAVE_API_KEY="your-brave-key"
-export OPENAI_API_KEY="your-openai-key"
 export ELEVENLABS_API_KEY="your-elevenlabs-key"
 ```
 
@@ -126,7 +133,10 @@ poetry run mypy openpaw/
 - Python 3.11+
 - Poetry for dependency management
 - Telegram Bot Token (for Telegram channel)
-- Anthropic API key (for Claude models)
+- Model provider credentials (one of):
+  - Anthropic API key (for Claude models via Anthropic)
+  - OpenAI API key (for GPT models)
+  - AWS credentials (for Bedrock models: Kimi K2, Claude, Mistral, etc.)
 
 ## License
 

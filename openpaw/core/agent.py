@@ -30,6 +30,7 @@ class AgentRunner:
         temperature: float = 0.7,
         checkpointer: Any | None = None,
         tools: list[Any] | None = None,
+        region: str | None = None,
     ):
         """Initialize the agent runner.
 
@@ -41,6 +42,7 @@ class AgentRunner:
             temperature: Model temperature setting.
             checkpointer: Optional LangGraph checkpointer for persistence.
             tools: Optional additional tools to provide to the agent.
+            region: AWS region for Bedrock models (e.g., us-east-1).
         """
         self.workspace = workspace
         self.model_id = model
@@ -49,6 +51,7 @@ class AgentRunner:
         self.temperature = temperature
         self.checkpointer = checkpointer
         self.tools = tools or []
+        self.region = region
 
         self._agent = self._build_agent()
 
@@ -61,6 +64,8 @@ class AgentRunner:
         model_kwargs: dict[str, Any] = {"temperature": self.temperature}
         if self.api_key:
             model_kwargs["api_key"] = self.api_key
+        if self.region:
+            model_kwargs["region_name"] = self.region
 
         model = init_chat_model(self.model_id, **model_kwargs)
         system_prompt = self.workspace.build_system_prompt()

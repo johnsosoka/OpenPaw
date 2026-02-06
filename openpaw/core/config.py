@@ -136,11 +136,12 @@ class CronJobConfig(BaseModel):
 class WorkspaceModelConfig(BaseModel):
     """LLM configuration for a workspace agent."""
 
-    provider: str | None = Field(default=None, description="Model provider (anthropic, openai, etc.)")
+    provider: str | None = Field(default=None, description="Model provider (anthropic, openai, bedrock_converse, etc.)")
     model: str | None = Field(default=None, description="Model identifier")
     api_key: str | None = Field(default=None, description="API key for the model provider")
     temperature: float | None = Field(default=None, description="Model temperature")
     max_turns: int | None = Field(default=None, description="Max agent turns per run")
+    region: str | None = Field(default=None, description="AWS region for Bedrock models (e.g., us-east-1)")
 
     model_config = {"extra": "allow"}
 

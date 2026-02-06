@@ -26,6 +26,11 @@ channels:
 
 # Agent defaults
 agent:
+  # Model format: provider:model_id
+  # Anthropic: anthropic:claude-sonnet-4-20250514
+  # OpenAI: openai:gpt-4o
+  # AWS Bedrock: bedrock_converse:moonshot.kimi-k2-thinking
+  #              bedrock_converse:anthropic.claude-3-sonnet-20240229-v1:0
   model: anthropic:claude-sonnet-4-20250514
   max_turns: 50
   temperature: 0.7

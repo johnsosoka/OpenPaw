@@ -125,6 +125,46 @@ queue:
 
 **Config Merging**: Workspace settings deep-merge over global config. Missing fields inherit from global, present fields override.
 
+#### AWS Bedrock Configuration
+
+OpenPaw supports AWS Bedrock models via the `bedrock_converse` provider. Available models include Kimi K2 Thinking, Claude, Mistral, and others.
+
+**Global config (`config.yaml`)**:
+
+```yaml
+agent:
+  model: bedrock_converse:moonshot.kimi-k2-thinking
+```
+
+**Per-workspace (`agent.yaml`)**:
+
+```yaml
+model:
+  provider: bedrock_converse
+  model: moonshot.kimi-k2-thinking
+  region: us-east-1  # Optional, defaults to AWS_REGION env var
+```
+
+**Available Bedrock Models**:
+- `moonshot.kimi-k2-thinking` - Moonshot Kimi K2 (1T MoE, 256K context)
+- `anthropic.claude-3-sonnet-20240229-v1:0` - Claude 3 Sonnet
+- `anthropic.claude-3-haiku-20240307-v1:0` - Claude 3 Haiku
+- `mistral.mistral-large-2402-v1:0` - Mistral Large
+
+**AWS Credentials**: Configure via environment variables or AWS CLI profile:
+
+```bash
+# Environment variables
+export AWS_ACCESS_KEY_ID="your-access-key"
+export AWS_SECRET_ACCESS_KEY="your-secret-key"
+export AWS_REGION="us-east-1"
+
+# Or use AWS CLI profile
+aws configure
+```
+
+**Region Availability** (Kimi K2): `us-east-1`, `us-east-2`, `us-west-2`, `ap-northeast-1`, `ap-south-1`, `sa-east-1`
+
 ### Cron System
 
 Workspaces can define scheduled tasks via YAML files in `crons/` directory.
