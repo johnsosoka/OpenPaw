@@ -8,9 +8,12 @@ Builtins are optional capabilities conditionally loaded based on API key availab
 Builtins Registry
   ├─ Tools (LangChain-compatible)
   │   ├─ brave_search    (requires BRAVE_API_KEY)
-  │   └─ elevenlabs      (requires ELEVENLABS_API_KEY)
+  │   ├─ elevenlabs      (requires ELEVENLABS_API_KEY)
+  │   ├─ shell           (no prerequisites, disabled by default)
+  │   └─ ssh             (no prerequisites, requires config)
   └─ Processors (message transformers)
-      └─ whisper         (requires OPENAI_API_KEY)
+      ├─ whisper         (requires OPENAI_API_KEY)
+      └─ timestamp       (no prerequisites)
 ```
 
 Builtins are discovered at runtime. If prerequisites (API keys, dependencies) are missing, the builtin is unavailable.
@@ -116,6 +119,186 @@ To find voice IDs:
 
 **Groups:** `voice`
 
+### shell (Tool)
+
+Execute shell commands on the host system with configurable security controls.
+
+**Prerequisites:**
+- None (always available if enabled)
+- `poetry install --extras system`
+
+**Security:**
+- Disabled by default - must explicitly enable
+- Default blocked commands list prevents dangerous operations (rm -rf, sudo, etc.)
+- Optional command allowlist for strict control
+- Optional working directory constraint
+
+**Configuration:**
+
+```yaml
+builtins:
+  shell:
+    enabled: true  # Must explicitly enable (disabled by default)
+    config:
+      allowed_commands:  # Optional allowlist - command must start with one of these
+        - ls
+        - cat
+        - grep
+        - echo
+      blocked_commands:  # Optional override of defaults (defaults include rm -rf, sudo, etc.)
+        - rm -rf
+        - sudo
+        - chmod 777
+      working_directory: /home/user/sandbox  # Optional: constrain to directory
+```
+
+**Default blocked commands:**
+- `rm -rf`, `rm -r`, `rm --recursive`
+- `sudo`
+- `chmod 777`, `chmod -R`
+- `chown`, `chgrp`
+- `> /dev/`, `dd if=`
+- `mkfs`, `:(){:|:&};:`
+- `wget`, `curl` (downloading arbitrary content)
+
+**Usage:**
+
+The agent can execute safe shell commands:
+
+```
+User: "What files are in the current directory?"
+Agent: [Uses shell tool with command "ls -la"]
+Agent: "Here are the files in the directory..."
+```
+
+Blocked commands return clear error messages:
+
+```
+Agent: [Attempts "sudo rm -rf /"]
+Shell Tool: "Command blocked: contains blocked pattern 'sudo'"
+```
+
+**Groups:** `system`
+
+### ssh (Tool)
+
+Execute commands on remote hosts via SSH with mandatory host allowlisting.
+
+**Prerequisites:**
+- SSH keys available on the system
+- `poetry install --extras system`
+
+**Security:**
+- Mandatory host allowlist - connections to non-allowlisted hosts are rejected
+- Uses system SSH keys or specified key paths
+- Configurable connection timeout
+
+**Configuration:**
+
+```yaml
+builtins:
+  ssh:
+    enabled: true
+    config:
+      allowed_hosts:  # REQUIRED: Only these hosts can be accessed
+        - server1.example.com
+        - 192.168.1.100
+        - dev-box
+      default_user: deploy  # Optional: default SSH username
+      default_key_path: ~/.ssh/id_rsa  # Optional: default SSH key (supports ~ expansion)
+      timeout: 30  # Optional: connection timeout in seconds (default: 30)
+```
+
+**Usage:**
+
+The agent can execute commands on remote hosts:
+
+```
+User: "Check disk space on the dev server"
+Agent: [Uses ssh tool: host="dev-box", command="df -h"]
+Agent: "The dev server has 45% disk usage..."
+```
+
+Tool input parameters:
+- `host` (required) - Target hostname (must be in allowed_hosts)
+- `command` (required) - Command to execute
+- `user` (optional) - Override default username
+- `key_path` (optional) - Override default key path
+
+Output format:
+```
+[SSH] hostname: command
+[Exit Code] 0
+[STDOUT]
+command output
+
+[STDERR]
+error output if any
+```
+
+Blocked hosts return clear error messages:
+
+```
+Agent: [Attempts to SSH to "unknown-host"]
+SSH Tool: "Host 'unknown-host' not in allowed_hosts list"
+```
+
+**Groups:** `system`
+
+### timestamp (Processor)
+
+Prepends current date/time context to inbound messages, helping agents understand the current time in the user's timezone.
+
+**Prerequisites:**
+- None (always available)
+- No extra installation needed
+
+**Configuration:**
+
+```yaml
+builtins:
+  timestamp:
+    enabled: true
+    config:
+      timezone: America/Los_Angeles  # Timezone string (default: UTC)
+      format: "%Y-%m-%d %H:%M %Z"  # Optional datetime format (strftime format)
+      template: "[Current time: {datetime}]"  # Optional prefix template
+```
+
+**Usage:**
+
+Automatically adds timestamp context to every message:
+
+```
+User: "What's the weather today?"
+[Timestamp processor adds: "[Current time: 2026-02-06 14:30 PST]"]
+Agent sees: "[Current time: 2026-02-06 14:30 PST]\n\nWhat's the weather today?"
+Agent: "For today, February 6th at 2:30 PM Pacific time..."
+```
+
+**Format Examples:**
+
+```yaml
+# ISO 8601 format
+format: "%Y-%m-%d %H:%M:%S %Z"
+# Output: [Current time: 2026-02-06 14:30:00 PST]
+
+# Human-readable format
+format: "%A, %B %d, %Y at %I:%M %p %Z"
+# Output: [Current time: Thursday, February 06, 2026 at 02:30 PM PST]
+
+# Date only
+format: "%Y-%m-%d"
+# Output: [Current time: 2026-02-06]
+```
+
+**Supported timezones:**
+- IANA timezone database names: `America/Los_Angeles`, `Europe/London`, `Asia/Tokyo`
+- `UTC` for UTC time
+- Uses Python `zoneinfo` module
+
+**Groups:** `context`
+
 ## Configuration
 
 ### Global Configuration
@@ -145,6 +328,23 @@ builtins:
     config:
       voice_id: 21m00Tcm4TlvDq8ikWAM
       model_id: eleven_monolingual_v1
+
+  shell:
+    enabled: true
+    config:
+      allowed_commands: ["ls", "cat", "grep"]
+
+  ssh:
+    enabled: true
+    config:
+      allowed_hosts:
+        - server1.example.com
+        - 192.168.1.100
+
+  timestamp:
+    enabled: true
+    config:
+      timezone: America/Los_Angeles
 ```
 
 ### Per-Workspace Configuration
@@ -221,6 +421,8 @@ Builtins can be organized into groups for easier configuration.
 **Current groups:**
 - `voice` - Voice-related capabilities (whisper, elevenlabs)
 - `web` - Web-related capabilities (brave_search)
+- `system` - System operations (shell, ssh)
+- `context` - Message context enrichment (timestamp)
 
 **Usage:**
 
@@ -249,6 +451,13 @@ poetry install --extras web
 ```
 
 Installs: `langchain-community`
+
+**System capabilities:**
+```bash
+poetry install --extras system
+```
+
+Installs: `langchain-experimental`, `asyncssh`
 
 **All builtins:**
 ```bash
@@ -468,7 +677,10 @@ Reduce attack surface:
 builtins:
   deny:
     - elevenlabs  # Don't need TTS in this workspace
+    - group:system  # Disable shell/ssh for security
 ```
+
+**Security Note:** System tools (shell, ssh) should be denied unless explicitly needed. The shell tool is disabled by default and requires explicit enablement.
 
 ### 4. Use Groups for Bulk Operations
 
@@ -538,6 +750,42 @@ For custom builtins, document:
 - Check allow/deny lists
 - Tool must be properly registered
 - Agent must have permission to use tools (model capability)
+
+## Security Considerations
+
+### System Tools (shell, ssh)
+
+The `shell` and `ssh` tools provide powerful system access and require careful configuration:
+
+**Shell Tool:**
+- Disabled by default - must explicitly enable in config
+- Use `allowed_commands` for strict allowlisting when possible
+- Default `blocked_commands` list prevents common dangerous operations
+- Consider constraining `working_directory` to a sandbox
+- Never enable in untrusted environments
+
+**SSH Tool:**
+- Requires mandatory `allowed_hosts` configuration
+- Rejects connections to non-allowlisted hosts
+- Uses system SSH keys - ensure keys have appropriate permissions
+- Consider separate keys for agent SSH access
+- Audit `allowed_hosts` list regularly
+
+**Best Practices:**
+1. Enable system tools only in workspaces that need them
+2. Use `group:system` deny rule in untrusted workspaces
+3. Configure minimal permissions (minimal allowed_commands, minimal allowed_hosts)
+4. Monitor logs for blocked command attempts
+5. Keep SSH keys secured with appropriate file permissions (600)
+
+### Context Processors (timestamp)
+
+Context processors modify messages transparently:
+
+**Timestamp Processor:**
+- No security concerns - read-only time information
+- Verify timezone configuration matches user's actual location
+- Consider disabling if timestamp context causes issues with agent behavior
 
 ## Future Builtins
 

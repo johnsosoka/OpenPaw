@@ -62,6 +62,20 @@ class BuiltinRegistry:
         except ImportError as e:
             logger.debug(f"ElevenLabs TTS not available: {e}")
 
+        try:
+            from openpaw.builtins.tools.shell import ShellToolBuiltin
+
+            self.register_tool(ShellToolBuiltin)
+        except ImportError as e:
+            logger.debug(f"Shell tool not available: {e}")
+
+        try:
+            from openpaw.builtins.tools.ssh import SSHTool
+
+            self.register_tool(SSHTool)
+        except ImportError as e:
+            logger.debug(f"SSH tool not available: {e}")
+
         # Processors
         try:
             from openpaw.builtins.processors.whisper import WhisperProcessor
@@ -69,6 +83,13 @@ class BuiltinRegistry:
             self.register_processor(WhisperProcessor)
         except ImportError as e:
             logger.debug(f"Whisper processor not available: {e}")
+
+        try:
+            from openpaw.builtins.processors.timestamp import TimestampProcessor
+
+            self.register_processor(TimestampProcessor)
+        except ImportError as e:
+            logger.debug(f"Timestamp processor not available: {e}")
 
     def register_tool(self, tool_class: type["BaseBuiltinTool"]) -> None:
         """Register a tool builtin.
