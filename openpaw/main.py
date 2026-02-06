@@ -1,10 +1,7 @@
-"""Main entry point for OpenPaw."""
+"""Workspace runner for OpenPaw."""
 
-import argparse
 import asyncio
 import logging
-import signal
-from pathlib import Path
 from typing import Any
 
 from langgraph.checkpoint.memory import InMemorySaver
@@ -12,23 +9,19 @@ from langgraph.checkpoint.memory import InMemorySaver
 from openpaw.channels.base import Message
 from openpaw.channels.telegram import TelegramChannel
 from openpaw.core.agent import AgentRunner
-from openpaw.core.config import Config, load_config, merge_configs
+from openpaw.core.config import Config, merge_configs
 from openpaw.queue.lane import LaneQueue, QueueItem, QueueMode
 from openpaw.queue.manager import QueueManager
 from openpaw.workspace.loader import WorkspaceLoader
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 
-class OpenPaw:
-    """Main application orchestrating channels, queues, and agents."""
+class WorkspaceRunner:
+    """Manages a single agent workspace with channels, queues, and agents."""
 
     def __init__(self, config: Config, workspace_name: str):
-        """Initialize OpenPaw.
+        """Initialize WorkspaceRunner.
 
         Args:
             config: Application configuration.
@@ -80,6 +73,7 @@ class OpenPaw:
 
         self._channels: dict[str, TelegramChannel] = {}
         self._cron_scheduler: Any = None
+        self._queue_processor_task: asyncio.Task[None] | None = None
         self._running = False
 
     def _merge_workspace_config(self, global_config: Config, workspace: Any) -> dict[str, Any]:
@@ -170,10 +164,15 @@ class OpenPaw:
             # Log security mode
             if allow_all:
                 logger.warning(f"Workspace '{self.workspace_name}': allow_all=true (insecure mode)")
-            elif allowed_users:
-                logger.info(f"Workspace '{self.workspace_name}': Allowlist mode ({len(allowed_users)} users)")
+            elif allowed_users or allowed_groups:
+                logger.info(
+                    f"Workspace '{self.workspace_name}': Allowlist mode "
+                    f"({len(allowed_users)} users, {len(allowed_groups)} groups)"
+                )
             else:
-                logger.info(f"Workspace '{self.workspace_name}': No users configured, all requests will be denied")
+                logger.warning(
+                    f"Workspace '{self.workspace_name}': Empty allowlist - all requests will be denied"
+                )
 
             logger.info(f"Initialized Telegram channel for workspace: {self.workspace_name}")
         else:
@@ -254,8 +253,8 @@ class OpenPaw:
         await self._lane_queue.process("main", handler)
 
     async def start(self) -> None:
-        """Start OpenPaw."""
-        logger.info(f"Starting OpenPaw with workspace: {self.workspace_name}")
+        """Start workspace runner."""
+        logger.info(f"Starting workspace runner: {self.workspace_name}")
 
         await self._setup_channels()
 
@@ -269,9 +268,9 @@ class OpenPaw:
 
         self._running = True
 
-        asyncio.create_task(self._queue_processor())
+        self._queue_processor_task = asyncio.create_task(self._queue_processor())
 
-        logger.info("OpenPaw is running. Press Ctrl+C to stop.")
+        logger.info(f"Workspace runner '{self.workspace_name}' is running")
 
     async def _setup_cron_scheduler(self) -> None:
         """Initialize and start cron scheduler if workspace has cron jobs."""
@@ -304,9 +303,18 @@ class OpenPaw:
             logger.error(f"Failed to start cron scheduler: {e}", exc_info=True)
 
     async def stop(self) -> None:
-        """Stop OpenPaw gracefully."""
-        logger.info("Stopping OpenPaw...")
+        """Stop workspace runner gracefully."""
+        logger.info(f"Stopping workspace runner: {self.workspace_name}")
         self._running = False
+
+        # Cancel queue processor task
+        if self._queue_processor_task:
+            self._queue_processor_task.cancel()
+            try:
+                await self._queue_processor_task
+            except asyncio.CancelledError:
+                pass
+            self._queue_processor_task = None
 
         # Stop cron scheduler if running
         if self._cron_scheduler:
@@ -317,57 +325,4 @@ class OpenPaw:
             await channel.stop()
             logger.info(f"Stopped channel: {name}")
 
-        logger.info("OpenPaw stopped.")
-
-
-async def main() -> None:
-    """CLI entry point."""
-    parser = argparse.ArgumentParser(description="OpenPaw - AI Agent Framework")
-    parser.add_argument(
-        "-c", "--config",
-        type=Path,
-        default=Path("config.yaml"),
-        help="Path to configuration file",
-    )
-    parser.add_argument(
-        "-w", "--workspace",
-        type=str,
-        required=True,
-        help="Name of the agent workspace to load",
-    )
-    parser.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        help="Enable verbose logging",
-    )
-
-    args = parser.parse_args()
-
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
-
-    config = load_config(args.config)
-
-    app = OpenPaw(config, args.workspace)
-
-    loop = asyncio.get_event_loop()
-    stop_event = asyncio.Event()
-
-    def signal_handler() -> None:
-        stop_event.set()
-
-    loop.add_signal_handler(signal.SIGINT, signal_handler)
-    loop.add_signal_handler(signal.SIGTERM, signal_handler)
-
-    await app.start()
-    await stop_event.wait()
-    await app.stop()
-
-
-def run() -> None:
-    """Entry point for poetry scripts."""
-    asyncio.run(main())
-
-
-if __name__ == "__main__":
-    run()
+        logger.info(f"Workspace runner '{self.workspace_name}' stopped")

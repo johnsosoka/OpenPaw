@@ -59,9 +59,8 @@ Thumbs.db
 # Poetry
 poetry.lock
 
-# Agent workspaces (keep example only)
-agent_workspaces/*
-!agent_workspaces/.example/
+# Agent workspaces (contain tokens and personal config)
+agent_workspaces/
 
 # LLM memory/context (session-specific)
 llm_memory/

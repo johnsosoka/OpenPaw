@@ -8,12 +8,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Install dependencies
 poetry install
 
-# Run the bot
+# Run single workspace
 poetry run openpaw -c config.yaml -w <workspace_name>
 poetry run openpaw -c config.yaml -w gilfoyle -v  # verbose
 
+# Run multiple workspaces
+poetry run openpaw -c config.yaml -w gilfoyle,assistant
+
+# Run all workspaces
+poetry run openpaw -c config.yaml --all
+poetry run openpaw -c config.yaml -w "*"
+
 # Or via python module
-poetry run python -m openpaw.main -c config.yaml -w <workspace_name>
+poetry run python -m openpaw.cli -c config.yaml -w <workspace_name>
 
 # Lint
 poetry run ruff check openpaw/
@@ -35,14 +42,24 @@ OpenPaw is a multi-channel AI agent framework built on DeepAgents (LangGraph). I
 ### Core Flow
 
 ```
-Channel (Telegram) → QueueManager → LaneQueue → AgentRunner → DeepAgent
-     ↑                                              ↓
-     └──────────────── Response ────────────────────┘
+OpenPawOrchestrator
+  ├─ WorkspaceRunner["gilfoyle"]
+  │   └─ Channel → QueueManager → LaneQueue → AgentRunner → DeepAgent
+  ├─ WorkspaceRunner["assistant"]
+  │   └─ (isolated: own channel, queue, agent)
+  └─ WorkspaceRunner["scheduler"]
+      └─ (isolated: own channel, queue, agent)
 ```
+
+Each workspace is fully isolated with its own channels, queue, agent runner, and cron scheduler.
 
 ### Key Components
 
-**`openpaw/main.py`** - `OpenPaw` class orchestrates everything: loads workspace, merges global/workspace config, initializes queue system, sets up channels, schedules crons, and runs the main loop.
+**`openpaw/cli.py`** - CLI entry point. Parses arguments, supports single workspace (`-w name`), multiple workspaces (`-w name1,name2`), or all workspaces (`--all` or `-w "*"`).
+
+**`openpaw/orchestrator.py`** - `OpenPawOrchestrator` manages multiple `WorkspaceRunner` instances. Handles concurrent startup/shutdown and workspace discovery.
+
+**`openpaw/main.py`** - `WorkspaceRunner` manages a single workspace: loads workspace config, merges with global config, initializes queue system, sets up channels, schedules crons, and runs the message loop.
 
 **`openpaw/core/agent.py`** - `AgentRunner` wraps DeepAgents' `create_deep_agent()`. It stitches workspace markdown files into a system prompt, passes the skills directory to DeepAgents natively, and configures `FilesystemBackend` for sandboxed workspace file access.
 
