@@ -37,14 +37,14 @@ poetry run pytest -k "test_name"
 
 ## Architecture
 
-OpenPaw is a multi-channel AI agent framework built on DeepAgents (LangGraph). It draws architectural inspiration from OpenClaw's command queue and channel patterns.
+OpenPaw is a multi-channel AI agent framework built on LangGraph (`create_react_agent`). It draws architectural inspiration from OpenClaw's command queue and channel patterns.
 
 ### Core Flow
 
 ```
 OpenPawOrchestrator
   ├─ WorkspaceRunner["gilfoyle"]
-  │   └─ Channel → QueueManager → LaneQueue → AgentRunner → DeepAgent
+  │   └─ Channel → QueueManager → LaneQueue → AgentRunner → LangGraph ReAct Agent
   ├─ WorkspaceRunner["assistant"]
   │   └─ (isolated: own channel, queue, agent)
   └─ WorkspaceRunner["scheduler"]
@@ -61,7 +61,7 @@ Each workspace is fully isolated with its own channels, queue, agent runner, and
 
 **`openpaw/main.py`** - `WorkspaceRunner` manages a single workspace: loads workspace config, merges with global config, initializes queue system, sets up channels, schedules crons, and runs the message loop.
 
-**`openpaw/core/agent.py`** - `AgentRunner` wraps DeepAgents' `create_deep_agent()`. It stitches workspace markdown files into a system prompt, passes the skills directory to DeepAgents natively, and configures `FilesystemBackend` for sandboxed workspace file access.
+**`openpaw/core/agent.py`** - `AgentRunner` wraps LangGraph's `create_react_agent()`. It stitches workspace markdown files into a system prompt via `init_chat_model()` for multi-provider support, and configures sandboxed filesystem tools for workspace access.
 
 **`openpaw/core/config.py`** - Pydantic models for global and workspace configuration. Handles environment variable expansion (`${VAR}`) and deep-merging workspace config over global defaults.
 
@@ -74,6 +74,16 @@ Each workspace is fully isolated with its own channels, queue, agent runner, and
 **`openpaw/channels/telegram.py`** - Telegram bot adapter using `python-telegram-bot`. Converts platform messages to unified `Message` format, handles allowlisting, and supports voice/audio messages.
 
 **`openpaw/builtins/`** - Optional capabilities (tools and processors) conditionally loaded based on API key availability. See "Builtins System" section.
+
+**`openpaw/builtins/tools/send_message.py`** - Mid-execution messaging tool. Uses `contextvars` for session-safe state. Lets agents push updates to users while continuing to work.
+
+**`openpaw/builtins/tools/followup.py`** - Self-continuation tool. Agents request re-invocation after responding, enabling multi-step autonomous workflows with depth limiting.
+
+**`openpaw/builtins/tools/task.py`** - Task management tools (`create_task`, `update_task`, `list_tasks`, `get_task`). CRUD over `TASKS.yaml` for tracking long-running operations across heartbeats.
+
+**`openpaw/task/store.py`** - `TaskStore` for YAML-based task persistence. Thread-safe with `_load_unlocked`/`_save_unlocked` pattern for atomic compound operations.
+
+**`openpaw/tools/filesystem.py`** - `FilesystemTools` providing sandboxed file operations: `ls`, `read_file`, `write_file`, `overwrite_file`, `edit_file`, `glob_files`, `grep_files`. Path traversal protection via resolve + prefix check.
 
 **`openpaw/cron/scheduler.py`** - `CronScheduler` uses APScheduler to execute scheduled tasks. Each job builds a fresh agent instance, injects the cron prompt, and routes output to the configured channel. Also handles dynamic tasks from `CronTool`.
 
@@ -93,7 +103,7 @@ agent_workspaces/<name>/
 ├── .env          # Workspace-specific environment variables (auto-loaded)
 ├── crons/        # Scheduled task definitions
 │   └── *.yaml    # Individual cron job configurations
-├── skills/       # DeepAgents native skills (SKILL.md format)
+├── skills/       # LangChain skill directories (SKILL.md format)
 └── tools/        # LangChain tools (Python files with @tool decorated functions)
 ```
 
@@ -155,9 +165,12 @@ model:
 
 **Available Bedrock Models**:
 - `moonshot.kimi-k2-thinking` - Moonshot Kimi K2 (1T MoE, 256K context)
-- `anthropic.claude-3-sonnet-20240229-v1:0` - Claude 3 Sonnet
-- `anthropic.claude-3-haiku-20240307-v1:0` - Claude 3 Haiku
+- `us.anthropic.claude-haiku-4-5-20251001-v1:0` - Claude Haiku 4.5
+- `amazon.nova-pro-v1:0` - Amazon Nova Pro
+- `amazon.nova-lite-v1:0` - Amazon Nova Lite
 - `mistral.mistral-large-2402-v1:0` - Mistral Large
+
+**Note**: Newer Bedrock models may require inference profile IDs (prefixed with `us.` or `global.`) instead of bare model IDs. Use `aws bedrock list-inference-profiles` to discover available profiles. The `api_key` field is automatically excluded for Bedrock providers.
 
 **AWS Credentials**: Configure via environment variables or AWS CLI profile:
 
@@ -257,12 +270,9 @@ heartbeat:
 
 ### Filesystem Access
 
-Agents have sandboxed filesystem access to their workspace directory via DeepAgents `FilesystemBackend`. This enables:
-- Reading/writing workspace files
-- Persisting state across cron runs
-- Organizing workspace-specific data
+Agents have sandboxed filesystem access to their workspace directory via `FilesystemTools` (`openpaw/tools/filesystem.py`). Available operations: `ls`, `read_file`, `write_file`, `overwrite_file`, `edit_file`, `glob_files`, `grep_files`. Path traversal protection via resolve + prefix check.
 
-Access is restricted to the workspace root—agents cannot read/write outside their directory.
+Access is restricted to the workspace root — agents cannot read/write outside their directory. Agents are encouraged to organize their workspace (subdirectories, notes, state files) for continuity across conversations.
 
 ### Workspace Tools
 
@@ -320,6 +330,9 @@ OpenPaw provides optional built-in capabilities that are conditionally available
 - `brave_search` - Web search via Brave API (requires `BRAVE_API_KEY`)
 - `elevenlabs` - Text-to-speech for voice responses (requires `ELEVENLABS_API_KEY`)
 - `cron` - Agent self-scheduling (no API key required, see "Dynamic Scheduling" section)
+- `send_message` - Mid-execution messaging to keep users informed during long operations (no API key required)
+- `followup` - Self-continuation for multi-step autonomous workflows with depth limiting (no API key required)
+- `task_tracker` - Task management via TASKS.yaml for persistent cross-session work tracking (no API key required)
 
 **Processors** - Channel-layer message transformers:
 - `whisper` - Audio transcription for voice messages (requires `OPENAI_API_KEY`)
@@ -333,7 +346,10 @@ builtins/
 ├── tools/            # LangChain tool implementations
 │   ├── brave_search.py
 │   ├── elevenlabs_tts.py
-│   └── cron.py       # Agent self-scheduling
+│   ├── cron.py       # Agent self-scheduling
+│   ├── send_message.py  # Mid-execution messaging (contextvars-based)
+│   ├── followup.py      # Self-continuation with depth limiting
+│   └── task.py          # TASKS.yaml CRUD operations
 └── processors/       # Message preprocessors
     └── whisper.py
 ```
@@ -364,8 +380,19 @@ builtins:
 
 **Adding New Builtins**: Create a class extending `BaseBuiltinTool` or `BaseBuiltinProcessor`, define `metadata` with prerequisites, and register in `registry.py`.
 
+### Framework Orientation Prompt
+
+Agents automatically receive a dynamic system prompt section (`<framework>`) explaining the OpenPaw framework philosophy. Sections are conditionally included based on enabled builtins:
+- **Always**: Workspace persistence, self-organization encouragement
+- **Heartbeat System**: If HEARTBEAT.md has content — heartbeat protocol, HEARTBEAT_OK convention
+- **Task Management**: If `task_tracker` enabled — TASKS.yaml usage, cross-session continuity
+- **Self-Continuation**: If `followup` enabled — multi-step workflow chaining
+- **Progress Updates**: If `send_message` enabled — mid-execution user communication
+- **Self-Scheduling**: If `cron` enabled — future action scheduling
+
+This explains HOW the agent exists in the framework (philosophy), not WHAT tools are available (LangChain handles that).
+
 ### Memory & Summarization
 
 - `InMemorySaver` checkpointer enables multi-turn conversation memory (per session, lost on restart)
-- DeepAgents includes `SummarizationMiddleware` that auto-compresses context when it grows large (keeps last 20 messages by default)
 - For persistent storage across restarts, swap to `SqliteSaver`
