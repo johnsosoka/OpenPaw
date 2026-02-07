@@ -30,6 +30,7 @@ class BuiltinLoader:
         workspace_config: "WorkspaceBuiltinsConfig | None" = None,
         workspace_path: Path | None = None,
         channel_config: dict[str, Any] | None = None,
+        task_store: Any | None = None,
     ):
         """Initialize the loader.
 
@@ -38,11 +39,13 @@ class BuiltinLoader:
             workspace_config: Workspace-specific overrides.
             workspace_path: Path to the workspace directory (for tools that need it).
             channel_config: Channel configuration for routing (e.g., telegram allowed_users).
+            task_store: TaskStore instance for task management builtins.
         """
         self.global_config = global_config
         self.workspace_config = workspace_config
         self.workspace_path = workspace_path
         self.channel_config = channel_config or {}
+        self.task_store = task_store
         self.registry = BuiltinRegistry.get_instance()
         self._tool_instances: dict[str, Any] = {}  # Track loaded tool instances
 
@@ -103,6 +106,10 @@ class BuiltinLoader:
         if self.workspace_path:
             config["workspace_path"] = self.workspace_path
 
+        # Inject task_store for task management builtins
+        if self.task_store and name in ("task_tracker", "tasks"):
+            config["task_store"] = self.task_store
+
         # Inject channel routing config for cron tool
         if name == "cron" and self.channel_config:
             channel_type = self.channel_config.get("type", "telegram")
@@ -111,6 +118,11 @@ class BuiltinLoader:
             allowed_users = self.channel_config.get("allowed_users", [])
             if allowed_users:
                 config["default_chat_id"] = allowed_users[0]
+
+        # Inject channel routing config for send_message tool
+        if name == "send_message" and self.channel_config:
+            channel_type = self.channel_config.get("type", "telegram")
+            config["default_channel"] = channel_type
 
         # Global config
         if self.global_config:
@@ -214,6 +226,14 @@ class BuiltinLoader:
             The tool instance, or None if not loaded.
         """
         return self._tool_instances.get(name)
+
+    def get_loaded_tool_names(self) -> list[str]:
+        """Get names of all loaded tool instances.
+
+        Returns:
+            List of builtin tool names that were successfully loaded.
+        """
+        return list(self._tool_instances.keys())
 
     def load_processors(self) -> list[BaseBuiltinProcessor]:
         """Load all allowed and available processor builtins.

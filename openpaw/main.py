@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from dotenv import load_dotenv
@@ -17,6 +18,7 @@ from openpaw.core.logging import setup_workspace_logger
 from openpaw.heartbeat.scheduler import HeartbeatScheduler
 from openpaw.queue.lane import LaneQueue, QueueItem, QueueMode
 from openpaw.queue.manager import QueueManager
+from openpaw.task.store import TaskStore
 from openpaw.workspace.loader import WorkspaceLoader
 from openpaw.workspace.tool_loader import load_workspace_tools
 
@@ -60,6 +62,10 @@ class WorkspaceRunner:
         # Merge workspace config with global config if workspace has agent.yaml
         self._merged_config = self._merge_workspace_config(config, self._workspace)
 
+        # Initialize TaskStore for long-running task tracking
+        self._task_store = TaskStore(self._workspace.path)
+        self._cleanup_old_tasks()
+
         self._lane_queue = LaneQueue(
             main_concurrency=config.lanes.main_concurrency,
             subagent_concurrency=config.lanes.subagent_concurrency,
@@ -93,11 +99,15 @@ class WorkspaceRunner:
             workspace_config=workspace_builtins_config,
             workspace_path=self._workspace.path,
             channel_config=workspace_channel_config,
+            task_store=self._task_store,
         )
 
         # Load tools (LangChain tools for agent) and processors (message transformers)
         self._builtin_tools = self._builtin_loader.load_tools()
         self._processors: list[BaseBuiltinProcessor] = self._builtin_loader.load_processors()
+
+        # Extract enabled builtin names for conditional system prompt sections
+        self._enabled_builtin_names = self._builtin_loader.get_loaded_tool_names()
 
         if self._builtin_tools:
             self.logger.info(f"Loaded {len(self._builtin_tools)} builtin tools for workspace: {workspace_name}")
@@ -121,6 +131,7 @@ class WorkspaceRunner:
 
         self.logger.info(f"Initializing agent with model: {model_str}")
 
+        # AgentRunner auto-detects thinking models - no need for WorkspaceRunner to check
         self._agent_runner = AgentRunner(
             workspace=self._workspace,
             model=model_str,
@@ -130,6 +141,8 @@ class WorkspaceRunner:
             checkpointer=self._checkpointer,
             tools=all_tools if all_tools else None,
             region=agent_config.get("region"),
+            timeout_seconds=agent_config.get("timeout_seconds", 300.0),
+            enabled_builtins=self._enabled_builtin_names,
         )
 
         self._channels: dict[str, TelegramChannel] = {}
@@ -186,6 +199,39 @@ class WorkspaceRunner:
 
         # Merge and return
         return merge_configs(global_dict, workspace_dict)
+
+
+    def _cleanup_old_tasks(self) -> None:
+        """Clean up old completed tasks from TaskStore on startup.
+
+        Removes tasks older than 7 days that are in completed/failed/cancelled state.
+        Logs count of active tasks remaining.
+        """
+        try:
+            removed = self._task_store.cleanup_old_tasks(max_age_days=7)
+            if removed > 0:
+                self.logger.info(f"Cleaned up {removed} old task(s) from TaskStore")
+
+            # Log count of active tasks
+            from openpaw.task.store import TaskStatus
+
+            active_tasks = self._task_store.list(status=TaskStatus.IN_PROGRESS)
+            pending_tasks = self._task_store.list(status=TaskStatus.PENDING)
+            awaiting_tasks = self._task_store.list(status=TaskStatus.AWAITING_CHECK)
+
+            total_active = len(active_tasks) + len(pending_tasks) + len(awaiting_tasks)
+            if total_active > 0:
+                self.logger.info(
+                    f"TaskStore has {total_active} active task(s) "
+                    f"(pending: {len(pending_tasks)}, in_progress: {len(active_tasks)}, "
+                    f"awaiting_check: {len(awaiting_tasks)})"
+                )
+        except FileNotFoundError:
+            # TASKS.yaml doesn't exist yet - this is fine for new workspaces
+            self.logger.debug("TaskStore file not found (new workspace)")
+        except Exception as e:
+            # Log warning but don't fail startup
+            self.logger.warning(f"Failed to cleanup TaskStore: {e}")
 
     async def _setup_channels(self) -> None:
         """Initialize configured channels.
@@ -297,34 +343,72 @@ class WorkspaceRunner:
                 )
 
     async def _process_telegram_messages(self, session_key: str, messages: list[Message]) -> None:
-        """Process collected messages for a Telegram session."""
+        """Process collected messages for a Telegram session with followup support."""
         combined_content = "\n".join(m.content for m in messages)
-
         thread_id = session_key
+        channel = self._channels.get("telegram")
+        followup_depth = 0
+        max_followup_depth = 5
 
-        try:
-            response = await self._agent_runner.run(
-                message=combined_content,
-                thread_id=thread_id,
-            )
+        while True:
+            try:
+                # Set session context for send_message tool
+                if channel:
+                    self._connect_send_message_tool(channel, session_key)
 
-            channel = self._channels.get("telegram")
-            if channel:
-                # Guard against empty responses (e.g., thinking models producing only <think> tokens)
-                if response and response.strip():
-                    await channel.send_message(session_key, response)
-                    # Check for pending TTS audio from ElevenLabs tool
-                    await self._send_pending_audio(channel, session_key)
-                else:
-                    self.logger.warning(f"Agent produced empty response for {session_key}, sending fallback")
-                    fallback = "I processed your message but my response was empty. Please try again."
-                    await channel.send_message(session_key, fallback)
+                # Set followup chain depth
+                followup_tool = self._builtin_loader.get_tool_instance("followup")
+                if followup_tool:
+                    followup_tool.set_chain_depth(followup_depth)
 
-        except Exception as e:
-            self.logger.error(f"Error processing messages for {session_key}: {e}", exc_info=True)
-            channel = self._channels.get("telegram")
-            if channel:
-                await channel.send_message(session_key, f"Error: {e}")
+                response = await self._agent_runner.run(
+                    message=combined_content,
+                    thread_id=thread_id,
+                )
+
+                if channel:
+                    if response and response.strip():
+                        await channel.send_message(session_key, response)
+                        await self._send_pending_audio(channel, session_key)
+                    else:
+                        self.logger.warning(f"Agent produced empty response for {session_key}, sending fallback")
+                        fallback = "I processed your message but my response was empty. Please try again."
+                        await channel.send_message(session_key, fallback)
+
+            except Exception as e:
+                self.logger.error(f"Error processing messages for {session_key}: {e}", exc_info=True)
+                if channel:
+                    await channel.send_message(session_key, f"Error: {e}")
+                break  # Don't continue followup chain on error
+            finally:
+                self._disconnect_send_message_tool()
+
+            # Check for followup request
+            if followup_tool:
+                followup = followup_tool.get_pending_followup()
+                if followup and followup.delay_seconds == 0:
+                    followup_depth += 1
+                    if followup_depth > max_followup_depth:
+                        self.logger.warning(
+                            f"Followup chain depth exceeded ({max_followup_depth}) "
+                            f"for session {session_key}"
+                        )
+                        break
+
+                    self.logger.info(
+                        f"Processing immediate followup (depth={followup_depth}): "
+                        f"{followup.prompt[:100]}"
+                    )
+                    combined_content = f"[SYSTEM FOLLOWUP - depth {followup_depth}]\n{followup.prompt}"
+                    continue
+                elif followup and followup.delay_seconds > 0:
+                    self.logger.info(
+                        f"Scheduling delayed followup ({followup.delay_seconds}s): "
+                        f"{followup.prompt[:100]}"
+                    )
+                    self._schedule_delayed_followup(followup, session_key)
+
+            break  # No followup or delayed followup scheduled, exit loop
 
     async def _send_pending_audio(self, channel: TelegramChannel, session_key: str) -> None:
         """Check for and send any pending TTS audio."""
@@ -339,6 +423,32 @@ class WorkspaceRunner:
             pass  # ElevenLabs not available
         except Exception as e:
             self.logger.error(f"Failed to send TTS audio: {e}")
+
+    def _schedule_delayed_followup(self, followup: Any, session_key: str) -> None:
+        """Schedule a delayed followup via the cron system."""
+        from datetime import UTC, datetime, timedelta
+
+        cron_tool = self._builtin_loader.get_tool_instance("cron")
+        if not cron_tool or not cron_tool.scheduler:
+            self.logger.warning("Cannot schedule delayed followup: no cron tool/scheduler available")
+            return
+
+        if not cron_tool.default_chat_id:
+            self.logger.warning("Cannot schedule delayed followup: cron tool has no default_chat_id")
+            return
+
+        run_at = datetime.now(UTC) + timedelta(seconds=followup.delay_seconds)
+        from openpaw.cron.dynamic import create_once_task
+
+        task = create_once_task(
+            prompt=followup.prompt,
+            run_at=run_at,
+            channel=cron_tool.default_channel,
+            chat_id=cron_tool.default_chat_id,
+        )
+        cron_tool.store.add_task(task)
+        cron_tool._add_to_live_scheduler(task)
+        self.logger.info(f"Delayed followup scheduled as cron task {task.id}")
 
     async def _queue_processor(self) -> None:
         """Background task processing the lane queue."""
@@ -374,28 +484,44 @@ class WorkspaceRunner:
 
         self.logger.info(f"Workspace runner '{self.workspace_name}' is running")
 
+    def _create_agent_factory(self) -> Callable[[], AgentRunner]:
+        """Create an agent factory closure for stateless scheduler usage.
+
+        Returns a factory function that creates fresh AgentRunner instances
+        without checkpointers (stateless) but with the same configuration,
+        tools, and system prompt as the main agent.
+
+        Used by both cron and heartbeat schedulers to spawn isolated agent runs.
+
+        Returns:
+            Callable that returns a fresh AgentRunner instance.
+        """
+        def agent_factory() -> AgentRunner:
+            """Factory to create fresh agent instances for scheduled tasks."""
+            tools = list(self._builtin_tools) + list(self._workspace_tools)
+            return AgentRunner(
+                workspace=self._workspace,
+                model=self._agent_runner.model_id,
+                api_key=self._agent_runner.api_key,
+                max_turns=self._agent_runner.max_turns,
+                temperature=self._agent_runner.temperature,
+                checkpointer=None,  # No checkpointer for scheduled tasks
+                tools=tools if tools else None,
+                region=self._agent_runner.region,
+                strip_thinking=self._agent_runner.strip_thinking,
+                timeout_seconds=self._agent_runner.timeout_seconds,
+                enabled_builtins=self._enabled_builtin_names,
+            )
+        return agent_factory
+
     async def _setup_cron_scheduler(self) -> None:
         """Initialize and start cron scheduler if workspace has cron jobs."""
         try:
             from openpaw.cron.scheduler import CronScheduler
 
-            def agent_factory() -> AgentRunner:
-                """Factory to create fresh agent instances for cron jobs."""
-                cron_tools = list(self._builtin_tools) + list(self._workspace_tools)
-                return AgentRunner(
-                    workspace=self._workspace,
-                    model=self._agent_runner.model_id,
-                    api_key=self._agent_runner.api_key,
-                    max_turns=self._agent_runner.max_turns,
-                    temperature=self._agent_runner.temperature,
-                    checkpointer=None,  # No checkpointer for cron jobs
-                    tools=cron_tools if cron_tools else None,
-                    region=self._agent_runner.region,
-                )
-
             self._cron_scheduler = CronScheduler(
                 workspace_path=self._workspace.path,
-                agent_factory=agent_factory,
+                agent_factory=self._create_agent_factory(),
                 channels=self._channels,
             )
 
@@ -426,6 +552,36 @@ class WorkspaceRunner:
         except Exception as e:
             self.logger.warning(f"Failed to connect CronTool to scheduler: {e}")
 
+    def _connect_send_message_tool(self, channel: Any, session_key: str) -> None:
+        """Connect send_message tool to active session context.
+
+        Called before each agent run to enable mid-execution messaging.
+
+        Args:
+            channel: The channel instance for sending messages.
+            session_key: The session key for routing.
+        """
+        try:
+            send_message_tool = self._builtin_loader.get_tool_instance("send_message")
+            if send_message_tool:
+                send_message_tool.set_session_context(channel, session_key)
+                self.logger.debug(f"Connected send_message tool for session: {session_key}")
+        except Exception as e:
+            self.logger.debug(f"Failed to connect send_message tool: {e}")
+
+    def _disconnect_send_message_tool(self) -> None:
+        """Disconnect send_message tool from session context.
+
+        Called after each agent run completes.
+        """
+        try:
+            send_message_tool = self._builtin_loader.get_tool_instance("send_message")
+            if send_message_tool:
+                send_message_tool.clear_session_context()
+                self.logger.debug("Disconnected send_message tool")
+        except Exception as e:
+            self.logger.debug(f"Failed to disconnect send_message tool: {e}")
+
     async def _setup_heartbeat_scheduler(self) -> None:
         """Initialize and start heartbeat scheduler if enabled in workspace config.
 
@@ -441,24 +597,10 @@ class WorkspaceRunner:
             return
 
         try:
-
-            def agent_factory() -> AgentRunner:
-                """Factory for fresh agent instances."""
-                heartbeat_tools = list(self._builtin_tools) + list(self._workspace_tools)
-                return AgentRunner(
-                    workspace=self._workspace,
-                    model=self._agent_runner.model_id,
-                    api_key=self._agent_runner.api_key,
-                    max_turns=self._agent_runner.max_turns,
-                    temperature=self._agent_runner.temperature,
-                    checkpointer=None,  # No checkpointer for heartbeat
-                    tools=heartbeat_tools if heartbeat_tools else None,
-                    region=self._agent_runner.region,
-                )
-
             self._heartbeat_scheduler = HeartbeatScheduler(
                 workspace_name=self.workspace_name,
-                agent_factory=agent_factory,
+                workspace_path=self._workspace.path,
+                agent_factory=self._create_agent_factory(),
                 channels=self._channels,
                 config=heartbeat_config,
             )

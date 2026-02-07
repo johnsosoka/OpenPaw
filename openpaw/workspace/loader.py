@@ -29,10 +29,19 @@ class AgentWorkspace:
     config: "WorkspaceConfig | None" = None
     crons: "list[CronDefinition]" = field(default_factory=list)
 
-    def build_system_prompt(self) -> str:
+    def build_system_prompt(self, enabled_builtins: list[str] | None = None) -> str:
         """Stitch together workspace files into a system prompt.
 
         The prompt structure follows DeepAgents conventions with clear sections.
+        Returns a string suitable for use with create_react_agent.
+
+        Args:
+            enabled_builtins: List of enabled builtin names. If provided,
+                task_context is only included when 'task_tracker' is in the list.
+                If None (default), task_context is always included for backward compat.
+
+        Returns:
+            String containing workspace prompt sections and task management context.
         """
         sections = []
 
@@ -45,10 +54,102 @@ class AgentWorkspace:
         if self.user_md:
             sections.append(f"<user>\n{self.user_md.strip()}\n</user>")
 
+        # Only include task context if task_tracker builtin is enabled
+        if enabled_builtins is None or "task_tracker" in enabled_builtins:
+            task_context = self._build_task_context()
+            if task_context:
+                sections.append(f"<task_context>\n{task_context}\n</task_context>")
+
         if self.heartbeat_md:
             sections.append(f"<heartbeat>\n{self.heartbeat_md.strip()}\n</heartbeat>")
 
         return "\n\n".join(sections)
+
+    def _build_task_context(self) -> str:
+        """Build the task management context section for the system prompt.
+
+        Returns:
+            Formatted task context explaining TASKS.yaml usage.
+        """
+        return """## Task Management
+
+You have access to a task management system for tracking long-running operations.
+
+### TASKS.yaml
+Your workspace contains a TASKS.yaml file for tracking tasks. You can:
+- Create tasks when starting long operations (research, processing, API workflows)
+- Update task status as work progresses
+- Check tasks during heartbeat to monitor ongoing work
+
+### Task Lifecycle
+Tasks progress through the following statuses:
+- `pending`: Task created, waiting to start
+- `in_progress`: Actively being worked on
+- `awaiting_check`: Needs review or verification
+- `completed`: Successfully finished
+- `failed`: Encountered an error
+- `cancelled`: Stopped by user or system
+
+### Task Structure
+Each task in TASKS.yaml has these key fields:
+- `id`: Unique identifier for the task
+- `type`: Category (research, deployment, batch, etc.)
+- `status`: Current lifecycle state
+- `description`: What the task does
+- `expected_duration_minutes`: Estimated time to complete
+- `created_at`, `started_at`, `completed_at`: Timing information
+- `last_checked_at`, `check_count`: Monitoring metrics
+- `notes`: Progress updates (append with each check)
+- `metadata`: Tool-specific data
+- `result_summary`, `result_path`: Completion details
+
+### Heartbeat Integration
+During heartbeat checks, you should:
+1. Read TASKS.yaml to review all active tasks
+2. Check for tasks past their `expected_duration_minutes` - investigate status
+3. Look for tasks marked `awaiting_check` - take action
+4. Update `last_checked_at` and `check_count` when checking a task
+5. Append progress notes to the `notes` field
+6. Notify user of completed tasks if not already done
+7. Update status to `completed` or `failed` with appropriate details
+8. Clean up old completed tasks (>24 hours) after user notification
+
+### Best Practices
+- **Create a task before starting long operations**: This provides transparency to the user
+- **Set realistic `expected_duration_minutes`**: Users rely on this for planning
+- **Update `notes` with progress**: Help future heartbeats understand what's happened
+- **Mark `awaiting_check` when human review needed**: This signals priority
+- **Store outputs in workspace filesystem**: Use relative paths in `result_path`
+- **Clean up after completion**: Remove tasks from TASKS.yaml after notifying the user
+- **Handle failures gracefully**: Set status to `failed` with clear `error_message`
+
+### Example Task Entry
+```yaml
+tasks:
+  - id: "research-abc123"
+    type: "research"
+    status: "in_progress"
+    created_at: "2026-02-06T10:30:00Z"
+    started_at: "2026-02-06T10:31:15Z"
+    expected_duration_minutes: 20
+    last_checked_at: "2026-02-06T10:45:00Z"
+    check_count: 2
+    description: "Research market trends for Q1 2026"
+    metadata:
+      tool: "gpt_researcher"
+      query: "market trends Q1 2026"
+    notes: |
+      - Check 1: API call initiated, data collection started
+      - Check 2: 60% complete, synthesis phase in progress
+```
+
+### When to Create Tasks
+Create a task entry when:
+- Starting a tool that takes more than 5 minutes
+- Triggering an external API with async processing
+- Beginning research or data collection
+- Initiating a deployment or batch operation
+- Any operation where the user should be kept informed of progress"""
 
 
 class WorkspaceLoader:

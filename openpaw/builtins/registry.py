@@ -83,6 +83,27 @@ class BuiltinRegistry:
         except ImportError as e:
             logger.debug(f"Cron tool not available: {e}")
 
+        try:
+            from openpaw.builtins.tools.task import TaskToolBuiltin
+
+            self.register_tool(TaskToolBuiltin)
+        except ImportError as e:
+            logger.debug(f"Task tool not available: {e}")
+
+        try:
+            from openpaw.builtins.tools.send_message import SendMessageTool
+
+            self.register_tool(SendMessageTool)
+        except ImportError as e:
+            logger.debug(f"Send message tool not available: {e}")
+
+        try:
+            from openpaw.builtins.tools.followup import FollowupTool
+
+            self.register_tool(FollowupTool)
+        except ImportError as e:
+            logger.debug(f"Followup tool not available: {e}")
+
         # Processors
         try:
             from openpaw.builtins.processors.whisper import WhisperProcessor
