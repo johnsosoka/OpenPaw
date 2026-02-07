@@ -1,0 +1,81 @@
+# Agent Configuration
+# Copy to agent_workspaces/<name>/ and customize
+
+name: Assistant
+description: Personal assistant for daily tasks and questions
+
+# Model Configuration
+# Supports: anthropic, openai, bedrock_converse
+model:
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+  api_key: ${ANTHROPIC_API_KEY}
+  temperature: 0.7
+  max_turns: 50
+
+# Alternative: AWS Bedrock
+# model:
+#   provider: bedrock_converse
+#   model: anthropic.claude-3-sonnet-20240229-v1:0
+#   region: us-east-1
+
+# Channel Configuration
+channel:
+  type: telegram
+  token: ${TELEGRAM_BOT_TOKEN}
+  # Add your Telegram user ID (get from @userinfobot)
+  allowed_users:
+    - 123456789  # Replace with your user ID
+  allowed_groups: []
+  # allow_all: false  # Never enable in production
+
+# Queue Behavior
+queue:
+  # collect: Batch rapid messages before processing (recommended)
+  # steer: Process immediately, cancel in-flight on new message
+  # followup: Sequential processing, no cancellation
+  # interrupt: Cancel backlog, process only latest
+  mode: collect
+  debounce_ms: 1000  # Wait 1s for additional messages
+
+# Heartbeat Configuration (Optional)
+# Enables proactive check-ins
+heartbeat:
+  enabled: false  # Enable when ready
+  interval_minutes: 60
+  active_hours: "09:00-18:00"  # Only during work hours
+  suppress_ok: true  # Don't send if nothing to report
+  output:
+    channel: telegram
+    chat_id: 123456789  # Same as allowed_users
+
+# Builtins Configuration (Optional)
+# Tools and processors available to the agent
+builtins:
+  allow: []  # Empty = allow all available
+  deny: []
+
+  # Cron tool for self-scheduling (always available)
+  cron:
+    enabled: true
+    config:
+      min_interval_seconds: 300  # 5 minute minimum
+      max_tasks: 50
+
+  # Web search (requires BRAVE_API_KEY)
+  # brave_search:
+  #   enabled: true
+  #   config:
+  #     count: 5
+
+  # Voice transcription (requires OPENAI_API_KEY)
+  # whisper:
+  #   enabled: true
+  #   config:
+  #     model: whisper-1
+
+  # Text-to-speech (requires ELEVENLABS_API_KEY)
+  # elevenlabs:
+  #   enabled: true
+  #   config:
+  #     voice_id: 21m00Tcm4TlvDq8ikWAM
