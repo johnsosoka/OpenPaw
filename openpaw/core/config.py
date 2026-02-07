@@ -284,7 +284,6 @@ class Config(BaseModel):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     builtins: BuiltinsConfig = Field(default_factory=BuiltinsConfig, description="Builtin capabilities config")
     cron_jobs: list[CronJobConfig] = Field(default_factory=list, description="Scheduled agent jobs")
-    heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig, description="Heartbeat scheduler config")
 
     model_config = {"extra": "allow"}
 

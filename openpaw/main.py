@@ -402,19 +402,17 @@ class WorkspaceRunner:
             self.logger.warning(f"Failed to connect CronTool to scheduler: {e}")
 
     async def _setup_heartbeat_scheduler(self) -> None:
-        """Initialize and start heartbeat scheduler if enabled.
+        """Initialize and start heartbeat scheduler if enabled in workspace config.
 
-        Checks workspace config first, then falls back to global config.
-        Only starts if heartbeat.enabled is True.
+        Heartbeat is purely per-workspace. No global fallback.
+        Only starts if workspace config defines heartbeat.enabled = True.
         """
-        # Get heartbeat config - check workspace first, then global
-        heartbeat_config = None
-        if self._workspace.config and self._workspace.config.heartbeat:
-            heartbeat_config = self._workspace.config.heartbeat
-        elif self.config.heartbeat.enabled:
-            heartbeat_config = self.config.heartbeat
+        # Get heartbeat config from workspace only - no global fallback
+        if not self._workspace.config or not self._workspace.config.heartbeat:
+            return
 
-        if not heartbeat_config or not heartbeat_config.enabled:
+        heartbeat_config = self._workspace.config.heartbeat
+        if not heartbeat_config.enabled:
             return
 
         try:
