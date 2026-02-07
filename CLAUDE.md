@@ -67,6 +67,8 @@ Each workspace is fully isolated with its own channels, queue, agent runner, and
 
 **`openpaw/workspace/loader.py`** - Loads agent "workspaces" from `agent_workspaces/<name>/`. Each workspace requires: `AGENT.md`, `USER.md`, `SOUL.md`, `HEARTBEAT.md`. Optional `agent.yaml` and `crons/*.yaml` are loaded if present. These are combined into XML-tagged sections for the system prompt.
 
+**`openpaw/workspace/tool_loader.py`** - Dynamically loads LangChain tools from workspace `tools/` directories. Imports Python files and extracts `@tool` decorated functions (BaseTool instances).
+
 **`openpaw/queue/lane.py`** - Lane-based FIFO queue with configurable concurrency per lane (main, subagent, cron). Supports OpenClaw-style queue modes: `collect`, `steer`, `followup`, `interrupt`.
 
 **`openpaw/channels/telegram.py`** - Telegram bot adapter using `python-telegram-bot`. Converts platform messages to unified `Message` format, handles allowlisting, and supports voice/audio messages.
@@ -88,9 +90,11 @@ agent_workspaces/<name>/
 ├── SOUL.md       # Core personality, values
 ├── HEARTBEAT.md  # Current state, session notes
 ├── agent.yaml    # Optional per-workspace configuration (model, channel, queue)
+├── .env          # Workspace-specific environment variables (auto-loaded)
 ├── crons/        # Scheduled task definitions
 │   └── *.yaml    # Individual cron job configurations
-└── skills/       # DeepAgents native skills (SKILL.md format)
+├── skills/       # DeepAgents native skills (SKILL.md format)
+└── tools/        # LangChain tools (Python files with @tool decorated functions)
 ```
 
 ### Configuration
@@ -259,6 +263,54 @@ Agents have sandboxed filesystem access to their workspace directory via DeepAge
 - Organizing workspace-specific data
 
 Access is restricted to the workspace root—agents cannot read/write outside their directory.
+
+### Workspace Tools
+
+Workspaces can define custom LangChain tools in a `tools/` directory. These are Python files containing `@tool` decorated functions that are automatically loaded and made available to the agent.
+
+**Example** (`tools/calendar.py`):
+
+```python
+from langchain_core.tools import tool
+
+@tool
+def get_upcoming_events(days_ahead: int = 7) -> str:
+    """Get upcoming calendar events.
+
+    Args:
+        days_ahead: Number of days to look ahead
+
+    Returns:
+        Formatted list of events.
+    """
+    # Implementation here
+    return fetch_events(days_ahead)
+
+@tool
+def check_availability(date: str) -> str:
+    """Check if a specific date is free."""
+    return check_date(date)
+```
+
+**Key Points**:
+- Files must be in `{workspace}/tools/*.py`
+- Use LangChain's `@tool` decorator from `langchain_core.tools`
+- Tools are merged with framework builtins (brave_search, cron, etc.)
+- Environment variables from workspace `.env` are available
+- Multiple tools per file are supported
+- Files starting with `_` are ignored
+
+**Dependencies**: Add a `tools/requirements.txt` for tool-specific packages:
+
+```
+# tools/requirements.txt
+icalendar>=5.0.0
+caldav>=1.0.0
+```
+
+Missing dependencies are auto-installed at workspace startup.
+
+**Loading**: Tools are dynamically imported at workspace startup. The tool loader checks requirements.txt first, installs missing packages, then extracts all `BaseTool` instances from each Python file in the tools directory.
 
 ### Builtins System
 

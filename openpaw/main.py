@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import Any
 
+from dotenv import load_dotenv
 from langgraph.checkpoint.memory import InMemorySaver
 
 from openpaw.builtins.base import BaseBuiltinProcessor
@@ -17,6 +18,7 @@ from openpaw.heartbeat.scheduler import HeartbeatScheduler
 from openpaw.queue.lane import LaneQueue, QueueItem, QueueMode
 from openpaw.queue.manager import QueueManager
 from openpaw.workspace.loader import WorkspaceLoader
+from openpaw.workspace.tool_loader import load_workspace_tools
 
 # Module-level logger (for general WorkspaceRunner class messages)
 module_logger = logging.getLogger(__name__)
@@ -48,6 +50,12 @@ class WorkspaceRunner:
 
         self._workspace_loader = WorkspaceLoader(config.workspaces_path)
         self._workspace = self._workspace_loader.load(workspace_name)
+
+        # Load workspace-specific .env file if present
+        workspace_env = self._workspace.path / ".env"
+        if workspace_env.exists():
+            load_dotenv(workspace_env, override=True)
+            self.logger.info(f"Loaded environment from: {workspace_env}")
 
         # Merge workspace config with global config if workspace has agent.yaml
         self._merged_config = self._merge_workspace_config(config, self._workspace)
@@ -96,11 +104,22 @@ class WorkspaceRunner:
         if self._processors:
             self.logger.info(f"Loaded {len(self._processors)} builtin processors for workspace: {workspace_name}")
 
+        # Load workspace-defined tools from tools/ directory
+        self._workspace_tools = load_workspace_tools(self._workspace.tools_path)
+        if self._workspace_tools:
+            tool_names = [t.name for t in self._workspace_tools]
+            self.logger.info(f"Loaded {len(self._workspace_tools)} workspace tools: {tool_names}")
+
+        # Merge all tools: builtins + workspace tools
+        all_tools = list(self._builtin_tools) + list(self._workspace_tools)
+
         # Use merged model config for agent
         agent_config = self._merged_config.get("model", {})
         model_str = agent_config.get("model", config.agent.model)
         if agent_config.get("provider"):
             model_str = f"{agent_config['provider']}:{agent_config['model']}"
+
+        self.logger.info(f"Initializing agent with model: {model_str}")
 
         self._agent_runner = AgentRunner(
             workspace=self._workspace,
@@ -109,7 +128,7 @@ class WorkspaceRunner:
             max_turns=agent_config.get("max_turns", config.agent.max_turns),
             temperature=agent_config.get("temperature", config.agent.temperature),
             checkpointer=self._checkpointer,
-            tools=self._builtin_tools,
+            tools=all_tools if all_tools else None,
             region=agent_config.get("region"),
         )
 
@@ -290,11 +309,16 @@ class WorkspaceRunner:
             )
 
             channel = self._channels.get("telegram")
-            if channel and response:
-                await channel.send_message(session_key, response)
-
-                # Check for pending TTS audio from ElevenLabs tool
-                await self._send_pending_audio(channel, session_key)
+            if channel:
+                # Guard against empty responses (e.g., thinking models producing only <think> tokens)
+                if response and response.strip():
+                    await channel.send_message(session_key, response)
+                    # Check for pending TTS audio from ElevenLabs tool
+                    await self._send_pending_audio(channel, session_key)
+                else:
+                    self.logger.warning(f"Agent produced empty response for {session_key}, sending fallback")
+                    fallback = "I processed your message but my response was empty. Please try again."
+                    await channel.send_message(session_key, fallback)
 
         except Exception as e:
             self.logger.error(f"Error processing messages for {session_key}: {e}", exc_info=True)
@@ -357,6 +381,7 @@ class WorkspaceRunner:
 
             def agent_factory() -> AgentRunner:
                 """Factory to create fresh agent instances for cron jobs."""
+                cron_tools = list(self._builtin_tools) + list(self._workspace_tools)
                 return AgentRunner(
                     workspace=self._workspace,
                     model=self._agent_runner.model_id,
@@ -364,7 +389,7 @@ class WorkspaceRunner:
                     max_turns=self._agent_runner.max_turns,
                     temperature=self._agent_runner.temperature,
                     checkpointer=None,  # No checkpointer for cron jobs
-                    tools=self._builtin_tools,  # Pass builtin tools to cron agents
+                    tools=cron_tools if cron_tools else None,
                     region=self._agent_runner.region,
                 )
 
@@ -419,6 +444,7 @@ class WorkspaceRunner:
 
             def agent_factory() -> AgentRunner:
                 """Factory for fresh agent instances."""
+                heartbeat_tools = list(self._builtin_tools) + list(self._workspace_tools)
                 return AgentRunner(
                     workspace=self._workspace,
                     model=self._agent_runner.model_id,
@@ -426,7 +452,7 @@ class WorkspaceRunner:
                     max_turns=self._agent_runner.max_turns,
                     temperature=self._agent_runner.temperature,
                     checkpointer=None,  # No checkpointer for heartbeat
-                    tools=self._builtin_tools,
+                    tools=heartbeat_tools if heartbeat_tools else None,
                     region=self._agent_runner.region,
                 )
 

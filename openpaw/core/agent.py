@@ -54,6 +54,7 @@ class AgentRunner:
         checkpointer: Any | None = None,
         tools: list[Any] | None = None,
         region: str | None = None,
+        strip_thinking: bool = False,
     ):
         """Initialize the agent runner.
 
@@ -66,6 +67,7 @@ class AgentRunner:
             checkpointer: Optional LangGraph checkpointer for persistence.
             tools: Optional additional tools to provide to the agent.
             region: AWS region for Bedrock models (e.g., us-east-1).
+            strip_thinking: Whether to strip <think>...</think> tokens from responses.
         """
         self.workspace = workspace
         self.model_id = model
@@ -75,6 +77,7 @@ class AgentRunner:
         self.checkpointer = checkpointer
         self.tools = tools or []
         self.region = region
+        self.strip_thinking = strip_thinking
 
         self._agent = self._build_agent()
 
@@ -96,6 +99,9 @@ class AgentRunner:
         skills_paths: list[str] = []
         if self.workspace.skills_path.exists():
             skills_paths.append(str(self.workspace.skills_path))
+            logger.info(f"Skills directory found: {self.workspace.skills_path}")
+        else:
+            logger.debug(f"No skills directory at: {self.workspace.skills_path}")
 
         # Validate and resolve workspace path for security
         workspace_root = self.workspace.path.resolve()
@@ -162,7 +168,9 @@ class AgentRunner:
             else:
                 raw_response = str(last_message)
 
-            return self._strip_thinking_tokens(raw_response)
+            if self.strip_thinking:
+                return self._strip_thinking_tokens(raw_response)
+            return raw_response
 
         return ""
 
@@ -199,6 +207,8 @@ class AgentRunner:
             else:
                 raw_response = str(last_message)
 
-            return self._strip_thinking_tokens(raw_response)
+            if self.strip_thinking:
+                return self._strip_thinking_tokens(raw_response)
+            return raw_response
 
         return ""

@@ -25,6 +25,7 @@ class AgentWorkspace:
     soul_md: str
     heartbeat_md: str
     skills_path: Path
+    tools_path: Path
     config: "WorkspaceConfig | None" = None
     crons: "list[CronDefinition]" = field(default_factory=list)
 
@@ -55,6 +56,7 @@ class WorkspaceLoader:
 
     REQUIRED_FILES = ["AGENT.md", "USER.md", "SOUL.md", "HEARTBEAT.md"]
     SKILLS_DIR = "skills"
+    TOOLS_DIR = "tools"
 
     def __init__(self, workspaces_root: Path):
         """Initialize the workspace loader.
@@ -106,6 +108,7 @@ class WorkspaceLoader:
             raise FileNotFoundError(f"Missing required files in {workspace_name}: {missing}")
 
         skills_path = workspace_path / self.SKILLS_DIR
+        tools_path = workspace_path / self.TOOLS_DIR
 
         # Load optional workspace config and crons
         workspace_config = self._load_workspace_config(workspace_path)
@@ -119,6 +122,7 @@ class WorkspaceLoader:
             soul_md=self._read_file(workspace_path / "SOUL.md"),
             heartbeat_md=self._read_file(workspace_path / "HEARTBEAT.md"),
             skills_path=skills_path,
+            tools_path=tools_path,
             config=workspace_config,
             crons=crons,
         )

@@ -6,11 +6,13 @@ OpenPaw is a multi-channel AI agent framework built on [DeepAgents](https://gith
 
 - **Multi-Workspace Orchestration** - Run multiple isolated agents simultaneously, each with their own configuration
 - **Agent Workspaces** - Define agent personalities through structured markdown files (AGENT.md, USER.md, SOUL.md, HEARTBEAT.md)
+- **Custom Workspace Tools** - Define LangChain `@tool` functions per workspace with auto-dependency installation
 - **Channel Support** - Currently supports Telegram with extensible architecture for additional platforms
 - **Lane-Based Queue System** - FIFO queue with configurable concurrency and multiple queue modes (collect, steer, followup, interrupt)
 - **Cron Scheduler** - Define scheduled tasks per workspace via YAML configuration
 - **Optional Builtins** - Conditionally loaded capabilities based on API key availability (web search, voice transcription, TTS)
 - **Sandboxed Filesystem Access** - Per-workspace file access via DeepAgents FilesystemBackend
+- **Per-Workspace Environment** - Automatic `.env` loading for workspace-specific secrets and configuration
 
 ## Quick Start
 
@@ -72,6 +74,35 @@ touch AGENT.md USER.md SOUL.md HEARTBEAT.md
 ```
 
 See [docs/workspaces.md](docs/workspaces.md) for detailed workspace structure.
+
+### Workspace Tools
+
+Workspaces can define custom LangChain tools in a `tools/` directory:
+
+```python
+# agent_workspaces/my-agent/tools/calendar.py
+from langchain_core.tools import tool
+
+@tool
+def get_events(days: int = 7) -> str:
+    """Get upcoming calendar events."""
+    return fetch_calendar_events(days)
+```
+
+Dependencies are auto-installed from `tools/requirements.txt` at startup:
+
+```
+# agent_workspaces/my-agent/tools/requirements.txt
+icalendar>=5.0.0
+caldav>=1.0.0
+```
+
+Workspace-specific secrets go in `.env` (auto-loaded):
+
+```bash
+# agent_workspaces/my-agent/.env
+CALENDAR_API_KEY=your-key
+```
 
 ### Run OpenPaw
 

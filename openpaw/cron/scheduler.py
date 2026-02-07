@@ -210,13 +210,7 @@ class CronScheduler:
 
         try:
             agent_runner = self.agent_factory()
-
-            # Wrap prompt with context to ensure visible output
-            wrapped_prompt = (
-                f"[Scheduled task - produce a visible response, not just internal thinking]\n\n"
-                f"{task.prompt}"
-            )
-            response = await agent_runner.run(message=wrapped_prompt)
+            response = await agent_runner.run(message=task.prompt)
 
             # Route response using task's stored routing info
             if task.channel and task.chat_id:
