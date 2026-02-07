@@ -410,6 +410,11 @@ class WorkspaceRunner:
 
             break  # No followup or delayed followup scheduled, exit loop
 
+        # Reset followup state after loop exits (cleanup stale state from errors)
+        followup_tool = self._builtin_loader.get_tool_instance("followup")
+        if followup_tool:
+            followup_tool.reset()
+
     async def _send_pending_audio(self, channel: TelegramChannel, session_key: str) -> None:
         """Check for and send any pending TTS audio."""
         try:

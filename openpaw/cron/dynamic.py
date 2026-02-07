@@ -8,7 +8,7 @@ import json
 import logging
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -269,7 +269,7 @@ def create_once_task(
         id=str(uuid.uuid4()),
         task_type="once",
         prompt=prompt,
-        created_at=datetime.now(),
+        created_at=datetime.now(UTC),
         run_at=run_at,
         channel=channel,
         chat_id=chat_id,
@@ -299,7 +299,7 @@ def create_interval_task(
         id=str(uuid.uuid4()),
         task_type="interval",
         prompt=prompt,
-        created_at=datetime.now(),
+        created_at=datetime.now(UTC),
         interval_seconds=interval_seconds,
         next_run=next_run,
         channel=channel,

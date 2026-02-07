@@ -84,8 +84,14 @@ class TelegramChannel(ChannelAdapter):
         """Register callback for incoming messages."""
         self._message_callback = callback
 
+    # Telegram maximum message length
+    MAX_MESSAGE_LENGTH = 4096
+
     async def send_message(self, session_key: str, content: str, **kwargs: Any) -> Message:
         """Send a message to a Telegram chat.
+
+        Automatically splits messages that exceed Telegram's 4096-char limit,
+        breaking at paragraph boundaries when possible.
 
         Args:
             session_key: Session key in format 'telegram:chat_id'.
@@ -93,7 +99,7 @@ class TelegramChannel(ChannelAdapter):
             **kwargs: Additional telegram.Bot.send_message kwargs.
 
         Returns:
-            The sent Message object.
+            The sent Message object (last chunk if split).
         """
         if not self._app:
             raise RuntimeError("Telegram channel not started")
@@ -101,7 +107,10 @@ class TelegramChannel(ChannelAdapter):
         parts = session_key.split(":")
         chat_id = int(parts[1])
 
-        sent = await self._app.bot.send_message(chat_id=chat_id, text=content, **kwargs)
+        chunks = self._split_message(content)
+        sent = None
+        for chunk in chunks:
+            sent = await self._app.bot.send_message(chat_id=chat_id, text=chunk, **kwargs)
 
         return Message(
             id=str(sent.message_id),
@@ -112,6 +121,45 @@ class TelegramChannel(ChannelAdapter):
             direction=MessageDirection.OUTBOUND,
             timestamp=datetime.now(),
         )
+
+    def _split_message(self, text: str) -> list[str]:
+        """Split text into chunks that fit Telegram's message limit.
+
+        Tries to break at paragraph boundaries (double newline), falls back
+        to single newlines, then hard-splits as a last resort.
+
+        Args:
+            text: The full message text.
+
+        Returns:
+            List of message chunks, each within MAX_MESSAGE_LENGTH.
+        """
+        if len(text) <= self.MAX_MESSAGE_LENGTH:
+            return [text]
+
+        chunks: list[str] = []
+        remaining = text
+
+        while remaining:
+            if len(remaining) <= self.MAX_MESSAGE_LENGTH:
+                chunks.append(remaining)
+                break
+
+            # Try to split at paragraph boundary
+            split_at = remaining.rfind("\n\n", 0, self.MAX_MESSAGE_LENGTH)
+
+            # Fall back to single newline
+            if split_at == -1:
+                split_at = remaining.rfind("\n", 0, self.MAX_MESSAGE_LENGTH)
+
+            # Hard split as last resort
+            if split_at == -1:
+                split_at = self.MAX_MESSAGE_LENGTH
+
+            chunks.append(remaining[:split_at])
+            remaining = remaining[split_at:].lstrip("\n")
+
+        return chunks
 
     async def send_audio(
         self,

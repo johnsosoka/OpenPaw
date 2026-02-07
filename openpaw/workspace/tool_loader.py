@@ -2,6 +2,7 @@
 
 import importlib.util
 import logging
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -59,6 +60,13 @@ def load_workspace_tools(tools_path: Path, auto_install: bool = True) -> list[Ba
     requirements_file = tools_path / REQUIREMENTS_FILE
     if requirements_file.exists():
         _handle_requirements(requirements_file, auto_install)
+
+    # Inject workspace root path so tools can resolve workspace-relative paths.
+    # Tools capture this at import time via module-level constant.
+    # NOTE: This relies on sequential workspace initialization. If parallel
+    # workspace loading is introduced, switch to a factory/injection pattern.
+    workspace_root = tools_path.parent
+    os.environ["OPENPAW_WORKSPACE_PATH"] = str(workspace_root.resolve())
 
     for py_file in sorted(tools_path.glob("*.py")):
         # Skip private/internal modules
