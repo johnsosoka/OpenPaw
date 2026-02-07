@@ -36,12 +36,12 @@ class AgentWorkspace:
         Returns a string suitable for use with create_react_agent.
 
         Args:
-            enabled_builtins: List of enabled builtin names. If provided,
-                task_context is only included when 'task_tracker' is in the list.
-                If None (default), task_context is always included for backward compat.
+            enabled_builtins: List of enabled builtin names. Used to conditionally
+                include framework capabilities (task_tracker, cron, followup, etc.).
+                If None (default), all capabilities are included for backward compat.
 
         Returns:
-            String containing workspace prompt sections and task management context.
+            String containing workspace prompt sections and framework orientation.
         """
         sections = []
 
@@ -54,102 +54,92 @@ class AgentWorkspace:
         if self.user_md:
             sections.append(f"<user>\n{self.user_md.strip()}\n</user>")
 
-        # Only include task context if task_tracker builtin is enabled
-        if enabled_builtins is None or "task_tracker" in enabled_builtins:
-            task_context = self._build_task_context()
-            if task_context:
-                sections.append(f"<task_context>\n{task_context}\n</task_context>")
+        # Framework orientation comes before heartbeat
+        framework_context = self._build_framework_context(enabled_builtins)
+        if framework_context:
+            sections.append(f"<framework>\n{framework_context}\n</framework>")
 
         if self.heartbeat_md:
             sections.append(f"<heartbeat>\n{self.heartbeat_md.strip()}\n</heartbeat>")
 
         return "\n\n".join(sections)
 
-    def _build_task_context(self) -> str:
-        """Build the task management context section for the system prompt.
+    def _build_framework_context(self, enabled_builtins: list[str] | None) -> str:
+        """Build the framework orientation section for the system prompt.
+
+        This explains how the agent exists within the OpenPaw framework and what
+        capabilities are available based on enabled builtins.
+
+        Args:
+            enabled_builtins: List of enabled builtin names, or None to include all.
 
         Returns:
-            Formatted task context explaining TASKS.yaml usage.
+            Formatted framework context with conditional capability descriptions.
         """
-        return """## Task Management
+        sections = []
 
-You have access to a task management system for tracking long-running operations.
+        # ALWAYS include framework orientation
+        sections.append(
+            "You are a persistent autonomous agent running in the OpenPaw framework. "
+            "Your workspace directory is your long-term memory—files you write today will "
+            "be there tomorrow. You are encouraged to organize your workspace: create "
+            "subdirectories, maintain notes, keep state files. You can freely read, write, "
+            "and edit files in your workspace. This is YOUR space—use it to stay organized "
+            "and maintain continuity across conversations."
+        )
 
-### TASKS.yaml
-Your workspace contains a TASKS.yaml file for tracking tasks. You can:
-- Create tasks when starting long operations (research, processing, API workflows)
-- Update task status as work progresses
-- Check tasks during heartbeat to monitor ongoing work
+        # Heartbeat system - include if heartbeat content exists (non-empty, non-trivial)
+        has_heartbeat = bool(self.heartbeat_md and len(self.heartbeat_md.strip()) > 20)
+        if has_heartbeat:
+            sections.append(
+                "\n\n## Heartbeat System\n\n"
+                "You receive periodic wake-up calls to check on ongoing work. Use these "
+                "heartbeats to review tasks, monitor long-running operations, and send "
+                "proactive updates. HEARTBEAT.md is your scratchpad for things to check "
+                "on next time you wake up. If there's nothing requiring attention, respond "
+                "with exactly 'HEARTBEAT_OK' to avoid sending unnecessary messages."
+            )
 
-### Task Lifecycle
-Tasks progress through the following statuses:
-- `pending`: Task created, waiting to start
-- `in_progress`: Actively being worked on
-- `awaiting_check`: Needs review or verification
-- `completed`: Successfully finished
-- `failed`: Encountered an error
-- `cancelled`: Stopped by user or system
+        # Task management - include if task_tracker is enabled
+        if enabled_builtins is None or "task_tracker" in enabled_builtins:
+            sections.append(
+                "\n\n## Task Management\n\n"
+                "You have a task tracking system (TASKS.yaml) for managing work across "
+                "sessions. Tasks persist—use them to remember what you're working on. "
+                "Future heartbeats will see your tasks and can continue where you left off. "
+                "Create tasks for long operations, update them as you progress, and clean "
+                "up when complete."
+            )
 
-### Task Structure
-Each task in TASKS.yaml has these key fields:
-- `id`: Unique identifier for the task
-- `type`: Category (research, deployment, batch, etc.)
-- `status`: Current lifecycle state
-- `description`: What the task does
-- `expected_duration_minutes`: Estimated time to complete
-- `created_at`, `started_at`, `completed_at`: Timing information
-- `last_checked_at`, `check_count`: Monitoring metrics
-- `notes`: Progress updates (append with each check)
-- `metadata`: Tool-specific data
-- `result_summary`, `result_path`: Completion details
+        # Self-continuation - include if followup is enabled
+        if enabled_builtins is None or "followup" in enabled_builtins:
+            sections.append(
+                "\n\n## Self-Continuation\n\n"
+                "You can request to be re-invoked after your current response completes. "
+                "Use this for multi-step workflows that don't need user input between steps. "
+                "You can also schedule delayed followups for time-dependent checks (e.g., "
+                "'check this again in 5 minutes')."
+            )
 
-### Heartbeat Integration
-During heartbeat checks, you should:
-1. Read TASKS.yaml to review all active tasks
-2. Check for tasks past their `expected_duration_minutes` - investigate status
-3. Look for tasks marked `awaiting_check` - take action
-4. Update `last_checked_at` and `check_count` when checking a task
-5. Append progress notes to the `notes` field
-6. Notify user of completed tasks if not already done
-7. Update status to `completed` or `failed` with appropriate details
-8. Clean up old completed tasks (>24 hours) after user notification
+        # Progress updates - include if send_message is enabled
+        if enabled_builtins is None or "send_message" in enabled_builtins:
+            sections.append(
+                "\n\n## Progress Updates\n\n"
+                "You can send messages to the user while you continue working. Don't make "
+                "the user wait in silence during long operations—send progress updates to "
+                "keep them informed about what you're doing."
+            )
 
-### Best Practices
-- **Create a task before starting long operations**: This provides transparency to the user
-- **Set realistic `expected_duration_minutes`**: Users rely on this for planning
-- **Update `notes` with progress**: Help future heartbeats understand what's happened
-- **Mark `awaiting_check` when human review needed**: This signals priority
-- **Store outputs in workspace filesystem**: Use relative paths in `result_path`
-- **Clean up after completion**: Remove tasks from TASKS.yaml after notifying the user
-- **Handle failures gracefully**: Set status to `failed` with clear `error_message`
+        # Self-scheduling - include if cron tools are enabled
+        if enabled_builtins is None or "cron" in enabled_builtins:
+            sections.append(
+                "\n\n## Self-Scheduling\n\n"
+                "You can schedule future actions—one-time or recurring. Use this for "
+                "reminders, periodic checks, or deferred work. Schedule tasks that should "
+                "happen at a specific time or on a regular interval."
+            )
 
-### Example Task Entry
-```yaml
-tasks:
-  - id: "research-abc123"
-    type: "research"
-    status: "in_progress"
-    created_at: "2026-02-06T10:30:00Z"
-    started_at: "2026-02-06T10:31:15Z"
-    expected_duration_minutes: 20
-    last_checked_at: "2026-02-06T10:45:00Z"
-    check_count: 2
-    description: "Research market trends for Q1 2026"
-    metadata:
-      tool: "gpt_researcher"
-      query: "market trends Q1 2026"
-    notes: |
-      - Check 1: API call initiated, data collection started
-      - Check 2: 60% complete, synthesis phase in progress
-```
-
-### When to Create Tasks
-Create a task entry when:
-- Starting a tool that takes more than 5 minutes
-- Triggering an external API with async processing
-- Beginning research or data collection
-- Initiating a deployment or batch operation
-- Any operation where the user should be kept informed of progress"""
+        return "".join(sections)
 
 
 class WorkspaceLoader:
