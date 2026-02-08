@@ -362,7 +362,7 @@ Agents can spawn background workers for concurrent task execution using the `spa
 
 **Lifecycle**: `pending` → `running` → `completed`/`failed`/`cancelled`/`timed_out`. Running sub-agents exceeding their timeout are marked as `timed_out` during cleanup.
 
-**Notifications**: When `notify: true` (default), sub-agents send completion notifications to the requesting session. Notifications are truncated (500 chars) with a prompt to use `get_subagent_result` for full output.
+**Notifications**: When `notify: true` (default), sub-agent completion results are injected into the message queue via `WorkspaceRunner._inject_system_event()` using `QueueMode.COLLECT`. This triggers a new agent turn where the main agent processes the `[SYSTEM]` notification and responds naturally. Notifications are truncated (500 chars) with a prompt to use `get_subagent_result` for full output. If no `result_callback` is configured, falls back to direct channel messaging.
 
 **Configuration** (optional, in `agent.yaml` or global config):
 
@@ -393,7 +393,9 @@ builtins:
 - **Interrupt mode**: When pending messages are detected, the current tool raises `InterruptSignalError`, the agent's response is discarded, and the new message is processed immediately. More aggressive than steer — aborts mid-run rather than redirecting.
 - **Followup mode**: No middleware behavior (reserved for followup tool chaining).
 
-**Implementation**: Middleware calls `queue_manager.peek_pending(session_key)` before each tool execution. In steer mode, first detection triggers `queue_manager.consume_pending()` and stores messages for post-run injection. In interrupt mode, detection raises exception immediately.
+**Implementation**: Middleware calls `queue_manager.peek_pending(session_key)` before each tool execution. `peek_pending()` checks both the session's pre-debounce buffer AND the lane queue (steer-mode messages bypass the session buffer). In steer mode, first detection triggers `queue_manager.consume_pending()` and stores messages for post-run injection. In interrupt mode, detection raises exception immediately.
+
+**Post-Run Detection**: After the agent run completes, `_process_messages()` performs a final `peek_pending()` check to catch messages that arrived after the last tool call (or during tool-free runs). This ensures steer/interrupt responsiveness even when the middleware didn't fire.
 
 **Integration**: `WorkspaceRunner` captures steer state before middleware reset via local variables. Interrupt exceptions are caught in `_process_messages()`, where pending messages become the new `combined_content` for re-entry into the processing loop.
 
