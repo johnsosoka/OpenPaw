@@ -43,6 +43,7 @@ def command_context(workspace_path: Path) -> CommandContext:
         workspace_name="test_workspace",
         workspace_path=workspace_path,
         queue_manager=Mock(),
+        workspace_timezone="UTC",  # Default to UTC
     )
 
 
@@ -239,3 +240,51 @@ async def test_status_number_formatting(
     assert "Tokens today: 202,366" in result.response
     assert "in: 123,456" in result.response
     assert "out: 78,910" in result.response
+
+
+@pytest.mark.asyncio
+async def test_status_uses_workspace_timezone(
+    token_logger: TokenUsageLogger,
+    workspace_path: Path,
+):
+    """Test /status command uses workspace timezone for token aggregation."""
+    from openpaw.core.metrics import InvocationMetrics
+
+    # Create a context with Mountain Time timezone
+    mock_agent_runner = Mock()
+    mock_agent_runner.model_id = "test-model-1"
+    session_manager = SessionManager(workspace_path)
+
+    context_mountain = CommandContext(
+        channel=Mock(),
+        session_manager=session_manager,
+        checkpointer=Mock(),
+        agent_runner=mock_agent_runner,
+        workspace_name="test_workspace",
+        workspace_path=workspace_path,
+        queue_manager=Mock(),
+        workspace_timezone="America/Denver",  # Mountain Time
+    )
+
+    # Log some tokens
+    token_logger.log(
+        metrics=InvocationMetrics(
+            input_tokens=1000,
+            output_tokens=500,
+            total_tokens=1500,
+        ),
+        workspace="test_workspace",
+        invocation_type="user",
+        session_key="telegram:12345",
+    )
+
+    command = StatusCommand()
+    message = Mock()
+    message.session_key = "telegram:12345"
+
+    # Execute command with Mountain Time context
+    result = await command.handle(message, "", context_mountain)
+
+    # Should show tokens (timezone-aware day boundary)
+    assert "Tokens" in result.response
+    assert "1,500" in result.response

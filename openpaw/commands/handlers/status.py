@@ -63,8 +63,11 @@ class StatusCommand(CommandHandler):
         # Token usage info
         try:
             reader = TokenUsageReader(context.workspace_path)
-            today = reader.tokens_today()
-            session = reader.tokens_for_session(message.session_key)
+            today = reader.tokens_today(timezone_str=context.workspace_timezone)
+            session = reader.tokens_for_session(
+                message.session_key,
+                timezone_str=context.workspace_timezone
+            )
 
             if today.total_tokens > 0:
                 lines.append(

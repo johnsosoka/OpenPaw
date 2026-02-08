@@ -45,6 +45,7 @@ class CommandContext:
     queue_manager: "QueueManager"
     command_router: Any = None  # CommandRouter, avoid circular import
     conversation_archiver: Any = None  # ConversationArchiver, avoid circular import
+    workspace_timezone: str = "UTC"  # IANA timezone string for day boundaries
 
 
 @dataclass

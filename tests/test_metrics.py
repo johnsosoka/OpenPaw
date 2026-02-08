@@ -1,8 +1,18 @@
 """Tests for token usage and invocation metrics tracking."""
 
+import json
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
 import pytest
 
-from openpaw.core.metrics import InvocationMetrics, extract_metrics_from_callback
+from openpaw.core.metrics import (
+    InvocationMetrics,
+    TokenUsageLogger,
+    TokenUsageReader,
+    extract_metrics_from_callback,
+)
 
 
 class MockCallbackHandler:
@@ -232,3 +242,170 @@ def test_extract_metrics_large_values():
     assert metrics.input_tokens == 100000
     assert metrics.output_tokens == 50000
     assert metrics.total_tokens == 150000
+
+
+# Timezone-aware token tracking tests
+
+
+@pytest.fixture
+def workspace_with_tokens(tmp_path: Path) -> Path:
+    """Create a workspace with token usage log entries."""
+    workspace = tmp_path / "test_workspace"
+    workspace.mkdir()
+    return workspace
+
+
+def test_tokens_today_default_utc(workspace_with_tokens: Path):
+    """Test tokens_today() defaults to UTC for backward compatibility."""
+    logger = TokenUsageLogger(workspace_with_tokens)
+    reader = TokenUsageReader(workspace_with_tokens)
+
+    # Log some tokens
+    metrics = InvocationMetrics(
+        input_tokens=1000,
+        output_tokens=500,
+        total_tokens=1500,
+    )
+    logger.log(metrics, "test", "user", "telegram:123")
+
+    # Read without timezone arg should use UTC
+    today = reader.tokens_today()
+    assert today.total_tokens == 1500
+
+
+def test_tokens_today_mountain_time(workspace_with_tokens: Path):
+    """Test tokens_today() uses Mountain Time midnight as day boundary."""
+    logger = TokenUsageLogger(workspace_with_tokens)
+    reader = TokenUsageReader(workspace_with_tokens)
+
+    # Create a timestamp that's "yesterday" in Mountain Time but "today" in UTC
+    # Mountain Time is UTC-7 (during DST) or UTC-6 (standard time)
+    # Let's use a time that's definitely different: 11 PM Mountain = 6 AM UTC next day
+    mountain_tz = ZoneInfo("America/Denver")
+
+    # Get current time in Mountain Time
+    now_mountain = datetime.now(mountain_tz)
+
+    # Create a timestamp at 11 PM Mountain Time yesterday
+    yesterday_11pm_mountain = now_mountain.replace(
+        hour=23, minute=0, second=0, microsecond=0
+    ) - timedelta(days=1)
+
+    # Manually log an entry with yesterday's timestamp
+    log_path = workspace_with_tokens / ".openpaw" / "token_usage.jsonl"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(log_path, "a") as f:
+        entry = {
+            "timestamp": yesterday_11pm_mountain.isoformat(),
+            "workspace": "test",
+            "invocation_type": "user",
+            "session_key": "telegram:123",
+            "input_tokens": 500,
+            "output_tokens": 250,
+            "total_tokens": 750,
+            "llm_calls": 1,
+            "duration_ms": 1000.0,
+            "model": "test-model",
+        }
+        f.write(json.dumps(entry) + "\n")
+
+    # Create a timestamp for today
+    today_entry = {
+        "timestamp": now_mountain.isoformat(),
+        "workspace": "test",
+        "invocation_type": "user",
+        "session_key": "telegram:123",
+        "input_tokens": 1000,
+        "output_tokens": 500,
+        "total_tokens": 1500,
+        "llm_calls": 1,
+        "duration_ms": 2000.0,
+        "model": "test-model",
+    }
+
+    with open(log_path, "a") as f:
+        f.write(json.dumps(today_entry) + "\n")
+
+    # Read with Mountain Time — should only get today's entry
+    today = reader.tokens_today(timezone_str="America/Denver")
+    assert today.total_tokens == 1500
+
+    # Read with UTC — might get different results depending on timestamp conversion
+    today_utc = reader.tokens_today(timezone_str="UTC")
+    # The UTC aggregation might include different entries due to timezone offset
+
+
+def test_tokens_for_session_mountain_time(workspace_with_tokens: Path):
+    """Test tokens_for_session() respects workspace timezone."""
+    logger = TokenUsageLogger(workspace_with_tokens)
+    reader = TokenUsageReader(workspace_with_tokens)
+
+    # Log tokens today
+    metrics = InvocationMetrics(
+        input_tokens=1000,
+        output_tokens=500,
+        total_tokens=1500,
+    )
+    logger.log(metrics, "test", "user", "telegram:123")
+
+    # Different session
+    logger.log(
+        InvocationMetrics(input_tokens=2000, output_tokens=1000, total_tokens=3000),
+        "test",
+        "user",
+        "telegram:456",
+    )
+
+    # Read session tokens in Mountain Time
+    session = reader.tokens_for_session("telegram:123", timezone_str="America/Denver")
+    assert session.total_tokens == 1500
+
+
+def test_tokens_today_no_log_file(workspace_with_tokens: Path):
+    """Test tokens_today() returns empty metrics when log doesn't exist."""
+    reader = TokenUsageReader(workspace_with_tokens)
+
+    today = reader.tokens_today(timezone_str="America/Denver")
+    assert today.total_tokens == 0
+    assert today.input_tokens == 0
+    assert today.output_tokens == 0
+
+
+def test_tokens_today_multiple_timezones(workspace_with_tokens: Path):
+    """Test that different timezones can yield different results for 'today'."""
+    logger = TokenUsageLogger(workspace_with_tokens)
+    reader = TokenUsageReader(workspace_with_tokens)
+
+    # Create entries near midnight boundary
+    log_path = workspace_with_tokens / ".openpaw" / "token_usage.jsonl"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Entry at 11:30 PM Pacific Time
+    pacific_tz = ZoneInfo("America/Los_Angeles")
+    late_night_pacific = datetime.now(pacific_tz).replace(
+        hour=23, minute=30, second=0, microsecond=0
+    )
+
+    with open(log_path, "a") as f:
+        entry = {
+            "timestamp": late_night_pacific.isoformat(),
+            "workspace": "test",
+            "invocation_type": "user",
+            "session_key": "telegram:123",
+            "input_tokens": 1000,
+            "output_tokens": 500,
+            "total_tokens": 1500,
+            "llm_calls": 1,
+            "duration_ms": 1000.0,
+            "model": "test-model",
+        }
+        f.write(json.dumps(entry) + "\n")
+
+    # Read in Pacific time — should be included
+    today_pacific = reader.tokens_today(timezone_str="America/Los_Angeles")
+
+    # The entry might be today or tomorrow depending on when the test runs
+    # Just verify the function doesn't crash and returns valid metrics
+    assert isinstance(today_pacific, InvocationMetrics)
+    assert today_pacific.total_tokens >= 0

@@ -2,7 +2,6 @@
 
 import logging
 import mimetypes
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +13,7 @@ from openpaw.builtins.base import (
     ProcessorResult,
 )
 from openpaw.channels.base import Attachment, Message
+from openpaw.core.timezone import workspace_now
 from openpaw.utils.filename import deduplicate_path, sanitize_filename
 
 logger = logging.getLogger(__name__)
@@ -97,6 +97,7 @@ class FilePersistenceProcessor(BaseBuiltinProcessor):
         self.clear_data_after_save = (
             config.get("clear_data_after_save", False) if config else False
         )
+        self._timezone = config.get("timezone", "UTC") if config else "UTC"
 
         if not self.workspace_path:
             logger.warning(
@@ -200,8 +201,8 @@ class FilePersistenceProcessor(BaseBuiltinProcessor):
         # Sanitize filename
         sanitized_filename = sanitize_filename(filename)
 
-        # Build target directory
-        today = datetime.now().strftime("%Y-%m-%d")
+        # Build target directory (use workspace timezone for date partition)
+        today = workspace_now(self._timezone).strftime("%Y-%m-%d")
         target_dir = Path(self.workspace_path) / "uploads" / today
         target_dir.mkdir(parents=True, exist_ok=True)
 

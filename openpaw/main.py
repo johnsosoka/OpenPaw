@@ -353,6 +353,7 @@ class WorkspaceRunner:
             workspace_path=self._workspace.path,
             queue_manager=self._queue_manager,
             command_router=self._command_router,
+            workspace_timezone=self._workspace_timezone,
             conversation_archiver=self._conversation_archiver,
         )
 

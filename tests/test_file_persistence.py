@@ -1,8 +1,10 @@
 """Tests for FilePersistenceProcessor."""
 
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -528,3 +530,54 @@ async def test_special_characters_sanitized(processor, sample_message, temp_work
     assert "(" not in saved_name
     assert "[" not in saved_name
     assert saved_name.islower() or saved_name == saved_name.lower()
+
+
+@pytest.mark.asyncio
+async def test_timezone_aware_date_partition(temp_workspace, sample_message):
+    """Test that date partition uses workspace timezone, not server timezone.
+
+    Scenario: File uploaded at 11:30pm Mountain Time on Feb 7.
+    If server is UTC, that's 06:30am UTC on Feb 8.
+    File should land in 2026-02-07 folder (Mountain Time), not 2026-02-08.
+    """
+    from openpaw.core.timezone import workspace_now
+
+    # Create processor with Mountain Time timezone
+    processor = FilePersistenceProcessor(
+        config={
+            "workspace_path": temp_workspace,
+            "timezone": "America/Denver"
+        }
+    )
+
+    # Mock workspace_now to return 11:30pm Mountain Time on Feb 7
+    # (which would be 06:30am UTC on Feb 8)
+    mock_mountain_time = datetime(
+        2026, 2, 7, 23, 30, 0,
+        tzinfo=ZoneInfo("America/Denver")
+    )
+
+    attachment = Attachment(
+        type="document",
+        data=b"Late night upload",
+        filename="report.pdf",
+        mime_type="application/pdf",
+    )
+    sample_message.attachments = [attachment]
+
+    # Mock workspace_now to return our test timestamp
+    with patch("openpaw.builtins.processors.file_persistence.workspace_now") as mock_now:
+        mock_now.return_value = mock_mountain_time
+        await processor.process_inbound(sample_message)
+
+    # Verify file landed in 2026-02-07 (Mountain Time date), NOT 2026-02-08
+    expected_dir = Path(temp_workspace) / "uploads" / "2026-02-07"
+    assert expected_dir.exists(), "Expected Mountain Time date directory to exist"
+
+    saved_files = list(expected_dir.glob("*.pdf"))
+    assert len(saved_files) == 1, "Expected one file in Mountain Time date directory"
+    assert saved_files[0].name == "report.pdf"
+
+    # Verify no file in the UTC date directory
+    utc_dir = Path(temp_workspace) / "uploads" / "2026-02-08"
+    assert not utc_dir.exists(), "UTC date directory should not exist"

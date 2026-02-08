@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
@@ -159,8 +160,12 @@ class TokenUsageReader:
         self._workspace_path = Path(workspace_path)
         self._log_path = self._workspace_path / ".openpaw" / "token_usage.jsonl"
 
-    def tokens_today(self) -> InvocationMetrics:
-        """Aggregate all entries from today (UTC).
+    def tokens_today(self, timezone_str: str = "UTC") -> InvocationMetrics:
+        """Aggregate all entries from today in the specified timezone.
+
+        Args:
+            timezone_str: IANA timezone string (e.g., "America/Denver").
+                         Defaults to "UTC" for backward compatibility.
 
         Returns:
             Aggregated metrics for today's invocations.
@@ -168,8 +173,9 @@ class TokenUsageReader:
         if not self._log_path.exists():
             return InvocationMetrics()
 
-        # Get today's date in UTC
-        today = datetime.now(UTC).date()
+        # Get today's date in the specified timezone
+        timezone = ZoneInfo(timezone_str)
+        today = datetime.now(timezone).date()
         aggregated = InvocationMetrics()
 
         try:
@@ -179,10 +185,10 @@ class TokenUsageReader:
                         continue
                     try:
                         entry = json.loads(line)
-                        # Parse timestamp and check if it's today
+                        # Parse timestamp and check if it's today in workspace timezone
                         timestamp = datetime.fromisoformat(entry["timestamp"])
-                        # Ensure we compare dates in UTC
-                        entry_date = timestamp.astimezone(UTC).date()
+                        # Convert to workspace timezone before comparing dates
+                        entry_date = timestamp.astimezone(timezone).date()
                         if entry_date == today:
                             aggregated.input_tokens += entry.get("input_tokens", 0)
                             aggregated.output_tokens += entry.get("output_tokens", 0)
@@ -197,11 +203,13 @@ class TokenUsageReader:
 
         return aggregated
 
-    def tokens_for_session(self, session_key: str) -> InvocationMetrics:
-        """Aggregate entries matching a session key from today.
+    def tokens_for_session(self, session_key: str, timezone_str: str = "UTC") -> InvocationMetrics:
+        """Aggregate entries matching a session key from today in the specified timezone.
 
         Args:
             session_key: Session key to filter by.
+            timezone_str: IANA timezone string (e.g., "America/Denver").
+                         Defaults to "UTC" for backward compatibility.
 
         Returns:
             Aggregated metrics for the session from today.
@@ -209,8 +217,9 @@ class TokenUsageReader:
         if not self._log_path.exists():
             return InvocationMetrics()
 
-        # Get today's date in UTC
-        today = datetime.now(UTC).date()
+        # Get today's date in the specified timezone
+        timezone = ZoneInfo(timezone_str)
+        today = datetime.now(timezone).date()
         aggregated = InvocationMetrics()
 
         try:
@@ -220,10 +229,10 @@ class TokenUsageReader:
                         continue
                     try:
                         entry = json.loads(line)
-                        # Parse timestamp and check if it's today
+                        # Parse timestamp and check if it's today in workspace timezone
                         timestamp = datetime.fromisoformat(entry["timestamp"])
-                        # Ensure we compare dates in UTC
-                        entry_date = timestamp.astimezone(UTC).date()
+                        # Convert to workspace timezone before comparing dates
+                        entry_date = timestamp.astimezone(timezone).date()
                         if entry_date == today and entry.get("session_key") == session_key:
                             aggregated.input_tokens += entry.get("input_tokens", 0)
                             aggregated.output_tokens += entry.get("output_tokens", 0)
