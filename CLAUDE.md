@@ -37,14 +37,14 @@ poetry run pytest -k "test_name"
 
 ## Architecture
 
-OpenPaw is a multi-channel AI agent framework built on DeepAgents (LangGraph). It draws architectural inspiration from OpenClaw's command queue and channel patterns.
+OpenPaw is a multi-channel AI agent framework built on LangGraph (`create_react_agent`). It draws architectural inspiration from OpenClaw's command queue and channel patterns.
 
 ### Core Flow
 
 ```
 OpenPawOrchestrator
   ├─ WorkspaceRunner["gilfoyle"]
-  │   └─ Channel → QueueManager → LaneQueue → AgentRunner → DeepAgent
+  │   └─ Channel → QueueManager → LaneQueue → AgentRunner → LangGraph ReAct Agent
   ├─ WorkspaceRunner["assistant"]
   │   └─ (isolated: own channel, queue, agent)
   └─ WorkspaceRunner["scheduler"]
@@ -59,9 +59,11 @@ Each workspace is fully isolated with its own channels, queue, agent runner, and
 
 **`openpaw/orchestrator.py`** - `OpenPawOrchestrator` manages multiple `WorkspaceRunner` instances. Handles concurrent startup/shutdown and workspace discovery.
 
-**`openpaw/main.py`** - `WorkspaceRunner` manages a single workspace: loads workspace config, merges with global config, initializes queue system, sets up channels, schedules crons, and runs the message loop.
+**`openpaw/main.py`** - `WorkspaceRunner` manages a single workspace: loads workspace config, merges with global config, initializes queue system, sets up channels via factory, manages `AsyncSqliteSaver` lifecycle, wires command routing, schedules crons, and runs the message loop.
 
-**`openpaw/core/agent.py`** - `AgentRunner` wraps DeepAgents' `create_deep_agent()`. It stitches workspace markdown files into a system prompt, passes the skills directory to DeepAgents natively, and configures `FilesystemBackend` for sandboxed workspace file access.
+**`openpaw/core/agent.py`** - `AgentRunner` wraps LangGraph's `create_react_agent()`. It stitches workspace markdown files into a system prompt via `init_chat_model()` for multi-provider support, configures sandboxed filesystem tools for workspace access, and tracks per-invocation token usage via `UsageMetadataCallbackHandler`. Supports `extra_model_kwargs` for OpenAI-compatible API endpoints (e.g., `base_url`).
+
+**`openpaw/core/metrics.py`** - Token usage tracking infrastructure. `InvocationMetrics` dataclass, `extract_metrics_from_callback()` for `UsageMetadataCallbackHandler`, `TokenUsageLogger` (thread-safe JSONL append to `.openpaw/token_usage.jsonl`), and `TokenUsageReader` for aggregation (today/session).
 
 **`openpaw/core/config.py`** - Pydantic models for global and workspace configuration. Handles environment variable expansion (`${VAR}`) and deep-merging workspace config over global defaults.
 
@@ -71,15 +73,45 @@ Each workspace is fully isolated with its own channels, queue, agent runner, and
 
 **`openpaw/queue/lane.py`** - Lane-based FIFO queue with configurable concurrency per lane (main, subagent, cron). Supports OpenClaw-style queue modes: `collect`, `steer`, `followup`, `interrupt`.
 
-**`openpaw/channels/telegram.py`** - Telegram bot adapter using `python-telegram-bot`. Converts platform messages to unified `Message` format, handles allowlisting, and supports voice/audio messages.
+**`openpaw/channels/telegram.py`** - Telegram bot adapter using `python-telegram-bot`. Converts platform messages to unified `Message` format, handles allowlisting, and supports voice/audio messages, documents, and photo uploads.
+
+**`openpaw/channels/factory.py`** - Channel factory. Decouples `WorkspaceRunner` from concrete channel types via `create_channel(channel_type, config, workspace_name)`. Currently supports `telegram`; new providers register here.
+
+**`openpaw/session/manager.py`** - `SessionManager` for tracking conversation threads per session. Thread-safe JSON persistence at `{workspace}/.openpaw/sessions.json`. Provides `get_thread_id()`, `new_conversation()`, `get_state()`, `increment_message_count()`.
+
+**`openpaw/commands/`** - Framework command system. `CommandHandler` ABC + `CommandRouter` registry + `CommandContext` for runtime dependencies. Commands are routed BEFORE inbound processors to avoid content modification breaking `is_command` detection.
+
+**`openpaw/commands/handlers/`** - Built-in command handlers: `/start`, `/new`, `/compact`, `/help`, `/queue`, `/status`. See "Command System" section.
+
+**`openpaw/memory/archiver.py`** - `ConversationArchiver` for exporting conversations from the LangGraph checkpointer. Produces dual-format output: markdown (human-readable) + JSON sidecar (machine-readable) at `{workspace}/memory/conversations/`.
 
 **`openpaw/builtins/`** - Optional capabilities (tools and processors) conditionally loaded based on API key availability. See "Builtins System" section.
+
+**`openpaw/builtins/tools/_channel_context.py`** - Shared `contextvars` module for session-safe channel/session state. Used by `send_message` and `send_file` to access the active channel and session key during tool execution.
+
+**`openpaw/builtins/tools/send_message.py`** - Mid-execution messaging tool. Uses shared `_channel_context` for session-safe state. Lets agents push updates to users while continuing to work.
+
+**`openpaw/builtins/tools/send_file.py`** - `SendFileTool` for sending workspace files to users via channel. Validates files within sandbox, infers MIME type, enforces 50MB limit. Uses shared `_channel_context`.
+
+**`openpaw/builtins/tools/followup.py`** - Self-continuation tool. Agents request re-invocation after responding, enabling multi-step autonomous workflows with depth limiting.
+
+**`openpaw/builtins/tools/task.py`** - Task management tools (`create_task`, `update_task`, `list_tasks`, `get_task`). CRUD over `TASKS.yaml` for tracking long-running operations across heartbeats.
+
+**`openpaw/task/store.py`** - `TaskStore` for YAML-based task persistence. Thread-safe with `_load_unlocked`/`_save_unlocked` pattern for atomic compound operations.
+
+**`openpaw/tools/filesystem.py`** - `FilesystemTools` providing sandboxed file operations: `ls`, `read_file`, `write_file`, `overwrite_file`, `edit_file`, `glob_files`, `grep_files`, `file_info`. Path traversal protection via `resolve_sandboxed_path()`. `read_file` has a 100K character safety valve. `grep_files` supports `context_lines` for surrounding context.
+
+**`openpaw/tools/sandbox.py`** - Standalone `resolve_sandboxed_path()` utility. Validates paths within workspace root, rejecting absolute paths, `~`, `..`, and `.openpaw/` access. Shared by `FilesystemTools`, `SendFileTool`, and inbound processors (DoclingProcessor, WhisperProcessor).
+
+**`openpaw/utils/filename.py`** - Filename sanitization and deduplication utilities. `sanitize_filename()` removes special characters, normalizes spaces, and lowercases. `deduplicate_path()` appends counters (1), (2), etc. for uniqueness.
+
+**`openpaw/builtins/processors/file_persistence.py`** - `FilePersistenceProcessor` saves all uploaded files to `uploads/{YYYY-MM-DD}/` with date partitioning. Sets `attachment.saved_path` for downstream processors.
 
 **`openpaw/cron/scheduler.py`** - `CronScheduler` uses APScheduler to execute scheduled tasks. Each job builds a fresh agent instance, injects the cron prompt, and routes output to the configured channel. Also handles dynamic tasks from `CronTool`.
 
 **`openpaw/cron/dynamic.py`** - `DynamicCronStore` for persisting agent-scheduled tasks to workspace-local JSON. Includes `DynamicCronTask` dataclass and factory functions.
 
-**`openpaw/heartbeat/scheduler.py`** - `HeartbeatScheduler` for proactive agent check-ins. Supports active hours, HEARTBEAT_OK suppression, and configurable intervals.
+**`openpaw/heartbeat/scheduler.py`** - `HeartbeatScheduler` for proactive agent check-ins. Supports active hours, HEARTBEAT_OK suppression, configurable intervals, pre-flight skip (avoids LLM call when HEARTBEAT.md is empty and no active tasks), task summary injection into heartbeat prompt, and JSONL event logging with token metrics.
 
 ### Agent Workspace Structure
 
@@ -91,9 +123,24 @@ agent_workspaces/<name>/
 ├── HEARTBEAT.md  # Current state, session notes
 ├── agent.yaml    # Optional per-workspace configuration (model, channel, queue)
 ├── .env          # Workspace-specific environment variables (auto-loaded)
+├── .openpaw/     # Framework internals (protected from agent access)
+│   ├── conversations.db  # AsyncSqliteSaver checkpoint database
+│   ├── sessions.json     # Session/conversation thread state
+│   └── token_usage.jsonl # Token usage metrics (append-only)
+├── uploads/      # User-uploaded files (from FilePersistenceProcessor)
+│   └── {YYYY-MM-DD}/  # Date-partitioned file storage
+│       ├── report.pdf        # Original uploaded file
+│       ├── report.md         # Docling-converted markdown (sibling)
+│       ├── voice_123.ogg     # Original audio file
+│       └── voice_123.txt     # Whisper transcript (sibling)
+├── heartbeat_log.jsonl   # Heartbeat event log (outcomes, metrics, task counts)
+├── memory/
+│   └── conversations/    # Archived conversation exports
+│       ├── conv_*.md     # Markdown archives (human-readable)
+│       └── conv_*.json   # JSON sidecars (machine-readable)
 ├── crons/        # Scheduled task definitions
 │   └── *.yaml    # Individual cron job configurations
-├── skills/       # DeepAgents native skills (SKILL.md format)
+├── skills/       # LangChain skill directories (SKILL.md format)
 └── tools/        # LangChain tools (Python files with @tool decorated functions)
 ```
 
@@ -110,6 +157,7 @@ Place `agent.yaml` in the workspace root to customize behavior:
 ```yaml
 name: Gilfoyle
 description: Sarcastic systems architect
+timezone: America/Denver  # IANA timezone identifier (default: UTC)
 
 model:
   provider: anthropic
@@ -155,9 +203,12 @@ model:
 
 **Available Bedrock Models**:
 - `moonshot.kimi-k2-thinking` - Moonshot Kimi K2 (1T MoE, 256K context)
-- `anthropic.claude-3-sonnet-20240229-v1:0` - Claude 3 Sonnet
-- `anthropic.claude-3-haiku-20240307-v1:0` - Claude 3 Haiku
+- `us.anthropic.claude-haiku-4-5-20251001-v1:0` - Claude Haiku 4.5
+- `amazon.nova-pro-v1:0` - Amazon Nova Pro
+- `amazon.nova-lite-v1:0` - Amazon Nova Lite
 - `mistral.mistral-large-2402-v1:0` - Mistral Large
+
+**Note**: Newer Bedrock models may require inference profile IDs (prefixed with `us.` or `global.`) instead of bare model IDs. Use `aws bedrock list-inference-profiles` to discover available profiles. The `api_key` field is automatically excluded for Bedrock providers.
 
 **AWS Credentials**: Configure via environment variables or AWS CLI profile:
 
@@ -172,6 +223,52 @@ aws configure
 ```
 
 **Region Availability** (Kimi K2): `us-east-1`, `us-east-2`, `us-west-2`, `ap-northeast-1`, `ap-south-1`, `sa-east-1`
+
+#### OpenAI-Compatible APIs
+
+Any OpenAI-compatible provider can be used by specifying `base_url` in the workspace model config. Extra kwargs beyond the standard set (`provider`, `model`, `api_key`, `temperature`, `max_turns`, `timeout_seconds`, `region`) are passed through to `init_chat_model()`.
+
+```yaml
+model:
+  provider: openai
+  model: kimi-k2.5
+  api_key: ${MOONSHOT_API_KEY}
+  base_url: https://api.moonshot.ai/v1
+  temperature: 1.0
+```
+
+### Token Usage Tracking
+
+Every agent invocation (user messages, cron jobs, heartbeats) logs token counts to `{workspace}/.openpaw/token_usage.jsonl`. The `/status` command displays tokens today and tokens this session.
+
+**Components**: `InvocationMetrics` (dataclass), `TokenUsageLogger` (thread-safe JSONL writer), `TokenUsageReader` (aggregation). All in `openpaw/core/metrics.py`.
+
+**Integration**: `AgentRunner.run()` creates a `UsageMetadataCallbackHandler` per invocation. After completion, metrics are extracted via `extract_metrics_from_callback()` and exposed via `agent_runner.last_metrics`. `WorkspaceRunner`, `CronScheduler`, and `HeartbeatScheduler` pass the logger to record each invocation.
+
+### Timezone Handling
+
+OpenPaw uses a "store in UTC, display in workspace timezone" pattern. The `timezone` field in `agent.yaml` (IANA identifier, default `"UTC"`) controls all time-related display and scheduling.
+
+**What uses workspace timezone:**
+- Heartbeat active hours window (`active_hours: "09:00-17:00"`)
+- Cron schedule expressions (APScheduler `CronTrigger`)
+- Agent-created scheduled tasks (`schedule_at` timestamp parsing)
+- File upload date partitions (`uploads/{YYYY-MM-DD}/`)
+- `/status` "tokens today" day boundary
+- Display timestamps in conversation archives, task notes, and filesystem listings
+
+**What remains UTC (internal storage):**
+- JSONL logs (token_usage.jsonl, heartbeat_log.jsonl)
+- Session state (sessions.json)
+- Task internal timestamps (created_at, started_at, completed_at in TASKS.yaml)
+- Conversation archive JSON sidecar files
+- LangGraph checkpoint data
+
+**Utilities** (`openpaw/core/timezone.py`):
+- `workspace_now(timezone_str)` — Current time in workspace timezone
+- `format_for_display(dt, timezone_str, fmt)` — Convert UTC datetime to display string
+
+**Validation:** `WorkspaceConfig.timezone` has a Pydantic validator that rejects invalid IANA identifiers at config load time.
 
 ### Cron System
 
@@ -197,6 +294,8 @@ output:
 - `"0 9 * * *"` - Every day at 9:00 AM
 - `"*/15 * * * *"` - Every 15 minutes
 - `"0 0 * * 0"` - Every Sunday at midnight
+
+**Note:** Cron schedule expressions fire in the workspace timezone.
 
 **Execution**: CronScheduler builds a fresh agent instance (no checkpointer), injects the prompt, routes output to specified channel.
 
@@ -251,18 +350,25 @@ heartbeat:
 
 **HEARTBEAT_OK Protocol**: If the agent determines there's nothing to report, it can respond with exactly "HEARTBEAT_OK" and no message will be sent (when `suppress_ok: true`). This prevents noisy "all clear" messages.
 
-**Active Hours**: Heartbeats only fire within the specified window (workspace timezone). Outside active hours, heartbeats are silently skipped.
+**Active Hours**: Heartbeats only fire within the specified window (workspace timezone). Outside active hours, heartbeats are silently skipped. **Note:** `active_hours` are interpreted in the workspace timezone.
 
-**Prompt Template**: The heartbeat prompt is defined in the agent's `HEARTBEAT.md` file and can reference the current timestamp.
+**Pre-flight Skip**: Before invoking the LLM, the scheduler checks HEARTBEAT.md and TASKS.yaml. If HEARTBEAT.md is empty/trivial and no active tasks exist, the heartbeat is skipped entirely — saving API costs for idle workspaces.
+
+**Task Summary Injection**: When active tasks exist, a compact summary is injected into the heartbeat prompt as `<active_tasks>` XML tags. This avoids an extra LLM tool call to `list_tasks()`.
+
+**Event Logging**: Every heartbeat event is logged to `{workspace}/heartbeat_log.jsonl` with outcome, duration, token metrics, and active task count.
+
+**Prompt Template**: The heartbeat prompt is built dynamically from a structured template. `HEARTBEAT.md` serves as a scratchpad for agent-maintained notes on what to check during heartbeats.
 
 ### Filesystem Access
 
-Agents have sandboxed filesystem access to their workspace directory via DeepAgents `FilesystemBackend`. This enables:
-- Reading/writing workspace files
-- Persisting state across cron runs
-- Organizing workspace-specific data
+Agents have sandboxed filesystem access to their workspace directory via `FilesystemTools` (`openpaw/tools/filesystem.py`). Available operations: `ls`, `read_file`, `write_file`, `overwrite_file`, `edit_file`, `glob_files`, `grep_files`, `file_info`. Path traversal protection via `resolve_sandboxed_path()` in `openpaw/tools/sandbox.py`.
 
-Access is restricted to the workspace root—agents cannot read/write outside their directory.
+- `file_info`: Lightweight metadata (size, line count, binary detection, read strategy hints) without reading content
+- `grep_files`: Supports `context_lines` parameter for surrounding context (maps to ripgrep `-C`)
+- `read_file`: 100K character safety valve prevents context window exhaustion on large files
+
+Access is restricted to the workspace root — agents cannot read/write outside their directory. The `.openpaw/` directory is additionally protected; agents cannot read or write framework internals (checkpoint DB, session state, token logs). Agents are encouraged to organize their workspace (subdirectories, notes, state files) for continuity across conversations.
 
 ### Workspace Tools
 
@@ -320,9 +426,15 @@ OpenPaw provides optional built-in capabilities that are conditionally available
 - `brave_search` - Web search via Brave API (requires `BRAVE_API_KEY`)
 - `elevenlabs` - Text-to-speech for voice responses (requires `ELEVENLABS_API_KEY`)
 - `cron` - Agent self-scheduling (no API key required, see "Dynamic Scheduling" section)
+- `send_message` - Mid-execution messaging to keep users informed during long operations (no API key required)
+- `followup` - Self-continuation for multi-step autonomous workflows with depth limiting (no API key required)
+- `task_tracker` - Task management via TASKS.yaml for persistent cross-session work tracking (no API key required)
+- `send_file` - Send workspace files to users (no API key required)
 
 **Processors** - Channel-layer message transformers:
+- `file_persistence` - Saves all uploaded files to workspace uploads/ directory (no API key required)
 - `whisper` - Audio transcription for voice messages (requires `OPENAI_API_KEY`)
+- `docling` - Document conversion (PDF, DOCX, PPTX, etc.) to markdown. Saves to `{workspace}/inbox/{date}/{filename}/`. Requires `docling` package.
 
 **`openpaw/builtins/`** - Package structure:
 ```
@@ -333,9 +445,15 @@ builtins/
 ├── tools/            # LangChain tool implementations
 │   ├── brave_search.py
 │   ├── elevenlabs_tts.py
-│   └── cron.py       # Agent self-scheduling
+│   ├── cron.py       # Agent self-scheduling
+│   ├── _channel_context.py # Shared contextvars for channel/session state
+│   ├── send_message.py  # Mid-execution messaging
+│   ├── send_file.py     # Send workspace files to users
+│   ├── followup.py      # Self-continuation with depth limiting
+│   └── task.py          # TASKS.yaml CRUD operations
 └── processors/       # Message preprocessors
-    └── whisper.py
+    ├── whisper.py     # Audio transcription
+    └── docling.py     # Document → markdown conversion
 ```
 
 **Configuration** (global or per-workspace):
@@ -360,12 +478,105 @@ builtins:
     enabled: true
     config:
       voice_id: 21m00Tcm4TlvDq8ikWAM
+
+  file_persistence:
+    enabled: true
+    config:
+      max_file_size: 52428800  # 50 MB default
+      clear_data_after_save: false
 ```
 
 **Adding New Builtins**: Create a class extending `BaseBuiltinTool` or `BaseBuiltinProcessor`, define `metadata` with prerequisites, and register in `registry.py`.
 
-### Memory & Summarization
+### Inbound File Handling
 
-- `InMemorySaver` checkpointer enables multi-turn conversation memory (per session, lost on restart)
-- DeepAgents includes `SummarizationMiddleware` that auto-compresses context when it grows large (keeps last 20 messages by default)
-- For persistent storage across restarts, swap to `SqliteSaver`
+OpenPaw provides universal file persistence for all uploaded files, with optional content enrichment via downstream processors.
+
+**Processor Pipeline Order**: `file_persistence` → `whisper` → `timestamp` → `docling`
+
+**FilePersistenceProcessor** - First processor in the pipeline. Saves all uploaded files to `{workspace}/uploads/{YYYY-MM-DD}/` with date partitioning. Sets `attachment.saved_path` (relative to workspace root) so downstream processors can read from disk. Enriches message content with file receipt notifications:
+
+```
+[File received: report.pdf (2.3 MB, application/pdf)]
+[Saved to: uploads/2026-02-07/report.pdf]
+```
+
+**Content Enrichment** - Downstream processors add content summaries as sibling files:
+
+- **WhisperProcessor**: Transcribes audio/voice messages, saves transcript as `.txt` sibling to the audio file (e.g., `voice_123.ogg` → `voice_123.txt`)
+- **DoclingProcessor**: Converts documents (PDF, DOCX, PPTX, etc.) to markdown, saves as `.md` sibling file (e.g., `report.pdf` → `report.md`)
+
+**Agent View** - The agent receives the enriched message content with file metadata and any transcripts/conversions appended inline. Original files remain in `uploads/` for agent filesystem access.
+
+**Configuration** - File persistence is enabled by default. Configure via `builtins.file_persistence`:
+
+```yaml
+builtins:
+  file_persistence:
+    enabled: true
+    config:
+      max_file_size: 52428800  # 50 MB default
+      clear_data_after_save: false  # Free memory after saving
+```
+
+**Filename Handling** - `sanitize_filename()` normalizes filenames (lowercases, removes special chars, replaces spaces with underscores). `deduplicate_path()` appends counters (1), (2), etc. to prevent overwrites.
+
+**Security** - All processors use `resolve_sandboxed_path()` for defense-in-depth path validation. Files cannot escape the workspace root.
+
+### Framework Orientation Prompt
+
+Agents automatically receive a dynamic system prompt section (`<framework>`) explaining the OpenPaw framework philosophy. Sections are conditionally included based on enabled builtins:
+- **Always**: Workspace persistence, self-organization encouragement, conversation memory
+- **Heartbeat System**: If HEARTBEAT.md has content — heartbeat protocol, HEARTBEAT_OK convention
+- **Task Management**: If `task_tracker` enabled — TASKS.yaml usage, cross-session continuity
+- **Self-Continuation**: If `followup` enabled — multi-step workflow chaining
+- **Progress Updates**: If `send_message` enabled — mid-execution user communication
+- **File Sharing**: If `send_file` enabled — sending workspace files to users
+- **Self-Scheduling**: If `cron` enabled — future action scheduling
+
+This explains HOW the agent exists in the framework (philosophy), not WHAT tools are available (LangChain handles that).
+
+### Command System
+
+Framework commands are handled by `CommandRouter` before messages reach the agent. Commands bypass the inbound processor pipeline to avoid content modification (e.g., `TimestampProcessor`) breaking detection.
+
+**Built-in Commands**:
+- `/start` - Welcome message (hidden from `/help`, for Telegram onboarding)
+- `/new` - Archive current conversation and start fresh (bypasses queue)
+- `/compact` - Summarize current conversation, archive it, start new with summary injected (bypasses queue)
+- `/help` - List available commands with descriptions
+- `/queue <mode>` - Change queue mode (`collect`, `steer`, `followup`, `interrupt`)
+- `/status` - Show workspace info: model, conversation stats, active tasks, token usage (today + session)
+
+**Adding Commands**: Extend `CommandHandler` ABC, implement `definition` property and `handle()` method, register in `get_framework_commands()`.
+
+**Command Flow**: `Channel._handle_command()` → `WorkspaceRunner._handle_inbound_message()` → `CommandRouter.route()` → `CommandHandler.handle()` → `CommandResult`
+
+### Channel Abstraction
+
+Channels are created via the factory pattern in `openpaw/channels/factory.py`. `WorkspaceRunner` is fully decoupled from concrete channel types.
+
+```python
+# Adding a new channel provider:
+# 1. Create adapter extending ChannelAdapter in openpaw/channels/
+# 2. Register in create_channel() factory
+# 3. Use channel type string in workspace config
+```
+
+Channels register bot commands (e.g., Telegram's command menu) via `register_commands()` using the command router's definition list. Channels also support `send_file(session_key, file_path, filename, caption)` for delivering files to users (used by `SendFileTool`).
+
+### Conversation Persistence
+
+Conversations persist across restarts via `AsyncSqliteSaver` (from `langgraph-checkpoint-sqlite`).
+
+**Lifecycle**:
+1. `WorkspaceRunner.start()` opens `aiosqlite` connection, creates `AsyncSqliteSaver`, calls `setup()`, rebuilds agent with checkpointer
+2. Messages are routed with thread ID `"{session_key}:{conversation_id}"` (e.g., `telegram:123456:conv_2026-02-07T14-30-00-123456`)
+3. `/new` and `/compact` rotate to new conversation IDs while archiving the old
+4. `WorkspaceRunner.stop()` archives all active conversations, then closes the DB connection
+
+**SessionManager**: Tracks which conversation each session is in. Thread-safe, persists to `.openpaw/sessions.json`. Conversation IDs use format `conv_{ISO_timestamp_with_microseconds}`.
+
+**ConversationArchiver**: On `/new`, `/compact`, or shutdown, exports the conversation from the checkpointer to `memory/conversations/` as markdown + JSON. Agents can reference archived conversations for long-term context.
+
+**Storage**: All framework state lives in `{workspace}/.openpaw/` (protected from agent filesystem access). Archives go to `{workspace}/memory/conversations/` (readable by agents).

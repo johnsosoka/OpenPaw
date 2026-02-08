@@ -8,7 +8,7 @@ import json
 import logging
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -85,64 +85,81 @@ class DynamicCronStore:
 
         logger.info(f"DynamicCronStore initialized: {self.storage_file}")
 
+    def _load_unlocked(self) -> list[DynamicCronTask]:
+        """Load all tasks from storage. Caller must hold self._lock.
+
+        Returns:
+            List of DynamicCronTask objects. Returns empty list if file doesn't exist
+            or is corrupted.
+        """
+        if not self.storage_file.exists():
+            logger.debug(f"Storage file does not exist: {self.storage_file}")
+            return []
+
+        try:
+            with self.storage_file.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            if not isinstance(data, list):
+                logger.error(f"Invalid storage format (expected list): {self.storage_file}")
+                return []
+
+            tasks = [DynamicCronTask.from_dict(task_data) for task_data in data]
+            logger.info(f"Loaded {len(tasks)} dynamic cron task(s) from storage")
+            return tasks
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Corrupted storage file {self.storage_file}: {e}")
+            return []
+        except (KeyError, ValueError) as e:
+            logger.error(f"Invalid task data in {self.storage_file}: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Unexpected error loading {self.storage_file}: {e}", exc_info=True)
+            return []
+
     def load(self) -> list[DynamicCronTask]:
-        """Load all tasks from storage.
+        """Load all tasks from storage (thread-safe).
 
         Returns:
             List of DynamicCronTask objects. Returns empty list if file doesn't exist
             or is corrupted.
         """
         with self._lock:
-            if not self.storage_file.exists():
-                logger.debug(f"Storage file does not exist: {self.storage_file}")
-                return []
+            return self._load_unlocked()
 
-            try:
-                with self.storage_file.open("r", encoding="utf-8") as f:
-                    data = json.load(f)
+    def _save_unlocked(self, tasks: list[DynamicCronTask]) -> None:
+        """Persist tasks to storage. Caller must hold self._lock.
 
-                if not isinstance(data, list):
-                    logger.error(f"Invalid storage format (expected list): {self.storage_file}")
-                    return []
+        Args:
+            tasks: List of DynamicCronTask objects to save.
+        """
+        try:
+            data = [task.to_dict() for task in tasks]
 
-                tasks = [DynamicCronTask.from_dict(task_data) for task_data in data]
-                logger.info(f"Loaded {len(tasks)} dynamic cron task(s) from storage")
-                return tasks
+            # Atomic write: write to temp file, then rename
+            temp_file = self.storage_file.with_suffix(".tmp")
 
-            except json.JSONDecodeError as e:
-                logger.error(f"Corrupted storage file {self.storage_file}: {e}")
-                return []
-            except (KeyError, ValueError) as e:
-                logger.error(f"Invalid task data in {self.storage_file}: {e}")
-                return []
-            except Exception as e:
-                logger.error(f"Unexpected error loading {self.storage_file}: {e}", exc_info=True)
-                return []
+            with temp_file.open("w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+
+            # Atomic rename (POSIX guarantees atomicity)
+            temp_file.replace(self.storage_file)
+
+            logger.info(f"Saved {len(tasks)} dynamic cron task(s) to storage")
+
+        except Exception as e:
+            logger.error(f"Failed to save tasks to {self.storage_file}: {e}", exc_info=True)
+            raise
 
     def save(self, tasks: list[DynamicCronTask]) -> None:
-        """Persist tasks to storage.
+        """Persist tasks to storage (thread-safe).
 
         Args:
             tasks: List of DynamicCronTask objects to save.
         """
         with self._lock:
-            try:
-                data = [task.to_dict() for task in tasks]
-
-                # Atomic write: write to temp file, then rename
-                temp_file = self.storage_file.with_suffix(".tmp")
-
-                with temp_file.open("w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2, ensure_ascii=False)
-
-                # Atomic rename (POSIX guarantees atomicity)
-                temp_file.replace(self.storage_file)
-
-                logger.info(f"Saved {len(tasks)} dynamic cron task(s) to storage")
-
-            except Exception as e:
-                logger.error(f"Failed to save tasks to {self.storage_file}: {e}", exc_info=True)
-                raise
+            self._save_unlocked(tasks)
 
     def add_task(self, task: DynamicCronTask) -> None:
         """Add a new task and persist immediately.
@@ -150,9 +167,10 @@ class DynamicCronStore:
         Args:
             task: DynamicCronTask to add.
         """
-        tasks = self.load()
-        tasks.append(task)
-        self.save(tasks)
+        with self._lock:
+            tasks = self._load_unlocked()
+            tasks.append(task)
+            self._save_unlocked(tasks)
         logger.info(f"Added dynamic cron task: {task.id} ({task.task_type})")
 
     def remove_task(self, task_id: str) -> bool:
@@ -164,14 +182,15 @@ class DynamicCronStore:
         Returns:
             True if task was found and removed, False otherwise.
         """
-        tasks = self.load()
-        initial_count = len(tasks)
-        tasks = [t for t in tasks if t.id != task_id]
+        with self._lock:
+            tasks = self._load_unlocked()
+            initial_count = len(tasks)
+            tasks = [t for t in tasks if t.id != task_id]
 
-        if len(tasks) < initial_count:
-            self.save(tasks)
-            logger.info(f"Removed dynamic cron task: {task_id}")
-            return True
+            if len(tasks) < initial_count:
+                self._save_unlocked(tasks)
+                logger.info(f"Removed dynamic cron task: {task_id}")
+                return True
 
         logger.warning(f"Task not found for removal: {task_id}")
         return False
@@ -210,19 +229,20 @@ class DynamicCronStore:
         Returns:
             True if task was found and updated, False otherwise.
         """
-        tasks = self.load()
-        updated = False
+        with self._lock:
+            tasks = self._load_unlocked()
+            updated = False
 
-        for i, existing_task in enumerate(tasks):
-            if existing_task.id == task.id:
-                tasks[i] = task
-                updated = True
-                break
+            for i, existing_task in enumerate(tasks):
+                if existing_task.id == task.id:
+                    tasks[i] = task
+                    updated = True
+                    break
 
-        if updated:
-            self.save(tasks)
-            logger.info(f"Updated dynamic cron task: {task.id}")
-            return True
+            if updated:
+                self._save_unlocked(tasks)
+                logger.info(f"Updated dynamic cron task: {task.id}")
+                return True
 
         logger.warning(f"Task not found for update: {task.id}")
         return False
@@ -249,7 +269,7 @@ def create_once_task(
         id=str(uuid.uuid4()),
         task_type="once",
         prompt=prompt,
-        created_at=datetime.now(),
+        created_at=datetime.now(UTC),
         run_at=run_at,
         channel=channel,
         chat_id=chat_id,
@@ -279,7 +299,7 @@ def create_interval_task(
         id=str(uuid.uuid4()),
         task_type="interval",
         prompt=prompt,
-        created_at=datetime.now(),
+        created_at=datetime.now(UTC),
         interval_seconds=interval_seconds,
         next_run=next_run,
         channel=channel,

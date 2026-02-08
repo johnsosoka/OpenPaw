@@ -30,6 +30,8 @@ class BuiltinLoader:
         workspace_config: "WorkspaceBuiltinsConfig | None" = None,
         workspace_path: Path | None = None,
         channel_config: dict[str, Any] | None = None,
+        workspace_timezone: str = "UTC",
+        task_store: Any | None = None,
     ):
         """Initialize the loader.
 
@@ -38,11 +40,15 @@ class BuiltinLoader:
             workspace_config: Workspace-specific overrides.
             workspace_path: Path to the workspace directory (for tools that need it).
             channel_config: Channel configuration for routing (e.g., telegram allowed_users).
+            workspace_timezone: Workspace timezone for temporal operations (e.g., 'America/Los_Angeles').
+            task_store: TaskStore instance for task management builtins.
         """
         self.global_config = global_config
         self.workspace_config = workspace_config
         self.workspace_path = workspace_path
         self.channel_config = channel_config or {}
+        self.workspace_timezone = workspace_timezone
+        self.task_store = task_store
         self.registry = BuiltinRegistry.get_instance()
         self._tool_instances: dict[str, Any] = {}  # Track loaded tool instances
 
@@ -89,7 +95,7 @@ class BuiltinLoader:
         """Get merged configuration for a builtin.
 
         Workspace config overrides global config.
-        Automatically injects workspace_path for tools that need it.
+        Automatically injects workspace_path and timezone for tools that need it.
 
         Args:
             name: The builtin name.
@@ -103,6 +109,13 @@ class BuiltinLoader:
         if self.workspace_path:
             config["workspace_path"] = self.workspace_path
 
+        # Inject workspace timezone for all builtins (can be overridden by explicit config)
+        config["timezone"] = self.workspace_timezone
+
+        # Inject task_store for task management builtins
+        if self.task_store and name in ("task_tracker", "tasks"):
+            config["task_store"] = self.task_store
+
         # Inject channel routing config for cron tool
         if name == "cron" and self.channel_config:
             channel_type = self.channel_config.get("type", "telegram")
@@ -111,6 +124,41 @@ class BuiltinLoader:
             allowed_users = self.channel_config.get("allowed_users", [])
             if allowed_users:
                 config["default_chat_id"] = allowed_users[0]
+
+        # Inject channel routing config for send_message tool
+        if name == "send_message" and self.channel_config:
+            channel_type = self.channel_config.get("type", "telegram")
+            config["default_channel"] = channel_type
+
+        # Extract max_file_size from SendFileBuiltinConfig if present
+        if name == "send_file":
+            if self.global_config:
+                global_cfg = getattr(self.global_config, name, None)
+                if global_cfg and hasattr(global_cfg, "max_file_size"):
+                    config["max_file_size"] = global_cfg.max_file_size
+            if self.workspace_config:
+                workspace_cfg = getattr(self.workspace_config, name, None)
+                if workspace_cfg and hasattr(workspace_cfg, "max_file_size"):
+                    config["max_file_size"] = workspace_cfg.max_file_size
+
+        # Extract typed fields from DoclingBuiltinConfig
+        if name == "docling":
+            _docling_fields = [
+                "max_file_size", "ocr_backend", "ocr_languages",
+                "force_full_page_ocr", "document_timeout", "do_ocr", "do_table_structure",
+            ]
+            if self.global_config:
+                global_cfg = getattr(self.global_config, name, None)
+                if global_cfg:
+                    for field in _docling_fields:
+                        if hasattr(global_cfg, field):
+                            config[field] = getattr(global_cfg, field)
+            if self.workspace_config:
+                workspace_cfg = getattr(self.workspace_config, name, None)
+                if workspace_cfg:
+                    for field in _docling_fields:
+                        if hasattr(workspace_cfg, field):
+                            config[field] = getattr(workspace_cfg, field)
 
         # Global config
         if self.global_config:
@@ -214,6 +262,14 @@ class BuiltinLoader:
             The tool instance, or None if not loaded.
         """
         return self._tool_instances.get(name)
+
+    def get_loaded_tool_names(self) -> list[str]:
+        """Get names of all loaded tool instances.
+
+        Returns:
+            List of builtin tool names that were successfully loaded.
+        """
+        return list(self._tool_instances.keys())
 
     def load_processors(self) -> list[BaseBuiltinProcessor]:
         """Load all allowed and available processor builtins.

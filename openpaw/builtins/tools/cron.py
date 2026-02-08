@@ -4,6 +4,7 @@ import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
@@ -380,11 +381,13 @@ class CronToolBuiltin(BaseBuiltinTool):
         try:
             dt = datetime.fromisoformat(timestamp_str)
 
-            # If naive, assume workspace timezone (or UTC if not configured)
+            # If naive, interpret in workspace timezone
             if dt.tzinfo is None:
-                # For now, assume UTC for naive timestamps
-                # Future: use workspace timezone from config
-                dt = dt.replace(tzinfo=UTC)
+                # Interpret naive timestamps in workspace timezone
+                workspace_tz = ZoneInfo(self.timezone)
+                dt = dt.replace(tzinfo=workspace_tz)
+                # Convert to UTC for internal storage
+                dt = dt.astimezone(UTC)
             else:
                 # Convert to UTC
                 dt = dt.astimezone(UTC)

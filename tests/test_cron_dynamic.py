@@ -688,11 +688,11 @@ class TestCronToolBuiltin:
         assert len(tasks) == 2
 
     def test_parse_timestamp_naive_assumes_utc(self, tmp_path: Any) -> None:
-        """Test that naive timestamps are assumed to be UTC."""
+        """Test that naive timestamps use workspace timezone (defaults to UTC)."""
         config = {"workspace_path": str(tmp_path)}
         tool = CronToolBuiltin(config)
 
-        # Naive timestamp (no timezone)
+        # Naive timestamp (no timezone) - should use workspace timezone (UTC by default)
         result = tool._parse_timestamp("2026-02-06T18:30:00")
 
         assert result.tzinfo == UTC

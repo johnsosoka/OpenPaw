@@ -29,10 +29,19 @@ class AgentWorkspace:
     config: "WorkspaceConfig | None" = None
     crons: "list[CronDefinition]" = field(default_factory=list)
 
-    def build_system_prompt(self) -> str:
+    def build_system_prompt(self, enabled_builtins: list[str] | None = None) -> str:
         """Stitch together workspace files into a system prompt.
 
         The prompt structure follows DeepAgents conventions with clear sections.
+        Returns a string suitable for use with create_react_agent.
+
+        Args:
+            enabled_builtins: List of enabled builtin names. Used to conditionally
+                include framework capabilities (task_tracker, cron, followup, etc.).
+                If None (default), all capabilities are included for backward compat.
+
+        Returns:
+            String containing workspace prompt sections and framework orientation.
         """
         sections = []
 
@@ -45,10 +54,122 @@ class AgentWorkspace:
         if self.user_md:
             sections.append(f"<user>\n{self.user_md.strip()}\n</user>")
 
+        # Framework orientation comes before heartbeat
+        framework_context = self._build_framework_context(enabled_builtins)
+        if framework_context:
+            sections.append(f"<framework>\n{framework_context}\n</framework>")
+
         if self.heartbeat_md:
             sections.append(f"<heartbeat>\n{self.heartbeat_md.strip()}\n</heartbeat>")
 
         return "\n\n".join(sections)
+
+    def _build_framework_context(self, enabled_builtins: list[str] | None) -> str:
+        """Build the framework orientation section for the system prompt.
+
+        This explains how the agent exists within the OpenPaw framework and what
+        capabilities are available based on enabled builtins.
+
+        Args:
+            enabled_builtins: List of enabled builtin names, or None to include all.
+
+        Returns:
+            Formatted framework context with conditional capability descriptions.
+        """
+        sections = []
+
+        # ALWAYS include framework orientation
+        sections.append(
+            "You are a persistent autonomous agent running in the OpenPaw framework. "
+            "Your workspace directory is your long-term memory—files you write today will "
+            "be there tomorrow. You are encouraged to organize your workspace: create "
+            "subdirectories, maintain notes, keep state files. You can freely read, write, "
+            "and edit files in your workspace. This is YOUR space—use it to stay organized "
+            "and maintain continuity across conversations."
+        )
+
+        # Heartbeat system - include if heartbeat content exists (non-empty, non-trivial)
+        has_heartbeat = bool(self.heartbeat_md and len(self.heartbeat_md.strip()) > 20)
+        if has_heartbeat:
+            sections.append(
+                "\n\n## Heartbeat System\n\n"
+                "You receive periodic wake-up calls to check on ongoing work. Use these "
+                "heartbeats to review tasks, monitor long-running operations, and send "
+                "proactive updates. HEARTBEAT.md is your scratchpad for things to check "
+                "on next time you wake up. If there's nothing requiring attention, respond "
+                "with exactly 'HEARTBEAT_OK' to avoid sending unnecessary messages."
+            )
+
+        # Task management - include if task_tracker is enabled
+        if enabled_builtins is None or "task_tracker" in enabled_builtins:
+            sections.append(
+                "\n\n## Task Management\n\n"
+                "You have a task tracking system (TASKS.yaml) for managing work across "
+                "sessions. Tasks persist—use them to remember what you're working on. "
+                "Future heartbeats will see your tasks and can continue where you left off. "
+                "Create tasks for long operations, update them as you progress, and clean "
+                "up when complete."
+            )
+
+        # Self-continuation - include if followup is enabled
+        if enabled_builtins is None or "followup" in enabled_builtins:
+            sections.append(
+                "\n\n## Self-Continuation\n\n"
+                "You can request to be re-invoked after your current response completes. "
+                "Use this for multi-step workflows that don't need user input between steps. "
+                "You can also schedule delayed followups for time-dependent checks (e.g., "
+                "'check this again in 5 minutes')."
+            )
+
+        # Progress updates - include if send_message is enabled
+        if enabled_builtins is None or "send_message" in enabled_builtins:
+            sections.append(
+                "\n\n## Progress Updates\n\n"
+                "You can send messages to the user while you continue working. Don't make "
+                "the user wait in silence during long operations—send progress updates to "
+                "keep them informed about what you're doing."
+            )
+
+        # File sharing - include if send_file is enabled
+        if enabled_builtins is None or "send_file" in enabled_builtins:
+            sections.append(
+                "\n\n## File Sharing\n\n"
+                "You can send files from your workspace to the user using the send_file tool. "
+                "Write or generate files in your workspace, then use send_file to deliver them. "
+                "Supported: PDFs, images, documents, text files, and more."
+            )
+
+        # File uploads - always available (processor-based, no prerequisites)
+        sections.append(
+            "\n\n## File Uploads\n\n"
+            "When users send you files (documents, images, audio, etc.), they are "
+            "automatically saved to your uploads/ directory, organized by date. "
+            "You'll see a notification in the message like [Saved to: uploads/...]. "
+            "You can read, reference, and process these files using your filesystem tools. "
+            "Supported document types (PDF, DOCX, etc.) are also automatically converted "
+            "to markdown for easier reading."
+        )
+
+        # Self-scheduling - include if cron tools are enabled
+        if enabled_builtins is None or "cron" in enabled_builtins:
+            sections.append(
+                "\n\n## Self-Scheduling\n\n"
+                "You can schedule future actions—one-time or recurring. Use this for "
+                "reminders, periodic checks, or deferred work. Schedule tasks that should "
+                "happen at a specific time or on a regular interval."
+            )
+
+        # Conversation memory is always available (core feature, not a builtin)
+        sections.append(
+            "\n\n## Conversation Memory\n\n"
+            "Your conversations are automatically saved to disk and persist across restarts. "
+            "When you or the user starts a new conversation (via /new), the previous conversation "
+            "is archived in memory/conversations/ as both markdown and JSON files.\n\n"
+            "You can read these archives with your filesystem tools to reference past interactions. "
+            "Use /new to start a fresh conversation when the current topic is complete."
+        )
+
+        return "".join(sections)
 
 
 class WorkspaceLoader:

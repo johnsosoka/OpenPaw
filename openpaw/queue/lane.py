@@ -48,6 +48,7 @@ class Lane:
     queue: deque[QueueItem] = field(default_factory=deque)
     active_count: int = 0
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    _item_available: asyncio.Event = field(default_factory=asyncio.Event)
 
     def __hash__(self) -> int:
         return hash(self.name)
@@ -110,6 +111,7 @@ class LaneQueue:
         lane = self.get_lane(lane_name)
         async with lane._lock:
             lane.queue.append(item)
+            lane._item_available.set()  # Signal that an item is available
 
     async def process(
         self,
@@ -134,8 +136,13 @@ class LaneQueue:
                     item = lane.queue.popleft()
                     lane.active_count += 1
 
+                # Clear event if queue is now empty (after potentially dequeuing)
+                if not lane.queue:
+                    lane._item_available.clear()
+
             if item is None:
-                await asyncio.sleep(0.01)
+                # Wait for signal that an item is available instead of polling
+                await lane._item_available.wait()
                 continue
 
             session_lock = await self.get_session_lock(item.session_key)

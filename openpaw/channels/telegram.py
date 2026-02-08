@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
 from openpaw.channels.base import Attachment, ChannelAdapter, Message, MessageDirection
 
@@ -59,12 +59,12 @@ class TelegramChannel(ChannelAdapter):
         """Start the Telegram bot."""
         self._app = Application.builder().token(self.token).build()
 
-        self._app.add_handler(CommandHandler("start", self._handle_start))
-        self._app.add_handler(CommandHandler("help", self._handle_help))
-        self._app.add_handler(CommandHandler("queue", self._handle_queue_command))
-        self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message))
+        # Route all messages through the unified callback
         self._app.add_handler(MessageHandler(filters.COMMAND, self._handle_command))
+        self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message))
         self._app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._handle_voice_message))
+        self._app.add_handler(MessageHandler(filters.Document.ALL, self._handle_document))
+        self._app.add_handler(MessageHandler(filters.PHOTO, self._handle_photo))
 
         await self._app.initialize()
         await self._app.start()
@@ -84,8 +84,14 @@ class TelegramChannel(ChannelAdapter):
         """Register callback for incoming messages."""
         self._message_callback = callback
 
+    # Telegram maximum message length
+    MAX_MESSAGE_LENGTH = 4096
+
     async def send_message(self, session_key: str, content: str, **kwargs: Any) -> Message:
         """Send a message to a Telegram chat.
+
+        Automatically splits messages that exceed Telegram's 4096-char limit,
+        breaking at paragraph boundaries when possible.
 
         Args:
             session_key: Session key in format 'telegram:chat_id'.
@@ -93,7 +99,7 @@ class TelegramChannel(ChannelAdapter):
             **kwargs: Additional telegram.Bot.send_message kwargs.
 
         Returns:
-            The sent Message object.
+            The sent Message object (last chunk if split).
         """
         if not self._app:
             raise RuntimeError("Telegram channel not started")
@@ -101,7 +107,13 @@ class TelegramChannel(ChannelAdapter):
         parts = session_key.split(":")
         chat_id = int(parts[1])
 
-        sent = await self._app.bot.send_message(chat_id=chat_id, text=content, **kwargs)
+        chunks = self._split_message(content)
+        sent = None
+        for chunk in chunks:
+            sent = await self._app.bot.send_message(chat_id=chat_id, text=chunk, **kwargs)
+
+        if not sent:
+            raise RuntimeError("Failed to send message: no chunks were sent")
 
         return Message(
             id=str(sent.message_id),
@@ -112,6 +124,45 @@ class TelegramChannel(ChannelAdapter):
             direction=MessageDirection.OUTBOUND,
             timestamp=datetime.now(),
         )
+
+    def _split_message(self, text: str) -> list[str]:
+        """Split text into chunks that fit Telegram's message limit.
+
+        Tries to break at paragraph boundaries (double newline), falls back
+        to single newlines, then hard-splits as a last resort.
+
+        Args:
+            text: The full message text.
+
+        Returns:
+            List of message chunks, each within MAX_MESSAGE_LENGTH.
+        """
+        if len(text) <= self.MAX_MESSAGE_LENGTH:
+            return [text]
+
+        chunks: list[str] = []
+        remaining = text
+
+        while remaining:
+            if len(remaining) <= self.MAX_MESSAGE_LENGTH:
+                chunks.append(remaining)
+                break
+
+            # Try to split at paragraph boundary
+            split_at = remaining.rfind("\n\n", 0, self.MAX_MESSAGE_LENGTH)
+
+            # Fall back to single newline
+            if split_at == -1:
+                split_at = remaining.rfind("\n", 0, self.MAX_MESSAGE_LENGTH)
+
+            # Hard split as last resort
+            if split_at == -1:
+                split_at = self.MAX_MESSAGE_LENGTH
+
+            chunks.append(remaining[:split_at])
+            remaining = remaining[split_at:].lstrip("\n")
+
+        return chunks
 
     async def send_audio(
         self,
@@ -153,6 +204,63 @@ class TelegramChannel(ChannelAdapter):
             direction=MessageDirection.OUTBOUND,
             timestamp=datetime.now(),
         )
+
+    # Telegram file size limit
+    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+
+    async def send_file(
+        self,
+        session_key: str,
+        file_data: bytes,
+        filename: str,
+        mime_type: str | None = None,
+        caption: str | None = None,
+    ) -> None:
+        """Send a file via Telegram's sendDocument API.
+
+        Args:
+            session_key: Session key in format 'telegram:chat_id'.
+            file_data: Raw file bytes.
+            filename: Display filename for the file.
+            mime_type: Optional MIME type hint (currently unused by Telegram API).
+            caption: Optional caption/message to accompany the file.
+
+        Raises:
+            RuntimeError: If the channel is not started.
+            ValueError: If file size exceeds Telegram's 50MB limit.
+        """
+        if not self._app:
+            raise RuntimeError("Telegram channel not started")
+
+        # Validate file size
+        file_size = len(file_data)
+        if file_size > self.MAX_FILE_SIZE:
+            size_mb = file_size / (1024 * 1024)
+            raise ValueError(
+                f"File size ({size_mb:.1f} MB) exceeds Telegram's 50 MB limit"
+            )
+
+        from io import BytesIO
+
+        # Parse session key to extract chat_id
+        parts = session_key.split(":")
+        chat_id = int(parts[1])
+
+        # Wrap bytes in BytesIO for Telegram API
+        file_obj = BytesIO(file_data)
+        file_obj.name = filename
+
+        try:
+            await self._app.bot.send_document(
+                chat_id=chat_id,
+                document=file_obj,
+                caption=caption,
+                filename=filename,
+            )
+            logger.info(f"Sent file '{filename}' ({file_size} bytes) to chat {chat_id}")
+        except Exception as e:
+            logger.error(f"Failed to send file '{filename}' to chat {chat_id}: {e}")
+            raise RuntimeError(f"Failed to send file: {e}") from e
 
     def _is_allowed(self, update: Update) -> bool:
         """Check if the message sender is allowed.
@@ -261,46 +369,6 @@ class TelegramChannel(ChannelAdapter):
         if message and self._message_callback:
             await self._message_callback(message)
 
-    async def _handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /start command."""
-        if not self._is_allowed(update):
-            await self._send_unauthorized_response(update)
-            return
-
-        if update.message:
-            await update.message.reply_text(
-                "OpenPaw agent ready. Send me a message to begin.\n\n"
-                "Commands:\n"
-                "/help - Show this help\n"
-                "/queue <mode> - Set queue mode (collect, steer, followup)"
-            )
-
-    async def _handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /help command."""
-        if not self._is_allowed(update):
-            return
-
-        if update.message:
-            await update.message.reply_text(
-                "OpenPaw Commands:\n\n"
-                "/start - Initialize the bot\n"
-                "/help - Show this help\n"
-                "/queue <mode> - Set queue mode\n"
-                "  - collect: Coalesce messages (default)\n"
-                "  - steer: Inject immediately\n"
-                "  - followup: Queue for next turn\n"
-                "\nJust send a message to chat with the agent."
-            )
-
-    async def _handle_queue_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /queue command for setting queue mode."""
-        if not self._is_allowed(update):
-            return
-
-        message = self._to_message(update)
-        if message and self._message_callback:
-            await self._message_callback(message)
-
     async def _handle_voice_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming voice and audio messages."""
         if not self._is_allowed(update):
@@ -310,6 +378,145 @@ class TelegramChannel(ChannelAdapter):
         message = await self._voice_to_message(update)
         if message and self._message_callback:
             await self._message_callback(message)
+
+    async def _handle_document(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle incoming document uploads (PDF, DOCX, images, etc.)."""
+        if not self._is_allowed(update):
+            await self._send_unauthorized_response(update)
+            return
+
+        message = await self._document_to_message(update)
+        if message and self._message_callback:
+            await self._message_callback(message)
+
+    async def _handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle incoming photo messages."""
+        if not self._is_allowed(update):
+            await self._send_unauthorized_response(update)
+            return
+
+        message = await self._photo_to_message(update)
+        if message and self._message_callback:
+            await self._message_callback(message)
+
+    async def _document_to_message(self, update: Update) -> Message | None:
+        """Convert document upload to unified Message format with attachment.
+
+        Downloads the file and creates a document Attachment for processing
+        by inbound processors (e.g., DoclingProcessor).
+        """
+        if not update.message or not update.effective_user or not update.effective_chat:
+            return None
+
+        document = update.message.document
+        if not document:
+            return None
+
+        chat_id = update.effective_chat.id
+        session_key = self.build_session_key(chat_id)
+
+        try:
+            file = await document.get_file()
+            file_bytes = await file.download_as_bytearray()
+
+            attachment = Attachment(
+                type="document",
+                data=bytes(file_bytes),
+                filename=document.file_name,
+                mime_type=document.mime_type or "application/octet-stream",
+                metadata={"file_size": document.file_size},
+            )
+
+            logger.info(
+                f"Downloaded document: {document.file_name} "
+                f"({document.file_size} bytes, {document.mime_type})"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to download document: {e}")
+            return None
+
+        return Message(
+            id=str(update.message.message_id),
+            channel=self.name,
+            session_key=session_key,
+            user_id=str(update.effective_user.id),
+            content=update.message.caption or "",
+            direction=MessageDirection.INBOUND,
+            timestamp=update.message.date or datetime.now(),
+            reply_to_id=str(update.message.reply_to_message.message_id) if update.message.reply_to_message else None,
+            metadata={
+                "chat_type": update.effective_chat.type,
+                "username": update.effective_user.username,
+                "first_name": update.effective_user.first_name,
+                "has_document": True,
+            },
+            attachments=[attachment],
+        )
+
+    async def _photo_to_message(self, update: Update) -> Message | None:
+        """Convert photo message to unified Message format with attachment.
+
+        Downloads the highest resolution photo and creates an Attachment for processing
+        by inbound processors (e.g., vision models).
+
+        Telegram sends photos as an array of PhotoSize objects with different resolutions.
+        We select the last element which has the highest resolution.
+        """
+        if not update.message or not update.effective_user or not update.effective_chat:
+            return None
+
+        if not update.message.photo:
+            return None
+
+        chat_id = update.effective_chat.id
+        session_key = self.build_session_key(chat_id)
+
+        # Get highest resolution photo (last element in array)
+        photo = update.message.photo[-1]
+
+        try:
+            file = await photo.get_file()
+            file_bytes = await file.download_as_bytearray()
+
+            attachment = Attachment(
+                type="image",
+                data=bytes(file_bytes),
+                filename=None,  # Telegram photos don't have filenames
+                mime_type="image/jpeg",  # Telegram compresses to JPEG
+                metadata={
+                    "width": photo.width,
+                    "height": photo.height,
+                    "file_size": photo.file_size,
+                },
+            )
+
+            logger.info(
+                f"Downloaded photo: {photo.width}x{photo.height} "
+                f"({photo.file_size} bytes)"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to download photo: {e}")
+            return None
+
+        return Message(
+            id=str(update.message.message_id),
+            channel=self.name,
+            session_key=session_key,
+            user_id=str(update.effective_user.id),
+            content=update.message.caption or "",
+            direction=MessageDirection.INBOUND,
+            timestamp=update.message.date or datetime.now(),
+            reply_to_id=str(update.message.reply_to_message.message_id) if update.message.reply_to_message else None,
+            metadata={
+                "chat_type": update.effective_chat.type,
+                "username": update.effective_user.username,
+                "first_name": update.effective_user.first_name,
+                "has_photo": True,
+            },
+            attachments=[attachment],
+        )
 
     async def _voice_to_message(self, update: Update) -> Message | None:
         """Convert voice/audio message to unified Message format with attachment.

@@ -10,10 +10,18 @@ from openpaw.core.config import HeartbeatConfig
 from openpaw.heartbeat.scheduler import HEARTBEAT_PROMPT, HeartbeatScheduler
 
 
+@pytest.fixture
+def tmp_workspace(tmp_path):
+    """Create a temporary workspace path."""
+    workspace = tmp_path / "test_workspace"
+    workspace.mkdir()
+    return workspace
+
+
 class TestHeartbeatConfig:
     """Test HeartbeatConfig defaults and customization."""
 
-    def test_default_values(self) -> None:
+    def test_default_values(self, tmp_workspace) -> None:
         """Test default configuration values."""
         config = HeartbeatConfig()
 
@@ -24,7 +32,7 @@ class TestHeartbeatConfig:
         assert config.target_channel == "telegram"
         assert config.target_chat_id is None
 
-    def test_custom_values(self) -> None:
+    def test_custom_values(self, tmp_workspace) -> None:
         """Test overriding all fields."""
         config = HeartbeatConfig(
             enabled=True,
@@ -46,11 +54,12 @@ class TestHeartbeatConfig:
 class TestParseActiveHours:
     """Test active hours parsing logic."""
 
-    def test_parse_active_hours_valid(self) -> None:
+    def test_parse_active_hours_valid(self, tmp_workspace) -> None:
         """Test parsing valid active hours string."""
         config = HeartbeatConfig(active_hours="08:00-22:00")
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -63,11 +72,12 @@ class TestParseActiveHours:
         assert start_time == time(8, 0)
         assert end_time == time(22, 0)
 
-    def test_parse_active_hours_midnight_span(self) -> None:
+    def test_parse_active_hours_midnight_span(self, tmp_workspace) -> None:
         """Test parsing active hours that cross midnight."""
         config = HeartbeatConfig(active_hours="22:00-06:00")
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -80,11 +90,12 @@ class TestParseActiveHours:
         assert start_time == time(22, 0)
         assert end_time == time(6, 0)
 
-    def test_parse_active_hours_none(self) -> None:
+    def test_parse_active_hours_none(self, tmp_workspace) -> None:
         """Test parsing None active hours (always active)."""
         config = HeartbeatConfig(active_hours=None)
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -94,37 +105,40 @@ class TestParseActiveHours:
 
         assert result is None
 
-    def test_parse_active_hours_invalid_format(self) -> None:
+    def test_parse_active_hours_invalid_format(self, tmp_workspace) -> None:
         """Test invalid active hours format raises ValueError."""
         config = HeartbeatConfig(active_hours="invalid-format")
 
         with pytest.raises(ValueError, match="Invalid active_hours format"):
             HeartbeatScheduler(
                 workspace_name="test",
+                workspace_path=tmp_workspace,
                 agent_factory=Mock(),
                 channels={},
                 config=config,
             )
 
-    def test_parse_active_hours_missing_colon(self) -> None:
+    def test_parse_active_hours_missing_colon(self, tmp_workspace) -> None:
         """Test active hours without colon raises ValueError."""
         config = HeartbeatConfig(active_hours="0800-2200")
 
         with pytest.raises(ValueError, match="Invalid active_hours format"):
             HeartbeatScheduler(
                 workspace_name="test",
+                workspace_path=tmp_workspace,
                 agent_factory=Mock(),
                 channels={},
                 config=config,
             )
 
-    def test_parse_active_hours_invalid_time(self) -> None:
+    def test_parse_active_hours_invalid_time(self, tmp_workspace) -> None:
         """Test active hours with invalid time values raises ValueError."""
         config = HeartbeatConfig(active_hours="25:00-30:00")
 
         with pytest.raises(ValueError, match="Invalid active_hours format"):
             HeartbeatScheduler(
                 workspace_name="test",
+                workspace_path=tmp_workspace,
                 agent_factory=Mock(),
                 channels={},
                 config=config,
@@ -134,14 +148,17 @@ class TestParseActiveHours:
 class TestIsWithinActiveHours:
     """Test active hours window checking logic."""
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    def test_is_within_active_hours_inside(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_is_within_active_hours_inside(self, mock_workspace_now: Any, tmp_workspace) -> None:
         """Test current time within active hours window returns True."""
-        mock_datetime.now.return_value.time.return_value = time(14, 30)
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(14, 30)
+        mock_workspace_now.return_value = mock_dt
 
         config = HeartbeatConfig(active_hours="08:00-22:00")
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -151,14 +168,17 @@ class TestIsWithinActiveHours:
 
         assert result is True
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    def test_is_within_active_hours_outside(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_is_within_active_hours_outside(self, mock_workspace_now: Any, tmp_workspace) -> None:
         """Test current time outside active hours window returns False."""
-        mock_datetime.now.return_value.time.return_value = time(2, 30)
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(2, 30)
+        mock_workspace_now.return_value = mock_dt
 
         config = HeartbeatConfig(active_hours="08:00-22:00")
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -168,14 +188,17 @@ class TestIsWithinActiveHours:
 
         assert result is False
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    def test_is_within_active_hours_boundary_start(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_is_within_active_hours_boundary_start(self, mock_workspace_now: Any, tmp_workspace) -> None:
         """Test current time at start boundary is included."""
-        mock_datetime.now.return_value.time.return_value = time(8, 0)
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(8, 0)
+        mock_workspace_now.return_value = mock_dt
 
         config = HeartbeatConfig(active_hours="08:00-22:00")
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -185,14 +208,17 @@ class TestIsWithinActiveHours:
 
         assert result is True
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    def test_is_within_active_hours_boundary_end(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_is_within_active_hours_boundary_end(self, mock_workspace_now: Any, tmp_workspace) -> None:
         """Test current time at end boundary is included."""
-        mock_datetime.now.return_value.time.return_value = time(22, 0)
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(22, 0)
+        mock_workspace_now.return_value = mock_dt
 
         config = HeartbeatConfig(active_hours="08:00-22:00")
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -202,14 +228,17 @@ class TestIsWithinActiveHours:
 
         assert result is True
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    def test_is_within_active_hours_midnight_span_before(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_is_within_active_hours_midnight_span_before(self, mock_workspace_now: Any, tmp_workspace) -> None:
         """Test midnight span with time before midnight."""
-        mock_datetime.now.return_value.time.return_value = time(23, 30)
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(23, 30)
+        mock_workspace_now.return_value = mock_dt
 
         config = HeartbeatConfig(active_hours="22:00-06:00")
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -219,14 +248,17 @@ class TestIsWithinActiveHours:
 
         assert result is True
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    def test_is_within_active_hours_midnight_span_after(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_is_within_active_hours_midnight_span_after(self, mock_workspace_now: Any, tmp_workspace) -> None:
         """Test midnight span with time after midnight."""
-        mock_datetime.now.return_value.time.return_value = time(3, 30)
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(3, 30)
+        mock_workspace_now.return_value = mock_dt
 
         config = HeartbeatConfig(active_hours="22:00-06:00")
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -236,14 +268,17 @@ class TestIsWithinActiveHours:
 
         assert result is True
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    def test_is_within_active_hours_midnight_span_outside(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_is_within_active_hours_midnight_span_outside(self, mock_workspace_now: Any, tmp_workspace) -> None:
         """Test midnight span with time outside window."""
-        mock_datetime.now.return_value.time.return_value = time(12, 0)
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(12, 0)
+        mock_workspace_now.return_value = mock_dt
 
         config = HeartbeatConfig(active_hours="22:00-06:00")
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -253,11 +288,12 @@ class TestIsWithinActiveHours:
 
         assert result is False
 
-    def test_is_within_active_hours_no_window(self) -> None:
+    def test_is_within_active_hours_no_window(self, tmp_workspace) -> None:
         """Test no active hours configured returns True (always active)."""
         config = HeartbeatConfig(active_hours=None)
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -266,16 +302,65 @@ class TestIsWithinActiveHours:
         result = scheduler._is_within_active_hours()
 
         assert result is True
+
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_is_within_active_hours_timezone_aware_inside(self, mock_workspace_now: Any, tmp_workspace) -> None:
+        """Test active hours check with America/Denver timezone - inside window."""
+        # Mock workspace_now to return 10:00 AM Mountain Time
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(10, 0)
+        mock_workspace_now.return_value = mock_dt
+
+        config = HeartbeatConfig(active_hours="09:00-17:00")
+        scheduler = HeartbeatScheduler(
+            workspace_name="test",
+            workspace_path=tmp_workspace,
+            agent_factory=Mock(),
+            channels={},
+            config=config,
+            timezone="America/Denver",
+        )
+
+        result = scheduler._is_within_active_hours()
+
+        assert result is True
+        # Verify workspace_now was called with the correct timezone
+        mock_workspace_now.assert_called_once_with("America/Denver")
+
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_is_within_active_hours_timezone_aware_outside(self, mock_workspace_now: Any, tmp_workspace) -> None:
+        """Test active hours check with America/Denver timezone - outside window."""
+        # Mock workspace_now to return 20:00 (8:00 PM) Mountain Time
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(20, 0)
+        mock_workspace_now.return_value = mock_dt
+
+        config = HeartbeatConfig(active_hours="09:00-17:00")
+        scheduler = HeartbeatScheduler(
+            workspace_name="test",
+            workspace_path=tmp_workspace,
+            agent_factory=Mock(),
+            channels={},
+            config=config,
+            timezone="America/Denver",
+        )
+
+        result = scheduler._is_within_active_hours()
+
+        assert result is False
+        # Verify workspace_now was called with the correct timezone
+        mock_workspace_now.assert_called_once_with("America/Denver")
 
 
 class TestIsHeartbeatOk:
     """Test heartbeat response validation logic."""
 
-    def test_is_heartbeat_ok_exact(self) -> None:
+    def test_is_heartbeat_ok_exact(self, tmp_workspace) -> None:
         """Test exact HEARTBEAT_OK response returns True."""
         config = HeartbeatConfig()
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -285,11 +370,12 @@ class TestIsHeartbeatOk:
 
         assert result is True
 
-    def test_is_heartbeat_ok_case_insensitive(self) -> None:
+    def test_is_heartbeat_ok_case_insensitive(self, tmp_workspace) -> None:
         """Test lowercase heartbeat_ok returns True."""
         config = HeartbeatConfig()
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -299,11 +385,12 @@ class TestIsHeartbeatOk:
 
         assert result is True
 
-    def test_is_heartbeat_ok_mixed_case(self) -> None:
+    def test_is_heartbeat_ok_mixed_case(self, tmp_workspace) -> None:
         """Test mixed case HeArTbEaT_oK returns True."""
         config = HeartbeatConfig()
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -313,11 +400,12 @@ class TestIsHeartbeatOk:
 
         assert result is True
 
-    def test_is_heartbeat_ok_embedded(self) -> None:
+    def test_is_heartbeat_ok_embedded(self, tmp_workspace) -> None:
         """Test HEARTBEAT_OK embedded in longer response returns True."""
         config = HeartbeatConfig()
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -329,11 +417,12 @@ class TestIsHeartbeatOk:
 
         assert result is True
 
-    def test_is_heartbeat_ok_negative(self) -> None:
+    def test_is_heartbeat_ok_negative(self, tmp_workspace) -> None:
         """Test response without HEARTBEAT_OK returns False."""
         config = HeartbeatConfig()
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -343,11 +432,12 @@ class TestIsHeartbeatOk:
 
         assert result is False
 
-    def test_is_heartbeat_ok_empty(self) -> None:
+    def test_is_heartbeat_ok_empty(self, tmp_workspace) -> None:
         """Test empty response returns False."""
         config = HeartbeatConfig()
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -357,11 +447,12 @@ class TestIsHeartbeatOk:
 
         assert result is False
 
-    def test_is_heartbeat_ok_partial_match(self) -> None:
+    def test_is_heartbeat_ok_partial_match(self, tmp_workspace) -> None:
         """Test partial match like 'HEARTBEAT' alone returns False."""
         config = HeartbeatConfig()
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -375,15 +466,16 @@ class TestIsHeartbeatOk:
 class TestBuildHeartbeatPrompt:
     """Test heartbeat prompt generation."""
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    def test_build_heartbeat_prompt_includes_timestamp(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_build_heartbeat_prompt_includes_timestamp(self, mock_workspace_now: Any, tmp_workspace) -> None:
         """Test generated prompt includes current timestamp."""
         fixed_time = datetime(2026, 2, 6, 14, 30, 0)
-        mock_datetime.now.return_value = fixed_time
+        mock_workspace_now.return_value = fixed_time
 
         config = HeartbeatConfig()
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -393,11 +485,12 @@ class TestBuildHeartbeatPrompt:
 
         assert "2026-02-06T14:30:00" in result
 
-    def test_build_heartbeat_prompt_content(self) -> None:
+    def test_build_heartbeat_prompt_content(self, tmp_workspace) -> None:
         """Test prompt contains expected content."""
         config = HeartbeatConfig()
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -408,13 +501,14 @@ class TestBuildHeartbeatPrompt:
         assert "[HEARTBEAT CHECK" in result
         assert "HEARTBEAT.md" in result
         assert "HEARTBEAT_OK" in result
-        assert "time-sensitive" in result
+        assert "Time-sensitive" in result
 
-    def test_build_heartbeat_prompt_matches_template(self) -> None:
+    def test_build_heartbeat_prompt_matches_template(self, tmp_workspace) -> None:
         """Test prompt uses HEARTBEAT_PROMPT template."""
         config = HeartbeatConfig()
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -423,14 +517,14 @@ class TestBuildHeartbeatPrompt:
         result = scheduler._build_heartbeat_prompt()
 
         # Should contain key sections from template
-        assert "Review your HEARTBEAT.md file" in result
+        assert "Check your HEARTBEAT.md file" in result
         assert "If nothing requires immediate attention" in result
 
 
 class TestHeartbeatSchedulerInitialization:
     """Test HeartbeatScheduler initialization."""
 
-    def test_initialization_stores_config(self) -> None:
+    def test_initialization_stores_config(self, tmp_workspace) -> None:
         """Test initialization stores configuration."""
         config = HeartbeatConfig(
             enabled=True,
@@ -442,6 +536,7 @@ class TestHeartbeatSchedulerInitialization:
 
         scheduler = HeartbeatScheduler(
             workspace_name="gilfoyle",
+            workspace_path=tmp_workspace,
             agent_factory=agent_factory,
             channels=channels,
             config=config,
@@ -454,12 +549,13 @@ class TestHeartbeatSchedulerInitialization:
         assert scheduler._scheduler is None
         assert scheduler._job is None
 
-    def test_initialization_parses_active_hours(self) -> None:
+    def test_initialization_parses_active_hours(self, tmp_workspace) -> None:
         """Test initialization parses active hours at init time."""
         config = HeartbeatConfig(active_hours="09:00-17:00")
 
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -475,11 +571,12 @@ class TestHeartbeatSchedulerInitialization:
 class TestHeartbeatSchedulerStart:
     """Test HeartbeatScheduler start behavior."""
 
-    async def test_start_disabled_config(self) -> None:
+    async def test_start_disabled_config(self, tmp_workspace) -> None:
         """Test start does nothing when heartbeat is disabled."""
         config = HeartbeatConfig(enabled=False)
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -491,7 +588,7 @@ class TestHeartbeatSchedulerStart:
         assert scheduler._job is None
 
     @patch("openpaw.heartbeat.scheduler.AsyncIOScheduler")
-    async def test_start_enabled_creates_scheduler(self, mock_scheduler_class: Any) -> None:
+    async def test_start_enabled_creates_scheduler(self, mock_scheduler_class: Any, tmp_workspace) -> None:
         """Test start creates AsyncIOScheduler when enabled."""
         mock_scheduler_instance = Mock()
         mock_scheduler_class.return_value = mock_scheduler_instance
@@ -499,6 +596,7 @@ class TestHeartbeatSchedulerStart:
         config = HeartbeatConfig(enabled=True, interval_minutes=10)
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -512,14 +610,18 @@ class TestHeartbeatSchedulerStart:
         assert scheduler._scheduler is mock_scheduler_instance
 
     @patch("openpaw.heartbeat.scheduler.AsyncIOScheduler")
-    async def test_start_configures_interval_trigger(self, mock_scheduler_class: Any) -> None:
+    async def test_start_configures_interval_trigger(self, mock_scheduler_class: Any, tmp_workspace) -> None:
         """Test start configures correct interval trigger."""
+        # Create HEARTBEAT.md to prevent skip
+        (tmp_workspace / "HEARTBEAT.md").write_text("# Heartbeat\nSome content here")
+
         mock_scheduler_instance = Mock()
         mock_scheduler_class.return_value = mock_scheduler_instance
 
         config = HeartbeatConfig(enabled=True, interval_minutes=15)
         scheduler = HeartbeatScheduler(
             workspace_name="gilfoyle",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -541,11 +643,12 @@ class TestHeartbeatSchedulerStart:
 class TestHeartbeatSchedulerStop:
     """Test HeartbeatScheduler stop behavior."""
 
-    async def test_stop_no_scheduler(self) -> None:
+    async def test_stop_no_scheduler(self, tmp_workspace) -> None:
         """Test stop does nothing when scheduler not started."""
         config = HeartbeatConfig()
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -554,7 +657,7 @@ class TestHeartbeatSchedulerStop:
         # Should not raise an exception
         await scheduler.stop()
 
-    async def test_stop_shutdown_scheduler(self) -> None:
+    async def test_stop_shutdown_scheduler(self, tmp_workspace) -> None:
         """Test stop shuts down running scheduler."""
         mock_scheduler = Mock()
         mock_scheduler.running = True
@@ -562,6 +665,7 @@ class TestHeartbeatSchedulerStop:
         config = HeartbeatConfig()
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -572,7 +676,7 @@ class TestHeartbeatSchedulerStop:
 
         mock_scheduler.shutdown.assert_called_once_with(wait=True)
 
-    async def test_stop_non_running_scheduler(self) -> None:
+    async def test_stop_non_running_scheduler(self, tmp_workspace) -> None:
         """Test stop does nothing if scheduler not running."""
         mock_scheduler = Mock()
         mock_scheduler.running = False
@@ -580,6 +684,7 @@ class TestHeartbeatSchedulerStop:
         config = HeartbeatConfig()
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=Mock(),
             channels={},
             config=config,
@@ -595,15 +700,18 @@ class TestHeartbeatSchedulerStop:
 class TestRunHeartbeat:
     """Test heartbeat execution logic."""
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    async def test_run_heartbeat_skips_outside_active_hours(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    async def test_run_heartbeat_skips_outside_active_hours(self, mock_workspace_now: Any, tmp_workspace) -> None:
         """Test heartbeat skipped when outside active hours."""
-        mock_datetime.now.return_value.time.return_value = time(2, 0)
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(2, 0)
+        mock_workspace_now.return_value = mock_dt
 
         mock_agent_factory = Mock()
         config = HeartbeatConfig(enabled=True, active_hours="08:00-22:00")
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=mock_agent_factory,
             channels={},
             config=config,
@@ -614,10 +722,15 @@ class TestRunHeartbeat:
         # Agent factory should not be called
         mock_agent_factory.assert_not_called()
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    async def test_run_heartbeat_executes_within_active_hours(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    async def test_run_heartbeat_executes_within_active_hours(self, mock_workspace_now: Any, tmp_workspace) -> None:
         """Test heartbeat executes when within active hours."""
-        mock_datetime.now.return_value.time.return_value = time(14, 0)
+        # Create HEARTBEAT.md to prevent skip
+        (tmp_workspace / "HEARTBEAT.md").write_text("# Heartbeat\nSome content here")
+
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(14, 0)
+        mock_workspace_now.return_value = mock_dt
 
         mock_agent_runner = AsyncMock()
         mock_agent_runner.run.return_value = "HEARTBEAT_OK"
@@ -630,6 +743,7 @@ class TestRunHeartbeat:
         )
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=mock_agent_factory,
             channels={},
             config=config,
@@ -641,8 +755,11 @@ class TestRunHeartbeat:
         mock_agent_factory.assert_called_once()
         mock_agent_runner.run.assert_called_once()
 
-    async def test_run_heartbeat_passes_prompt_to_agent(self) -> None:
+    async def test_run_heartbeat_passes_prompt_to_agent(self, tmp_workspace) -> None:
         """Test heartbeat passes generated prompt to agent."""
+        # Create HEARTBEAT.md to prevent skip
+        (tmp_workspace / "HEARTBEAT.md").write_text("# Heartbeat\nSome content here")
+
         mock_agent_runner = AsyncMock()
         mock_agent_runner.run.return_value = "HEARTBEAT_OK"
         mock_agent_factory = Mock(return_value=mock_agent_runner)
@@ -650,6 +767,7 @@ class TestRunHeartbeat:
         config = HeartbeatConfig(enabled=True, suppress_ok=True)
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=mock_agent_factory,
             channels={},
             config=config,
@@ -665,7 +783,7 @@ class TestRunHeartbeat:
         assert "[HEARTBEAT CHECK" in prompt
         assert "HEARTBEAT.md" in prompt
 
-    async def test_run_heartbeat_suppresses_ok_response(self) -> None:
+    async def test_run_heartbeat_suppresses_ok_response(self, tmp_workspace) -> None:
         """Test HEARTBEAT_OK response is suppressed from channel."""
         mock_agent_runner = AsyncMock()
         mock_agent_runner.run.return_value = "HEARTBEAT_OK"
@@ -681,6 +799,7 @@ class TestRunHeartbeat:
         )
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=mock_agent_factory,
             channels=channels,
             config=config,
@@ -691,8 +810,11 @@ class TestRunHeartbeat:
         # Channel send_message should not be called
         mock_channel.send_message.assert_not_called()
 
-    async def test_run_heartbeat_sends_non_ok_response(self) -> None:
+    async def test_run_heartbeat_sends_non_ok_response(self, tmp_workspace) -> None:
         """Test non-OK response is sent to channel."""
+        # Create HEARTBEAT.md to prevent skip
+        (tmp_workspace / "HEARTBEAT.md").write_text("# Heartbeat\nSome content here")
+
         response_text = "Found issues requiring attention"
         mock_agent_runner = AsyncMock()
         mock_agent_runner.run.return_value = response_text
@@ -711,6 +833,7 @@ class TestRunHeartbeat:
         )
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=mock_agent_factory,
             channels=channels,
             config=config,
@@ -725,8 +848,11 @@ class TestRunHeartbeat:
             content=response_text,
         )
 
-    async def test_run_heartbeat_sends_ok_when_not_suppressed(self) -> None:
+    async def test_run_heartbeat_sends_ok_when_not_suppressed(self, tmp_workspace) -> None:
         """Test HEARTBEAT_OK is sent when suppress_ok=False."""
+        # Create HEARTBEAT.md to prevent skip
+        (tmp_workspace / "HEARTBEAT.md").write_text("# Heartbeat\nSome content here")
+
         mock_agent_runner = AsyncMock()
         mock_agent_runner.run.return_value = "HEARTBEAT_OK"
         mock_agent_factory = Mock(return_value=mock_agent_runner)
@@ -744,6 +870,7 @@ class TestRunHeartbeat:
         )
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=mock_agent_factory,
             channels=channels,
             config=config,
@@ -757,7 +884,7 @@ class TestRunHeartbeat:
             content="HEARTBEAT_OK",
         )
 
-    async def test_run_heartbeat_logs_error_when_channel_not_found(self) -> None:
+    async def test_run_heartbeat_logs_error_when_channel_not_found(self, tmp_workspace) -> None:
         """Test error logged when target channel not found."""
         mock_agent_runner = AsyncMock()
         mock_agent_runner.run.return_value = "Important alert"
@@ -772,6 +899,7 @@ class TestRunHeartbeat:
         )
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=mock_agent_factory,
             channels=channels,
             config=config,
@@ -780,7 +908,7 @@ class TestRunHeartbeat:
         # Should not raise exception
         await scheduler._run_heartbeat()
 
-    async def test_run_heartbeat_warns_when_no_routing_config(self) -> None:
+    async def test_run_heartbeat_warns_when_no_routing_config(self, tmp_workspace) -> None:
         """Test warning when response generated but no routing configured."""
         mock_agent_runner = AsyncMock()
         mock_agent_runner.run.return_value = "Important message"
@@ -796,6 +924,7 @@ class TestRunHeartbeat:
         )
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=mock_agent_factory,
             channels=channels,
             config=config,
@@ -804,7 +933,7 @@ class TestRunHeartbeat:
         # Should not raise exception, just log warning
         await scheduler._run_heartbeat()
 
-    async def test_run_heartbeat_handles_agent_exception(self) -> None:
+    async def test_run_heartbeat_handles_agent_exception(self, tmp_workspace) -> None:
         """Test heartbeat handles agent execution exceptions gracefully."""
         mock_agent_runner = AsyncMock()
         mock_agent_runner.run.side_effect = Exception("Agent crashed")
@@ -813,6 +942,7 @@ class TestRunHeartbeat:
         config = HeartbeatConfig(enabled=True)
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=mock_agent_factory,
             channels={},
             config=config,
@@ -821,8 +951,11 @@ class TestRunHeartbeat:
         # Should not raise exception
         await scheduler._run_heartbeat()
 
-    async def test_run_heartbeat_no_active_hours_always_runs(self) -> None:
+    async def test_run_heartbeat_no_active_hours_always_runs(self, tmp_workspace) -> None:
         """Test heartbeat always runs when no active hours set."""
+        # Create HEARTBEAT.md to prevent skip
+        (tmp_workspace / "HEARTBEAT.md").write_text("# Heartbeat\nSome content here")
+
         mock_agent_runner = AsyncMock()
         mock_agent_runner.run.return_value = "HEARTBEAT_OK"
         mock_agent_factory = Mock(return_value=mock_agent_runner)
@@ -834,6 +967,7 @@ class TestRunHeartbeat:
         )
         scheduler = HeartbeatScheduler(
             workspace_name="test",
+            workspace_path=tmp_workspace,
             agent_factory=mock_agent_factory,
             channels={},
             config=config,
@@ -849,18 +983,18 @@ class TestRunHeartbeat:
 class TestHeartbeatPromptTemplate:
     """Test HEARTBEAT_PROMPT template constant."""
 
-    def test_prompt_template_has_timestamp_placeholder(self) -> None:
+    def test_prompt_template_has_timestamp_placeholder(self, tmp_workspace) -> None:
         """Test prompt template includes timestamp placeholder."""
         assert "{timestamp}" in HEARTBEAT_PROMPT
 
-    def test_prompt_template_has_key_instructions(self) -> None:
+    def test_prompt_template_has_key_instructions(self, tmp_workspace) -> None:
         """Test prompt template includes key instructions."""
         assert "HEARTBEAT.md" in HEARTBEAT_PROMPT
         assert "HEARTBEAT_OK" in HEARTBEAT_PROMPT
-        assert "time-sensitive" in HEARTBEAT_PROMPT
-        assert "pending tasks" in HEARTBEAT_PROMPT
+        assert "Time-sensitive" in HEARTBEAT_PROMPT
+        assert "pending" in HEARTBEAT_PROMPT
 
-    def test_prompt_template_can_be_formatted(self) -> None:
+    def test_prompt_template_can_be_formatted(self, tmp_workspace) -> None:
         """Test prompt template can be formatted with timestamp."""
         formatted = HEARTBEAT_PROMPT.format(timestamp="2026-02-06T14:30:00")
 

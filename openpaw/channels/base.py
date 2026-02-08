@@ -25,6 +25,7 @@ class Attachment:
         filename: Original filename if available.
         mime_type: MIME type of the attachment.
         metadata: Additional type-specific metadata.
+        saved_path: Relative path within workspace where file was persisted (set by FilePersistenceProcessor).
     """
 
     type: str
@@ -33,6 +34,7 @@ class Attachment:
     filename: str | None = None
     mime_type: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    saved_path: str | None = None
 
 
 @dataclass
@@ -117,6 +119,16 @@ class ChannelAdapter(ABC):
         """
         ...
 
+    async def register_commands(self, commands: list[Any]) -> None:
+        """Register available commands with the channel platform.
+
+        Override in implementations that support native command registration
+        (e.g., Telegram BotFather hints, Discord slash commands).
+
+        Default implementation is a no-op.
+        """
+        pass
+
     def build_session_key(self, *parts: str | int) -> str:
         """Build a session key from parts.
 
@@ -127,3 +139,27 @@ class ChannelAdapter(ABC):
             Session key string like 'channel:part1:part2'.
         """
         return f"{self.name}:" + ":".join(str(p) for p in parts)
+
+    async def send_file(
+        self,
+        session_key: str,
+        file_data: bytes,
+        filename: str,
+        mime_type: str | None = None,
+        caption: str | None = None,
+    ) -> None:
+        """Send a file to a channel session.
+
+        Args:
+            session_key: Target session (e.g., "telegram:123456").
+            file_data: Raw file bytes.
+            filename: Display filename for the file.
+            mime_type: Optional MIME type hint.
+            caption: Optional caption/message to accompany the file.
+
+        Raises:
+            NotImplementedError: If the channel doesn't support file sending.
+        """
+        raise NotImplementedError(
+            f"Channel '{type(self).__name__}' does not support file sending"
+        )
