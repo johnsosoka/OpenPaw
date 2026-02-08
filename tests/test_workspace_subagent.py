@@ -240,3 +240,77 @@ class TestAgentFactory:
                     factory_source = inspect.getsource(factory)
                     assert "middleware=[]" in factory_source
                     assert "checkpointer=None" in factory_source
+
+
+class TestQueueInjection:
+    """Test sub-agent result queue injection."""
+
+    @pytest.mark.asyncio
+    async def test_inject_system_event_creates_message(self) -> None:
+        """_inject_system_event creates a Message and submits to queue."""
+        from openpaw.channels.base import Message, MessageDirection
+        from openpaw.main import WorkspaceRunner
+        from openpaw.queue.lane import QueueMode
+
+        # Create a minimal workspace runner and mock the queue manager
+        runner = MagicMock(spec=WorkspaceRunner)
+        runner._queue_manager = AsyncMock()
+        runner._queue_manager.submit = AsyncMock()
+        runner.logger = MagicMock()
+
+        # Call the real implementation
+        from openpaw.main import WorkspaceRunner as RealRunner
+
+        await RealRunner._inject_system_event(
+            runner, session_key="telegram:12345", content="[SYSTEM] Test event"
+        )
+
+        # Verify submit was called
+        runner._queue_manager.submit.assert_called_once()
+        call_kwargs = runner._queue_manager.submit.call_args[1]
+
+        # Verify session_key and channel_name
+        assert call_kwargs["session_key"] == "telegram:12345"
+        assert call_kwargs["channel_name"] == "telegram"
+
+        # Verify mode is COLLECT
+        assert call_kwargs["mode"] == QueueMode.COLLECT
+
+        # Verify message structure
+        msg = call_kwargs["message"]
+        assert isinstance(msg, Message)
+        assert msg.session_key == "telegram:12345"
+        assert msg.user_id == "system"
+        assert msg.content == "[SYSTEM] Test event"
+        assert msg.direction == MessageDirection.INBOUND
+        assert msg.channel == "telegram"
+        assert msg.id.startswith("system-")
+
+    def test_subagent_runner_created_with_result_callback(self) -> None:
+        """SubAgentRunner is created with result_callback parameter."""
+        from openpaw.core.config import Config
+        from openpaw.main import WorkspaceRunner
+
+        # Create a mock workspace runner with minimal setup
+        with patch("openpaw.main.WorkspaceLoader") as mock_loader:
+            with patch("openpaw.main.BuiltinLoader") as mock_builtin:
+                with patch("openpaw.main.load_workspace_tools"):
+                    # Mock workspace
+                    mock_workspace = MagicMock()
+                    mock_workspace.path = Path("/tmp/workspace")
+                    mock_workspace.config = None
+                    mock_workspace.crons = []
+                    mock_loader.return_value.load.return_value = mock_workspace
+
+                    mock_builtin.return_value.load_tools.return_value = []
+                    mock_builtin.return_value.load_processors.return_value = []
+                    mock_builtin.return_value.get_loaded_tool_names.return_value = []
+
+                    with patch("openpaw.core.agent.create_agent"):
+                        with patch("openpaw.core.agent.AgentRunner._create_model"):
+                            config = Config(workspaces_path="/tmp")
+                            runner = WorkspaceRunner(config=config, workspace_name="test")
+
+                            # Verify _inject_system_event method exists
+                            assert hasattr(runner, "_inject_system_event")
+                            assert callable(runner._inject_system_event)

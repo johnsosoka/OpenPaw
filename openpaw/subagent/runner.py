@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 
 from openpaw.channels.base import ChannelAdapter
@@ -62,6 +62,7 @@ class SubAgentRunner:
         token_logger: TokenUsageLogger | None = None,
         workspace_name: str = "unknown",
         max_concurrent: int = 8,
+        result_callback: Callable[[str, str], Awaitable[None]] | None = None,
     ):
         """Initialize the sub-agent runner.
 
@@ -72,6 +73,8 @@ class SubAgentRunner:
             token_logger: Optional token usage logger for tracking invocations.
             workspace_name: Workspace name for logging context.
             max_concurrent: Maximum simultaneous sub-agents (default: 8).
+            result_callback: Optional callback for queue injection of results.
+                If provided, called with (session_key, content) instead of direct channel send.
         """
         self._agent_factory = agent_factory
         self._store = store
@@ -79,6 +82,7 @@ class SubAgentRunner:
         self._token_logger = token_logger
         self._workspace_name = workspace_name
         self._max_concurrent = max_concurrent
+        self._result_callback = result_callback
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._active_tasks: dict[str, asyncio.Task] = {}
 
@@ -257,6 +261,12 @@ class SubAgentRunner:
                 # Rebuild agent with filtered tools
                 runner._agent = runner._build_agent()
 
+                # Override agent's internal timeout to defer to SubAgentRunner's
+                # outer timeout. AgentRunner.run() catches TimeoutError internally
+                # and returns a string, which would be misclassified as success.
+                # By setting the inner timeout higher, only the outer fires.
+                runner.timeout_seconds = (request.timeout_minutes * 60) + 30
+
                 # Run the agent with timeout
                 try:
                     async with asyncio.timeout(request.timeout_minutes * 60):
@@ -278,6 +288,11 @@ class SubAgentRunner:
                     self._store.save_result(result)
 
                     logger.warning(f"Sub-agent {request.id} timed out")
+
+                    # Send timeout notification if requested
+                    if request.notify:
+                        await self._send_notification(request, result)
+
                     return
 
                 # Success: save result
@@ -355,6 +370,39 @@ class SubAgentRunner:
 
             logger.error(f"Sub-agent {request.id} failed: {e}", exc_info=True)
 
+    def _format_notification(self, request: SubAgentRequest, result: SubAgentResult) -> str:
+        """Format a notification message for sub-agent completion.
+
+        Args:
+            request: The original sub-agent request.
+            result: The execution result.
+
+        Returns:
+            Formatted notification content with [SYSTEM] prefix.
+        """
+        # Determine status and format message
+        if result.error:
+            # Check if it's a timeout error
+            if "timed out" in result.error.lower():
+                return (
+                    f"[SYSTEM] Sub-agent '{request.label}' timed out "
+                    f"after {request.timeout_minutes} minutes."
+                )
+            else:
+                return f"[SYSTEM] Sub-agent '{request.label}' failed.\nError: {result.error}"
+        else:
+            # Success case - truncate output if too long
+            output = result.output
+            if len(output) > 500:
+                output = output[:500]
+                return (
+                    f"[SYSTEM] Sub-agent '{request.label}' completed.\n\n"
+                    f"{output}\n\n"
+                    f"Use get_subagent_result(id=\"{request.id}\") to read the full output."
+                )
+            else:
+                return f"[SYSTEM] Sub-agent '{request.label}' completed.\n\n{output}"
+
     async def _send_notification(self, request: SubAgentRequest, result: SubAgentResult) -> None:
         """Send completion notification to the requesting session.
 
@@ -363,35 +411,31 @@ class SubAgentRunner:
             result: The execution result.
         """
         try:
-            # Parse channel from session_key (format: "channel:id")
-            parts = request.session_key.split(":", 1)
-            if len(parts) != 2:
-                logger.warning(
-                    f"Invalid session_key format for notification: {request.session_key}"
-                )
-                return
+            # Format the notification content
+            content = self._format_notification(request, result)
 
-            channel_name = parts[0]
-            channel = self._channels.get(channel_name)
-
-            if not channel:
-                logger.warning(f"Channel not found for notification: {channel_name}")
-                return
-
-            # Format result (truncate if too long)
-            output = result.output
-            if len(output) > 500:
-                output = output[:500] + "\n\n[Output truncated - use get_subagent_result to see full output]"
-
-            # Format notification message
-            if result.error:
-                message = f"[Sub-agent '{request.label}' failed]\nError: {result.error}"
+            # Use result callback if provided (queue injection)
+            if self._result_callback:
+                await self._result_callback(request.session_key, content)
+                logger.debug(f"Queued notification for sub-agent {request.id}")
             else:
-                message = f"[Sub-agent '{request.label}' completed]\n{output}"
+                # Fallback: direct channel send (backwards compatibility)
+                parts = request.session_key.split(":", 1)
+                if len(parts) != 2:
+                    logger.warning(
+                        f"Invalid session_key format for notification: {request.session_key}"
+                    )
+                    return
 
-            await channel.send_message(session_key=request.session_key, content=message)
+                channel_name = parts[0]
+                channel = self._channels.get(channel_name)
 
-            logger.debug(f"Sent notification for sub-agent {request.id}")
+                if not channel:
+                    logger.warning(f"Channel not found for notification: {channel_name}")
+                    return
+
+                await channel.send_message(session_key=request.session_key, content=content)
+                logger.debug(f"Sent notification for sub-agent {request.id}")
 
         except Exception as e:
             logger.warning(f"Failed to send notification for sub-agent {request.id}: {e}")

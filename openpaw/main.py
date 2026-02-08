@@ -5,6 +5,7 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import aiosqlite
 from dotenv import load_dotenv
@@ -15,7 +16,7 @@ from openpaw.approval.manager import ApprovalGateManager
 from openpaw.approval.middleware import ApprovalRequiredError, ApprovalToolMiddleware
 from openpaw.builtins.base import BaseBuiltinProcessor
 from openpaw.builtins.loader import BuiltinLoader
-from openpaw.channels.base import ChannelAdapter, Message
+from openpaw.channels.base import ChannelAdapter, Message, MessageDirection
 from openpaw.channels.factory import create_channel
 from openpaw.commands.base import CommandContext
 from openpaw.commands.handlers import get_framework_commands
@@ -845,6 +846,7 @@ class WorkspaceRunner:
             token_logger=self._token_logger,
             workspace_name=self.workspace_name,
             max_concurrent=8,  # Could come from config later
+            result_callback=self._inject_system_event,
         )
         # Connect SpawnTool to SubAgentRunner
         self._connect_spawn_tool_to_runner()
@@ -943,6 +945,51 @@ class WorkspaceRunner:
                 self.logger.debug("SpawnTool not loaded for this workspace")
         except Exception as e:
             self.logger.warning(f"Failed to connect SpawnTool to runner: {e}")
+
+    async def _inject_system_event(self, session_key: str, content: str) -> None:
+        """Inject a system event into the queue for agent processing.
+
+        This is called by SubAgentRunner to queue sub-agent completion notifications
+        so the main agent can respond naturally.
+
+        Args:
+            session_key: The session key for routing (format: "channel:identifier").
+            content: The system event content (pre-formatted with [SYSTEM] prefix).
+        """
+        # Validate session_key format
+        parts = session_key.split(":", 1)
+        if len(parts) != 2 or not parts[0]:
+            self.logger.error(f"Invalid session_key format for system event: {session_key}")
+            return
+
+        channel_name = parts[0]
+
+        try:
+            msg = Message(
+                id=f"system-{uuid4().hex[:8]}",
+                channel=channel_name,
+                session_key=session_key,
+                user_id="system",
+                content=content,
+                direction=MessageDirection.INBOUND,
+            )
+
+            # Submit to queue with COLLECT mode explicitly
+            # This prevents steering/interrupting active conversations
+            await self._queue_manager.submit(
+                session_key=session_key,
+                channel_name=channel_name,
+                message=msg,
+                mode=QueueMode.COLLECT,
+            )
+
+            self.logger.info(f"Injected system event into queue for session: {session_key}")
+
+        except Exception as e:
+            self.logger.error(
+                f"Failed to inject system event for {session_key}: {e}",
+                exc_info=True,
+            )
 
     def _connect_send_message_tool(self, channel: Any, session_key: str) -> None:
         """Connect send_message tool to active session context.

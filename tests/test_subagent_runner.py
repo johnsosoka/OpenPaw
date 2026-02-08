@@ -708,3 +708,334 @@ def test_subagent_excluded_tools_contains_expected_names():
     }
 
     assert SUBAGENT_EXCLUDED_TOOLS == expected_tools
+
+
+@pytest.mark.asyncio
+async def test_notification_uses_callback_when_provided(
+    agent_factory, mock_store, mock_channel, mock_token_logger
+):
+    """Test that when result_callback is provided, it's called instead of channel.send_message."""
+    # Create a mock callback
+    mock_callback = AsyncMock()
+
+    runner = SubAgentRunner(
+        agent_factory=agent_factory,
+        store=mock_store,
+        channels={"telegram": mock_channel},
+        token_logger=mock_token_logger,
+        workspace_name="test",
+        max_concurrent=2,
+        result_callback=mock_callback,
+    )
+
+    request = SubAgentRequest(
+        id="test-req",
+        task="Test task",
+        label="test-label",
+        status=SubAgentStatus.COMPLETED,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+        notify=True,
+    )
+
+    result = SubAgentResult(
+        request_id="test-req",
+        output="Test output",
+        token_count=100,
+        duration_ms=500,
+    )
+
+    # Send notification
+    await runner._send_notification(request, result)
+
+    # Verify callback was called
+    mock_callback.assert_called_once()
+    call_args = mock_callback.call_args
+    assert call_args[0][0] == "telegram:12345"  # session_key
+    assert "[SYSTEM]" in call_args[0][1]  # content has [SYSTEM] prefix
+    assert "test-label" in call_args[0][1]
+    assert "completed" in call_args[0][1]
+
+    # Verify channel.send_message was NOT called
+    mock_channel.send_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_notification_falls_back_to_channel_when_no_callback(
+    agent_factory, mock_store, mock_channel, mock_token_logger
+):
+    """Test that when result_callback is None, it falls back to channel.send_message."""
+    runner = SubAgentRunner(
+        agent_factory=agent_factory,
+        store=mock_store,
+        channels={"telegram": mock_channel},
+        token_logger=mock_token_logger,
+        workspace_name="test",
+        max_concurrent=2,
+        result_callback=None,  # No callback
+    )
+
+    request = SubAgentRequest(
+        id="test-req",
+        task="Test task",
+        label="test-label",
+        status=SubAgentStatus.COMPLETED,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+        notify=True,
+    )
+
+    result = SubAgentResult(
+        request_id="test-req",
+        output="Test output",
+        token_count=100,
+        duration_ms=500,
+    )
+
+    # Send notification
+    await runner._send_notification(request, result)
+
+    # Verify channel.send_message WAS called
+    mock_channel.send_message.assert_called_once()
+    call_args = mock_channel.send_message.call_args
+    assert call_args[1]["session_key"] == "telegram:12345"
+    assert "[SYSTEM]" in call_args[1]["content"]
+    assert "test-label" in call_args[1]["content"]
+    assert "completed" in call_args[1]["content"]
+
+
+def test_format_notification_success():
+    """Test that _format_notification formats success messages correctly."""
+    runner = SubAgentRunner(
+        agent_factory=lambda: Mock(),
+        store=Mock(),
+        channels={},
+        workspace_name="test",
+    )
+
+    request = SubAgentRequest(
+        id="test-req-123",
+        task="Test task",
+        label="research-x",
+        status=SubAgentStatus.COMPLETED,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+    )
+
+    result = SubAgentResult(
+        request_id="test-req-123",
+        output="Short output",
+        token_count=100,
+        duration_ms=500,
+    )
+
+    content = runner._format_notification(request, result)
+
+    assert content.startswith("[SYSTEM]")
+    assert "research-x" in content
+    assert "completed" in content
+    assert "Short output" in content
+
+
+def test_format_notification_success_truncated():
+    """Test that _format_notification truncates long output."""
+    runner = SubAgentRunner(
+        agent_factory=lambda: Mock(),
+        store=Mock(),
+        channels={},
+        workspace_name="test",
+    )
+
+    request = SubAgentRequest(
+        id="test-req-123",
+        task="Test task",
+        label="research-x",
+        status=SubAgentStatus.COMPLETED,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+    )
+
+    # Create very long output
+    long_output = "A" * 1000
+    result = SubAgentResult(
+        request_id="test-req-123",
+        output=long_output,
+        token_count=100,
+        duration_ms=500,
+    )
+
+    content = runner._format_notification(request, result)
+
+    assert content.startswith("[SYSTEM]")
+    assert "research-x" in content
+    assert "completed" in content
+    assert "get_subagent_result" in content
+    assert f'id="{request.id}"' in content
+    assert len(content) < len(long_output)  # Truncated
+
+
+def test_format_notification_failure():
+    """Test that _format_notification formats failure messages correctly."""
+    runner = SubAgentRunner(
+        agent_factory=lambda: Mock(),
+        store=Mock(),
+        channels={},
+        workspace_name="test",
+    )
+
+    request = SubAgentRequest(
+        id="test-req-123",
+        task="Test task",
+        label="research-x",
+        status=SubAgentStatus.FAILED,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+    )
+
+    result = SubAgentResult(
+        request_id="test-req-123",
+        output="",
+        error="Something went wrong",
+        duration_ms=500,
+    )
+
+    content = runner._format_notification(request, result)
+
+    assert content.startswith("[SYSTEM]")
+    assert "research-x" in content
+    assert "failed" in content
+    assert "Something went wrong" in content
+
+
+@pytest.mark.asyncio
+async def test_timeout_sends_notification_when_notify_true(
+    mock_store, mock_channel, mock_token_logger
+):
+    """Test that timeout sends notification when notify=True."""
+    # Create agent runner that hangs
+    mock_runner = Mock(spec=AgentRunner)
+
+    async def slow_run(message):
+        await asyncio.sleep(10)
+        return "Should not reach here"
+
+    mock_runner.run = slow_run
+    mock_runner.additional_tools = []
+    mock_runner._build_agent = Mock(return_value=Mock())
+    mock_runner._agent = Mock()
+    mock_runner.last_metrics = None
+    mock_runner.timeout_seconds = 300.0
+
+    mock_callback = AsyncMock()
+
+    runner = SubAgentRunner(
+        agent_factory=lambda: mock_runner,
+        store=mock_store,
+        channels={"telegram": mock_channel},
+        token_logger=mock_token_logger,
+        workspace_name="test",
+        max_concurrent=2,
+        result_callback=mock_callback,
+    )
+
+    request = SubAgentRequest(
+        id="test-req",
+        task="Test task",
+        label="timeout-test",
+        status=SubAgentStatus.RUNNING,
+        session_key="telegram:12345",
+        timeout_minutes=0.01,  # 0.6 seconds timeout
+        notify=True,
+    )
+
+    await runner._execute_subagent(request)
+
+    # Verify timeout notification was sent via callback
+    mock_callback.assert_called_once()
+    call_args = mock_callback.call_args
+    assert call_args[0][0] == "telegram:12345"
+    assert "timed out" in call_args[0][1]
+    assert "timeout-test" in call_args[0][1]
+
+
+@pytest.mark.asyncio
+async def test_timeout_override_sets_inner_timeout_higher(
+    mock_store, mock_channel, mock_token_logger
+):
+    """Test that _execute_subagent overrides runner.timeout_seconds to be higher than outer."""
+    captured_timeout = None
+
+    mock_runner = Mock(spec=AgentRunner)
+    mock_runner.timeout_seconds = 300.0  # Default workspace timeout
+
+    async def capture_run(message):
+        nonlocal captured_timeout
+        captured_timeout = mock_runner.timeout_seconds
+        await asyncio.sleep(0.01)
+        return "Test response"
+
+    mock_runner.run = capture_run
+    mock_runner.additional_tools = []
+    mock_runner._build_agent = Mock(return_value=Mock())
+    mock_runner._agent = Mock()
+    mock_runner.last_metrics = None
+
+    runner = SubAgentRunner(
+        agent_factory=lambda: mock_runner,
+        store=mock_store,
+        channels={"telegram": mock_channel},
+        token_logger=mock_token_logger,
+        workspace_name="test",
+        max_concurrent=2,
+    )
+
+    request = SubAgentRequest(
+        id="test-req",
+        task="Test task",
+        label="test-label",
+        status=SubAgentStatus.RUNNING,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+        notify=False,
+    )
+
+    await runner._execute_subagent(request)
+
+    # Verify the inner timeout was overridden to be higher than the outer
+    assert captured_timeout is not None
+    outer_timeout = request.timeout_minutes * 60  # 1800s
+    assert captured_timeout > outer_timeout
+    assert captured_timeout == outer_timeout + 30
+
+
+def test_format_notification_timeout():
+    """Test that _format_notification formats timeout messages correctly."""
+    runner = SubAgentRunner(
+        agent_factory=lambda: Mock(),
+        store=Mock(),
+        channels={},
+        workspace_name="test",
+    )
+
+    request = SubAgentRequest(
+        id="test-req-123",
+        task="Test task",
+        label="research-x",
+        status=SubAgentStatus.TIMED_OUT,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+    )
+
+    result = SubAgentResult(
+        request_id="test-req-123",
+        output="",
+        error="Sub-agent timed out after 30 minutes",
+        duration_ms=1800000,
+    )
+
+    content = runner._format_notification(request, result)
+
+    assert content.startswith("[SYSTEM]")
+    assert "research-x" in content
+    assert "timed out" in content
+    assert "30 minutes" in content
