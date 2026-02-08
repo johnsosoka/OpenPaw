@@ -5,19 +5,25 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+import aiosqlite
 from dotenv import load_dotenv
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from openpaw.builtins.base import BaseBuiltinProcessor
 from openpaw.builtins.loader import BuiltinLoader
-from openpaw.channels.base import Message
-from openpaw.channels.telegram import TelegramChannel
+from openpaw.channels.base import ChannelAdapter, Message
+from openpaw.channels.factory import create_channel
+from openpaw.commands.base import CommandContext
+from openpaw.commands.handlers import get_framework_commands
+from openpaw.commands.router import CommandRouter
 from openpaw.core.agent import AgentRunner
 from openpaw.core.config import Config, merge_configs
 from openpaw.core.logging import setup_workspace_logger
 from openpaw.heartbeat.scheduler import HeartbeatScheduler
+from openpaw.memory.archiver import ConversationArchiver
 from openpaw.queue.lane import LaneQueue, QueueItem, QueueMode
 from openpaw.queue.manager import QueueManager
+from openpaw.session.manager import SessionManager
 from openpaw.task.store import TaskStore
 from openpaw.workspace.loader import WorkspaceLoader
 from openpaw.workspace.tool_loader import load_workspace_tools
@@ -82,9 +88,25 @@ class WorkspaceRunner:
             default_drop_policy=queue_config.get("drop_policy", config.queue.drop_policy),
         )
 
-        # Checkpointer for multi-turn conversation memory
-        # InMemorySaver persists within session; use SqliteSaver for disk persistence
-        self._checkpointer = InMemorySaver()
+        # Checkpointer lifecycle managed in start()/stop()
+        # SQLite-backed persistence for durable conversations across restarts
+        self._db_path = self._workspace.path / ".openpaw" / "conversations.db"
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._db_conn: aiosqlite.Connection | None = None
+        self._checkpointer: Any | None = None  # Initialized in start()
+
+        # Initialize SessionManager for conversation tracking
+        self._session_manager = SessionManager(self._workspace.path)
+
+        # Initialize conversation archiver for persisting conversations
+        self._conversation_archiver = ConversationArchiver(
+            workspace_path=self._workspace.path,
+            workspace_name=self.workspace_name,
+        )
+
+        # Initialize command router and register framework commands
+        self._command_router = CommandRouter()
+        self._register_framework_commands()
 
         # Load builtins for this workspace
         workspace_builtins_config = None
@@ -145,7 +167,7 @@ class WorkspaceRunner:
             enabled_builtins=self._enabled_builtin_names,
         )
 
-        self._channels: dict[str, TelegramChannel] = {}
+        self._channels: dict[str, ChannelAdapter] = {}
         self._cron_scheduler: Any = None
         self._heartbeat_scheduler: HeartbeatScheduler | None = None
         self._queue_processor_task: asyncio.Task[None] | None = None
@@ -200,6 +222,14 @@ class WorkspaceRunner:
         # Merge and return
         return merge_configs(global_dict, workspace_dict)
 
+    def _register_framework_commands(self) -> None:
+        """Register all framework command handlers."""
+        for handler in get_framework_commands():
+            self._command_router.register(handler)
+        self.logger.info(
+            f"Registered {len(self._command_router.list_commands(include_hidden=True))} framework commands"
+        )
+
 
     def _cleanup_old_tasks(self) -> None:
         """Clean up old completed tasks from TaskStore on startup.
@@ -234,13 +264,8 @@ class WorkspaceRunner:
             self.logger.warning(f"Failed to cleanup TaskStore: {e}")
 
     async def _setup_channels(self) -> None:
-        """Initialize configured channels.
-
-        Each workspace MUST define its own channel configuration.
-        Raises an error if no channel is configured.
-        """
+        """Initialize configured channels via factory."""
         workspace_channel = self._merged_config.get("channel", {})
-
         if not workspace_channel:
             raise ValueError(
                 f"Workspace '{self.workspace_name}' must define channel configuration in agent.yaml"
@@ -248,48 +273,74 @@ class WorkspaceRunner:
 
         channel_type = workspace_channel.get("type", "telegram")
         token = workspace_channel.get("token")
-
         if not token:
             raise ValueError(
                 f"Workspace '{self.workspace_name}' must define channel.token in agent.yaml"
             )
 
-        if channel_type == "telegram":
-            allowed_users = workspace_channel.get("allowed_users", [])
-            allowed_groups = workspace_channel.get("allowed_groups", [])
-            allow_all = workspace_channel.get("allow_all", False)
+        channel = create_channel(channel_type, workspace_channel, self.workspace_name)
+        channel.on_message(self._handle_inbound_message)
+        self._channels[channel_type] = channel
+        await self._queue_manager.register_handler(channel_type, self._process_messages)
 
-            telegram = TelegramChannel(
-                token=token,
-                allowed_users=allowed_users,
-                allowed_groups=allowed_groups,
-                allow_all=allow_all,
-                workspace_name=self.workspace_name,
+        # Log security mode (channel-type agnostic logging)
+        allow_all = workspace_channel.get("allow_all", False)
+        allowed_users = workspace_channel.get("allowed_users", [])
+        allowed_groups = workspace_channel.get("allowed_groups", [])
+        if allow_all:
+            self.logger.warning(f"Workspace '{self.workspace_name}': allow_all=true (insecure mode)")
+        elif allowed_users or allowed_groups:
+            self.logger.info(
+                f"Workspace '{self.workspace_name}': Allowlist mode "
+                f"({len(allowed_users)} users, {len(allowed_groups)} groups)"
             )
-            telegram.on_message(self._handle_inbound_message)
-            self._channels["telegram"] = telegram
-            await self._queue_manager.register_handler("telegram", self._process_telegram_messages)
-
-            # Log security mode
-            if allow_all:
-                self.logger.warning(f"Workspace '{self.workspace_name}': allow_all=true (insecure mode)")
-            elif allowed_users or allowed_groups:
-                self.logger.info(
-                    f"Workspace '{self.workspace_name}': Allowlist mode "
-                    f"({len(allowed_users)} users, {len(allowed_groups)} groups)"
-                )
-            else:
-                self.logger.warning(
-                    f"Workspace '{self.workspace_name}': Empty allowlist - all requests will be denied"
-                )
-
-            self.logger.info(f"Initialized Telegram channel for workspace: {self.workspace_name}")
         else:
-            raise ValueError(f"Unsupported channel type: {channel_type}")
+            self.logger.warning(
+                f"Workspace '{self.workspace_name}': Empty allowlist - all requests will be denied"
+            )
+
+        self.logger.info(f"Initialized {channel_type} channel for workspace: {self.workspace_name}")
+
+    def _build_command_context(self, message: Message) -> CommandContext:
+        """Build command execution context for the current message.
+
+        Args:
+            message: The incoming message that triggered the command.
+
+        Returns:
+            CommandContext populated with current runtime state.
+        """
+        channel = self._channels.get(message.channel)
+        if not channel:
+            raise RuntimeError(f"No channel found for message.channel: {message.channel}")
+        return CommandContext(
+            channel=channel,
+            session_manager=self._session_manager,
+            checkpointer=self._checkpointer,
+            agent_runner=self._agent_runner,
+            workspace_name=self.workspace_name,
+            workspace_path=self._workspace.path,
+            queue_manager=self._queue_manager,
+            command_router=self._command_router,
+            conversation_archiver=self._conversation_archiver,
+        )
 
     async def _handle_inbound_message(self, message: Message) -> None:
         """Handle an inbound message from any channel."""
-        # Process through inbound processors (e.g., Whisper transcription)
+        # Check for framework commands BEFORE processors modify content
+        # (TimestampProcessor prepends [Current time: ...] which breaks is_command)
+        if message.is_command:
+            context = self._build_command_context(message)
+            command_result = await self._command_router.route(message, context)
+            if command_result and command_result.handled:
+                if command_result.response:
+                    channel = self._channels.get(message.channel)
+                    if channel:
+                        await channel.send_message(message.session_key, command_result.response)
+                return
+            # Unknown command — fall through to processors and queue
+
+        # Process through inbound processors (e.g., Whisper transcription, timestamps)
         processed_message = message
         for processor in self._processors:
             try:
@@ -304,49 +355,18 @@ class WorkspaceRunner:
         content_preview = processed_message.content[:50] if processed_message.content else "(empty)"
         self.logger.info(f"Received message from {processed_message.channel}: {content_preview}...")
 
-        if processed_message.is_command:
-            command, args = processed_message.parse_command()
-            if command == "queue":
-                await self._handle_queue_command(processed_message, args)
-                return
-
         await self._queue_manager.submit(
             session_key=processed_message.session_key,
             channel_name=processed_message.channel,
             message=processed_message,
         )
 
-    async def _handle_queue_command(self, message: Message, args: str) -> None:
-        """Handle /queue command to set queue mode."""
-        mode_str = args.strip().lower()
-        mode_map = {
-            "collect": QueueMode.COLLECT,
-            "steer": QueueMode.STEER,
-            "followup": QueueMode.FOLLOWUP,
-            "interrupt": QueueMode.INTERRUPT,
-            "default": QueueMode.COLLECT,
-            "reset": QueueMode.COLLECT,
-        }
-
-        mode = mode_map.get(mode_str)
-        if mode:
-            await self._queue_manager.set_session_mode(message.session_key, mode)
-            channel = self._channels.get(message.channel)
-            if channel:
-                await channel.send_message(message.session_key, f"Queue mode set to: {mode.value}")
-        else:
-            channel = self._channels.get(message.channel)
-            if channel:
-                await channel.send_message(
-                    message.session_key,
-                    f"Unknown mode: {mode_str}. Valid: collect, steer, followup, interrupt, default",
-                )
-
-    async def _process_telegram_messages(self, session_key: str, messages: list[Message]) -> None:
-        """Process collected messages for a Telegram session with followup support."""
+    async def _process_messages(self, session_key: str, messages: list[Message]) -> None:
+        """Process collected messages for a session with followup support."""
         combined_content = "\n".join(m.content for m in messages)
-        thread_id = session_key
-        channel = self._channels.get("telegram")
+        thread_id = self._session_manager.get_thread_id(session_key)
+        channel_name = session_key.split(":")[0]
+        channel = self._channels.get(channel_name)
         followup_depth = 0
         max_followup_depth = 5
 
@@ -369,6 +389,7 @@ class WorkspaceRunner:
                 if channel:
                     if response and response.strip():
                         await channel.send_message(session_key, response)
+                        self._session_manager.increment_message_count(session_key)
                         await self._send_pending_audio(channel, session_key)
                     else:
                         self.logger.warning(f"Agent produced empty response for {session_key}, sending fallback")
@@ -415,8 +436,11 @@ class WorkspaceRunner:
         if followup_tool:
             followup_tool.reset()
 
-    async def _send_pending_audio(self, channel: TelegramChannel, session_key: str) -> None:
+    async def _send_pending_audio(self, channel: ChannelAdapter, session_key: str) -> None:
         """Check for and send any pending TTS audio."""
+        if not hasattr(channel, "send_audio"):
+            return
+
         try:
             from openpaw.builtins.tools.elevenlabs_tts import ElevenLabsTTSTool
 
@@ -468,6 +492,13 @@ class WorkspaceRunner:
     async def start(self) -> None:
         """Start workspace runner."""
         self.logger.info(f"Starting workspace runner: {self.workspace_name}")
+
+        # Initialize SQLite checkpointer for durable conversations
+        self._db_conn = await aiosqlite.connect(str(self._db_path))
+        self._checkpointer = AsyncSqliteSaver(self._db_conn)
+        await self._checkpointer.setup()
+        self._agent_runner.update_checkpointer(self._checkpointer)
+        self.logger.info(f"Initialized SQLite checkpointer: {self._db_path}")
 
         await self._setup_channels()
 
@@ -618,6 +649,42 @@ class WorkspaceRunner:
         except Exception as e:
             self.logger.error(f"Failed to start heartbeat scheduler: {e}", exc_info=True)
 
+    async def _archive_active_conversations(self) -> None:
+        """Archive all active conversations on shutdown.
+
+        Archives each active session's conversation to markdown + JSON files.
+        Errors are logged but don't prevent clean shutdown.
+        """
+        if not self._checkpointer or not hasattr(self, '_conversation_archiver'):
+            return
+
+        sessions = self._session_manager.list_sessions()
+        if not sessions:
+            self.logger.debug("No active sessions to archive on shutdown")
+            return
+
+        archived_count = 0
+        for session_key, state in sessions.items():
+            try:
+                thread_id = f"{session_key}:{state.conversation_id}"
+                archive = await self._conversation_archiver.archive(
+                    checkpointer=self._checkpointer,
+                    thread_id=thread_id,
+                    session_key=session_key,
+                    conversation_id=state.conversation_id,
+                    tags=["shutdown"],
+                )
+                if archive:
+                    archived_count += 1
+                    self.logger.debug(
+                        f"Archived conversation {state.conversation_id} ({archive.message_count} messages)"
+                    )
+            except Exception as e:
+                self.logger.warning(f"Failed to archive conversation {state.conversation_id}: {e}", exc_info=True)
+
+        if archived_count > 0:
+            self.logger.info(f"Archived {archived_count} conversation(s) on shutdown")
+
     async def stop(self) -> None:
         """Stop workspace runner gracefully."""
         self.logger.info(f"Stopping workspace runner: {self.workspace_name}")
@@ -645,5 +712,14 @@ class WorkspaceRunner:
         for name, channel in self._channels.items():
             await channel.stop()
             self.logger.info(f"Stopped channel: {name}")
+
+        # Archive all active conversations before closing DB
+        await self._archive_active_conversations()
+
+        # Close SQLite checkpointer connection
+        if self._db_conn:
+            await self._db_conn.close()
+            self._db_conn = None
+            self.logger.info("Closed checkpointer database connection")
 
         self.logger.info(f"Workspace runner '{self.workspace_name}' stopped")

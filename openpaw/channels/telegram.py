@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
 from openpaw.channels.base import Attachment, ChannelAdapter, Message, MessageDirection
 
@@ -59,11 +59,9 @@ class TelegramChannel(ChannelAdapter):
         """Start the Telegram bot."""
         self._app = Application.builder().token(self.token).build()
 
-        self._app.add_handler(CommandHandler("start", self._handle_start))
-        self._app.add_handler(CommandHandler("help", self._handle_help))
-        self._app.add_handler(CommandHandler("queue", self._handle_queue_command))
-        self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message))
+        # Route all messages through the unified callback
         self._app.add_handler(MessageHandler(filters.COMMAND, self._handle_command))
+        self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message))
         self._app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._handle_voice_message))
 
         await self._app.initialize()
@@ -111,6 +109,9 @@ class TelegramChannel(ChannelAdapter):
         sent = None
         for chunk in chunks:
             sent = await self._app.bot.send_message(chat_id=chat_id, text=chunk, **kwargs)
+
+        if not sent:
+            raise RuntimeError("Failed to send message: no chunks were sent")
 
         return Message(
             id=str(sent.message_id),
@@ -303,46 +304,6 @@ class TelegramChannel(ChannelAdapter):
         """Handle incoming commands."""
         if not self._is_allowed(update):
             await self._send_unauthorized_response(update)
-            return
-
-        message = self._to_message(update)
-        if message and self._message_callback:
-            await self._message_callback(message)
-
-    async def _handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /start command."""
-        if not self._is_allowed(update):
-            await self._send_unauthorized_response(update)
-            return
-
-        if update.message:
-            await update.message.reply_text(
-                "OpenPaw agent ready. Send me a message to begin.\n\n"
-                "Commands:\n"
-                "/help - Show this help\n"
-                "/queue <mode> - Set queue mode (collect, steer, followup)"
-            )
-
-    async def _handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /help command."""
-        if not self._is_allowed(update):
-            return
-
-        if update.message:
-            await update.message.reply_text(
-                "OpenPaw Commands:\n\n"
-                "/start - Initialize the bot\n"
-                "/help - Show this help\n"
-                "/queue <mode> - Set queue mode\n"
-                "  - collect: Coalesce messages (default)\n"
-                "  - steer: Inject immediately\n"
-                "  - followup: Queue for next turn\n"
-                "\nJust send a message to chat with the agent."
-            )
-
-    async def _handle_queue_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /queue command for setting queue mode."""
-        if not self._is_allowed(update):
             return
 
         message = self._to_message(update)

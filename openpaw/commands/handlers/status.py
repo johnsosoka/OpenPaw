@@ -1,0 +1,62 @@
+"""Status command handler."""
+
+from typing import TYPE_CHECKING
+
+from openpaw.commands.base import CommandDefinition, CommandHandler, CommandResult
+from openpaw.task.store import TaskStore
+
+if TYPE_CHECKING:
+    from openpaw.channels.base import Message
+    from openpaw.commands.base import CommandContext
+
+
+class StatusCommand(CommandHandler):
+    """Display workspace status information."""
+
+    @property
+    def definition(self) -> CommandDefinition:
+        """Command metadata."""
+        return CommandDefinition(
+            name="status",
+            description="Show workspace status",
+        )
+
+    async def handle(
+        self,
+        message: "Message",
+        args: str,
+        context: "CommandContext",
+    ) -> CommandResult:
+        """Execute the status command.
+
+        Args:
+            message: Incoming message.
+            args: Command arguments (unused).
+            context: Command execution context.
+
+        Returns:
+            CommandResult with formatted status information.
+        """
+        lines = [f"Workspace: {context.workspace_name}"]
+        lines.append(f"Model: {context.agent_runner.model_id}")
+
+        # Session info
+        state = context.session_manager.get_state(message.session_key)
+        if state:
+            lines.append(f"Conversation: {state.conversation_id}")
+            lines.append(f"Messages: {state.message_count}")
+
+        # Task info (if available)
+        try:
+            task_store = TaskStore(context.workspace_path)
+            tasks = task_store.list()
+            if tasks:
+                pending = sum(1 for t in tasks if t.status == "pending")
+                in_progress = sum(1 for t in tasks if t.status == "in_progress")
+                completed = sum(1 for t in tasks if t.status == "completed")
+                lines.append(f"Tasks: {pending} pending, {in_progress} in progress, {completed} completed")
+        except Exception:
+            # Task system might not be available, skip
+            pass
+
+        return CommandResult(response="\n".join(lines))

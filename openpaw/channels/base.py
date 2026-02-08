@@ -117,6 +117,16 @@ class ChannelAdapter(ABC):
         """
         ...
 
+    async def register_commands(self, commands: list[Any]) -> None:
+        """Register available commands with the channel platform.
+
+        Override in implementations that support native command registration
+        (e.g., Telegram BotFather hints, Discord slash commands).
+
+        Default implementation is a no-op.
+        """
+        pass
+
     def build_session_key(self, *parts: str | int) -> str:
         """Build a session key from parts.
 

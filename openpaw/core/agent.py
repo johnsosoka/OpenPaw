@@ -107,6 +107,18 @@ class AgentRunner:
 
         self._agent = self._build_agent()
 
+    def update_checkpointer(self, checkpointer: Any) -> None:
+        """Update the checkpointer and rebuild the agent graph.
+
+        Used for deferred initialization when checkpointer requires async setup.
+
+        Args:
+            checkpointer: New checkpointer instance (e.g., AsyncSqliteSaver).
+        """
+        self.checkpointer = checkpointer
+        self._agent = self._build_agent()
+        logger.info(f"Updated checkpointer for workspace: {self.workspace.name}")
+
     def _validate_tool_names(self, tools: list[Any]) -> None:
         """Validate tool names comply with Bedrock requirements.
 

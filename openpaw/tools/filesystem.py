@@ -62,6 +62,13 @@ class FilesystemTools:
                 f"Home directory expansion (~) not allowed in sandbox. Got: {path}"
             )
 
+        # Reject framework internal directory
+        if any(part == ".openpaw" for part in Path(path).parts):
+            raise ValueError(
+                "Access to .openpaw/ directory is not allowed. "
+                "This directory contains framework internals."
+            )
+
         # Resolve path relative to workspace root
         full_path = (self.root / path).resolve()
 

@@ -59,7 +59,7 @@ Each workspace is fully isolated with its own channels, queue, agent runner, and
 
 **`openpaw/orchestrator.py`** - `OpenPawOrchestrator` manages multiple `WorkspaceRunner` instances. Handles concurrent startup/shutdown and workspace discovery.
 
-**`openpaw/main.py`** - `WorkspaceRunner` manages a single workspace: loads workspace config, merges with global config, initializes queue system, sets up channels, schedules crons, and runs the message loop.
+**`openpaw/main.py`** - `WorkspaceRunner` manages a single workspace: loads workspace config, merges with global config, initializes queue system, sets up channels via factory, manages `AsyncSqliteSaver` lifecycle, wires command routing, schedules crons, and runs the message loop.
 
 **`openpaw/core/agent.py`** - `AgentRunner` wraps LangGraph's `create_react_agent()`. It stitches workspace markdown files into a system prompt via `init_chat_model()` for multi-provider support, and configures sandboxed filesystem tools for workspace access.
 
@@ -72,6 +72,16 @@ Each workspace is fully isolated with its own channels, queue, agent runner, and
 **`openpaw/queue/lane.py`** - Lane-based FIFO queue with configurable concurrency per lane (main, subagent, cron). Supports OpenClaw-style queue modes: `collect`, `steer`, `followup`, `interrupt`.
 
 **`openpaw/channels/telegram.py`** - Telegram bot adapter using `python-telegram-bot`. Converts platform messages to unified `Message` format, handles allowlisting, and supports voice/audio messages.
+
+**`openpaw/channels/factory.py`** - Channel factory. Decouples `WorkspaceRunner` from concrete channel types via `create_channel(channel_type, config, workspace_name)`. Currently supports `telegram`; new providers register here.
+
+**`openpaw/session/manager.py`** - `SessionManager` for tracking conversation threads per session. Thread-safe JSON persistence at `{workspace}/.openpaw/sessions.json`. Provides `get_thread_id()`, `new_conversation()`, `get_state()`, `increment_message_count()`.
+
+**`openpaw/commands/`** - Framework command system. `CommandHandler` ABC + `CommandRouter` registry + `CommandContext` for runtime dependencies. Commands are routed BEFORE inbound processors to avoid content modification breaking `is_command` detection.
+
+**`openpaw/commands/handlers/`** - Built-in command handlers: `/start`, `/new`, `/compact`, `/help`, `/queue`, `/status`. See "Command System" section.
+
+**`openpaw/memory/archiver.py`** - `ConversationArchiver` for exporting conversations from the LangGraph checkpointer. Produces dual-format output: markdown (human-readable) + JSON sidecar (machine-readable) at `{workspace}/memory/conversations/`.
 
 **`openpaw/builtins/`** - Optional capabilities (tools and processors) conditionally loaded based on API key availability. See "Builtins System" section.
 
@@ -101,6 +111,13 @@ agent_workspaces/<name>/
 ├── HEARTBEAT.md  # Current state, session notes
 ├── agent.yaml    # Optional per-workspace configuration (model, channel, queue)
 ├── .env          # Workspace-specific environment variables (auto-loaded)
+├── .openpaw/     # Framework internals (protected from agent access)
+│   ├── conversations.db  # AsyncSqliteSaver checkpoint database
+│   └── sessions.json     # Session/conversation thread state
+├── memory/
+│   └── conversations/    # Archived conversation exports
+│       ├── conv_*.md     # Markdown archives (human-readable)
+│       └── conv_*.json   # JSON sidecars (machine-readable)
 ├── crons/        # Scheduled task definitions
 │   └── *.yaml    # Individual cron job configurations
 ├── skills/       # LangChain skill directories (SKILL.md format)
@@ -272,7 +289,7 @@ heartbeat:
 
 Agents have sandboxed filesystem access to their workspace directory via `FilesystemTools` (`openpaw/tools/filesystem.py`). Available operations: `ls`, `read_file`, `write_file`, `overwrite_file`, `edit_file`, `glob_files`, `grep_files`. Path traversal protection via resolve + prefix check.
 
-Access is restricted to the workspace root — agents cannot read/write outside their directory. Agents are encouraged to organize their workspace (subdirectories, notes, state files) for continuity across conversations.
+Access is restricted to the workspace root — agents cannot read/write outside their directory. The `.openpaw/` directory is additionally protected; agents cannot read or write framework internals (checkpoint DB, session state). Agents are encouraged to organize their workspace (subdirectories, notes, state files) for continuity across conversations.
 
 ### Workspace Tools
 
@@ -383,7 +400,7 @@ builtins:
 ### Framework Orientation Prompt
 
 Agents automatically receive a dynamic system prompt section (`<framework>`) explaining the OpenPaw framework philosophy. Sections are conditionally included based on enabled builtins:
-- **Always**: Workspace persistence, self-organization encouragement
+- **Always**: Workspace persistence, self-organization encouragement, conversation memory
 - **Heartbeat System**: If HEARTBEAT.md has content — heartbeat protocol, HEARTBEAT_OK convention
 - **Task Management**: If `task_tracker` enabled — TASKS.yaml usage, cross-session continuity
 - **Self-Continuation**: If `followup` enabled — multi-step workflow chaining
@@ -392,7 +409,47 @@ Agents automatically receive a dynamic system prompt section (`<framework>`) exp
 
 This explains HOW the agent exists in the framework (philosophy), not WHAT tools are available (LangChain handles that).
 
-### Memory & Summarization
+### Command System
 
-- `InMemorySaver` checkpointer enables multi-turn conversation memory (per session, lost on restart)
-- For persistent storage across restarts, swap to `SqliteSaver`
+Framework commands are handled by `CommandRouter` before messages reach the agent. Commands bypass the inbound processor pipeline to avoid content modification (e.g., `TimestampProcessor`) breaking detection.
+
+**Built-in Commands**:
+- `/start` - Welcome message (hidden from `/help`, for Telegram onboarding)
+- `/new` - Archive current conversation and start fresh (bypasses queue)
+- `/compact` - Summarize current conversation, archive it, start new with summary injected (bypasses queue)
+- `/help` - List available commands with descriptions
+- `/queue <mode>` - Change queue mode (`collect`, `steer`, `followup`, `interrupt`)
+- `/status` - Show workspace info: model, conversation stats, active tasks
+
+**Adding Commands**: Extend `CommandHandler` ABC, implement `definition` property and `handle()` method, register in `get_framework_commands()`.
+
+**Command Flow**: `Channel._handle_command()` → `WorkspaceRunner._handle_inbound_message()` → `CommandRouter.route()` → `CommandHandler.handle()` → `CommandResult`
+
+### Channel Abstraction
+
+Channels are created via the factory pattern in `openpaw/channels/factory.py`. `WorkspaceRunner` is fully decoupled from concrete channel types.
+
+```python
+# Adding a new channel provider:
+# 1. Create adapter extending ChannelAdapter in openpaw/channels/
+# 2. Register in create_channel() factory
+# 3. Use channel type string in workspace config
+```
+
+Channels register bot commands (e.g., Telegram's command menu) via `register_commands()` using the command router's definition list.
+
+### Conversation Persistence
+
+Conversations persist across restarts via `AsyncSqliteSaver` (from `langgraph-checkpoint-sqlite`).
+
+**Lifecycle**:
+1. `WorkspaceRunner.start()` opens `aiosqlite` connection, creates `AsyncSqliteSaver`, calls `setup()`, rebuilds agent with checkpointer
+2. Messages are routed with thread ID `"{session_key}:{conversation_id}"` (e.g., `telegram:123456:conv_2026-02-07T14-30-00-123456`)
+3. `/new` and `/compact` rotate to new conversation IDs while archiving the old
+4. `WorkspaceRunner.stop()` archives all active conversations, then closes the DB connection
+
+**SessionManager**: Tracks which conversation each session is in. Thread-safe, persists to `.openpaw/sessions.json`. Conversation IDs use format `conv_{ISO_timestamp_with_microseconds}`.
+
+**ConversationArchiver**: On `/new`, `/compact`, or shutdown, exports the conversation from the checkpointer to `memory/conversations/` as markdown + JSON. Agents can reference archived conversations for long-term context.
+
+**Storage**: All framework state lives in `{workspace}/.openpaw/` (protected from agent filesystem access). Archives go to `{workspace}/memory/conversations/` (readable by agents).

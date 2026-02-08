@@ -139,6 +139,16 @@ class AgentWorkspace:
                 "happen at a specific time or on a regular interval."
             )
 
+        # Conversation memory is always available (core feature, not a builtin)
+        sections.append(
+            "\n\n## Conversation Memory\n\n"
+            "Your conversations are automatically saved to disk and persist across restarts. "
+            "When you or the user starts a new conversation (via /new), the previous conversation "
+            "is archived in memory/conversations/ as both markdown and JSON files.\n\n"
+            "You can read these archives with your filesystem tools to reference past interactions. "
+            "Use /new to start a fresh conversation when the current topic is complete."
+        )
+
         return "".join(sections)
 
 
