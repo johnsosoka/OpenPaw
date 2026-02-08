@@ -73,6 +73,20 @@ Each workspace is fully isolated with its own channels, queue, agent runner, and
 
 **`openpaw/queue/lane.py`** - Lane-based FIFO queue with configurable concurrency per lane (main, subagent, cron). Supports OpenClaw-style queue modes: `collect`, `steer`, `followup`, `interrupt`.
 
+**`openpaw/core/tool_middleware.py`** - `QueueAwareToolMiddleware` wraps tool calls to inject pending messages (steer mode) or abort execution (interrupt mode) when users send new messages during agent runs. Provides responsive agent behavior via queue awareness.
+
+**`openpaw/subagent/store.py`** - `SubAgentStore` for YAML-based persistence of sub-agent requests and results at `.openpaw/subagents.yaml`. Thread-safe with status lifecycle tracking (pending → running → completed/failed/cancelled/timed_out).
+
+**`openpaw/subagent/runner.py`** - `SubAgentRunner` manages spawned background agents with concurrency control (default: 8 concurrent). Creates fresh AgentRunner instances with filtered tools (no recursion, no unsolicited messaging).
+
+**`openpaw/builtins/tools/spawn.py`** - `SpawnToolBuiltin` provides `spawn_agent`, `list_subagents`, `get_subagent_result`, `cancel_subagent` tools for concurrent task execution.
+
+**`openpaw/approval/config.py`** - `ApprovalGatesConfig` Pydantic models for per-tool approval requirements, timeout behavior, and default action (approve/deny).
+
+**`openpaw/approval/manager.py`** - `ApprovalGateManager` state machine for pending approval requests. Manages lifecycle: create → wait → resolve → cleanup, with automatic timeout handling.
+
+**`openpaw/approval/middleware.py`** - `ApprovalToolMiddleware` intercepts tool calls requiring user authorization. Raises `ApprovalRequiredError` to pause execution, sends UI to user, and resumes on approval.
+
 **`openpaw/channels/telegram.py`** - Telegram bot adapter using `python-telegram-bot`. Converts platform messages to unified `Message` format, handles allowlisting, and supports voice/audio messages, documents, and photo uploads.
 
 **`openpaw/channels/factory.py`** - Channel factory. Decouples `WorkspaceRunner` from concrete channel types via `create_channel(channel_type, config, workspace_name)`. Currently supports `telegram`; new providers register here.
@@ -126,7 +140,8 @@ agent_workspaces/<name>/
 ├── .openpaw/     # Framework internals (protected from agent access)
 │   ├── conversations.db  # AsyncSqliteSaver checkpoint database
 │   ├── sessions.json     # Session/conversation thread state
-│   └── token_usage.jsonl # Token usage metrics (append-only)
+│   ├── token_usage.jsonl # Token usage metrics (append-only)
+│   └── subagents.yaml    # Sub-agent requests and results
 ├── uploads/      # User-uploaded files (from FilePersistenceProcessor)
 │   └── {YYYY-MM-DD}/  # Date-partitioned file storage
 │       ├── report.pdf        # Original uploaded file
@@ -331,6 +346,92 @@ builtins:
 - Agent calls `schedule_at` with timestamp 10 minutes from now
 - Task fires, agent sends reminder to user's chat
 
+### Sub-Agent Spawning
+
+Agents can spawn background workers for concurrent task execution using the `spawn` builtin. Sub-agents run in isolated contexts with filtered tools to prevent recursion and unsolicited messaging.
+
+**Available Tools**:
+- `spawn_agent` - Spawn a background sub-agent with a task prompt and label
+- `list_subagents` - List all sub-agents (active and recently completed)
+- `get_subagent_result` - Retrieve result of a completed sub-agent by ID
+- `cancel_subagent` - Cancel a running sub-agent
+
+**Storage**: Sub-agent state persists to `{workspace}/.openpaw/subagents.yaml` and survives restarts. Completed/failed/cancelled requests older than 24 hours are automatically cleaned up on initialization.
+
+**Tool Exclusions**: Sub-agents cannot spawn sub-agents (no `spawn_agent`), send unsolicited messages (no `send_message`/`send_file`), self-continue (no `request_followup`), or schedule tasks (no cron tools). This prevents recursion and ensures sub-agents are single-purpose workers.
+
+**Lifecycle**: `pending` → `running` → `completed`/`failed`/`cancelled`/`timed_out`. Running sub-agents exceeding their timeout are marked as `timed_out` during cleanup.
+
+**Notifications**: When `notify: true` (default), sub-agents send completion notifications to the requesting session. Notifications are truncated (500 chars) with a prompt to use `get_subagent_result` for full output.
+
+**Configuration** (optional, in `agent.yaml` or global config):
+
+```yaml
+builtins:
+  spawn:
+    enabled: true
+    config:
+      max_concurrent: 8  # Maximum simultaneous sub-agents (default: 8)
+```
+
+**Limits**: Maximum 8 concurrent sub-agents (configurable), timeout defaults to 30 minutes (1-120 range). Results are truncated at 50K characters to match `read_file` safety valve pattern.
+
+**Example Usage** (by agent):
+- User: "Research topic X in the background while I work on Y"
+- Agent calls `spawn_agent(task="Research topic X...", label="research-x")`
+- Sub-agent runs concurrently, agent continues working on Y
+- When complete, user receives notification with result summary
+
+### Queue-Aware Tool Middleware
+
+`QueueAwareToolMiddleware` enables responsive agent behavior by checking for pending user messages during tool execution. The middleware composes with approval middleware in `create_agent(middleware=[queue_middleware, approval_middleware])`.
+
+**Queue Modes**:
+
+- **Collect mode** (default): No middleware behavior. Messages queue normally and are processed after the current run completes.
+- **Steer mode**: When pending messages are detected during tool execution, remaining tools are skipped and pending messages are injected as the next agent input. The agent sees `[Skipped: user sent new message — redirecting]` for skipped tools and processes the new message context.
+- **Interrupt mode**: When pending messages are detected, the current tool raises `InterruptSignalError`, the agent's response is discarded, and the new message is processed immediately. More aggressive than steer — aborts mid-run rather than redirecting.
+- **Followup mode**: No middleware behavior (reserved for followup tool chaining).
+
+**Implementation**: Middleware calls `queue_manager.peek_pending(session_key)` before each tool execution. In steer mode, first detection triggers `queue_manager.consume_pending()` and stores messages for post-run injection. In interrupt mode, detection raises exception immediately.
+
+**Integration**: `WorkspaceRunner` captures steer state before middleware reset via local variables. Interrupt exceptions are caught in `_process_messages()`, where pending messages become the new `combined_content` for re-entry into the processing loop.
+
+### Approval Gates
+
+Human-in-the-loop authorization for dangerous tools. When a gated tool is called, execution pauses while the user approves or denies via channel UI (e.g., Telegram inline keyboard).
+
+**Configuration** (in `agent.yaml` or global config):
+
+```yaml
+approval_gates:
+  enabled: true
+  timeout_seconds: 120            # Seconds to wait for user response
+  default_action: deny            # Action on timeout: "deny" or "approve"
+  tools:
+    overwrite_file:
+      require_approval: true
+      show_args: true             # Show tool arguments in approval prompt
+    delete_task:
+      require_approval: true
+```
+
+**Lifecycle**:
+1. Middleware detects gated tool call → creates `PendingApproval`
+2. Raises `ApprovalRequiredError` → `WorkspaceRunner` catches exception
+3. Channel sends approval request with inline buttons (Approve/Deny)
+4. User responds → `ApprovalGateManager.resolve()` called
+5. On approval: agent re-runs with same message, middleware lets tool through
+6. On denial: agent receives `[SYSTEM] The tool 'X' was denied by the user. Do not retry this action.`
+
+**Timeout Behavior**: If user doesn't respond within `timeout_seconds`, `default_action` is applied automatically (`approve` or `deny`). This prevents agents from hanging indefinitely.
+
+**Bypass Mechanism**: After approval, the middleware checks `check_recent_approval()` to allow tool execution without re-prompting. Approval is cleared after successful tool execution via `clear_recent_approval()`.
+
+**Exclusions**: Cron and heartbeat agents (stateless, no checkpointer) do not have approval gates. Approval middleware is only active for main lane user-triggered runs.
+
+**Channel Integration**: Channels implement `send_approval_request()` and register approval callbacks via `on_approval()`. Telegram uses inline keyboards; other channels can implement their own UI patterns.
+
 ### Heartbeat System
 
 The HeartbeatScheduler enables proactive agent check-ins on a configurable schedule. Agents can use this to monitor ongoing tasks, provide status updates, or maintain context without user prompts.
@@ -430,6 +531,7 @@ OpenPaw provides optional built-in capabilities that are conditionally available
 - `followup` - Self-continuation for multi-step autonomous workflows with depth limiting (no API key required)
 - `task_tracker` - Task management via TASKS.yaml for persistent cross-session work tracking (no API key required)
 - `send_file` - Send workspace files to users (no API key required)
+- `spawn` - Sub-agent spawning for background tasks (no API key required, see "Sub-Agent Spawning" section)
 
 **Processors** - Channel-layer message transformers:
 - `file_persistence` - Saves all uploaded files to workspace uploads/ directory (no API key required)
@@ -446,6 +548,7 @@ builtins/
 │   ├── brave_search.py
 │   ├── elevenlabs_tts.py
 │   ├── cron.py       # Agent self-scheduling
+│   ├── spawn.py      # Sub-agent spawning (spawn_agent, list, get_result, cancel)
 │   ├── _channel_context.py # Shared contextvars for channel/session state
 │   ├── send_message.py  # Mid-execution messaging
 │   ├── send_file.py     # Send workspace files to users

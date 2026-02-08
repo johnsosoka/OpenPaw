@@ -9,6 +9,8 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field, field_validator
 
+from openpaw.approval.config import ApprovalGatesConfig
+
 
 def expand_env_vars(value: str) -> str:
     """Expand ${VAR} patterns in a string with environment variable values.
@@ -271,6 +273,13 @@ class WorkspaceBuiltinsConfig(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class WorkspaceToolsConfig(BaseModel):
+    """Allow/deny list for workspace tools loaded from tools/ directory."""
+
+    allow: list[str] = Field(default_factory=list, description="Allowed tool names (empty = allow all)")
+    deny: list[str] = Field(default_factory=list, description="Denied tool names")
+
+
 class HeartbeatConfig(BaseModel):
     """Configuration for the heartbeat scheduler."""
 
@@ -299,6 +308,14 @@ class WorkspaceConfig(BaseModel):
         description="Builtin capability overrides",
     )
     heartbeat: HeartbeatConfig | None = Field(default=None, description="Per-workspace heartbeat config")
+    workspace_tools: WorkspaceToolsConfig = Field(
+        default_factory=WorkspaceToolsConfig,
+        description="Allow/deny list for workspace tools",
+    )
+    approval_gates: ApprovalGatesConfig = Field(
+        default_factory=ApprovalGatesConfig,
+        description="Approval gates configuration",
+    )
 
     @field_validator("timezone")
     @classmethod
@@ -339,6 +356,10 @@ class Config(BaseModel):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     builtins: BuiltinsConfig = Field(default_factory=BuiltinsConfig, description="Builtin capabilities config")
     cron_jobs: list[CronJobConfig] = Field(default_factory=list, description="Scheduled agent jobs")
+    approval_gates: ApprovalGatesConfig = Field(
+        default_factory=ApprovalGatesConfig,
+        description="Default approval gates configuration",
+    )
 
     model_config = {"extra": "allow"}
 

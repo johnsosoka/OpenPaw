@@ -6,8 +6,8 @@ from collections.abc import Callable, Coroutine
 from datetime import datetime
 from typing import Any
 
-from telegram import Update
-from telegram.ext import Application, ContextTypes, MessageHandler, filters
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 from openpaw.channels.base import Attachment, ChannelAdapter, Message, MessageDirection
 
@@ -54,10 +54,14 @@ class TelegramChannel(ChannelAdapter):
         self.workspace_name = workspace_name
         self._app: Application | None = None  # type: ignore[type-arg]
         self._message_callback: Callable[[Message], Coroutine[Any, Any, None]] | None = None
+        self._approval_callback: Callable[[str, bool], Coroutine[Any, Any, None]] | None = None
 
     async def start(self) -> None:
         """Start the Telegram bot."""
         self._app = Application.builder().token(self.token).build()
+
+        # Add callback query handler for approval buttons (BEFORE message handlers)
+        self._app.add_handler(CallbackQueryHandler(self._handle_approval_callback))
 
         # Route all messages through the unified callback
         self._app.add_handler(MessageHandler(filters.COMMAND, self._handle_command))
@@ -581,3 +585,79 @@ class TelegramChannel(ChannelAdapter):
             },
             attachments=[attachment],
         )
+
+    def on_approval(
+        self, callback: Callable[[str, bool], Coroutine[Any, Any, None]]
+    ) -> None:
+        """Register a callback for approval resolutions."""
+        self._approval_callback = callback
+
+    async def send_approval_request(
+        self,
+        session_key: str,
+        approval_id: str,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        show_args: bool = True,
+    ) -> None:
+        """Send approval request with Telegram inline keyboard."""
+        chat_id = int(session_key.split(":")[1])
+
+        # Escape backticks to prevent markdown injection
+        safe_tool_name = tool_name.replace("`", "'")
+        text = f"🔒 **Approval Required**\nTool: `{safe_tool_name}`\n"
+        if show_args and tool_args:
+            args_str = str(tool_args)
+            if len(args_str) > 500:
+                args_str = args_str[:500] + "..."
+            args_str = args_str.replace("`", "'")
+            text += f"Args: `{args_str}`\n"
+
+        keyboard = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton(
+                        "✅ Approve", callback_data=f"approve:{approval_id}"
+                    ),
+                    InlineKeyboardButton(
+                        "❌ Deny", callback_data=f"deny:{approval_id}"
+                    ),
+                ]
+            ]
+        )
+
+        await self._app.bot.send_message(  # type: ignore[union-attr]
+            chat_id=chat_id,
+            text=text,
+            reply_markup=keyboard,
+            parse_mode="Markdown",
+        )
+
+    async def _handle_approval_callback(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Handle inline keyboard button presses for approval gates."""
+        query = update.callback_query
+        if not query or not query.data:
+            return
+
+        await query.answer()  # Acknowledge the button press
+
+        parts = query.data.split(":", 1)
+        if len(parts) != 2:
+            return
+
+        action, approval_id = parts
+        approved = action == "approve"
+
+        # Update the button message to show result
+        result_text = "✅ Approved" if approved else "❌ Denied"
+        if query.message and query.message.text:
+            await query.edit_message_text(
+                text=f"{query.message.text}\n\n**Result: {result_text}**",
+                parse_mode="Markdown",
+            )
+
+        # Invoke the callback
+        if self._approval_callback:
+            await self._approval_callback(approval_id, approved)

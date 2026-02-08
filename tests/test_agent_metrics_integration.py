@@ -62,14 +62,13 @@ async def test_agent_runner_populates_metrics_after_run(mock_workspace: AgentWor
         api_key="test-key",
     )
 
-    # Mock the agent to return a result with messages
-    mock_result = {
-        "messages": [
-            Mock(content="Test response")
-        ]
-    }
+    # Mock the agent to stream updates with messages
+    async def mock_astream(*args, **kwargs):
+        # Simulate streaming updates
+        yield {"model": {"messages": [Mock(content="Test response")]}}
+
     runner._agent = Mock()
-    runner._agent.ainvoke = AsyncMock(return_value=mock_result)
+    runner._agent.astream = mock_astream
 
     # Run the agent
     response = await runner.run("Test message")
@@ -89,14 +88,12 @@ async def test_agent_runner_metrics_include_duration(mock_workspace: AgentWorksp
         api_key="test-key",
     )
 
-    # Mock the agent
-    mock_result = {
-        "messages": [
-            Mock(content="Test response")
-        ]
-    }
+    # Mock the agent to stream updates
+    async def mock_astream(*args, **kwargs):
+        yield {"model": {"messages": [Mock(content="Test response")]}}
+
     runner._agent = Mock()
-    runner._agent.ainvoke = AsyncMock(return_value=mock_result)
+    runner._agent.astream = mock_astream
 
     # Run the agent
     await runner.run("Test message")
@@ -118,13 +115,13 @@ async def test_agent_runner_metrics_on_timeout(mock_workspace: AgentWorkspace) -
     )
 
     # Mock the agent to be slow
-    async def slow_invoke(*args, **kwargs):
+    async def slow_astream(*args, **kwargs):
         import asyncio
         await asyncio.sleep(1)  # Sleep longer than timeout
-        return {"messages": [Mock(content="Should not see this")]}
+        yield {"model": {"messages": [Mock(content="Should not see this")]}}
 
     runner._agent = Mock()
-    runner._agent.ainvoke = slow_invoke
+    runner._agent.astream = slow_astream
 
     # Run the agent (should timeout)
     response = await runner.run("Test message")

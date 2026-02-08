@@ -10,7 +10,7 @@ from openpaw.workspace.loader import AgentWorkspace
 
 # Common patches for isolating AgentRunner from real dependencies
 _PATCH_FS = "openpaw.core.agent.FilesystemTools"
-_PATCH_AGENT = "openpaw.core.agent.create_react_agent"
+_PATCH_AGENT = "openpaw.core.agent.create_agent"
 
 # Provider patches (local imports in _create_model, patch at source)
 _PATCH_OPENAI = "langchain_openai.ChatOpenAI"

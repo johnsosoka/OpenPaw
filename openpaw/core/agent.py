@@ -6,12 +6,13 @@ import re
 import time
 from typing import Any
 
+from langchain.agents import create_agent
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.language_models import BaseChatModel
-from langgraph.prebuilt import create_react_agent
 
 from openpaw.core.metrics import InvocationMetrics, extract_metrics_from_callback
-from openpaw.llm.middleware import THINKING_TAG_PATTERN, build_post_model_hook, build_pre_model_hook
+from openpaw.core.tool_middleware import InterruptSignalError
+from openpaw.llm.middleware import THINKING_TAG_PATTERN
 from openpaw.tools.filesystem import FilesystemTools
 from openpaw.workspace.loader import AgentWorkspace
 
@@ -26,7 +27,7 @@ MAX_TOOL_NAME_LENGTH = 64
 
 
 class AgentRunner:
-    """Runs LangGraph ReAct agent with OpenPaw workspace configuration.
+    """Runs LangGraph agent with OpenPaw workspace configuration.
 
     Integrates:
     - Workspace-based system prompts (AGENT.md, USER.md, SOUL.md, HEARTBEAT.md)
@@ -34,6 +35,8 @@ class AgentRunner:
     - LangGraph checkpointing for multi-turn conversations
     - Automatic stripping of model thinking tokens (<think>...</think>)
     - Tool name validation for Bedrock compatibility
+    - Streaming execution via astream() for behavioral parity with ainvoke()
+    - Empty middleware list (foundation for T4.2 steer/interrupt features)
     """
 
     @staticmethod
@@ -67,6 +70,7 @@ class AgentRunner:
         timeout_seconds: float = 300.0,
         enabled_builtins: list[str] | None = None,
         extra_model_kwargs: dict[str, Any] | None = None,
+        middleware: list[Any] | None = None,
     ):
         """Initialize the agent runner.
 
@@ -84,6 +88,8 @@ class AgentRunner:
             enabled_builtins: List of enabled builtin tool names for conditional prompt sections.
             extra_model_kwargs: Additional kwargs to pass to init_chat_model
                 (e.g., base_url for OpenAI-compatible APIs).
+            middleware: Optional list of middleware functions for tool execution
+                (e.g., queue-aware middleware for steer/interrupt modes).
         """
         self.workspace = workspace
         self.model_id = model
@@ -97,6 +103,7 @@ class AgentRunner:
         self.timeout_seconds = timeout_seconds
         self.enabled_builtins = enabled_builtins
         self.extra_model_kwargs = extra_model_kwargs or {}
+        self._middleware = middleware or []
 
         # Token usage tracking (populated after each run)
         self._last_metrics: InvocationMetrics | None = None
@@ -234,14 +241,15 @@ class AgentRunner:
         )
 
     def _build_agent(self) -> Any:
-        """Build the LangGraph ReAct agent with workspace configuration.
+        """Build the LangGraph agent with workspace configuration.
 
-        Creates a ReAct agent with:
+        Creates an agent with:
         - Direct provider-specific model instantiation
         - Sandboxed filesystem tools for workspace access
         - Workspace-specific tools from tools/ directory
         - System prompt from workspace markdown files
-        - Optional thinking token stripping via post_model_hook
+        - Empty middleware list (populated in future sprints for steer/interrupt)
+        - Thinking token stripping handled via fallback logic in run()
         """
         # 1. Initialize model directly via provider class
         model = self._create_model()
@@ -272,14 +280,11 @@ class AgentRunner:
         # 5. Get system prompt from workspace
         system_prompt = self.workspace.build_system_prompt(enabled_builtins=self.enabled_builtins)
 
-        # 6. Build middleware hooks via openpaw.llm.middleware
-        pre_hook = build_pre_model_hook(strip_reasoning=self.strip_thinking)
-        post_hook = build_post_model_hook(strip_thinking=self.strip_thinking)
-
-        # 7. Call create_react_agent
-        # Note: create_react_agent handles tool binding internally - do NOT pre-bind
+        # 6. Call create_agent (successor to create_react_agent)
+        # Note: create_agent handles tool binding internally - do NOT pre-bind
+        # Note: middleware=[] is empty for now - T4.2 will populate with steer/interrupt logic
         logger.info(
-            f"Creating ReAct agent with {len(all_tools)} tools "
+            f"Creating agent with {len(all_tools)} tools "
             f"({len(filesystem_tools)} filesystem, {len(self.additional_tools)} additional)"
         )
 
@@ -287,13 +292,12 @@ class AgentRunner:
         tool_names = [getattr(t, 'name', str(t)) for t in all_tools]
         logger.info(f"Tool names: {tool_names}")
 
-        agent = create_react_agent(
+        agent = create_agent(
             model=model,
             tools=all_tools,
-            prompt=system_prompt,
+            system_prompt=system_prompt,
             checkpointer=self.checkpointer,
-            pre_model_hook=pre_hook,
-            post_model_hook=post_hook,
+            middleware=self._middleware,  # Populated by WorkspaceRunner for steer/interrupt
         )
 
         return agent
@@ -335,11 +339,22 @@ class AgentRunner:
         start_time = time.monotonic()
 
         try:
+            # Use astream with stream_mode="updates" for behavioral parity with ainvoke
+            # Collect all messages from the stream
+            final_messages = []
             async with asyncio.timeout(self.timeout_seconds):
-                result = await self._agent.ainvoke(
+                async for update in self._agent.astream(
                     {"messages": [{"role": "user", "content": message}]},
                     config=config,
-                )
+                    stream_mode="updates",
+                ):
+                    # Updates come as: {"model": {"messages": [...]}} from create_agent v2
+                    if "model" in update:
+                        messages_in_update = update["model"].get("messages", [])
+                        final_messages.extend(messages_in_update)
+        except InterruptSignalError:
+            # Re-raise for WorkspaceRunner to handle
+            raise
         except TimeoutError:
             # Extract partial metrics even on timeout
             duration_ms = (time.monotonic() - start_time) * 1000
@@ -357,6 +372,12 @@ class AgentRunner:
                 f"(timeout: {int(self.timeout_seconds)}s). "
                 f"Please try again with a simpler request."
             )
+        except Exception as e:
+            # Re-raise ApprovalRequiredError for WorkspaceRunner to handle
+            if type(e).__name__ == "ApprovalRequiredError":
+                raise
+            # Re-raise any other exception
+            raise
 
         # Extract metrics after successful invocation
         duration_ms = (time.monotonic() - start_time) * 1000
@@ -364,16 +385,17 @@ class AgentRunner:
             usage_callback, duration_ms, self.model_id
         )
 
-        messages = result.get("messages", [])
-        if messages:
-            last_message = messages[-1]
+        # Extract response from final messages
+        if final_messages:
+            last_message = final_messages[-1]
             raw_response = ""
             if hasattr(last_message, "content"):
                 raw_response = str(last_message.content)
             else:
                 raw_response = str(last_message)
 
-            # Thinking tokens should already be stripped by hook, but apply fallback
+            # Apply thinking token stripping fallback (no hooks in create_agent yet)
+            # Future: T4.2 will move this to middleware
             if self.strip_thinking and "<think>" in raw_response.lower():
                 return self._strip_thinking_tokens(raw_response)
             return raw_response

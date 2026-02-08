@@ -121,6 +121,21 @@ class AgentWorkspace:
                 "'check this again in 5 minutes')."
             )
 
+        # Sub-agent spawning - include if spawn is enabled
+        if enabled_builtins is None or "spawn" in enabled_builtins:
+            sections.append(
+                "\n\n## Sub-Agent Spawning\n\n"
+                "You can spawn background sub-agents to work on tasks concurrently while "
+                "you continue interacting with the user. Sub-agents are independent workers "
+                "that share your workspace filesystem but run in isolated contexts.\n\n"
+                "Use sub-agents for:\n"
+                "- Parallel research or data gathering\n"
+                "- Long-running analysis that shouldn't block conversation\n"
+                "- Concurrent API operations\n\n"
+                "Sub-agents will notify you when they complete. Use list_subagents to check "
+                "status and get_subagent_result to retrieve their output."
+            )
+
         # Progress updates - include if send_message is enabled
         if enabled_builtins is None or "send_message" in enabled_builtins:
             sections.append(

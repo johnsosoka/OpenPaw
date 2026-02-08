@@ -193,3 +193,47 @@ class QueueManager:
             session.cap = cap
         if drop_policy is not None:
             session.drop_policy = drop_policy
+
+    async def peek_pending(self, session_key: str) -> bool:
+        """Check if session has pending messages without removing them.
+
+        Non-destructive inspection of the session's message queue.
+
+        Args:
+            session_key: The session to check.
+
+        Returns:
+            True if there are pending messages in the session queue.
+        """
+        async with self._lock:
+            if session_key not in self._sessions:
+                return False
+            session = self._sessions[session_key]
+            return len(session.messages) > 0
+
+    async def consume_pending(self, session_key: str) -> list[Any]:
+        """Remove and return all pending messages for a session.
+
+        Destructive operation — messages are removed from the queue.
+        Cancels any pending debounce task since messages are being consumed directly.
+
+        Args:
+            session_key: The session to consume from.
+
+        Returns:
+            List of pending messages (may be empty).
+        """
+        async with self._lock:
+            if session_key not in self._sessions:
+                return []
+            session = self._sessions[session_key]
+
+            # Cancel pending debounce task if any
+            if session._debounce_task:
+                session._debounce_task.cancel()
+                session._debounce_task = None
+
+            # Drain all messages
+            messages = list(session.messages)
+            session.messages.clear()
+            return messages

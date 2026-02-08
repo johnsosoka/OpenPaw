@@ -40,3 +40,12 @@ def get_channel_context() -> tuple[Any, str | None]:
         Tuple of (channel, session_key). Both may be None if context not set.
     """
     return _channel_var.get(), _session_key_var.get()
+
+
+def get_current_session_key() -> str | None:
+    """Get the current session key from the context.
+
+    Returns:
+        Session key string (e.g., 'telegram:123456') or None if context not set.
+    """
+    return _session_key_var.get()

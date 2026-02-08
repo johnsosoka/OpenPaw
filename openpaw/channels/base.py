@@ -163,3 +163,38 @@ class ChannelAdapter(ABC):
         raise NotImplementedError(
             f"Channel '{type(self).__name__}' does not support file sending"
         )
+
+    async def send_approval_request(
+        self,
+        session_key: str,
+        approval_id: str,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        show_args: bool = True,
+    ) -> None:
+        """Send an approval request to the user with approve/deny options.
+
+        Override in channel implementations that support interactive approval
+        (e.g., Telegram inline keyboards).
+
+        Default sends a text message with instructions.
+
+        Args:
+            session_key: Target session identifier.
+            approval_id: Unique ID for this approval request.
+            tool_name: Name of the tool requiring approval.
+            tool_args: Arguments passed to the tool.
+            show_args: Whether to display tool arguments to user.
+        """
+        # Format approval message
+        message = f"🔒 Approval Required: {tool_name}\n"
+        if show_args and tool_args:
+            # Truncate long args
+            args_str = str(tool_args)
+            if len(args_str) > 500:
+                args_str = args_str[:500] + "..."
+            message += f"Arguments: {args_str}\n"
+        message += f"\nApproval ID: {approval_id}\n"
+        message += "Reply /approve or /deny to this request."
+
+        await self.send_message(session_key, message)

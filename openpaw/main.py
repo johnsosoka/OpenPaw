@@ -10,6 +10,9 @@ import aiosqlite
 from dotenv import load_dotenv
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from openpaw.approval.config import ApprovalGatesConfig
+from openpaw.approval.manager import ApprovalGateManager
+from openpaw.approval.middleware import ApprovalRequiredError, ApprovalToolMiddleware
 from openpaw.builtins.base import BaseBuiltinProcessor
 from openpaw.builtins.loader import BuiltinLoader
 from openpaw.channels.base import ChannelAdapter, Message
@@ -21,11 +24,14 @@ from openpaw.core.agent import AgentRunner
 from openpaw.core.config import Config, merge_configs
 from openpaw.core.logging import setup_workspace_logger
 from openpaw.core.metrics import TokenUsageLogger
+from openpaw.core.tool_middleware import InterruptSignalError, QueueAwareToolMiddleware
 from openpaw.heartbeat.scheduler import HeartbeatScheduler
 from openpaw.memory.archiver import ConversationArchiver
 from openpaw.queue.lane import LaneQueue, QueueItem, QueueMode
 from openpaw.queue.manager import QueueManager
 from openpaw.session.manager import SessionManager
+from openpaw.subagent.runner import SubAgentRunner
+from openpaw.subagent.store import SubAgentStore
 from openpaw.task.store import TaskStore
 from openpaw.workspace.loader import WorkspaceLoader
 from openpaw.workspace.tool_loader import load_workspace_tools
@@ -81,6 +87,9 @@ class WorkspaceRunner:
         # Initialize TaskStore for long-running task tracking
         self._task_store = TaskStore(self._workspace.path)
         self._cleanup_old_tasks()
+
+        # Initialize SubAgentStore for sub-agent tracking
+        self._subagent_store = SubAgentStore(self._workspace.path)
 
         # Initialize TokenUsageLogger for tracking token usage
         self._token_logger = TokenUsageLogger(self._workspace.path)
@@ -157,8 +166,28 @@ class WorkspaceRunner:
             tool_names = [t.name for t in self._workspace_tools]
             self.logger.info(f"Loaded {len(self._workspace_tools)} workspace tools: {tool_names}")
 
+        # Apply workspace tool filtering based on allow/deny lists
+        if self._workspace_tools and self._workspace.config:
+            self._workspace_tools = self._filter_workspace_tools(
+                self._workspace_tools,
+                self._workspace.config.workspace_tools
+            )
+
         # Merge all tools: builtins + workspace tools
         all_tools = list(self._builtin_tools) + list(self._workspace_tools)
+
+        # Create queue-aware middleware for steer/interrupt modes
+        self._queue_middleware = QueueAwareToolMiddleware()
+
+        # Create approval middleware if enabled
+        self._approval_middleware = ApprovalToolMiddleware()
+        self._approval_manager: ApprovalGateManager | None = None
+
+        # Get approval gates config
+        approval_config = self._get_approval_config()
+        if approval_config and approval_config.enabled:
+            self._approval_manager = ApprovalGateManager(approval_config)
+            self.logger.info("Approval gates enabled")
 
         # Use merged model config for agent
         agent_config = self._merged_config.get("model", {})
@@ -176,6 +205,10 @@ class WorkspaceRunner:
             self.logger.info(f"Passing extra model kwargs: {list(extra_model_kwargs.keys())}")
 
         # AgentRunner auto-detects thinking models - no need for WorkspaceRunner to check
+        middlewares = [self._queue_middleware.get_middleware()]
+        if self._approval_manager:
+            middlewares.append(self._approval_middleware.get_middleware())
+
         self._agent_runner = AgentRunner(
             workspace=self._workspace,
             model=model_str,
@@ -188,11 +221,13 @@ class WorkspaceRunner:
             timeout_seconds=agent_config.get("timeout_seconds", 300.0),
             enabled_builtins=self._enabled_builtin_names,
             extra_model_kwargs=extra_model_kwargs,
+            middleware=middlewares,
         )
 
         self._channels: dict[str, ChannelAdapter] = {}
         self._cron_scheduler: Any = None
         self._heartbeat_scheduler: HeartbeatScheduler | None = None
+        self._subagent_runner: SubAgentRunner | None = None
         self._queue_processor_task: asyncio.Task[None] | None = None
         self._running = False
 
@@ -262,6 +297,93 @@ class WorkspaceRunner:
             f"Registered {len(self._command_router.list_commands(include_hidden=True))} framework commands"
         )
 
+    def _get_approval_config(self) -> ApprovalGatesConfig | None:
+        """Get approval gates config from workspace or global.
+
+        Returns:
+            ApprovalGatesConfig if enabled, None otherwise.
+        """
+        # Check workspace config first
+        if self._workspace.config and self._workspace.config.approval_gates:
+            if self._workspace.config.approval_gates.enabled:
+                return self._workspace.config.approval_gates
+        # Check global config
+        if hasattr(self.config, "approval_gates") and self.config.approval_gates:
+            if self.config.approval_gates.enabled:
+                return self.config.approval_gates
+        return None
+
+    async def _handle_approval_resolution(
+        self, approval_id: str, approved: bool
+    ) -> None:
+        """Handle approval resolution from channel callback.
+
+        Args:
+            approval_id: ID of the approval request.
+            approved: Whether the user approved or denied.
+        """
+        if self._approval_manager:
+            success = self._approval_manager.resolve(approval_id, approved)
+            if success:
+                self.logger.info(
+                    f"Approval {approval_id}: {'approved' if approved else 'denied'}"
+                )
+            else:
+                self.logger.warning(f"Failed to resolve approval {approval_id}")
+
+    def _filter_workspace_tools(
+        self,
+        tools: list[Any],
+        config: Any,
+    ) -> list[Any]:
+        """Filter workspace tools based on allow/deny lists.
+
+        Args:
+            tools: List of workspace tools to filter.
+            config: WorkspaceToolsConfig with allow/deny lists.
+
+        Returns:
+            Filtered list of tools.
+        """
+        from openpaw.core.config import WorkspaceToolsConfig
+
+        # Handle case where config might not be WorkspaceToolsConfig
+        if not isinstance(config, WorkspaceToolsConfig):
+            return tools
+
+        deny = config.deny
+        allow = config.allow
+
+        # No filtering if both lists are empty
+        if not deny and not allow:
+            return tools
+
+        filtered = []
+        filtered_out = []
+
+        for tool in tools:
+            tool_name = tool.name
+
+            # Deny takes precedence
+            if deny and tool_name in deny:
+                filtered_out.append(tool_name)
+                continue
+
+            # Allow list filtering (if populated)
+            if allow and tool_name not in allow:
+                filtered_out.append(tool_name)
+                continue
+
+            filtered.append(tool)
+
+        if filtered_out:
+            self.logger.info(f"Filtered out workspace tools: {filtered_out}")
+
+        if filtered:
+            tool_names = [t.name for t in filtered]
+            self.logger.info(f"Active workspace tools after filtering: {tool_names}")
+
+        return filtered
 
     def _cleanup_old_tasks(self) -> None:
         """Clean up old completed tasks from TaskStore on startup.
@@ -395,7 +517,7 @@ class WorkspaceRunner:
         )
 
     async def _process_messages(self, session_key: str, messages: list[Message]) -> None:
-        """Process collected messages for a session with followup support."""
+        """Process collected messages for a session with followup, steer, and interrupt support."""
         combined_content = "\n".join(m.content for m in messages)
         thread_id = self._session_manager.get_thread_id(session_key)
         channel_name = session_key.split(":")[0]
@@ -404,7 +526,27 @@ class WorkspaceRunner:
         max_followup_depth = 5
 
         while True:
+            # Capture steer state before finally block resets it
+            steered = False
+            steer_messages = None
+
             try:
+                # Set queue awareness on middleware before each run
+                session_queue = await self._queue_manager._get_or_create_session(session_key)
+                self._queue_middleware.set_queue_awareness(
+                    queue_manager=self._queue_manager,
+                    session_key=session_key,
+                    queue_mode=session_queue.mode,
+                )
+
+                # Set approval context on middleware before each run
+                if self._approval_manager:
+                    self._approval_middleware.set_context(
+                        manager=self._approval_manager,
+                        session_key=session_key,
+                        thread_id=thread_id,
+                    )
+
                 # Set session context for send_message tool
                 if channel:
                     self._connect_send_message_tool(channel, session_key)
@@ -418,6 +560,10 @@ class WorkspaceRunner:
                     message=combined_content,
                     thread_id=thread_id,
                 )
+
+                # Capture steer state BEFORE reset
+                steered = self._queue_middleware.was_steered
+                steer_messages = self._queue_middleware.pending_steer_message
 
                 # Log token usage for this invocation
                 if self._agent_runner.last_metrics:
@@ -438,13 +584,116 @@ class WorkspaceRunner:
                         fallback = "I processed your message but my response was empty. Please try again."
                         await channel.send_message(session_key, fallback)
 
+            except ApprovalRequiredError as e:
+                # APPROVAL MODE: Tool requires user approval
+                # Log partial metrics if available
+                if self._agent_runner.last_metrics:
+                    self._token_logger.log(
+                        metrics=self._agent_runner.last_metrics,
+                        workspace=self.workspace_name,
+                        invocation_type="user",
+                        session_key=session_key,
+                    )
+
+                # Send approval request to user
+                if channel and self._approval_manager:
+                    tool_config = self._approval_manager.get_tool_config(e.tool_name)
+                    show_args = tool_config.show_args if tool_config else True
+                    await channel.send_approval_request(
+                        session_key=session_key,
+                        approval_id=e.approval_id,
+                        tool_name=e.tool_name,
+                        tool_args=e.tool_args,
+                        show_args=show_args,
+                    )
+
+                    # Wait for user approval
+                    approved = await self._approval_manager.wait_for_resolution(
+                        e.approval_id
+                    )
+
+                    if approved:
+                        # Re-run: the agent will re-invoke the tool
+                        self.logger.info(f"Tool {e.tool_name} approved, resuming")
+                        # The approval is already resolved, middleware will let it through
+                        # We need to continue the loop to re-run with same message
+                        continue  # Re-enter loop with same message
+                    else:
+                        # User denied - send denial to agent as system message
+                        self.logger.info(f"Tool {e.tool_name} denied")
+                        await channel.send_message(
+                            session_key,
+                            f"Tool '{e.tool_name}' was denied. "
+                            f"The agent will be informed.",
+                        )
+                        # Send denial to agent as tool result
+                        combined_content = (
+                            f"[SYSTEM] The tool '{e.tool_name}' was denied by "
+                            f"the user. Do not retry this action."
+                        )
+                        continue  # Re-enter with denial message
+
+                # No channel available, deny by default
+                break
+
+            except InterruptSignalError as e:
+                # INTERRUPT MODE: Run was aborted
+                # Log partial metrics if available
+                if self._agent_runner.last_metrics:
+                    self._token_logger.log(
+                        metrics=self._agent_runner.last_metrics,
+                        workspace=self.workspace_name,
+                        invocation_type="user",
+                        session_key=session_key,
+                    )
+
+                # Notify user that run was interrupted
+                if channel:
+                    await channel.send_message(session_key, "[Run interrupted — processing new message]")
+
+                # Use the pending messages as the new input
+                pending_msgs = e.pending_messages
+                if pending_msgs:
+                    # Extract message content from the pending messages
+                    # pending_msgs format: list of (channel_name, Message) tuples
+                    new_contents = []
+                    for _channel_name, msg in pending_msgs:
+                        if hasattr(msg, 'content'):
+                            new_contents.append(msg.content)
+                        else:
+                            new_contents.append(str(msg))
+                    combined_content = "\n".join(new_contents)
+
+                followup_depth = 0  # Reset followup depth on interrupt
+                continue  # Re-enter loop with new message
+
             except Exception as e:
                 self.logger.error(f"Error processing messages for {session_key}: {e}", exc_info=True)
                 if channel:
                     await channel.send_message(session_key, f"Error: {e}")
                 break  # Don't continue followup chain on error
+
             finally:
                 self._disconnect_send_message_tool()
+                # Note: Steer state (steered flag + steer_messages) is captured into local
+                # variables BEFORE this finally block. Middleware reset MUST happen after
+                # state capture because middleware state is per-invocation.
+                self._queue_middleware.reset()  # Always reset middleware state
+                if self._approval_manager:
+                    self._approval_middleware.reset()
+
+            # Check steer (captured before reset)
+            if steered and steer_messages:
+                new_contents = []
+                for _channel_name, msg in steer_messages:
+                    if hasattr(msg, 'content'):
+                        new_contents.append(msg.content)
+                    else:
+                        new_contents.append(str(msg))
+                combined_content = "\n".join(new_contents)
+                followup_depth = 0  # Reset followup depth on steer
+                self.logger.info(f"Steer redirect: processing {len(steer_messages)} new message(s)")
+                continue
 
             # Check for followup request
             if followup_tool:
@@ -548,6 +797,12 @@ class WorkspaceRunner:
             await channel.start()
             self.logger.info(f"Started channel: {name}")
 
+        # Connect approval callback to channels
+        if self._approval_manager:
+            for channel in self._channels.values():
+                if hasattr(channel, "on_approval"):
+                    channel.on_approval(self._handle_approval_resolution)
+
         # Start cron scheduler if workspace has cron definitions OR CronTool is loaded
         cron_tool_loaded = self._builtin_loader.get_tool_instance("cron") is not None
         if self._workspace.crons or cron_tool_loaded:
@@ -555,6 +810,18 @@ class WorkspaceRunner:
 
         # Start heartbeat scheduler if enabled
         await self._setup_heartbeat_scheduler()
+
+        # Start sub-agent runner
+        self._subagent_runner = SubAgentRunner(
+            agent_factory=self._create_agent_factory(),
+            store=self._subagent_store,
+            channels=self._channels,
+            token_logger=self._token_logger,
+            workspace_name=self.workspace_name,
+            max_concurrent=8,  # Could come from config later
+        )
+        # Connect SpawnTool to SubAgentRunner
+        self._connect_spawn_tool_to_runner()
 
         self._running = True
 
@@ -590,6 +857,7 @@ class WorkspaceRunner:
                 timeout_seconds=self._agent_runner.timeout_seconds,
                 enabled_builtins=self._enabled_builtin_names,
                 extra_model_kwargs=self._agent_runner.extra_model_kwargs,
+                middleware=[],  # No queue awareness for stateless scheduler agents
             )
         return agent_factory
 
@@ -633,6 +901,22 @@ class WorkspaceRunner:
                 self.logger.debug("CronTool not loaded for this workspace")
         except Exception as e:
             self.logger.warning(f"Failed to connect CronTool to scheduler: {e}")
+
+    def _connect_spawn_tool_to_runner(self) -> None:
+        """Connect SpawnTool builtin to the live SubAgentRunner.
+
+        This enables sub-agent spawning - when agents spawn background tasks,
+        they're immediately executed via the runner.
+        """
+        try:
+            spawn_tool = self._builtin_loader.get_tool_instance("spawn")
+            if spawn_tool:
+                spawn_tool.set_runner(self._subagent_runner)
+                self.logger.info("Connected SpawnTool to SubAgentRunner")
+            else:
+                self.logger.debug("SpawnTool not loaded for this workspace")
+        except Exception as e:
+            self.logger.warning(f"Failed to connect SpawnTool to runner: {e}")
 
     def _connect_send_message_tool(self, channel: Any, session_key: str) -> None:
         """Connect send_message tool to active session context.
@@ -757,9 +1041,19 @@ class WorkspaceRunner:
             await self._heartbeat_scheduler.stop()
             self.logger.info("Stopped heartbeat scheduler")
 
+        # Shutdown sub-agent runner (cancel active sub-agents)
+        if self._subagent_runner:
+            await self._subagent_runner.shutdown()
+            self.logger.info("Stopped sub-agent runner")
+
         for name, channel in self._channels.items():
             await channel.stop()
             self.logger.info(f"Stopped channel: {name}")
+
+        # Cleanup approval manager
+        if self._approval_manager:
+            await self._approval_manager.cleanup()
+            self.logger.info("Cleaned up approval manager")
 
         # Archive all active conversations before closing DB
         await self._archive_active_conversations()

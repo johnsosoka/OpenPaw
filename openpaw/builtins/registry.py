@@ -111,6 +111,13 @@ class BuiltinRegistry:
         except ImportError as e:
             logger.debug(f"Send file tool not available: {e}")
 
+        try:
+            from openpaw.builtins.tools.spawn import SpawnToolBuiltin
+
+            self.register_tool(SpawnToolBuiltin)
+        except ImportError as e:
+            logger.debug(f"Spawn tool not available: {e}")
+
         # Processors (ORDER MATTERS: file_persistence must run first in pipeline)
         try:
             from openpaw.builtins.processors.file_persistence import FilePersistenceProcessor
