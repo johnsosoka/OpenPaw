@@ -154,6 +154,48 @@ class LaneQueue:
                 async with lane._lock:
                     lane.active_count -= 1
 
+    async def peek_session_pending(self, session_key: str, lane_name: str = "main") -> bool:
+        """Check if a session has pending items in a lane queue.
+
+        Non-destructive check for use by steer/interrupt middleware.
+
+        Args:
+            session_key: Session to check for.
+            lane_name: Lane to check (default: main).
+
+        Returns:
+            True if there are queued items for this session.
+        """
+        lane = self.get_lane(lane_name)
+        async with lane._lock:
+            return any(item.session_key == session_key for item in lane.queue)
+
+    async def consume_session_pending(self, session_key: str, lane_name: str = "main") -> list[QueueItem]:
+        """Remove and return all pending items for a session from a lane queue.
+
+        Destructive operation for steer/interrupt middleware.
+
+        Args:
+            session_key: Session to consume for.
+            lane_name: Lane to consume from (default: main).
+
+        Returns:
+            List of QueueItems removed from the lane queue.
+        """
+        lane = self.get_lane(lane_name)
+        async with lane._lock:
+            remaining = deque()
+            consumed = []
+            for item in lane.queue:
+                if item.session_key == session_key:
+                    consumed.append(item)
+                else:
+                    remaining.append(item)
+            lane.queue = remaining
+            if not lane.queue:
+                lane._item_available.clear()
+            return consumed
+
     def get_stats(self) -> dict[str, dict[str, int]]:
         """Get current queue statistics."""
         return {

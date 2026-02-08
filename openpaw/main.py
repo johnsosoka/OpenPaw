@@ -565,6 +565,31 @@ class WorkspaceRunner:
                 steered = self._queue_middleware.was_steered
                 steer_messages = self._queue_middleware.pending_steer_message
 
+                # Post-run steer/interrupt check: catch pending messages that arrived
+                # after the last tool call (or when no tools were called at all).
+                # The middleware only checks during tool execution, so messages arriving
+                # during response generation or tool-free runs are missed.
+                if not steered and session_queue.mode in (QueueMode.STEER, QueueMode.INTERRUPT):
+                    has_post_run_pending = await self._queue_manager.peek_pending(session_key)
+                    if has_post_run_pending:
+                        pending = await self._queue_manager.consume_pending(session_key)
+                        if pending:
+                            if session_queue.mode == QueueMode.STEER:
+                                steered = True
+                                steer_messages = pending
+                                self.logger.info(
+                                    f"Post-run steer: {len(pending)} pending message(s) "
+                                    f"detected after agent run"
+                                )
+                            elif session_queue.mode == QueueMode.INTERRUPT:
+                                self.logger.info(
+                                    f"Post-run interrupt: {len(pending)} pending message(s) "
+                                    f"detected after agent run"
+                                )
+                                # Discard current response, use pending messages instead
+                                steered = True
+                                steer_messages = pending
+
                 # Log token usage for this invocation
                 if self._agent_runner.last_metrics:
                     self._token_logger.log(
@@ -574,7 +599,8 @@ class WorkspaceRunner:
                         session_key=session_key,
                     )
 
-                if channel:
+                # If steered, skip sending the current response (steer redirect below)
+                if not steered and channel:
                     if response and response.strip():
                         await channel.send_message(session_key, response)
                         self._session_manager.increment_message_count(session_key)

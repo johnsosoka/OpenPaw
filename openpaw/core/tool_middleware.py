@@ -111,16 +111,24 @@ class QueueAwareToolMiddleware:
         Raises:
             InterruptSignalError: When interrupt mode detects pending messages.
         """
+        tool_name = request.tool_call.get("name", "unknown")
+        logger.debug(
+            f"Middleware intercepting tool '{tool_name}' "
+            f"(mode={self._queue_mode.value}, session={self._session_key})"
+        )
+
         # In collect mode or if no queue awareness set, just execute normally
         if (
             self._queue_mode == QueueMode.COLLECT
             or self._queue_manager is None
             or self._session_key is None
         ):
+            logger.debug(f"Middleware pass-through: mode={self._queue_mode.value}")
             return await handler(request)
 
         # Check for pending messages
         has_pending = await self._queue_manager.peek_pending(self._session_key)
+        logger.debug(f"Middleware peek_pending={has_pending} for session={self._session_key}")
 
         if not has_pending:
             # No pending messages, execute normally

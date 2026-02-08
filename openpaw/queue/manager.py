@@ -1,12 +1,15 @@
 """Queue manager for coordinating message processing across channels."""
 
 import asyncio
+import logging
 from collections import deque
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any
 
 from openpaw.queue.lane import LaneQueue, QueueItem, QueueMode
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -197,43 +200,72 @@ class QueueManager:
     async def peek_pending(self, session_key: str) -> bool:
         """Check if session has pending messages without removing them.
 
-        Non-destructive inspection of the session's message queue.
+        Checks both the session's pre-debounce buffer AND the lane queue
+        for messages that have already been flushed. This ensures the
+        middleware detects pending messages regardless of debounce timing.
 
         Args:
             session_key: The session to check.
 
         Returns:
-            True if there are pending messages in the session queue.
+            True if there are pending messages anywhere in the pipeline.
         """
+        # Check pre-debounce session buffer
         async with self._lock:
-            if session_key not in self._sessions:
-                return False
-            session = self._sessions[session_key]
-            return len(session.messages) > 0
+            if session_key in self._sessions:
+                session = self._sessions[session_key]
+                buf_count = len(session.messages)
+                if buf_count > 0:
+                    logger.debug(f"peek_pending: {buf_count} in session buffer for {session_key}")
+                    return True
+
+        # Check lane queue for already-flushed items
+        lane_pending = await self.lane_queue.peek_session_pending(session_key)
+        logger.debug(f"peek_pending: lane_queue has_pending={lane_pending} for {session_key}")
+        return lane_pending
 
     async def consume_pending(self, session_key: str) -> list[Any]:
         """Remove and return all pending messages for a session.
 
-        Destructive operation — messages are removed from the queue.
-        Cancels any pending debounce task since messages are being consumed directly.
+        Drains both the session's pre-debounce buffer AND any items
+        already flushed to the lane queue.
+
+        Returns list of (channel_name, message) tuples, matching the
+        format used by _collect_message() and _flush_session().
 
         Args:
             session_key: The session to consume from.
 
         Returns:
-            List of pending messages (may be empty).
+            List of (channel_name, message) tuples (may be empty).
         """
+        messages: list[Any] = []
+
+        # Drain pre-debounce session buffer — already (channel_name, msg) tuples
         async with self._lock:
-            if session_key not in self._sessions:
-                return []
-            session = self._sessions[session_key]
+            if session_key in self._sessions:
+                session = self._sessions[session_key]
 
-            # Cancel pending debounce task if any
-            if session._debounce_task:
-                session._debounce_task.cancel()
-                session._debounce_task = None
+                # Cancel pending debounce task if any
+                if session._debounce_task:
+                    session._debounce_task.cancel()
+                    session._debounce_task = None
 
-            # Drain all messages
-            messages = list(session.messages)
-            session.messages.clear()
-            return messages
+                messages.extend(list(session.messages))
+                session.messages.clear()
+
+        # Drain lane queue for already-flushed items
+        lane_items = await self.lane_queue.consume_session_pending(session_key)
+        for item in lane_items:
+            # QueueItem.payload is (channel_name, [msg1, msg2, ...]) from _flush_session
+            if isinstance(item.payload, tuple) and len(item.payload) == 2:
+                channel_name, msg_list = item.payload
+                if isinstance(msg_list, list):
+                    for msg in msg_list:
+                        messages.append((channel_name, msg))
+                else:
+                    messages.append((channel_name, msg_list))
+            else:
+                messages.append(("unknown", item.payload))
+
+        return messages
