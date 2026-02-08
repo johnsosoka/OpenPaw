@@ -126,6 +126,16 @@ class DoclingProcessor(BaseBuiltinProcessor):
 
         processed_files: list[str] = []
         errors: list[str] = []
+        processing_notifications: list[str] = []
+
+        # Build processing start notifications
+        for attachment in document_attachments:
+            filename = attachment.filename or "document"
+            file_size = len(attachment.data) if attachment.data else 0
+            size_mb = file_size / (1024 * 1024)
+            processing_notifications.append(
+                f"[Processing document: {filename} ({size_mb:.1f} MB)...]"
+            )
 
         for attachment in document_attachments:
             if not attachment.data:
@@ -155,6 +165,11 @@ class DoclingProcessor(BaseBuiltinProcessor):
         # Build enriched message content
         enrichment_parts = []
 
+        # Add processing start notifications first
+        if processing_notifications:
+            enrichment_parts.extend(processing_notifications)
+            enrichment_parts.append("")  # Blank line separator
+
         # Add processed files info
         for result_info in processed_files:
             enrichment_parts.append(result_info)
@@ -167,11 +182,12 @@ class DoclingProcessor(BaseBuiltinProcessor):
                 f"[Note: {len(errors)} document {plural} could not be processed - {error_detail}]"
             )
 
-        # If nothing was processed and all failed, just add error note
+        # Build final content based on what we have
         if not processed_files and errors:
+            # Only errors - add to message content
             enrichment = "\n\n" + "\n".join(enrichment_parts)
-        elif processed_files:
-            # Add to start of message (before user caption)
+        elif processed_files or processing_notifications:
+            # We have processing info - add to start of message (before user caption)
             enrichment = "\n".join(enrichment_parts)
             if message.content:
                 enrichment += f"\n\nUser caption: {message.content}"
@@ -242,7 +258,11 @@ class DoclingProcessor(BaseBuiltinProcessor):
         """
         # Import docling (already checked for availability)
         try:
-            from docling.document_converter import DocumentConverter
+            import sys
+
+            from docling.datamodel.base_models import InputFormat
+            from docling.datamodel.pipeline_options import PdfPipelineOptions
+            from docling.document_converter import DocumentConverter, PdfFormatOption
         except ImportError as e:
             logger.error(f"Failed to import docling: {e}")
             return None
@@ -266,8 +286,29 @@ class DoclingProcessor(BaseBuiltinProcessor):
             tmp_path = Path(tmp_file.name)
 
         try:
+            # Configure pipeline with aggressive OCR for scanned/image-heavy PDFs
+            # Platform-specific OCR: OcrMacOptions on macOS, EasyOcrOptions elsewhere
+            if sys.platform == "darwin":
+                from docling.datamodel.pipeline_options import OcrMacOptions
+                ocr_options = OcrMacOptions(force_full_page_ocr=True)
+            else:
+                from docling.datamodel.pipeline_options import EasyOcrOptions
+                ocr_options = EasyOcrOptions(force_full_page_ocr=True, lang=["en"])
+
+            pipeline_options = PdfPipelineOptions(
+                do_ocr=True,
+                do_table_structure=True,
+                ocr_options=ocr_options,
+            )
+
+            # Create converter with optimized PDF processing
+            converter = DocumentConverter(
+                format_options={
+                    InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+                }
+            )
+
             # Run docling conversion in thread pool (CPU-bound)
-            converter = DocumentConverter()
             result = await asyncio.to_thread(converter.convert, tmp_path)
 
             # Export to markdown
@@ -277,6 +318,31 @@ class DoclingProcessor(BaseBuiltinProcessor):
             md_file = inbox_dir / "document.md"
             md_file.write_text(markdown, encoding="utf-8")
             logger.info(f"Saved markdown to {md_file}")
+
+            # Detect minimal/empty output
+            markdown_stripped = markdown.strip()
+            # Check if output is essentially empty (just image placeholders or whitespace)
+            is_minimal = (
+                len(markdown_stripped) < 50  # Very short output
+                or markdown_stripped in ["<!-- image -->", ""]  # Exact empty cases
+                or (
+                    markdown_stripped.startswith("<!-- image -->")
+                    and len(markdown_stripped) < 100
+                )
+            )
+
+            if is_minimal:
+                logger.warning(f"Docling produced minimal output for {filename}: {len(markdown)} bytes")
+                size_mb = file_size / (1024 * 1024)
+                relative_path = f"inbox/{today}/{sanitized_name}/"
+                result_parts = [f"[Document received: {filename} ({size_mb:.1f} MB)]"]
+                result_parts.append(f"Processed to: {relative_path}")
+                result_parts.append(
+                    "[Warning: Document conversion produced minimal output - "
+                    "PDF may be image-only, encrypted, or have extraction issues. "
+                    "Check document.md for details.]"
+                )
+                return "\n".join(result_parts)
 
             # Count tables and images (approximate from markdown)
             table_count = markdown.count("| --- |")

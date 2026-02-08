@@ -223,18 +223,28 @@ async def test_successful_processing(processor: DoclingProcessor, sample_message
     ]
 
     # Update document mock to return expected content
-    mock_docling["document"].export_to_markdown.return_value = "# Quarterly Report\n\nContent here"
+    mock_docling["document"].export_to_markdown.return_value = "# Quarterly Report\n\nContent here with enough text to not be minimal"
 
     # Mock the import and processing
     with patch.object(processor, "_check_docling_available", return_value=True), \
-         patch.dict(sys.modules, {"docling": mock_docling["module"], "docling.document_converter": mock_docling["module"].document_converter}), \
+         patch.dict(sys.modules, {
+             "docling": mock_docling["module"],
+             "docling.document_converter": mock_docling["module"].document_converter,
+             "docling.datamodel": Mock(),
+             "docling.datamodel.base_models": Mock(InputFormat=Mock(PDF="pdf")),
+             "docling.datamodel.pipeline_options": Mock(
+                 PdfPipelineOptions=Mock,
+                 EasyOcrOptions=Mock,
+             ),
+         }), \
          patch("asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
 
         mock_to_thread.return_value = mock_docling["result"]
 
         result = await processor.process_inbound(sample_message)
 
-    # Verify message enrichment
+    # Verify message enrichment includes processing notification
+    assert "Processing document: quarterly_report.pdf" in result.message.content
     assert "Document received: quarterly_report.pdf" in result.message.content
     assert "Processed to: inbox/" in result.message.content
     assert "document.md" in result.message.content
@@ -289,10 +299,19 @@ async def test_multiple_documents(processor: DoclingProcessor, sample_message: M
     ]
 
     # Update document mock
-    mock_docling["document"].export_to_markdown.return_value = "# Document Content"
+    mock_docling["document"].export_to_markdown.return_value = "# Document Content with enough text to not trigger minimal detection"
 
     with patch.object(processor, "_check_docling_available", return_value=True), \
-         patch.dict(sys.modules, {"docling": mock_docling["module"], "docling.document_converter": mock_docling["module"].document_converter}), \
+         patch.dict(sys.modules, {
+             "docling": mock_docling["module"],
+             "docling.document_converter": mock_docling["module"].document_converter,
+             "docling.datamodel": Mock(),
+             "docling.datamodel.base_models": Mock(InputFormat=Mock(PDF="pdf")),
+             "docling.datamodel.pipeline_options": Mock(
+                 PdfPipelineOptions=Mock,
+                 EasyOcrOptions=Mock,
+             ),
+         }), \
          patch("asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
 
         mock_to_thread.return_value = mock_docling["result"]
@@ -318,7 +337,16 @@ async def test_conversion_error_handling(processor: DoclingProcessor, sample_mes
     ]
 
     with patch.object(processor, "_check_docling_available", return_value=True), \
-         patch.dict(sys.modules, {"docling": mock_docling["module"], "docling.document_converter": mock_docling["module"].document_converter}), \
+         patch.dict(sys.modules, {
+             "docling": mock_docling["module"],
+             "docling.document_converter": mock_docling["module"].document_converter,
+             "docling.datamodel": Mock(),
+             "docling.datamodel.base_models": Mock(InputFormat=Mock(PDF="pdf")),
+             "docling.datamodel.pipeline_options": Mock(
+                 PdfPipelineOptions=Mock,
+                 EasyOcrOptions=Mock,
+             ),
+         }), \
          patch("asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
 
         mock_to_thread.side_effect = Exception("Conversion failed")
@@ -376,7 +404,16 @@ async def test_table_and_image_detection(processor: DoclingProcessor, sample_mes
     mock_docling["document"].export_to_markdown.return_value = markdown_content
 
     with patch.object(processor, "_check_docling_available", return_value=True), \
-         patch.dict(sys.modules, {"docling": mock_docling["module"], "docling.document_converter": mock_docling["module"].document_converter}), \
+         patch.dict(sys.modules, {
+             "docling": mock_docling["module"],
+             "docling.document_converter": mock_docling["module"].document_converter,
+             "docling.datamodel": Mock(),
+             "docling.datamodel.base_models": Mock(InputFormat=Mock(PDF="pdf")),
+             "docling.datamodel.pipeline_options": Mock(
+                 PdfPipelineOptions=Mock,
+                 EasyOcrOptions=Mock,
+             ),
+         }), \
          patch("asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
 
         mock_to_thread.return_value = mock_docling["result"]
@@ -386,3 +423,89 @@ async def test_table_and_image_detection(processor: DoclingProcessor, sample_mes
     # Verify table and image counts are reported
     assert "1 tables" in result.message.content or "1 table" in result.message.content
     assert "2 images" in result.message.content
+
+
+@pytest.mark.asyncio
+async def test_minimal_output_detection(processor: DoclingProcessor, sample_message: Message, workspace_path: Path, mock_docling: dict):
+    """Verify detection and warning for minimal/empty conversion output."""
+    pdf_data = b"%PDF-1.4 fake image-only pdf"
+    sample_message.attachments = [
+        Attachment(
+            type="document",
+            data=pdf_data,
+            mime_type="application/pdf",
+            filename="scanned_image.pdf",
+        )
+    ]
+
+    # Mock docling returning minimal output (just image placeholder)
+    mock_docling["document"].export_to_markdown.return_value = "<!-- image -->"
+
+    with patch.object(processor, "_check_docling_available", return_value=True), \
+         patch.dict(sys.modules, {
+             "docling": mock_docling["module"],
+             "docling.document_converter": mock_docling["module"].document_converter,
+             "docling.datamodel": Mock(),
+             "docling.datamodel.base_models": Mock(InputFormat=Mock(PDF="pdf")),
+             "docling.datamodel.pipeline_options": Mock(
+                 PdfPipelineOptions=Mock,
+                 EasyOcrOptions=Mock,
+             ),
+         }), \
+         patch("asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+
+        mock_to_thread.return_value = mock_docling["result"]
+
+        result = await processor.process_inbound(sample_message)
+
+    # Verify warning message is present
+    assert "minimal output" in result.message.content.lower()
+    assert "image-only" in result.message.content.lower() or "encrypted" in result.message.content.lower()
+    assert "Document received: scanned_image.pdf" in result.message.content
+
+    # Verify file was still saved
+    today = datetime.now().strftime("%Y-%m-%d")
+    md_file = workspace_path / "inbox" / today / "scanned_image" / "document.md"
+    assert md_file.exists()
+    assert md_file.read_text().strip() == "<!-- image -->"
+
+
+@pytest.mark.asyncio
+async def test_processing_notification(processor: DoclingProcessor, sample_message: Message, mock_docling: dict):
+    """Verify processing start notification is included in enriched content."""
+    sample_message.attachments = [
+        Attachment(
+            type="document",
+            data=b"fake pdf data",
+            mime_type="application/pdf",
+            filename="test.pdf",
+        )
+    ]
+
+    mock_docling["document"].export_to_markdown.return_value = "# Test\n\nSome content here to avoid minimal detection"
+
+    with patch.object(processor, "_check_docling_available", return_value=True), \
+         patch.dict(sys.modules, {
+             "docling": mock_docling["module"],
+             "docling.document_converter": mock_docling["module"].document_converter,
+             "docling.datamodel": Mock(),
+             "docling.datamodel.base_models": Mock(InputFormat=Mock(PDF="pdf")),
+             "docling.datamodel.pipeline_options": Mock(
+                 PdfPipelineOptions=Mock,
+                 EasyOcrOptions=Mock,
+             ),
+         }), \
+         patch("asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+
+        mock_to_thread.return_value = mock_docling["result"]
+
+        result = await processor.process_inbound(sample_message)
+
+    # Verify processing notification appears before completion notification
+    content = result.message.content
+    processing_idx = content.find("Processing document: test.pdf")
+    received_idx = content.find("Document received: test.pdf")
+
+    assert processing_idx != -1, "Processing notification should be present"
+    assert received_idx != -1, "Completion notification should be present"
+    assert processing_idx < received_idx, "Processing notification should appear before completion"
