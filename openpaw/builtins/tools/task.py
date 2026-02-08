@@ -14,6 +14,7 @@ from openpaw.builtins.base import (
     BuiltinPrerequisite,
     BuiltinType,
 )
+from openpaw.core.timezone import format_for_display
 from openpaw.task import (
     TaskPriority,
     TaskStatus,
@@ -156,6 +157,7 @@ class TaskToolBuiltin(BaseBuiltinTool):
 
         # Configuration
         self.max_age_days = self.config.get("max_age_days", 7)
+        self._timezone = self.config.get("timezone", "UTC")
 
         logger.info(
             f"TaskToolBuiltin initialized for workspace: {self.workspace_path.name}"
@@ -399,7 +401,7 @@ class TaskToolBuiltin(BaseBuiltinTool):
                 # Get existing task to append to notes
                 existing = self.store.get(task_id)
                 if existing:
-                    timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+                    timestamp = format_for_display(datetime.now(UTC), self._timezone, "%Y-%m-%d %H:%M %Z")
                     existing_notes = existing.notes or ""
                     if existing_notes:
                         updates["notes"] = f"{existing_notes}\n- [{timestamp}] {notes}"

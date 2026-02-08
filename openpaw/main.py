@@ -115,6 +115,7 @@ class WorkspaceRunner:
         self._conversation_archiver = ConversationArchiver(
             workspace_path=self._workspace.path,
             workspace_name=self.workspace_name,
+            timezone=self._workspace_timezone,
         )
 
         # Initialize command router and register framework commands

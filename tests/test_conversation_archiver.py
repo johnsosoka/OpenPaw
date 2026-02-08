@@ -1,9 +1,10 @@
 """Tests for ConversationArchiver."""
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
+from zoneinfo import ZoneInfo
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -417,3 +418,70 @@ async def test_archive_metadata_fields(archiver: ConversationArchiver, mock_chec
     assert archive.tags == ["tag1", "tag2"]
     assert archive.markdown_path.name == "conv_2026-02-07T14-30-00.md"
     assert archive.json_path.name == "conv_2026-02-07T14-30-00.json"
+
+
+@pytest.mark.asyncio
+async def test_archive_timezone_aware_display(tmp_path: Path, mock_checkpointer):
+    """Test that markdown timestamps use workspace timezone for display."""
+    # Create archiver with America/Denver timezone
+    archiver = ConversationArchiver(tmp_path, "test_workspace", timezone="America/Denver")
+
+    # Create a known UTC timestamp
+    utc_dt = datetime(2026, 2, 8, 17, 30, 0, tzinfo=ZoneInfo("UTC"))
+
+    # Modify mock_checkpointer to use our known timestamp
+    checkpoint_tuple = MagicMock()
+    checkpoint_tuple.checkpoint = {
+        "channel_values": {
+            "messages": [
+                HumanMessage(
+                    content="Test message",
+                    additional_kwargs={"timestamp": utc_dt}
+                ),
+            ]
+        }
+    }
+    mock_checkpointer.aget_tuple.return_value = checkpoint_tuple
+
+    archive = await archiver.archive(
+        checkpointer=mock_checkpointer,
+        thread_id="telegram:123:conv_tz_test",
+        session_key="telegram:123",
+        conversation_id="conv_tz_test",
+    )
+
+    # Read markdown content
+    markdown_content = archive.markdown_path.read_text()
+
+    # Verify markdown shows MST timezone (America/Denver in winter)
+    # 2026-02-08 17:30 UTC = 2026-02-08 10:30 MST
+    assert "10:30:00 MST" in markdown_content or "10:30:00 MDT" in markdown_content
+
+    # Verify JSON data remains UTC (no timezone conversion)
+    with archive.json_path.open("r") as f:
+        data = json.load(f)
+
+    # JSON timestamps should be ISO format UTC strings
+    assert data["messages"][0]["timestamp"] == utc_dt.isoformat()
+    # Metadata timestamps should also be UTC
+    assert "2026-02-08T17:30:00" in data["started_at"]
+
+
+@pytest.mark.asyncio
+async def test_archive_default_timezone_utc(tmp_path: Path, mock_checkpointer):
+    """Test that default timezone is UTC when not specified."""
+    # Create archiver without timezone parameter (defaults to UTC)
+    archiver = ConversationArchiver(tmp_path, "test_workspace")
+
+    archive = await archiver.archive(
+        checkpointer=mock_checkpointer,
+        thread_id="telegram:123:conv_default_tz",
+        session_key="telegram:123",
+        conversation_id="conv_default_tz",
+    )
+
+    # Read markdown content
+    markdown_content = archive.markdown_path.read_text()
+
+    # Verify timestamps show UTC
+    assert " UTC" in markdown_content

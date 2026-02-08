@@ -13,6 +13,8 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
+from openpaw.core.timezone import format_for_display
+
 logger = logging.getLogger(__name__)
 
 
@@ -98,15 +100,17 @@ class ConversationArchiver:
     - {conversation_id}.json — Machine-readable, includes tool_calls
     """
 
-    def __init__(self, workspace_path: Path, workspace_name: str):
+    def __init__(self, workspace_path: Path, workspace_name: str, timezone: str = "UTC"):
         """Initialize archiver.
 
         Args:
             workspace_path: Path to workspace root.
             workspace_name: Name of the workspace.
+            timezone: IANA timezone identifier for display timestamps (default: "UTC").
         """
         self._workspace_path = Path(workspace_path)
         self._workspace_name = workspace_name
+        self._timezone = timezone
         self._archive_dir = self._workspace_path / "memory" / "conversations"
         self._archive_dir.mkdir(parents=True, exist_ok=True)
 
@@ -215,8 +219,8 @@ class ConversationArchiver:
             f"**ID:** {archive.conversation_id}",
             f"**Session:** {archive.session_key}",
             f"**Workspace:** {archive.workspace_name}",
-            f"**Started:** {archive.started_at.strftime('%Y-%m-%d %H:%M:%S UTC')}",
-            f"**Ended:** {archive.ended_at.strftime('%Y-%m-%d %H:%M:%S UTC')}",
+            f"**Started:** {format_for_display(archive.started_at, self._timezone, '%Y-%m-%d %H:%M:%S %Z')}",
+            f"**Ended:** {format_for_display(archive.ended_at, self._timezone, '%Y-%m-%d %H:%M:%S %Z')}",
             f"**Messages:** {archive.message_count}",
             "",
         ]
@@ -238,7 +242,7 @@ class ConversationArchiver:
         # Format each message
         for i, message in enumerate(messages, 1):
             timestamp = self._extract_timestamp(message)
-            timestamp_str = timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')
+            timestamp_str = format_for_display(timestamp, self._timezone, '%Y-%m-%d %H:%M:%S %Z')
 
             if isinstance(message, HumanMessage):
                 lines.append(f"**[User]** {timestamp_str}")

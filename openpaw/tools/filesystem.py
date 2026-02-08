@@ -11,6 +11,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from langchain_core.tools import BaseTool, tool
 
@@ -24,16 +25,18 @@ class FilesystemTools:
     to prevent path traversal attacks and access outside the sandbox.
     """
 
-    def __init__(self, workspace_root: Path, max_file_size_mb: int = 10):
+    def __init__(self, workspace_root: Path, max_file_size_mb: int = 10, timezone: str = "UTC"):
         """Initialize filesystem tools with workspace sandbox.
 
         Args:
             workspace_root: Root directory for all file operations
             max_file_size_mb: Maximum file size in MB for operations like grep
+            timezone: IANA timezone identifier for timestamp display (default: UTC)
         """
         self.root = workspace_root.resolve()
         self.max_file_size_bytes = max_file_size_mb * 1024 * 1024
         self._max_read_output_chars: int = 100_000  # Character safety valve for read_file output
+        self._timezone = timezone
 
     def _resolve_path(self, path: str) -> Path:
         """Resolve a path relative to workspace root with security checks."""
@@ -114,22 +117,30 @@ class FilesystemTools:
                     if is_file:
                         try:
                             st = child.stat()
+                            tz = ZoneInfo(self._timezone)
+                            modified_at = datetime.fromtimestamp(st.st_mtime, tz=tz).strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            )
                             results.append({
                                 "path": str(rel_path),
                                 "is_dir": False,
                                 "size": int(st.st_size),
-                                "modified_at": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                                "modified_at": modified_at,
                             })
                         except OSError:
                             results.append({"path": str(rel_path), "is_dir": False})
                     elif is_dir:
                         try:
                             st = child.stat()
+                            tz = ZoneInfo(self._timezone)
+                            modified_at = datetime.fromtimestamp(st.st_mtime, tz=tz).strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            )
                             results.append({
                                 "path": str(rel_path),
                                 "is_dir": True,
                                 "size": 0,
-                                "modified_at": datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                                "modified_at": modified_at,
                             })
                         except OSError:
                             results.append({"path": str(rel_path), "is_dir": True})
@@ -493,7 +504,8 @@ class FilesystemTools:
                 # Get file stats
                 stat_info = resolved_path.stat()
                 size_bytes = stat_info.st_size
-                last_modified = datetime.fromtimestamp(stat_info.st_mtime).isoformat()
+                tz = ZoneInfo(self._timezone)
+                last_modified = datetime.fromtimestamp(stat_info.st_mtime, tz=tz).isoformat()
 
                 # Format human-readable size
                 if size_bytes < 1024:
