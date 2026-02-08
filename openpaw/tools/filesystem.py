@@ -14,6 +14,8 @@ from typing import Any
 
 from langchain_core.tools import BaseTool, tool
 
+from openpaw.tools.sandbox import resolve_sandboxed_path
+
 
 class FilesystemTools:
     """Sandboxed filesystem tools for agent workspace access.
@@ -31,56 +33,11 @@ class FilesystemTools:
         """
         self.root = workspace_root.resolve()
         self.max_file_size_bytes = max_file_size_mb * 1024 * 1024
+        self._max_read_output_chars: int = 100_000  # Character safety valve for read_file output
 
     def _resolve_path(self, path: str) -> Path:
-        """Resolve and validate path is within workspace sandbox.
-
-        Args:
-            path: Relative path from workspace root (no absolute paths or ..)
-
-        Returns:
-            Resolved absolute Path object
-
-        Raises:
-            ValueError: If path attempts traversal or escapes workspace root
-        """
-        # Reject absolute paths
-        if Path(path).is_absolute():
-            raise ValueError(
-                f"Absolute paths not allowed in sandbox. Use relative paths from workspace root. Got: {path}"
-            )
-
-        # Reject path traversal attempts
-        if ".." in Path(path).parts:
-            raise ValueError(
-                f"Path traversal (..) not allowed in sandbox. Got: {path}"
-            )
-
-        # Reject home directory expansion
-        if path.startswith("~"):
-            raise ValueError(
-                f"Home directory expansion (~) not allowed in sandbox. Got: {path}"
-            )
-
-        # Reject framework internal directory
-        if any(part == ".openpaw" for part in Path(path).parts):
-            raise ValueError(
-                "Access to .openpaw/ directory is not allowed. "
-                "This directory contains framework internals."
-            )
-
-        # Resolve path relative to workspace root
-        full_path = (self.root / path).resolve()
-
-        # Verify resolved path stays within workspace
-        try:
-            full_path.relative_to(self.root)
-        except ValueError:
-            raise ValueError(
-                f"Path resolves outside workspace root. Workspace: {self.root}, Path: {full_path}"
-            ) from None
-
-        return full_path
+        """Resolve a path relative to workspace root with security checks."""
+        return resolve_sandboxed_path(self.root, path)
 
     def _format_file_listing(self, file_info: dict[str, Any]) -> str:
         """Format file info for display."""
@@ -230,6 +187,15 @@ class FilesystemTools:
                 # Add footer if file was truncated
                 if end_idx < len(lines):
                     result += f"\n... ({len(lines) - end_idx} more lines)"
+
+
+                # Character safety valve
+                if len(result) > self._max_read_output_chars:
+                    result = result[:self._max_read_output_chars]
+                    result += (
+                        f"\n\n... (output truncated at {self._max_read_output_chars:,} characters. "
+                        f"Use offset/limit parameters to read specific sections.)"
+                    )
 
                 return result
 
@@ -435,6 +401,7 @@ class FilesystemTools:
             file_pattern: str | None = None,
             case_sensitive: bool = True,
             max_matches: int = 100,
+            context_lines: int = 0,
         ) -> str:
             """Search file contents for a pattern.
 
@@ -446,6 +413,7 @@ class FilesystemTools:
                 file_pattern: Optional glob to filter files (e.g., "*.py")
                 case_sensitive: Whether search is case-sensitive (default: True)
                 max_matches: Maximum number of matches to return (default: 100)
+                context_lines: Number of lines to show before and after each match (default: 0)
 
             Returns:
                 Matching lines with file path and line number
@@ -459,30 +427,155 @@ class FilesystemTools:
                 return f"Error: Path '{path}' does not exist"
 
             # Try ripgrep first
-            matches = self._ripgrep_search(
-                pattern, search_path, file_pattern, case_sensitive, max_matches
+            result = self._ripgrep_search(
+                pattern, search_path, file_pattern, case_sensitive, max_matches, context_lines
             )
 
             # Fallback to Python search if ripgrep unavailable
-            if matches is None:
-                matches = self._python_search(
-                    pattern, search_path, file_pattern, case_sensitive, max_matches
+            if result is None:
+                result = self._python_search(
+                    pattern, search_path, file_pattern, case_sensitive, max_matches, context_lines
                 )
 
-            if not matches:
+            if not result:
                 return f"No matches found for pattern '{pattern}' in '{path}'"
 
-            # Format results
-            results = []
-            for file_path, line_num, line_text in matches[:max_matches]:
-                # Truncate long lines
-                display_line = line_text[:200] + "..." if len(line_text) > 200 else line_text
-                results.append(f"{file_path}:{line_num}: {display_line}")
+            # result is either a formatted string (with context) or a list of tuples (no context)
+            if isinstance(result, str):
+                # Already formatted with context
+                return result
+            else:
+                # Legacy format: list of tuples
+                matches = result
+                results = []
+                for file_path, line_num, line_text in matches[:max_matches]:
+                    # Truncate long lines
+                    display_line = line_text[:200] + "..." if len(line_text) > 200 else line_text
+                    results.append(f"{file_path}:{line_num}: {display_line}")
 
-            count_msg = f"\n\n(Showing {len(results)} of {len(matches)} matches)" if len(matches) > max_matches else ""
-            return "\n".join(results) + count_msg
+                count_msg = (
+                    f"\n\n(Showing {len(results)} of {len(matches)} matches)"
+                    if len(matches) > max_matches
+                    else ""
+                )
+                return "\n".join(results) + count_msg
 
-        return [ls, read_file, write_file, overwrite_file, edit_file, glob_files, grep_files]
+        @tool
+        def file_info(path: str) -> str:
+            """Get file metadata without reading content.
+
+            Returns file size, line count (for text files), type detection,
+            and suggested read strategy for large files.
+
+            Args:
+                path: Relative path to the file within the workspace.
+
+            Returns:
+                JSON string with file metadata
+            """
+            try:
+                resolved_path = self._resolve_path(path)
+            except ValueError as e:
+                return json.dumps({"path": path, "exists": False, "error": str(e)})
+
+            if not resolved_path.exists():
+                return json.dumps({"path": path, "exists": False, "error": "File not found"})
+
+            if resolved_path.is_dir():
+                return json.dumps({
+                    "path": path,
+                    "exists": True,
+                    "is_directory": True,
+                    "error": "Use ls for directories"
+                })
+
+            try:
+                # Get file stats
+                stat_info = resolved_path.stat()
+                size_bytes = stat_info.st_size
+                last_modified = datetime.fromtimestamp(stat_info.st_mtime).isoformat()
+
+                # Format human-readable size
+                if size_bytes < 1024:
+                    size_human = f"{size_bytes} B"
+                elif size_bytes < 1024 * 1024:
+                    size_human = f"{size_bytes / 1024:.1f} KB"
+                elif size_bytes < 1024 * 1024 * 1024:
+                    size_human = f"{size_bytes / (1024 * 1024):.1f} MB"
+                else:
+                    size_human = f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
+
+                # Check if binary by reading first 8KB
+                is_binary = False
+                try:
+                    with open(resolved_path, "rb") as f:
+                        sample = f.read(8192)
+                        is_binary = b"\x00" in sample
+                except (OSError, PermissionError):
+                    pass
+
+                result = {
+                    "path": path,
+                    "exists": True,
+                    "size_bytes": size_bytes,
+                    "size_human": size_human,
+                    "is_binary": is_binary,
+                    "last_modified": last_modified,
+                }
+
+                # For text files, count lines and suggest read strategy
+                if not is_binary:
+                    line_count: int | str | None = None
+                    # For very large files (>10MB), use streaming approach or cap
+                    if size_bytes > 10 * 1024 * 1024:
+                        try:
+                            # Stream count for large files
+                            count = 0
+                            with open(resolved_path, encoding="utf-8", errors="ignore") as f:
+                                for _ in f:
+                                    count += 1
+                                    if count > 10000:
+                                        line_count = "10000+"
+                                        break
+                            if line_count is None:
+                                line_count = count
+                        except (OSError, PermissionError):
+                            line_count = None
+                    else:
+                        try:
+                            with open(resolved_path, encoding="utf-8", errors="ignore") as f:
+                                line_count = sum(1 for _ in f)
+                        except (OSError, PermissionError, UnicodeDecodeError):
+                            line_count = None
+
+                    if line_count is not None:
+                        result["line_count"] = line_count
+
+                    # Suggest read strategy based on line count
+                    if isinstance(line_count, int):
+                        if line_count < 50:
+                            result["suggested_read_strategy"] = "Small file. Safe to read in full."
+                        elif line_count > 500:
+                            result["suggested_read_strategy"] = (
+                                f"Large file. Use read_file('{path}', offset=0, limit=100) for preview."
+                            )
+                    elif line_count == "10000+":
+                        result["suggested_read_strategy"] = (
+                            f"Very large file (10000+ lines). Use read_file('{path}', offset=0, limit=100) for preview."
+                        )
+                else:
+                    result["suggested_read_strategy"] = "Binary file. Use appropriate tool for this file type."
+
+                return json.dumps(result)
+
+            except (OSError, PermissionError) as e:
+                return json.dumps({
+                    "path": path,
+                    "exists": True,
+                    "error": f"Permission or I/O error: {e}"
+                })
+
+        return [ls, read_file, write_file, overwrite_file, edit_file, glob_files, grep_files, file_info]
 
     def _ripgrep_search(
         self,
@@ -491,8 +584,15 @@ class FilesystemTools:
         file_pattern: str | None,
         case_sensitive: bool,
         max_matches: int,
-    ) -> list[tuple[str, int, str]] | None:
-        """Search using ripgrep (if available)."""
+        context_lines: int = 0,
+    ) -> list[tuple[str, int, str]] | str | None:
+        """Search using ripgrep (if available).
+
+        Returns:
+            None if ripgrep unavailable
+            List of tuples when context_lines=0 (backward compatible)
+            Formatted string when context_lines>0
+        """
         cmd = ["rg", "--json"]
 
         if not case_sensitive:
@@ -500,6 +600,9 @@ class FilesystemTools:
 
         if file_pattern:
             cmd.extend(["--glob", file_pattern])
+
+        if context_lines > 0:
+            cmd.extend(["-C", str(context_lines)])
 
         cmd.extend(["--", pattern, str(base_path)])
 
@@ -514,6 +617,11 @@ class FilesystemTools:
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return None
 
+        # When context_lines > 0, use new formatting
+        if context_lines > 0:
+            return self._format_ripgrep_with_context(proc.stdout, max_matches)
+
+        # Legacy path: no context
         matches = []
         for line in proc.stdout.splitlines():
             try:
@@ -548,6 +656,97 @@ class FilesystemTools:
 
         return matches
 
+    def _format_ripgrep_with_context(self, rg_output: str, max_matches: int) -> str:
+        """Format ripgrep JSON output with context lines.
+
+        Args:
+            rg_output: JSON output from ripgrep -C command
+            max_matches: Maximum number of match groups to include
+
+        Returns:
+            Formatted string with matches and context, using standard grep conventions
+        """
+        match_groups = []
+        current_group = []
+        last_line_num = None
+        last_file_path = None
+        match_count = 0
+
+        for line in rg_output.splitlines():
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            record_type = data.get("type")
+            if record_type not in ("match", "context"):
+                continue
+
+            record_data = data.get("data", {})
+            file_path_obj = record_data.get("path", {}).get("text")
+            if not file_path_obj:
+                continue
+
+            # Convert to relative path from workspace root
+            try:
+                rel_path = str(Path(file_path_obj).resolve().relative_to(self.root))
+            except ValueError:
+                continue
+
+            line_num = record_data.get("line_number")
+            line_text = record_data.get("lines", {}).get("text", "").rstrip("\n")
+
+            if line_num is None:
+                continue
+
+            # Truncate long lines (same as match lines)
+            display_line = line_text[:200] + "..." if len(line_text) > 200 else line_text
+
+            # Check if this is a new match group (non-contiguous)
+            if last_file_path is not None and last_line_num is not None:
+                # New file or gap in line numbers means new group
+                if rel_path != last_file_path or line_num > last_line_num + 1:
+                    if current_group:
+                        match_groups.append(current_group)
+                        current_group = []
+
+            # Format line according to type
+            if record_type == "match":
+                formatted = f"{rel_path}:{line_num}: {display_line}"
+                match_count += 1
+            else:  # context
+                formatted = f"{rel_path}-{line_num}- {display_line}"
+
+            current_group.append(formatted)
+            last_line_num = line_num
+            last_file_path = rel_path
+
+            # Stop if we've hit max matches
+            if match_count >= max_matches:
+                break
+
+        # Add final group
+        if current_group:
+            match_groups.append(current_group)
+
+        # Build output with -- separators
+        output_parts = []
+        for i, group in enumerate(match_groups[:max_matches]):
+            if i > 0:
+                output_parts.append("--")
+            output_parts.extend(group)
+
+        if not output_parts:
+            return ""
+
+        result = "\n".join(output_parts)
+
+        # Add count message if truncated
+        if match_count > max_matches:
+            result += f"\n\n(Showing first {max_matches} matches)"
+
+        return result
+
     def _python_search(
         self,
         pattern: str,
@@ -555,14 +754,26 @@ class FilesystemTools:
         file_pattern: str | None,
         case_sensitive: bool,
         max_matches: int,
-    ) -> list[tuple[str, int, str]]:
-        """Fallback search using Python regex."""
+        context_lines: int = 0,
+    ) -> list[tuple[str, int, str]] | str:
+        """Fallback search using Python regex.
+
+        Returns:
+            List of tuples when context_lines=0 (backward compatible)
+            Formatted string when context_lines>0
+        """
         try:
             flags = 0 if case_sensitive else re.IGNORECASE
             regex = re.compile(pattern, flags)
         except re.error as e:
             return [(f"Invalid regex pattern: {e}", 0, "")]
 
+        if context_lines > 0:
+            return self._python_search_with_context(
+                regex, base_path, file_pattern, max_matches, context_lines
+            )
+
+        # Legacy path: no context
         matches = []
         search_root = base_path if base_path.is_dir() else base_path.parent
 
@@ -606,6 +817,168 @@ class FilesystemTools:
                         return matches
 
         return matches
+
+    def _python_search_with_context(
+        self,
+        regex: re.Pattern[str],
+        base_path: Path,
+        file_pattern: str | None,
+        max_matches: int,
+        context_lines: int,
+    ) -> str:
+        """Python search with context lines.
+
+        Args:
+            regex: Compiled regex pattern
+            base_path: Path to search in
+            file_pattern: Optional glob to filter files
+            max_matches: Maximum number of matches
+            context_lines: Number of context lines before and after
+
+        Returns:
+            Formatted string with matches and context
+        """
+        match_groups = []
+        match_count = 0
+        search_root = base_path if base_path.is_dir() else base_path.parent
+
+        for file_path in search_root.rglob("*"):
+            try:
+                if not file_path.is_file():
+                    continue
+            except (PermissionError, OSError):
+                continue
+
+            # Filter by file pattern if provided
+            if file_pattern:
+                if not Path(file_path.name).match(file_pattern):
+                    continue
+
+            # Skip files that are too large
+            try:
+                if file_path.stat().st_size > self.max_file_size_bytes:
+                    continue
+            except OSError:
+                continue
+
+            # Read and search file
+            try:
+                content = file_path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, PermissionError, OSError):
+                continue
+
+            # Get relative path
+            try:
+                rel_path = str(file_path.relative_to(self.root))
+            except ValueError:
+                continue
+
+            lines = content.splitlines()
+
+            # Find all matches in this file
+            match_line_nums = []
+            for line_num, line in enumerate(lines, 1):
+                if regex.search(line):
+                    match_line_nums.append(line_num)
+
+            if not match_line_nums:
+                continue
+
+            # Build context windows for each match
+            for match_line_num in match_line_nums:
+                if match_count >= max_matches:
+                    break
+
+                # Calculate context window (1-indexed line numbers)
+                start_line = max(1, match_line_num - context_lines)
+                end_line = min(len(lines), match_line_num + context_lines)
+
+                group_lines = []
+                for line_num in range(start_line, end_line + 1):
+                    line_text = lines[line_num - 1]  # Convert to 0-indexed
+                    # Truncate long lines
+                    display_line = line_text[:200] + "..." if len(line_text) > 200 else line_text
+
+                    if line_num == match_line_num:
+                        # Match line
+                        formatted = f"{rel_path}:{line_num}: {display_line}"
+                    else:
+                        # Context line
+                        formatted = f"{rel_path}-{line_num}- {display_line}"
+
+                    group_lines.append(formatted)
+
+                match_groups.append(group_lines)
+                match_count += 1
+
+            if match_count >= max_matches:
+                break
+
+        if not match_groups:
+            return ""
+
+        # Merge overlapping groups within same file
+        merged_groups = []
+        i = 0
+        while i < len(match_groups):
+            current_group = match_groups[i]
+            i += 1
+
+            # Check if next group overlaps with current
+            while i < len(match_groups):
+                next_group = match_groups[i]
+
+                # Extract file path and line numbers from first line of each group
+                if not current_group or not next_group:
+                    break
+
+                current_last = current_group[-1]
+                next_first = next_group[0]
+
+                # Parse file:linenum or file-linenum from formatted strings
+                current_parts = current_last.split(":")
+                next_parts = next_first.split(":")
+                if len(current_parts) < 2 or len(next_parts) < 2:
+                    # Try hyphen separator for context lines
+                    current_parts = current_last.split("-")
+                    next_parts = next_first.split("-")
+
+                if len(current_parts) >= 2 and len(next_parts) >= 2:
+                    current_file = current_parts[0]
+                    next_file = next_parts[0]
+
+                    try:
+                        current_line_str = current_parts[1].split()[0] if len(current_parts[1].split()) > 0 else "0"
+                        next_line_str = next_parts[1].split()[0] if len(next_parts[1].split()) > 0 else "0"
+                        current_line = int(current_line_str.rstrip("-"))
+                        next_line = int(next_line_str.rstrip("-"))
+
+                        # If same file and overlapping or adjacent, merge
+                        if current_file == next_file and next_line <= current_line + 1:
+                            # Merge by adding unique lines from next_group
+                            current_group.extend(next_group)
+                            i += 1
+                            continue
+                    except (ValueError, IndexError):
+                        pass
+
+                break
+
+            merged_groups.append(current_group)
+
+        # Build output with -- separators
+        output_parts = []
+        for i, group in enumerate(merged_groups):
+            if i > 0:
+                output_parts.append("--")
+            output_parts.extend(group)
+
+        result = "\n".join(output_parts)
+
+        if match_count > max_matches:
+            result += f"\n\n(Showing first {max_matches} matches)"
+
+        return result
 
 
 if __name__ == "__main__":

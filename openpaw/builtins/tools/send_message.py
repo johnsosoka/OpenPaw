@@ -1,7 +1,6 @@
 """Send message builtin for mid-execution agent communication."""
 
 import asyncio
-import contextvars
 import logging
 from typing import Any
 
@@ -14,16 +13,13 @@ from openpaw.builtins.base import (
     BuiltinPrerequisite,
     BuiltinType,
 )
+from openpaw.builtins.tools._channel_context import (
+    clear_channel_context,
+    get_channel_context,
+    set_channel_context,
+)
 
 logger = logging.getLogger(__name__)
-
-# Per-session context variables for thread-safe state isolation
-_send_channel: contextvars.ContextVar[Any] = contextvars.ContextVar(
-    '_send_channel', default=None
-)
-_send_session_key: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    '_send_session_key', default=None
-)
 
 
 class SendMessageInput(BaseModel):
@@ -71,18 +67,14 @@ class SendMessageTool(BaseBuiltinTool):
             channel: The channel instance to send messages through.
             session_key: The session key for routing (e.g., 'telegram:123456').
         """
-        _send_channel.set(channel)
-        _send_session_key.set(session_key)
-        logger.debug(f"SendMessageTool context set: session_key={session_key}")
+        set_channel_context(channel, session_key)
 
     def clear_session_context(self) -> None:
         """Clear the session context after agent run completes.
 
         Called by WorkspaceRunner after each agent run.
         """
-        _send_channel.set(None)
-        _send_session_key.set(None)
-        logger.debug("SendMessageTool context cleared")
+        clear_channel_context()
 
     def get_langchain_tool(self) -> Any:
         """Return the send_message tool as a LangChain StructuredTool."""
@@ -96,8 +88,7 @@ class SendMessageTool(BaseBuiltinTool):
             Returns:
                 Confirmation message or error.
             """
-            channel = _send_channel.get()
-            session_key = _send_session_key.get()
+            channel, session_key = get_channel_context()
 
             if not channel or not session_key:
                 return "[Error: send_message not available in this context (no active session)]"
@@ -128,8 +119,7 @@ class SendMessageTool(BaseBuiltinTool):
             Returns:
                 Confirmation message or error.
             """
-            channel = _send_channel.get()
-            session_key = _send_session_key.get()
+            channel, session_key = get_channel_context()
 
             if not channel or not session_key:
                 return "[Error: send_message not available in this context (no active session)]"

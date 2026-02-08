@@ -185,6 +185,15 @@ class CronBuiltinConfig(BuiltinItemConfig):
     )
 
 
+class SendFileBuiltinConfig(BuiltinItemConfig):
+    """Configuration for the send_file tool."""
+
+    max_file_size: int = Field(
+        default=50 * 1024 * 1024,
+        description="Maximum file size in bytes (default 50MB for Telegram)"
+    )
+
+
 class BuiltinsConfig(BaseModel):
     """Global builtins configuration.
 
@@ -206,6 +215,7 @@ class BuiltinsConfig(BaseModel):
     whisper: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
     elevenlabs: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
     cron: CronBuiltinConfig = Field(default_factory=CronBuiltinConfig)
+    send_file: SendFileBuiltinConfig = Field(default_factory=SendFileBuiltinConfig)
 
     model_config = {"extra": "allow"}
 
@@ -227,6 +237,7 @@ class WorkspaceBuiltinsConfig(BaseModel):
     whisper: BuiltinItemConfig | None = None
     elevenlabs: BuiltinItemConfig | None = None
     cron: CronBuiltinConfig | None = None
+    send_file: SendFileBuiltinConfig | None = None
 
     model_config = {"extra": "allow"}
 

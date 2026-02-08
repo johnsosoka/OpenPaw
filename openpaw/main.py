@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import aiosqlite
@@ -19,6 +20,7 @@ from openpaw.commands.router import CommandRouter
 from openpaw.core.agent import AgentRunner
 from openpaw.core.config import Config, merge_configs
 from openpaw.core.logging import setup_workspace_logger
+from openpaw.core.metrics import TokenUsageLogger
 from openpaw.heartbeat.scheduler import HeartbeatScheduler
 from openpaw.memory.archiver import ConversationArchiver
 from openpaw.queue.lane import LaneQueue, QueueItem, QueueMode
@@ -57,13 +59,14 @@ class WorkspaceRunner:
             self.logger = logging.getLogger(f"{__name__}.{workspace_name}")
 
         self._workspace_loader = WorkspaceLoader(config.workspaces_path)
-        self._workspace = self._workspace_loader.load(workspace_name)
 
-        # Load workspace-specific .env file if present
-        workspace_env = self._workspace.path / ".env"
+        # Load workspace-specific .env BEFORE workspace load so ${VAR} expansion works
+        workspace_env = Path(config.workspaces_path) / workspace_name / ".env"
         if workspace_env.exists():
             load_dotenv(workspace_env, override=True)
             self.logger.info(f"Loaded environment from: {workspace_env}")
+
+        self._workspace = self._workspace_loader.load(workspace_name)
 
         # Merge workspace config with global config if workspace has agent.yaml
         self._merged_config = self._merge_workspace_config(config, self._workspace)
@@ -71,6 +74,9 @@ class WorkspaceRunner:
         # Initialize TaskStore for long-running task tracking
         self._task_store = TaskStore(self._workspace.path)
         self._cleanup_old_tasks()
+
+        # Initialize TokenUsageLogger for tracking token usage
+        self._token_logger = TokenUsageLogger(self._workspace.path)
 
         self._lane_queue = LaneQueue(
             main_concurrency=config.lanes.main_concurrency,
@@ -153,6 +159,13 @@ class WorkspaceRunner:
 
         self.logger.info(f"Initializing agent with model: {model_str}")
 
+        # Extract extra model kwargs (anything not in the known set)
+        known_model_keys = {"provider", "model", "api_key", "temperature", "max_turns", "region", "timeout_seconds"}
+        extra_model_kwargs = {k: v for k, v in agent_config.items() if k not in known_model_keys and v is not None}
+
+        if extra_model_kwargs:
+            self.logger.info(f"Passing extra model kwargs: {list(extra_model_kwargs.keys())}")
+
         # AgentRunner auto-detects thinking models - no need for WorkspaceRunner to check
         self._agent_runner = AgentRunner(
             workspace=self._workspace,
@@ -165,6 +178,7 @@ class WorkspaceRunner:
             region=agent_config.get("region"),
             timeout_seconds=agent_config.get("timeout_seconds", 300.0),
             enabled_builtins=self._enabled_builtin_names,
+            extra_model_kwargs=extra_model_kwargs,
         )
 
         self._channels: dict[str, ChannelAdapter] = {}
@@ -172,6 +186,15 @@ class WorkspaceRunner:
         self._heartbeat_scheduler: HeartbeatScheduler | None = None
         self._queue_processor_task: asyncio.Task[None] | None = None
         self._running = False
+
+    @property
+    def token_logger(self) -> TokenUsageLogger:
+        """Get the token usage logger for this workspace.
+
+        Returns:
+            TokenUsageLogger instance for reading/logging token usage.
+        """
+        return self._token_logger
 
     def _merge_workspace_config(self, global_config: Config, workspace: Any) -> dict[str, Any]:
         """Merge workspace config over global config.
@@ -386,6 +409,15 @@ class WorkspaceRunner:
                     thread_id=thread_id,
                 )
 
+                # Log token usage for this invocation
+                if self._agent_runner.last_metrics:
+                    self._token_logger.log(
+                        metrics=self._agent_runner.last_metrics,
+                        workspace=self.workspace_name,
+                        invocation_type="user",
+                        session_key=session_key,
+                    )
+
                 if channel:
                     if response and response.strip():
                         await channel.send_message(session_key, response)
@@ -547,6 +579,7 @@ class WorkspaceRunner:
                 strip_thinking=self._agent_runner.strip_thinking,
                 timeout_seconds=self._agent_runner.timeout_seconds,
                 enabled_builtins=self._enabled_builtin_names,
+                extra_model_kwargs=self._agent_runner.extra_model_kwargs,
             )
         return agent_factory
 
@@ -559,6 +592,8 @@ class WorkspaceRunner:
                 workspace_path=self._workspace.path,
                 agent_factory=self._create_agent_factory(),
                 channels=self._channels,
+                token_logger=self._token_logger,
+                workspace_name=self.workspace_name,
             )
 
             await self._cron_scheduler.start()
@@ -639,6 +674,7 @@ class WorkspaceRunner:
                 agent_factory=self._create_agent_factory(),
                 channels=self._channels,
                 config=heartbeat_config,
+                token_logger=self._token_logger,
             )
 
             await self._heartbeat_scheduler.start()

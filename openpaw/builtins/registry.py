@@ -104,6 +104,13 @@ class BuiltinRegistry:
         except ImportError as e:
             logger.debug(f"Followup tool not available: {e}")
 
+        try:
+            from openpaw.builtins.tools.send_file import SendFileTool
+
+            self.register_tool(SendFileTool)
+        except ImportError as e:
+            logger.debug(f"Send file tool not available: {e}")
+
         # Processors
         try:
             from openpaw.builtins.processors.whisper import WhisperProcessor
@@ -118,6 +125,13 @@ class BuiltinRegistry:
             self.register_processor(TimestampProcessor)
         except ImportError as e:
             logger.debug(f"Timestamp processor not available: {e}")
+
+        try:
+            from openpaw.builtins.processors.docling import DoclingProcessor
+
+            self.register_processor(DoclingProcessor)
+        except ImportError as e:
+            logger.debug(f"Docling processor not available: {e}")
 
     def register_tool(self, tool_class: type["BaseBuiltinTool"]) -> None:
         """Register a tool builtin.

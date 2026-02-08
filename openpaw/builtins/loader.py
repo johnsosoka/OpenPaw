@@ -124,6 +124,28 @@ class BuiltinLoader:
             channel_type = self.channel_config.get("type", "telegram")
             config["default_channel"] = channel_type
 
+        # Extract max_file_size from SendFileBuiltinConfig if present
+        if name == "send_file":
+            if self.global_config:
+                global_cfg = getattr(self.global_config, name, None)
+                if global_cfg and hasattr(global_cfg, "max_file_size"):
+                    config["max_file_size"] = global_cfg.max_file_size
+            if self.workspace_config:
+                workspace_cfg = getattr(self.workspace_config, name, None)
+                if workspace_cfg and hasattr(workspace_cfg, "max_file_size"):
+                    config["max_file_size"] = workspace_cfg.max_file_size
+
+        # Extract max_file_size from DoclingProcessorConfig if present
+        if name == "docling":
+            if self.global_config:
+                global_cfg = getattr(self.global_config, name, None)
+                if global_cfg and hasattr(global_cfg, "max_file_size"):
+                    config["max_file_size"] = global_cfg.max_file_size
+            if self.workspace_config:
+                workspace_cfg = getattr(self.workspace_config, name, None)
+                if workspace_cfg and hasattr(workspace_cfg, "max_file_size"):
+                    config["max_file_size"] = workspace_cfg.max_file_size
+
         # Global config
         if self.global_config:
             global_cfg = getattr(self.global_config, name, None)

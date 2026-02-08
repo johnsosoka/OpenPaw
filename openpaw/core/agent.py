@@ -3,23 +3,22 @@
 import asyncio
 import logging
 import re
+import time
 from typing import Any
 
-from langchain.chat_models import init_chat_model
-from langchain_core.messages import AIMessage
+from langchain_core.callbacks import UsageMetadataCallbackHandler
+from langchain_core.language_models import BaseChatModel
 from langgraph.prebuilt import create_react_agent
 
+from openpaw.core.metrics import InvocationMetrics, extract_metrics_from_callback
+from openpaw.llm.middleware import THINKING_TAG_PATTERN, build_post_model_hook, build_pre_model_hook
 from openpaw.tools.filesystem import FilesystemTools
 from openpaw.workspace.loader import AgentWorkspace
 
 logger = logging.getLogger(__name__)
 
-# Pattern to match thinking tokens like <think>...</think>
-# Non-greedy match, handles multiline content
-THINKING_TAG_PATTERN = re.compile(r"<think>[\s\S]*?</think>\s*", re.IGNORECASE)
-
 # Models known to produce thinking tokens
-THINKING_MODELS = ["moonshot.kimi-k2-thinking", "kimi-k2-thinking", "kimi-thinking"]
+THINKING_MODELS = ["moonshot.kimi-k2-thinking", "kimi-k2-thinking", "kimi-thinking", "kimi-k2.5"]
 
 # Bedrock tool name validation pattern (AWS requirement)
 BEDROCK_TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -67,6 +66,7 @@ class AgentRunner:
         strip_thinking: bool = False,
         timeout_seconds: float = 300.0,
         enabled_builtins: list[str] | None = None,
+        extra_model_kwargs: dict[str, Any] | None = None,
     ):
         """Initialize the agent runner.
 
@@ -82,6 +82,8 @@ class AgentRunner:
             strip_thinking: Whether to strip <think>...</think> tokens from responses.
             timeout_seconds: Wall-clock timeout for agent invocations (default 5 minutes).
             enabled_builtins: List of enabled builtin tool names for conditional prompt sections.
+            extra_model_kwargs: Additional kwargs to pass to init_chat_model
+                (e.g., base_url for OpenAI-compatible APIs).
         """
         self.workspace = workspace
         self.model_id = model
@@ -94,6 +96,10 @@ class AgentRunner:
         self.strip_thinking = strip_thinking
         self.timeout_seconds = timeout_seconds
         self.enabled_builtins = enabled_builtins
+        self.extra_model_kwargs = extra_model_kwargs or {}
+
+        # Token usage tracking (populated after each run)
+        self._last_metrics: InvocationMetrics | None = None
 
         # Auto-enable thinking stripping for known thinking models
         if not self.strip_thinking and any(
@@ -106,6 +112,15 @@ class AgentRunner:
             self.strip_thinking = True
 
         self._agent = self._build_agent()
+
+    @property
+    def last_metrics(self) -> InvocationMetrics | None:
+        """Get token usage metrics from the most recent invocation.
+
+        Returns:
+            InvocationMetrics from the last run() call, or None if no invocations yet.
+        """
+        return self._last_metrics
 
     def update_checkpointer(self, checkpointer: Any) -> None:
         """Update the checkpointer and rebuild the agent graph.
@@ -151,25 +166,85 @@ class AgentRunner:
                     f"Must match pattern: [a-zA-Z0-9_-]+"
                 )
 
+    def _create_model(self) -> BaseChatModel:
+        """Create the appropriate chat model based on provider.
+
+        Directly instantiates provider-specific classes instead of using
+        init_chat_model, which silently drops kwargs like extra_body.
+
+        Supported providers: openai, anthropic, bedrock_converse.
+
+        Returns:
+            Configured BaseChatModel instance.
+
+        Raises:
+            ValueError: If provider is not supported.
+        """
+        # Parse provider from model_id (format: "provider:model_name")
+        if ":" in self.model_id:
+            provider, model_name = self.model_id.split(":", 1)
+        else:
+            provider = "openai"
+            model_name = self.model_id
+
+        # Build kwargs common to all providers
+        kwargs: dict[str, Any] = {
+            "model": model_name,
+            "temperature": self.temperature,
+        }
+
+        # Merge extra kwargs from config (base_url, model_kwargs, extra_body, etc.)
+        kwargs.update(self.extra_model_kwargs)
+
+        # Flatten model_kwargs into direct constructor args so that params like
+        # extra_body reach the provider class directly instead of being silently dropped
+        nested_model_kwargs = kwargs.pop("model_kwargs", None)
+        if nested_model_kwargs and isinstance(nested_model_kwargs, dict):
+            kwargs.update(nested_model_kwargs)
+
+        if provider == "openai":
+            from langchain_openai import ChatOpenAI
+
+            if self.api_key:
+                kwargs["api_key"] = self.api_key
+            logger.info(f"Creating ChatOpenAI: model={model_name}, kwargs={list(kwargs.keys())}")
+            return ChatOpenAI(**kwargs)
+
+        if provider == "anthropic":
+            from langchain_anthropic import ChatAnthropic
+
+            if self.api_key:
+                kwargs["api_key"] = self.api_key
+            logger.info(f"Creating ChatAnthropic: model={model_name}")
+            return ChatAnthropic(**kwargs)
+
+        if provider in ("bedrock_converse", "bedrock"):
+            from langchain_aws import ChatBedrockConverse
+
+            if self.region:
+                kwargs["region_name"] = self.region
+            # Bedrock uses AWS credentials, not api_key
+            kwargs.pop("api_key", None)
+            logger.info(f"Creating ChatBedrockConverse: model={model_name}")
+            return ChatBedrockConverse(**kwargs)
+
+        raise ValueError(
+            f"Unsupported model provider: '{provider}'. "
+            f"Supported: openai, anthropic, bedrock_converse"
+        )
+
     def _build_agent(self) -> Any:
         """Build the LangGraph ReAct agent with workspace configuration.
 
         Creates a ReAct agent with:
-        - Multi-provider model support via init_chat_model
+        - Direct provider-specific model instantiation
         - Sandboxed filesystem tools for workspace access
         - Workspace-specific tools from tools/ directory
         - System prompt from workspace markdown files
         - Optional thinking token stripping via post_model_hook
         """
-        # 1. Initialize model with init_chat_model
-        model_kwargs: dict[str, Any] = {"temperature": self.temperature}
-        is_bedrock = self.model_id.startswith("bedrock")
-        if self.api_key and not is_bedrock:
-            model_kwargs["api_key"] = self.api_key
-        if self.region:
-            model_kwargs["region_name"] = self.region
-
-        model = init_chat_model(self.model_id, **model_kwargs)
+        # 1. Initialize model directly via provider class
+        model = self._create_model()
 
         # 2. Create FilesystemTools for workspace
         workspace_root = self.workspace.path.resolve()
@@ -194,8 +269,9 @@ class AgentRunner:
         # 5. Get system prompt from workspace
         system_prompt = self.workspace.build_system_prompt(enabled_builtins=self.enabled_builtins)
 
-        # 6. Create post_model_hook for thinking stripping (if needed)
-        post_hook = self._strip_thinking_hook if self.strip_thinking else None
+        # 6. Build middleware hooks via openpaw.llm.middleware
+        pre_hook = build_pre_model_hook(strip_reasoning=self.strip_thinking)
+        post_hook = build_post_model_hook(strip_thinking=self.strip_thinking)
 
         # 7. Call create_react_agent
         # Note: create_react_agent handles tool binding internally - do NOT pre-bind
@@ -213,47 +289,11 @@ class AgentRunner:
             tools=all_tools,
             prompt=system_prompt,
             checkpointer=self.checkpointer,
+            pre_model_hook=pre_hook,
             post_model_hook=post_hook,
         )
 
         return agent
-
-    def _strip_thinking_hook(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Post-model hook to strip thinking tokens from responses.
-
-        This hook is called after each model invocation to remove thinking blocks
-        from the response content. Works with both string content and structured
-        content blocks (Claude format).
-
-        Args:
-            state: Agent state dict containing messages.
-
-        Returns:
-            Modified state with thinking tokens removed.
-        """
-        messages = state.get("messages", [])
-        if not messages:
-            return state
-
-        last_message = messages[-1]
-
-        # Handle AIMessage with content attribute
-        if isinstance(last_message, AIMessage):
-            # Handle structured content (list of blocks)
-            if isinstance(last_message.content, list):
-                # Filter out thinking blocks
-                filtered_content = [
-                    block
-                    for block in last_message.content
-                    if not (hasattr(block, "type") and block.type == "thinking")
-                ]
-                last_message.content = filtered_content
-
-            # Handle string content
-            elif isinstance(last_message.content, str):
-                last_message.content = self._strip_thinking_tokens(last_message.content)
-
-        return state
 
     async def run(
         self,
@@ -271,6 +311,9 @@ class AgentRunner:
         Returns:
             Agent's response text with thinking tokens stripped.
         """
+        # Reset metrics from previous invocation
+        self._last_metrics = None
+
         # Set recursion_limit for multi-turn execution (2 supersteps per turn)
         config: dict[str, Any] = {"recursion_limit": self.max_turns * 2}
 
@@ -281,6 +324,13 @@ class AgentRunner:
             if session_id:
                 config["configurable"]["session_id"] = session_id
 
+        # Create fresh callback handler for token tracking
+        usage_callback = UsageMetadataCallbackHandler()
+        config["callbacks"] = [usage_callback]
+
+        # Track invocation duration
+        start_time = time.monotonic()
+
         try:
             async with asyncio.timeout(self.timeout_seconds):
                 result = await self._agent.ainvoke(
@@ -288,6 +338,13 @@ class AgentRunner:
                     config=config,
                 )
         except TimeoutError:
+            # Extract partial metrics even on timeout
+            duration_ms = (time.monotonic() - start_time) * 1000
+            self._last_metrics = extract_metrics_from_callback(
+                usage_callback, duration_ms, self.model_id
+            )
+            self._last_metrics.is_partial = True
+
             logger.warning(
                 f"Agent timed out after {self.timeout_seconds}s "
                 f"(workspace: {self.workspace.name})"
@@ -297,6 +354,12 @@ class AgentRunner:
                 f"(timeout: {int(self.timeout_seconds)}s). "
                 f"Please try again with a simpler request."
             )
+
+        # Extract metrics after successful invocation
+        duration_ms = (time.monotonic() - start_time) * 1000
+        self._last_metrics = extract_metrics_from_callback(
+            usage_callback, duration_ms, self.model_id
+        )
 
         messages = result.get("messages", [])
         if messages:

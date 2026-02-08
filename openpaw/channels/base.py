@@ -137,3 +137,27 @@ class ChannelAdapter(ABC):
             Session key string like 'channel:part1:part2'.
         """
         return f"{self.name}:" + ":".join(str(p) for p in parts)
+
+    async def send_file(
+        self,
+        session_key: str,
+        file_data: bytes,
+        filename: str,
+        mime_type: str | None = None,
+        caption: str | None = None,
+    ) -> None:
+        """Send a file to a channel session.
+
+        Args:
+            session_key: Target session (e.g., "telegram:123456").
+            file_data: Raw file bytes.
+            filename: Display filename for the file.
+            mime_type: Optional MIME type hint.
+            caption: Optional caption/message to accompany the file.
+
+        Raises:
+            NotImplementedError: If the channel doesn't support file sending.
+        """
+        raise NotImplementedError(
+            f"Channel '{type(self).__name__}' does not support file sending"
+        )

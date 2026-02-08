@@ -63,6 +63,7 @@ class TelegramChannel(ChannelAdapter):
         self._app.add_handler(MessageHandler(filters.COMMAND, self._handle_command))
         self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message))
         self._app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._handle_voice_message))
+        self._app.add_handler(MessageHandler(filters.Document.ALL, self._handle_document))
 
         await self._app.initialize()
         await self._app.start()
@@ -203,6 +204,63 @@ class TelegramChannel(ChannelAdapter):
             timestamp=datetime.now(),
         )
 
+    # Telegram file size limit
+    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+
+    async def send_file(
+        self,
+        session_key: str,
+        file_data: bytes,
+        filename: str,
+        mime_type: str | None = None,
+        caption: str | None = None,
+    ) -> None:
+        """Send a file via Telegram's sendDocument API.
+
+        Args:
+            session_key: Session key in format 'telegram:chat_id'.
+            file_data: Raw file bytes.
+            filename: Display filename for the file.
+            mime_type: Optional MIME type hint (currently unused by Telegram API).
+            caption: Optional caption/message to accompany the file.
+
+        Raises:
+            RuntimeError: If the channel is not started.
+            ValueError: If file size exceeds Telegram's 50MB limit.
+        """
+        if not self._app:
+            raise RuntimeError("Telegram channel not started")
+
+        # Validate file size
+        file_size = len(file_data)
+        if file_size > self.MAX_FILE_SIZE:
+            size_mb = file_size / (1024 * 1024)
+            raise ValueError(
+                f"File size ({size_mb:.1f} MB) exceeds Telegram's 50 MB limit"
+            )
+
+        from io import BytesIO
+
+        # Parse session key to extract chat_id
+        parts = session_key.split(":")
+        chat_id = int(parts[1])
+
+        # Wrap bytes in BytesIO for Telegram API
+        file_obj = BytesIO(file_data)
+        file_obj.name = filename
+
+        try:
+            await self._app.bot.send_document(
+                chat_id=chat_id,
+                document=file_obj,
+                caption=caption,
+                filename=filename,
+            )
+            logger.info(f"Sent file '{filename}' ({file_size} bytes) to chat {chat_id}")
+        except Exception as e:
+            logger.error(f"Failed to send file '{filename}' to chat {chat_id}: {e}")
+            raise RuntimeError(f"Failed to send file: {e}") from e
+
     def _is_allowed(self, update: Update) -> bool:
         """Check if the message sender is allowed.
 
@@ -319,6 +377,71 @@ class TelegramChannel(ChannelAdapter):
         message = await self._voice_to_message(update)
         if message and self._message_callback:
             await self._message_callback(message)
+
+    async def _handle_document(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle incoming document uploads (PDF, DOCX, images, etc.)."""
+        if not self._is_allowed(update):
+            await self._send_unauthorized_response(update)
+            return
+
+        message = await self._document_to_message(update)
+        if message and self._message_callback:
+            await self._message_callback(message)
+
+    async def _document_to_message(self, update: Update) -> Message | None:
+        """Convert document upload to unified Message format with attachment.
+
+        Downloads the file and creates a document Attachment for processing
+        by inbound processors (e.g., DoclingProcessor).
+        """
+        if not update.message or not update.effective_user or not update.effective_chat:
+            return None
+
+        document = update.message.document
+        if not document:
+            return None
+
+        chat_id = update.effective_chat.id
+        session_key = self.build_session_key(chat_id)
+
+        try:
+            file = await document.get_file()
+            file_bytes = await file.download_as_bytearray()
+
+            attachment = Attachment(
+                type="document",
+                data=bytes(file_bytes),
+                filename=document.file_name,
+                mime_type=document.mime_type or "application/octet-stream",
+                metadata={"file_size": document.file_size},
+            )
+
+            logger.info(
+                f"Downloaded document: {document.file_name} "
+                f"({document.file_size} bytes, {document.mime_type})"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to download document: {e}")
+            return None
+
+        return Message(
+            id=str(update.message.message_id),
+            channel=self.name,
+            session_key=session_key,
+            user_id=str(update.effective_user.id),
+            content=update.message.caption or "",
+            direction=MessageDirection.INBOUND,
+            timestamp=update.message.date or datetime.now(),
+            reply_to_id=str(update.message.reply_to_message.message_id) if update.message.reply_to_message else None,
+            metadata={
+                "chat_type": update.effective_chat.type,
+                "username": update.effective_user.username,
+                "first_name": update.effective_user.first_name,
+                "has_document": True,
+            },
+            attachments=[attachment],
+        )
 
     async def _voice_to_message(self, update: Update) -> Message | None:
         """Convert voice/audio message to unified Message format with attachment.

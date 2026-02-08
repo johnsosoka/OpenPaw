@@ -12,6 +12,7 @@ from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from openpaw.channels.base import ChannelAdapter
+from openpaw.core.metrics import TokenUsageLogger
 from openpaw.cron.dynamic import DynamicCronStore, DynamicCronTask
 from openpaw.cron.loader import CronDefinition, CronLoader
 
@@ -32,6 +33,8 @@ class CronScheduler:
         workspace_path: Path,
         agent_factory: Callable[[], Any],
         channels: Mapping[str, ChannelAdapter],
+        token_logger: TokenUsageLogger | None = None,
+        workspace_name: str | None = None,
     ):
         """Initialize the cron scheduler.
 
@@ -39,10 +42,14 @@ class CronScheduler:
             workspace_path: Path to the agent workspace.
             agent_factory: Factory function to create fresh agent instances.
             channels: Dictionary mapping channel types to channel instances for routing.
+            token_logger: Optional token usage logger for tracking cron invocations.
+            workspace_name: Workspace name for token logging (required if token_logger provided).
         """
         self.workspace_path = Path(workspace_path)
         self.agent_factory = agent_factory
         self.channels = channels
+        self._token_logger = token_logger
+        self._workspace_name = workspace_name
         self._scheduler: AsyncIOScheduler | None = None
         self._jobs: dict[str, Any] = {}
         self._dynamic_store = DynamicCronStore(workspace_path)
@@ -89,6 +96,15 @@ class CronScheduler:
             agent_runner = self.agent_factory()
 
             response = await agent_runner.run(message=cron.prompt)
+
+            # Log token usage for cron invocation
+            if self._token_logger and self._workspace_name and agent_runner.last_metrics:
+                self._token_logger.log(
+                    metrics=agent_runner.last_metrics,
+                    workspace=self._workspace_name,
+                    invocation_type="cron",
+                    session_key=None,
+                )
 
             channel = self.channels.get(cron.output.channel)
             if not channel:
@@ -211,6 +227,15 @@ class CronScheduler:
         try:
             agent_runner = self.agent_factory()
             response = await agent_runner.run(message=task.prompt)
+
+            # Log token usage for dynamic cron invocation
+            if self._token_logger and self._workspace_name and agent_runner.last_metrics:
+                self._token_logger.log(
+                    metrics=agent_runner.last_metrics,
+                    workspace=self._workspace_name,
+                    invocation_type="cron",
+                    session_key=None,
+                )
 
             # Route response using task's stored routing info
             if task.channel and task.chat_id:

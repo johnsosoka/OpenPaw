@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING
 
 from openpaw.commands.base import CommandDefinition, CommandHandler, CommandResult
+from openpaw.core.metrics import TokenUsageReader
 from openpaw.task.store import TaskStore
 
 if TYPE_CHECKING:
@@ -57,6 +58,23 @@ class StatusCommand(CommandHandler):
                 lines.append(f"Tasks: {pending} pending, {in_progress} in progress, {completed} completed")
         except Exception:
             # Task system might not be available, skip
+            pass
+
+        # Token usage info
+        try:
+            reader = TokenUsageReader(context.workspace_path)
+            today = reader.tokens_today()
+            session = reader.tokens_for_session(message.session_key)
+
+            if today.total_tokens > 0:
+                lines.append(
+                    f"Tokens today: {today.total_tokens:,} "
+                    f"(in: {today.input_tokens:,}, out: {today.output_tokens:,})"
+                )
+            if session.total_tokens > 0:
+                lines.append(f"Tokens this session: {session.total_tokens:,}")
+        except Exception:
+            # Token tracking might not be available, skip
             pass
 
         return CommandResult(response="\n".join(lines))

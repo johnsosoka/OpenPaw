@@ -130,6 +130,15 @@ class AgentWorkspace:
                 "keep them informed about what you're doing."
             )
 
+        # File sharing - include if send_file is enabled
+        if enabled_builtins is None or "send_file" in enabled_builtins:
+            sections.append(
+                "\n\n## File Sharing\n\n"
+                "You can send files from your workspace to the user using the send_file tool. "
+                "Write or generate files in your workspace, then use send_file to deliver them. "
+                "Supported: PDFs, images, documents, text files, and more."
+            )
+
         # Self-scheduling - include if cron tools are enabled
         if enabled_builtins is None or "cron" in enabled_builtins:
             sections.append(
