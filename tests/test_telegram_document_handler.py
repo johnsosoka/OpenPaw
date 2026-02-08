@@ -398,3 +398,399 @@ async def test_document_to_message_various_file_types() -> None:
         attachment = message.attachments[0]
         assert attachment.filename == filename
         assert attachment.mime_type == mime_type
+
+
+# Photo handler tests
+
+
+@pytest.mark.asyncio
+async def test_handle_photo_basic() -> None:
+    """Test that photo upload creates correct Message with Attachment."""
+    channel = TelegramChannel(
+        token="test-token",
+        allowed_users=[12345],
+        workspace_name="test",
+    )
+
+    # Mock the Update object
+    update = MagicMock()
+    update.effective_user.id = 12345
+    update.effective_chat.id = 67890
+    update.effective_chat.type = "private"
+    update.effective_user.username = "testuser"
+    update.effective_user.first_name = "Test"
+    update.message.message_id = 1
+    update.message.caption = None
+    update.message.date = datetime(2025, 1, 1, 12, 0, 0)
+    update.message.reply_to_message = None
+
+    # Mock photo and file download (Telegram sends photo array)
+    photo_data = b"\x89PNG\r\n\x1a\n mock image data"
+    mock_file = AsyncMock()
+    mock_file.download_as_bytearray = AsyncMock(return_value=bytearray(photo_data))
+
+    # Photo size object (highest resolution)
+    mock_photo = MagicMock()
+    mock_photo.width = 1920
+    mock_photo.height = 1080
+    mock_photo.file_size = 150000
+    mock_photo.get_file = AsyncMock(return_value=mock_file)
+
+    # Telegram sends photos as array of different sizes
+    update.message.photo = [mock_photo]
+
+    # Convert to message
+    message = await channel._photo_to_message(update)
+
+    # Verify message properties
+    assert message is not None
+    assert message.id == "1"
+    assert message.channel == "telegram"
+    assert message.session_key == "telegram:67890"
+    assert message.user_id == "12345"
+    assert message.content == ""
+    assert message.direction == MessageDirection.INBOUND
+    assert message.timestamp == datetime(2025, 1, 1, 12, 0, 0)
+    assert message.reply_to_id is None
+
+    # Verify metadata
+    assert message.metadata["chat_type"] == "private"
+    assert message.metadata["username"] == "testuser"
+    assert message.metadata["first_name"] == "Test"
+    assert message.metadata["has_photo"] is True
+
+    # Verify attachment
+    assert len(message.attachments) == 1
+    attachment = message.attachments[0]
+    assert attachment.type == "image"
+    assert attachment.data == photo_data
+    assert attachment.filename is None  # Telegram photos don't have filenames
+    assert attachment.mime_type == "image/jpeg"
+    assert attachment.metadata["width"] == 1920
+    assert attachment.metadata["height"] == 1080
+    assert attachment.metadata["file_size"] == 150000
+
+
+@pytest.mark.asyncio
+async def test_handle_photo_with_caption() -> None:
+    """Test that photo with caption sets content correctly."""
+    channel = TelegramChannel(
+        token="test-token",
+        allowed_users=[12345],
+        workspace_name="test",
+    )
+
+    update = MagicMock()
+    update.effective_user.id = 12345
+    update.effective_chat.id = 67890
+    update.effective_chat.type = "private"
+    update.effective_user.username = "testuser"
+    update.effective_user.first_name = "Test"
+    update.message.message_id = 1
+    update.message.caption = "Check out this sunset!"
+    update.message.date = datetime(2025, 1, 1, 12, 0, 0)
+    update.message.reply_to_message = None
+
+    mock_file = AsyncMock()
+    mock_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"image"))
+
+    mock_photo = MagicMock()
+    mock_photo.width = 1280
+    mock_photo.height = 720
+    mock_photo.file_size = 80000
+    mock_photo.get_file = AsyncMock(return_value=mock_file)
+
+    update.message.photo = [mock_photo]
+
+    message = await channel._photo_to_message(update)
+
+    assert message is not None
+    assert message.content == "Check out this sunset!"
+
+
+@pytest.mark.asyncio
+async def test_handle_photo_no_caption() -> None:
+    """Test that photo without caption has empty content."""
+    channel = TelegramChannel(
+        token="test-token",
+        allowed_users=[12345],
+        workspace_name="test",
+    )
+
+    update = MagicMock()
+    update.effective_user.id = 12345
+    update.effective_chat.id = 67890
+    update.effective_chat.type = "private"
+    update.effective_user.username = "testuser"
+    update.effective_user.first_name = "Test"
+    update.message.message_id = 1
+    update.message.caption = None
+    update.message.date = datetime(2025, 1, 1, 12, 0, 0)
+    update.message.reply_to_message = None
+
+    mock_file = AsyncMock()
+    mock_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"image"))
+
+    mock_photo = MagicMock()
+    mock_photo.width = 800
+    mock_photo.height = 600
+    mock_photo.file_size = 50000
+    mock_photo.get_file = AsyncMock(return_value=mock_file)
+
+    update.message.photo = [mock_photo]
+
+    message = await channel._photo_to_message(update)
+
+    assert message is not None
+    assert message.content == ""
+
+
+@pytest.mark.asyncio
+async def test_handle_photo_unauthorized() -> None:
+    """Test that unauthorized user gets rejection response."""
+    channel = TelegramChannel(
+        token="test-token",
+        allowed_users=[12345],  # Only user 12345 allowed
+        workspace_name="test",
+    )
+
+    # Unauthorized user
+    update = MagicMock()
+    update.effective_user.id = 99999  # Different user
+    update.effective_chat.id = 67890
+    update.effective_chat.type = "private"
+    update.effective_user.username = "unauthorized"
+    update.effective_user.first_name = "Unauthorized"
+    update.message.message_id = 1
+    update.message.reply_text = AsyncMock()
+
+    context = MagicMock()
+
+    # Should call unauthorized response
+    await channel._handle_photo(update, context)
+
+    # Verify reply_text was called with rejection message
+    assert update.message.reply_text.called
+    call_args = update.message.reply_text.call_args
+    assert "access denied" in call_args[0][0].lower()
+
+
+@pytest.mark.asyncio
+async def test_handle_photo_largest_resolution() -> None:
+    """Test that handler selects last element (highest resolution) from photo array."""
+    channel = TelegramChannel(
+        token="test-token",
+        allowed_users=[12345],
+        workspace_name="test",
+    )
+
+    update = MagicMock()
+    update.effective_user.id = 12345
+    update.effective_chat.id = 67890
+    update.effective_chat.type = "private"
+    update.effective_user.username = "testuser"
+    update.effective_user.first_name = "Test"
+    update.message.message_id = 1
+    update.message.caption = None
+    update.message.date = datetime(2025, 1, 1, 12, 0, 0)
+    update.message.reply_to_message = None
+
+    # Create multiple photo sizes (Telegram behavior)
+    small_photo = MagicMock()
+    small_photo.width = 320
+    small_photo.height = 240
+    small_photo.file_size = 10000
+    small_file = AsyncMock()
+    small_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"small"))
+    small_photo.get_file = AsyncMock(return_value=small_file)
+
+    medium_photo = MagicMock()
+    medium_photo.width = 800
+    medium_photo.height = 600
+    medium_photo.file_size = 50000
+    medium_file = AsyncMock()
+    medium_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"medium"))
+    medium_photo.get_file = AsyncMock(return_value=medium_file)
+
+    large_photo = MagicMock()
+    large_photo.width = 1920
+    large_photo.height = 1080
+    large_photo.file_size = 150000
+    large_file = AsyncMock()
+    large_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"large"))
+    large_photo.get_file = AsyncMock(return_value=large_file)
+
+    # Photo array from smallest to largest (Telegram convention)
+    update.message.photo = [small_photo, medium_photo, large_photo]
+
+    message = await channel._photo_to_message(update)
+
+    assert message is not None
+    attachment = message.attachments[0]
+    # Should select the largest (last) photo
+    assert attachment.data == b"large"
+    assert attachment.metadata["width"] == 1920
+    assert attachment.metadata["height"] == 1080
+    assert attachment.metadata["file_size"] == 150000
+
+
+@pytest.mark.asyncio
+async def test_handle_photo_dimensions_in_metadata() -> None:
+    """Test that width/height are captured in attachment metadata."""
+    channel = TelegramChannel(
+        token="test-token",
+        allowed_users=[12345],
+        workspace_name="test",
+    )
+
+    update = MagicMock()
+    update.effective_user.id = 12345
+    update.effective_chat.id = 67890
+    update.effective_chat.type = "private"
+    update.effective_user.username = "testuser"
+    update.effective_user.first_name = "Test"
+    update.message.message_id = 1
+    update.message.caption = None
+    update.message.date = datetime(2025, 1, 1, 12, 0, 0)
+    update.message.reply_to_message = None
+
+    mock_file = AsyncMock()
+    mock_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"image"))
+
+    mock_photo = MagicMock()
+    mock_photo.width = 2560
+    mock_photo.height = 1440
+    mock_photo.file_size = 200000
+    mock_photo.get_file = AsyncMock(return_value=mock_file)
+
+    update.message.photo = [mock_photo]
+
+    message = await channel._photo_to_message(update)
+
+    assert message is not None
+    attachment = message.attachments[0]
+    assert attachment.metadata["width"] == 2560
+    assert attachment.metadata["height"] == 1440
+    assert attachment.metadata["file_size"] == 200000
+
+
+@pytest.mark.asyncio
+async def test_handle_photo_download_failure() -> None:
+    """Test that download failure returns None."""
+    channel = TelegramChannel(
+        token="test-token",
+        allowed_users=[12345],
+        workspace_name="test",
+    )
+
+    update = MagicMock()
+    update.effective_user.id = 12345
+    update.effective_chat.id = 67890
+    update.effective_chat.type = "private"
+    update.effective_user.username = "testuser"
+    update.effective_user.first_name = "Test"
+    update.message.message_id = 1
+    update.message.caption = "This will fail"
+    update.message.date = datetime(2025, 1, 1, 12, 0, 0)
+    update.message.reply_to_message = None
+
+    # Mock download failure
+    mock_file = AsyncMock()
+    mock_file.download_as_bytearray = AsyncMock(side_effect=Exception("Network error"))
+
+    mock_photo = MagicMock()
+    mock_photo.width = 1920
+    mock_photo.height = 1080
+    mock_photo.file_size = 150000
+    mock_photo.get_file = AsyncMock(return_value=mock_file)
+
+    update.message.photo = [mock_photo]
+
+    message = await channel._photo_to_message(update)
+
+    assert message is None
+
+
+@pytest.mark.asyncio
+async def test_handle_photo_no_photo() -> None:
+    """Test that missing photo returns None."""
+    channel = TelegramChannel(
+        token="test-token",
+        allowed_users=[12345],
+        workspace_name="test",
+    )
+
+    update = MagicMock()
+    update.effective_user.id = 12345
+    update.effective_chat.id = 67890
+    update.effective_chat.type = "private"
+    update.effective_user.username = "testuser"
+    update.effective_user.first_name = "Test"
+    update.message.message_id = 1
+    update.message.caption = "No photo attached"
+    update.message.date = datetime(2025, 1, 1, 12, 0, 0)
+    update.message.reply_to_message = None
+    update.message.photo = None  # No photo
+
+    message = await channel._photo_to_message(update)
+
+    assert message is None
+
+
+@pytest.mark.asyncio
+async def test_handle_photo_invokes_callback() -> None:
+    """Test full flow: handler creates message and invokes callback."""
+    channel = TelegramChannel(
+        token="test-token",
+        allowed_users=[12345],
+        workspace_name="test",
+    )
+
+    # Mock callback
+    callback_invoked = False
+    received_message = None
+
+    async def mock_callback(msg):
+        nonlocal callback_invoked, received_message
+        callback_invoked = True
+        received_message = msg
+
+    channel.on_message(mock_callback)
+
+    # Create update with photo
+    update = MagicMock()
+    update.effective_user.id = 12345
+    update.effective_chat.id = 67890
+    update.effective_chat.type = "private"
+    update.effective_user.username = "testuser"
+    update.effective_user.first_name = "Test"
+    update.message.message_id = 1
+    update.message.caption = "Beautiful sunset"
+    update.message.date = datetime(2025, 1, 1, 12, 0, 0)
+    update.message.reply_to_message = None
+
+    photo_data = b"photo content here"
+    mock_file = AsyncMock()
+    mock_file.download_as_bytearray = AsyncMock(return_value=bytearray(photo_data))
+
+    mock_photo = MagicMock()
+    mock_photo.width = 1920
+    mock_photo.height = 1080
+    mock_photo.file_size = len(photo_data)
+    mock_photo.get_file = AsyncMock(return_value=mock_file)
+
+    update.message.photo = [mock_photo]
+
+    context = MagicMock()
+
+    # Handle photo
+    await channel._handle_photo(update, context)
+
+    # Verify callback was invoked
+    assert callback_invoked
+    assert received_message is not None
+    assert received_message.content == "Beautiful sunset"
+    assert len(received_message.attachments) == 1
+    assert received_message.attachments[0].type == "image"
+    assert received_message.attachments[0].data == photo_data
+    assert received_message.attachments[0].mime_type == "image/jpeg"

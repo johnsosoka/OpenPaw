@@ -64,6 +64,7 @@ class TelegramChannel(ChannelAdapter):
         self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message))
         self._app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._handle_voice_message))
         self._app.add_handler(MessageHandler(filters.Document.ALL, self._handle_document))
+        self._app.add_handler(MessageHandler(filters.PHOTO, self._handle_photo))
 
         await self._app.initialize()
         await self._app.start()
@@ -388,6 +389,16 @@ class TelegramChannel(ChannelAdapter):
         if message and self._message_callback:
             await self._message_callback(message)
 
+    async def _handle_photo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle incoming photo messages."""
+        if not self._is_allowed(update):
+            await self._send_unauthorized_response(update)
+            return
+
+        message = await self._photo_to_message(update)
+        if message and self._message_callback:
+            await self._message_callback(message)
+
     async def _document_to_message(self, update: Update) -> Message | None:
         """Convert document upload to unified Message format with attachment.
 
@@ -439,6 +450,70 @@ class TelegramChannel(ChannelAdapter):
                 "username": update.effective_user.username,
                 "first_name": update.effective_user.first_name,
                 "has_document": True,
+            },
+            attachments=[attachment],
+        )
+
+    async def _photo_to_message(self, update: Update) -> Message | None:
+        """Convert photo message to unified Message format with attachment.
+
+        Downloads the highest resolution photo and creates an Attachment for processing
+        by inbound processors (e.g., vision models).
+
+        Telegram sends photos as an array of PhotoSize objects with different resolutions.
+        We select the last element which has the highest resolution.
+        """
+        if not update.message or not update.effective_user or not update.effective_chat:
+            return None
+
+        if not update.message.photo:
+            return None
+
+        chat_id = update.effective_chat.id
+        session_key = self.build_session_key(chat_id)
+
+        # Get highest resolution photo (last element in array)
+        photo = update.message.photo[-1]
+
+        try:
+            file = await photo.get_file()
+            file_bytes = await file.download_as_bytearray()
+
+            attachment = Attachment(
+                type="image",
+                data=bytes(file_bytes),
+                filename=None,  # Telegram photos don't have filenames
+                mime_type="image/jpeg",  # Telegram compresses to JPEG
+                metadata={
+                    "width": photo.width,
+                    "height": photo.height,
+                    "file_size": photo.file_size,
+                },
+            )
+
+            logger.info(
+                f"Downloaded photo: {photo.width}x{photo.height} "
+                f"({photo.file_size} bytes)"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to download photo: {e}")
+            return None
+
+        return Message(
+            id=str(update.message.message_id),
+            channel=self.name,
+            session_key=session_key,
+            user_id=str(update.effective_user.id),
+            content=update.message.caption or "",
+            direction=MessageDirection.INBOUND,
+            timestamp=update.message.date or datetime.now(),
+            reply_to_id=str(update.message.reply_to_message.message_id) if update.message.reply_to_message else None,
+            metadata={
+                "chat_type": update.effective_chat.type,
+                "username": update.effective_user.username,
+                "first_name": update.effective_user.first_name,
+                "has_photo": True,
             },
             attachments=[attachment],
         )

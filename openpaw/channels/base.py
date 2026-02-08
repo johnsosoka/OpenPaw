@@ -25,6 +25,7 @@ class Attachment:
         filename: Original filename if available.
         mime_type: MIME type of the attachment.
         metadata: Additional type-specific metadata.
+        saved_path: Relative path within workspace where file was persisted (set by FilePersistenceProcessor).
     """
 
     type: str
@@ -33,6 +34,7 @@ class Attachment:
     filename: str | None = None
     mime_type: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    saved_path: str | None = None
 
 
 @dataclass

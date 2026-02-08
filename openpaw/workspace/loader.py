@@ -139,6 +139,17 @@ class AgentWorkspace:
                 "Supported: PDFs, images, documents, text files, and more."
             )
 
+        # File uploads - always available (processor-based, no prerequisites)
+        sections.append(
+            "\n\n## File Uploads\n\n"
+            "When users send you files (documents, images, audio, etc.), they are "
+            "automatically saved to your uploads/ directory, organized by date. "
+            "You'll see a notification in the message like [Saved to: uploads/...]. "
+            "You can read, reference, and process these files using your filesystem tools. "
+            "Supported document types (PDF, DOCX, etc.) are also automatically converted "
+            "to markdown for easier reading."
+        )
+
         # Self-scheduling - include if cron tools are enabled
         if enabled_builtins is None or "cron" in enabled_builtins:
             sections.append(
