@@ -6,6 +6,7 @@ from pathlib import Path
 
 from openpaw.core.config import Config
 from openpaw.main import WorkspaceRunner
+from openpaw.workspace.loader import WorkspaceLoader
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,8 @@ class OpenPawOrchestrator:
     def discover_workspaces(cls, workspaces_path: Path) -> list[str]:
         """Discover all valid workspaces in the workspaces directory.
 
-        A valid workspace is a directory containing AGENT.md.
+        A valid workspace is a directory containing all required files
+        (AGENT.md, USER.md, SOUL.md, HEARTBEAT.md).
 
         Args:
             workspaces_path: Path to workspaces directory.
@@ -91,7 +93,9 @@ class OpenPawOrchestrator:
             return workspaces
 
         for entry in workspaces_path.iterdir():
-            if entry.is_dir() and (entry / "AGENT.md").exists():
+            if entry.is_dir() and all(
+                (entry / f).exists() for f in WorkspaceLoader.REQUIRED_FILES
+            ):
                 workspaces.append(entry.name)
                 logger.debug(f"Discovered workspace: {entry.name}")
 

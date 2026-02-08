@@ -1,30 +1,39 @@
-"""Agent runner integrating DeepAgents with OpenPaw workspace system."""
+"""Agent runner integrating LangGraph ReAct agent with OpenPaw workspace system."""
 
+import asyncio
 import logging
 import re
+import time
 from typing import Any
 
-from deepagents import create_deep_agent
-from deepagents.backends import FilesystemBackend
-from langchain.chat_models import init_chat_model
+from langchain_core.callbacks import UsageMetadataCallbackHandler
+from langchain_core.language_models import BaseChatModel
+from langgraph.prebuilt import create_react_agent
 
+from openpaw.core.metrics import InvocationMetrics, extract_metrics_from_callback
+from openpaw.llm.middleware import THINKING_TAG_PATTERN, build_post_model_hook, build_pre_model_hook
+from openpaw.tools.filesystem import FilesystemTools
 from openpaw.workspace.loader import AgentWorkspace
 
 logger = logging.getLogger(__name__)
 
-# Pattern to match thinking tokens like <think>...</think>
-# Non-greedy match, handles multiline content
-THINKING_TAG_PATTERN = re.compile(r"<think>[\s\S]*?</think>\s*", re.IGNORECASE)
+# Models known to produce thinking tokens
+THINKING_MODELS = ["moonshot.kimi-k2-thinking", "kimi-k2-thinking", "kimi-thinking", "kimi-k2.5"]
+
+# Bedrock tool name validation pattern (AWS requirement)
+BEDROCK_TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+MAX_TOOL_NAME_LENGTH = 64
 
 
 class AgentRunner:
-    """Runs DeepAgents with OpenPaw workspace configuration.
+    """Runs LangGraph ReAct agent with OpenPaw workspace configuration.
 
     Integrates:
     - Workspace-based system prompts (AGENT.md, USER.md, SOUL.md, HEARTBEAT.md)
-    - DeepAgents native skills from workspace skills/ directory
+    - Sandboxed filesystem access for workspace operations
     - LangGraph checkpointing for multi-turn conversations
     - Automatic stripping of model thinking tokens (<think>...</think>)
+    - Tool name validation for Bedrock compatibility
     """
 
     @staticmethod
@@ -55,6 +64,9 @@ class AgentRunner:
         tools: list[Any] | None = None,
         region: str | None = None,
         strip_thinking: bool = False,
+        timeout_seconds: float = 300.0,
+        enabled_builtins: list[str] | None = None,
+        extra_model_kwargs: dict[str, Any] | None = None,
     ):
         """Initialize the agent runner.
 
@@ -68,6 +80,10 @@ class AgentRunner:
             tools: Optional additional tools to provide to the agent.
             region: AWS region for Bedrock models (e.g., us-east-1).
             strip_thinking: Whether to strip <think>...</think> tokens from responses.
+            timeout_seconds: Wall-clock timeout for agent invocations (default 5 minutes).
+            enabled_builtins: List of enabled builtin tool names for conditional prompt sections.
+            extra_model_kwargs: Additional kwargs to pass to init_chat_model
+                (e.g., base_url for OpenAI-compatible APIs).
         """
         self.workspace = workspace
         self.model_id = model
@@ -75,35 +91,162 @@ class AgentRunner:
         self.max_turns = max_turns
         self.temperature = temperature
         self.checkpointer = checkpointer
-        self.tools = tools or []
+        self.additional_tools = tools or []
         self.region = region
         self.strip_thinking = strip_thinking
+        self.timeout_seconds = timeout_seconds
+        self.enabled_builtins = enabled_builtins
+        self.extra_model_kwargs = extra_model_kwargs or {}
+
+        # Token usage tracking (populated after each run)
+        self._last_metrics: InvocationMetrics | None = None
+
+        # Auto-enable thinking stripping for known thinking models
+        if not self.strip_thinking and any(
+            thinking_model in self.model_id.lower()
+            for thinking_model in THINKING_MODELS
+        ):
+            logger.info(
+                f"Auto-enabling thinking token stripping for model: {self.model_id}"
+            )
+            self.strip_thinking = True
 
         self._agent = self._build_agent()
 
-    def _build_agent(self) -> Any:
-        """Build the DeepAgent with workspace configuration.
+    @property
+    def last_metrics(self) -> InvocationMetrics | None:
+        """Get token usage metrics from the most recent invocation.
 
-        Filesystem access is sandboxed to the workspace directory using
-        DeepAgents' FilesystemBackend with virtual_mode=True for security.
+        Returns:
+            InvocationMetrics from the last run() call, or None if no invocations yet.
         """
-        model_kwargs: dict[str, Any] = {"temperature": self.temperature}
-        if self.api_key:
-            model_kwargs["api_key"] = self.api_key
-        if self.region:
-            model_kwargs["region_name"] = self.region
+        return self._last_metrics
 
-        model = init_chat_model(self.model_id, **model_kwargs)
-        system_prompt = self.workspace.build_system_prompt()
+    def update_checkpointer(self, checkpointer: Any) -> None:
+        """Update the checkpointer and rebuild the agent graph.
 
-        skills_paths: list[str] = []
-        if self.workspace.skills_path.exists():
-            skills_paths.append(str(self.workspace.skills_path))
-            logger.info(f"Skills directory found: {self.workspace.skills_path}")
+        Used for deferred initialization when checkpointer requires async setup.
+
+        Args:
+            checkpointer: New checkpointer instance (e.g., AsyncSqliteSaver).
+        """
+        self.checkpointer = checkpointer
+        self._agent = self._build_agent()
+        logger.info(f"Updated checkpointer for workspace: {self.workspace.name}")
+
+    def _validate_tool_names(self, tools: list[Any]) -> None:
+        """Validate tool names comply with Bedrock requirements.
+
+        AWS Bedrock requires tool names to:
+        - Match pattern [a-zA-Z0-9_-]+
+        - Be 64 characters or less
+
+        Args:
+            tools: List of tools to validate.
+
+        Raises:
+            ValueError: If any tool name is invalid.
+        """
+        for tool in tools:
+            tool_name = getattr(tool, "name", None)
+            if not tool_name:
+                logger.warning(f"Tool {tool} has no name attribute, skipping validation")
+                continue
+
+            # Check length
+            if len(tool_name) > MAX_TOOL_NAME_LENGTH:
+                raise ValueError(
+                    f"Tool name '{tool_name}' exceeds max length of {MAX_TOOL_NAME_LENGTH} characters"
+                )
+
+            # Check pattern
+            if not BEDROCK_TOOL_NAME_PATTERN.match(tool_name):
+                raise ValueError(
+                    f"Tool name '{tool_name}' contains invalid characters. "
+                    f"Must match pattern: [a-zA-Z0-9_-]+"
+                )
+
+    def _create_model(self) -> BaseChatModel:
+        """Create the appropriate chat model based on provider.
+
+        Directly instantiates provider-specific classes instead of using
+        init_chat_model, which silently drops kwargs like extra_body.
+
+        Supported providers: openai, anthropic, bedrock_converse.
+
+        Returns:
+            Configured BaseChatModel instance.
+
+        Raises:
+            ValueError: If provider is not supported.
+        """
+        # Parse provider from model_id (format: "provider:model_name")
+        if ":" in self.model_id:
+            provider, model_name = self.model_id.split(":", 1)
         else:
-            logger.debug(f"No skills directory at: {self.workspace.skills_path}")
+            provider = "openai"
+            model_name = self.model_id
 
-        # Validate and resolve workspace path for security
+        # Build kwargs common to all providers
+        kwargs: dict[str, Any] = {
+            "model": model_name,
+            "temperature": self.temperature,
+        }
+
+        # Merge extra kwargs from config (base_url, model_kwargs, extra_body, etc.)
+        kwargs.update(self.extra_model_kwargs)
+
+        # Flatten model_kwargs into direct constructor args so that params like
+        # extra_body reach the provider class directly instead of being silently dropped
+        nested_model_kwargs = kwargs.pop("model_kwargs", None)
+        if nested_model_kwargs and isinstance(nested_model_kwargs, dict):
+            kwargs.update(nested_model_kwargs)
+
+        if provider == "openai":
+            from langchain_openai import ChatOpenAI
+
+            if self.api_key:
+                kwargs["api_key"] = self.api_key
+            logger.info(f"Creating ChatOpenAI: model={model_name}, kwargs={list(kwargs.keys())}")
+            return ChatOpenAI(**kwargs)
+
+        if provider == "anthropic":
+            from langchain_anthropic import ChatAnthropic
+
+            if self.api_key:
+                kwargs["api_key"] = self.api_key
+            logger.info(f"Creating ChatAnthropic: model={model_name}")
+            return ChatAnthropic(**kwargs)
+
+        if provider in ("bedrock_converse", "bedrock"):
+            from langchain_aws import ChatBedrockConverse
+
+            if self.region:
+                kwargs["region_name"] = self.region
+            # Bedrock uses AWS credentials, not api_key
+            kwargs.pop("api_key", None)
+            logger.info(f"Creating ChatBedrockConverse: model={model_name}")
+            return ChatBedrockConverse(**kwargs)
+
+        raise ValueError(
+            f"Unsupported model provider: '{provider}'. "
+            f"Supported: openai, anthropic, bedrock_converse"
+        )
+
+    def _build_agent(self) -> Any:
+        """Build the LangGraph ReAct agent with workspace configuration.
+
+        Creates a ReAct agent with:
+        - Direct provider-specific model instantiation
+        - Sandboxed filesystem tools for workspace access
+        - Workspace-specific tools from tools/ directory
+        - System prompt from workspace markdown files
+        - Optional thinking token stripping via post_model_hook
+        """
+        # 1. Initialize model directly via provider class
+        model = self._create_model()
+
+        # 2. Create FilesystemTools for workspace
         workspace_root = self.workspace.path.resolve()
         if not workspace_root.exists():
             raise ValueError(f"Workspace does not exist: {workspace_root}")
@@ -112,20 +255,42 @@ class AgentRunner:
 
         logger.debug(f"Sandboxing agent to workspace: {workspace_root}")
 
-        # Configure filesystem backend with workspace directory as root
-        # virtual_mode=True enforces sandboxing (blocks .., ~, and absolute paths outside root)
-        filesystem_backend = FilesystemBackend(
-            root_dir=str(workspace_root),
-            virtual_mode=True,
+        fs_tools_manager = FilesystemTools(workspace_root=workspace_root)
+        filesystem_tools = fs_tools_manager.get_tools()
+
+        # 3. Combine all tools (filesystem + additional tools)
+        all_tools = filesystem_tools + self.additional_tools
+
+        # 4. Validate tool names (especially important for Bedrock)
+        if "bedrock" in self.model_id.lower():
+            logger.debug("Validating tool names for Bedrock compatibility")
+            self._validate_tool_names(all_tools)
+
+        # 5. Get system prompt from workspace
+        system_prompt = self.workspace.build_system_prompt(enabled_builtins=self.enabled_builtins)
+
+        # 6. Build middleware hooks via openpaw.llm.middleware
+        pre_hook = build_pre_model_hook(strip_reasoning=self.strip_thinking)
+        post_hook = build_post_model_hook(strip_thinking=self.strip_thinking)
+
+        # 7. Call create_react_agent
+        # Note: create_react_agent handles tool binding internally - do NOT pre-bind
+        logger.info(
+            f"Creating ReAct agent with {len(all_tools)} tools "
+            f"({len(filesystem_tools)} filesystem, {len(self.additional_tools)} additional)"
         )
 
-        agent = create_deep_agent(
+        # Log all tool names for debugging
+        tool_names = [getattr(t, 'name', str(t)) for t in all_tools]
+        logger.info(f"Tool names: {tool_names}")
+
+        agent = create_react_agent(
             model=model,
-            system_prompt=system_prompt,
-            tools=self.tools if self.tools else None,
-            skills=skills_paths if skills_paths else None,
+            tools=all_tools,
+            prompt=system_prompt,
             checkpointer=self.checkpointer,
-            backend=filesystem_backend,
+            pre_model_hook=pre_hook,
+            post_model_hook=post_hook,
         )
 
         return agent
@@ -146,7 +311,12 @@ class AgentRunner:
         Returns:
             Agent's response text with thinking tokens stripped.
         """
-        config: dict[str, Any] = {}
+        # Reset metrics from previous invocation
+        self._last_metrics = None
+
+        # Set recursion_limit for multi-turn execution (2 supersteps per turn)
+        config: dict[str, Any] = {"recursion_limit": self.max_turns * 2}
+
         if session_id or thread_id:
             config["configurable"] = {}
             if thread_id:
@@ -154,9 +324,41 @@ class AgentRunner:
             if session_id:
                 config["configurable"]["session_id"] = session_id
 
-        result = await self._agent.ainvoke(
-            {"messages": [{"role": "user", "content": message}]},
-            config=config if config else None,
+        # Create fresh callback handler for token tracking
+        usage_callback = UsageMetadataCallbackHandler()
+        config["callbacks"] = [usage_callback]
+
+        # Track invocation duration
+        start_time = time.monotonic()
+
+        try:
+            async with asyncio.timeout(self.timeout_seconds):
+                result = await self._agent.ainvoke(
+                    {"messages": [{"role": "user", "content": message}]},
+                    config=config,
+                )
+        except TimeoutError:
+            # Extract partial metrics even on timeout
+            duration_ms = (time.monotonic() - start_time) * 1000
+            self._last_metrics = extract_metrics_from_callback(
+                usage_callback, duration_ms, self.model_id
+            )
+            self._last_metrics.is_partial = True
+
+            logger.warning(
+                f"Agent timed out after {self.timeout_seconds}s "
+                f"(workspace: {self.workspace.name})"
+            )
+            return (
+                f"I ran out of time processing your request "
+                f"(timeout: {int(self.timeout_seconds)}s). "
+                f"Please try again with a simpler request."
+            )
+
+        # Extract metrics after successful invocation
+        duration_ms = (time.monotonic() - start_time) * 1000
+        self._last_metrics = extract_metrics_from_callback(
+            usage_callback, duration_ms, self.model_id
         )
 
         messages = result.get("messages", [])
@@ -168,7 +370,8 @@ class AgentRunner:
             else:
                 raw_response = str(last_message)
 
-            if self.strip_thinking:
+            # Thinking tokens should already be stripped by hook, but apply fallback
+            if self.strip_thinking and "<think>" in raw_response.lower():
                 return self._strip_thinking_tokens(raw_response)
             return raw_response
 
@@ -185,7 +388,9 @@ class AgentRunner:
         Returns:
             Agent's response text with thinking tokens stripped.
         """
-        config: dict[str, Any] = {}
+        # Set recursion_limit for multi-turn execution (2 supersteps per turn)
+        config: dict[str, Any] = {"recursion_limit": self.max_turns * 2}
+
         if session_id or thread_id:
             config["configurable"] = {}
             if thread_id:
@@ -195,7 +400,7 @@ class AgentRunner:
 
         result = self._agent.invoke(
             {"messages": [{"role": "user", "content": message}]},
-            config=config if config else None,
+            config=config,
         )
 
         messages = result.get("messages", [])
@@ -207,7 +412,8 @@ class AgentRunner:
             else:
                 raw_response = str(last_message)
 
-            if self.strip_thinking:
+            # Thinking tokens should already be stripped by hook, but apply fallback
+            if self.strip_thinking and "<think>" in raw_response.lower():
                 return self._strip_thinking_tokens(raw_response)
             return raw_response
 

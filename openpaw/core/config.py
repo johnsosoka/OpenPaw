@@ -185,6 +185,42 @@ class CronBuiltinConfig(BuiltinItemConfig):
     )
 
 
+class SendFileBuiltinConfig(BuiltinItemConfig):
+    """Configuration for the send_file tool."""
+
+    max_file_size: int = Field(
+        default=50 * 1024 * 1024,
+        description="Maximum file size in bytes (default 50MB for Telegram)"
+    )
+
+
+class DoclingBuiltinConfig(BuiltinItemConfig):
+    """Configuration for the Docling document processor."""
+
+    max_file_size: int = Field(
+        default=50 * 1024 * 1024,
+        description="Maximum file size in bytes (default 50MB)"
+    )
+    ocr_backend: str = Field(
+        default="auto",
+        description="OCR backend: 'auto', 'mac', 'easyocr', 'tesseract', 'rapidocr'"
+    )
+    ocr_languages: list[str] = Field(
+        default_factory=lambda: ["en"],
+        description="OCR languages as ISO 639-1 codes (auto-mapped per backend)"
+    )
+    force_full_page_ocr: bool = Field(
+        default=True,
+        description="Force full-page OCR (recommended for scanned docs)"
+    )
+    document_timeout: float | None = Field(
+        default=None,
+        description="Per-document timeout in seconds (None = no limit)"
+    )
+    do_ocr: bool = Field(default=True, description="Enable OCR processing")
+    do_table_structure: bool = Field(default=True, description="Enable table structure detection")
+
+
 class BuiltinsConfig(BaseModel):
     """Global builtins configuration.
 
@@ -206,6 +242,8 @@ class BuiltinsConfig(BaseModel):
     whisper: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
     elevenlabs: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
     cron: CronBuiltinConfig = Field(default_factory=CronBuiltinConfig)
+    send_file: SendFileBuiltinConfig = Field(default_factory=SendFileBuiltinConfig)
+    docling: DoclingBuiltinConfig = Field(default_factory=DoclingBuiltinConfig)
 
     model_config = {"extra": "allow"}
 
@@ -227,6 +265,8 @@ class WorkspaceBuiltinsConfig(BaseModel):
     whisper: BuiltinItemConfig | None = None
     elevenlabs: BuiltinItemConfig | None = None
     cron: CronBuiltinConfig | None = None
+    send_file: SendFileBuiltinConfig | None = None
+    docling: DoclingBuiltinConfig | None = None
 
     model_config = {"extra": "allow"}
 

@@ -1,6 +1,6 @@
 # OpenPaw
 
-OpenPaw is a multi-channel AI agent framework built on [DeepAgents](https://github.com/anthropics/deepagents) (LangGraph). It enables running multiple isolated AI agent "workspaces," each with its own personality, communication channels, scheduled tasks, and optional capabilities.
+OpenPaw is a multi-channel AI agent framework built on [LangGraph](https://langchain-ai.github.io/langgraph/) (`create_react_agent`). It enables running multiple isolated AI agent "workspaces," each with its own personality, communication channels, scheduled tasks, and optional capabilities.
 
 ## Features
 
@@ -11,8 +11,11 @@ OpenPaw is a multi-channel AI agent framework built on [DeepAgents](https://gith
 - **Lane-Based Queue System** - FIFO queue with configurable concurrency and multiple queue modes (collect, steer, followup, interrupt)
 - **Cron Scheduler** - Define scheduled tasks per workspace via YAML configuration
 - **Optional Builtins** - Conditionally loaded capabilities based on API key availability (web search, voice transcription, TTS)
-- **Sandboxed Filesystem Access** - Per-workspace file access via DeepAgents FilesystemBackend
+- **Sandboxed Filesystem Access** - Per-workspace file operations (read, write, edit, glob, grep) with path traversal protection
 - **Per-Workspace Environment** - Automatic `.env` loading for workspace-specific secrets and configuration
+- **Agent Autonomy** - Self-continuation (followup), mid-execution messaging, and persistent task tracking across sessions
+- **Heartbeat System** - Proactive agent check-ins with HEARTBEAT_OK suppression and active hours
+- **Dynamic Framework Prompt** - Agents automatically understand their capabilities based on loaded builtins
 
 ## Quick Start
 
@@ -125,7 +128,7 @@ poetry run openpaw -c config.yaml -w my-agent -v
 ```
 OpenPawOrchestrator
   ├─ WorkspaceRunner["agent1"]
-  │   └─ Channel → QueueManager → LaneQueue → AgentRunner → DeepAgent
+  │   └─ Channel → QueueManager → LaneQueue → AgentRunner → LangGraph ReAct Agent
   ├─ WorkspaceRunner["agent2"]
   │   └─ (isolated: own channel, queue, agent)
   └─ WorkspaceRunner["agent3"]
@@ -161,7 +164,7 @@ poetry run mypy openpaw/
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.12+
 - Poetry for dependency management
 - Telegram Bot Token (for Telegram channel)
 - Model provider credentials (one of):
