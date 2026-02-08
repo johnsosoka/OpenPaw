@@ -653,3 +653,311 @@ async def test_processed_path_metadata_set(
     assert attachment.metadata is not None
     assert "processed_path" in attachment.metadata
     assert attachment.metadata["processed_path"] == "uploads/2026-02-07/test.md"
+
+
+# ============================================================================
+# Configuration Tests for OCR Pipeline
+# ============================================================================
+
+
+def test_config_defaults(workspace_path: Path):
+    """Verify processor uses correct defaults for OCR config."""
+    config = {"workspace_path": workspace_path}
+    processor = DoclingProcessor(config=config)
+
+    assert processor.ocr_backend == "auto"
+    assert processor.ocr_languages == ["en"]
+    assert processor.force_full_page_ocr is True
+    assert processor.document_timeout is None
+    assert processor.do_ocr is True
+    assert processor.do_table_structure is True
+
+
+def test_custom_config_values(workspace_path: Path):
+    """Verify processor stores custom OCR config values."""
+    config = {
+        "workspace_path": workspace_path,
+        "ocr_backend": "tesseract",
+        "ocr_languages": ["en", "fr", "de"],
+        "force_full_page_ocr": False,
+        "document_timeout": 120.0,
+        "do_ocr": False,
+        "do_table_structure": False,
+    }
+    processor = DoclingProcessor(config=config)
+
+    assert processor.ocr_backend == "tesseract"
+    assert processor.ocr_languages == ["en", "fr", "de"]
+    assert processor.force_full_page_ocr is False
+    assert processor.document_timeout == 120.0
+    assert processor.do_ocr is False
+    assert processor.do_table_structure is False
+
+
+def test_build_ocr_options_auto_macos(workspace_path: Path):
+    """Verify auto backend selects OcrMacOptions on macOS."""
+    config = {
+        "workspace_path": workspace_path,
+        "ocr_backend": "auto",
+        "ocr_languages": ["en", "fr"],
+    }
+    processor = DoclingProcessor(config=config)
+
+    MockOcrMacOptions = Mock()
+    mock_pipeline_options = Mock()
+    mock_pipeline_options.OcrMacOptions = MockOcrMacOptions
+
+    with patch.dict(sys.modules, {
+        "docling": Mock(),
+        "docling.datamodel": Mock(),
+        "docling.datamodel.pipeline_options": mock_pipeline_options,
+    }), patch("sys.platform", "darwin"):
+        result = processor._build_ocr_options()
+
+    MockOcrMacOptions.assert_called_once()
+    call_args = MockOcrMacOptions.call_args[1]
+    assert call_args["force_full_page_ocr"] is True
+    assert call_args["lang"] == ["en-US", "fr-FR"]
+
+
+def test_build_ocr_options_auto_linux(workspace_path: Path):
+    """Verify auto backend selects EasyOcrOptions on Linux."""
+    config = {
+        "workspace_path": workspace_path,
+        "ocr_backend": "auto",
+        "ocr_languages": ["en"],
+    }
+    processor = DoclingProcessor(config=config)
+
+    MockEasyOcrOptions = Mock()
+    mock_pipeline_options = Mock()
+    mock_pipeline_options.EasyOcrOptions = MockEasyOcrOptions
+
+    with patch.dict(sys.modules, {
+        "docling": Mock(),
+        "docling.datamodel": Mock(),
+        "docling.datamodel.pipeline_options": mock_pipeline_options,
+    }), patch("sys.platform", "linux"):
+        result = processor._build_ocr_options()
+
+    MockEasyOcrOptions.assert_called_once()
+    call_args = MockEasyOcrOptions.call_args[1]
+    assert call_args["force_full_page_ocr"] is True
+    assert call_args["lang"] == ["en"]
+
+
+def test_build_ocr_options_easyocr_explicit(workspace_path: Path):
+    """Verify explicit easyocr backend selection."""
+    config = {
+        "workspace_path": workspace_path,
+        "ocr_backend": "easyocr",
+        "ocr_languages": ["en", "fr"],
+    }
+    processor = DoclingProcessor(config=config)
+
+    MockEasyOcrOptions = Mock()
+    mock_pipeline_options = Mock()
+    mock_pipeline_options.EasyOcrOptions = MockEasyOcrOptions
+
+    with patch.dict(sys.modules, {
+        "docling": Mock(),
+        "docling.datamodel": Mock(),
+        "docling.datamodel.pipeline_options": mock_pipeline_options,
+    }):
+        result = processor._build_ocr_options()
+
+    MockEasyOcrOptions.assert_called_once_with(
+        force_full_page_ocr=True,
+        lang=["en", "fr"],
+    )
+
+
+def test_build_ocr_options_tesseract(workspace_path: Path):
+    """Verify tesseract backend with language mapping."""
+    config = {
+        "workspace_path": workspace_path,
+        "ocr_backend": "tesseract",
+        "ocr_languages": ["en", "fr", "de"],
+    }
+    processor = DoclingProcessor(config=config)
+
+    MockTesseractOcrOptions = Mock()
+    mock_pipeline_options = Mock()
+    mock_pipeline_options.TesseractOcrOptions = MockTesseractOcrOptions
+
+    with patch.dict(sys.modules, {
+        "docling": Mock(),
+        "docling.datamodel": Mock(),
+        "docling.datamodel.pipeline_options": mock_pipeline_options,
+    }):
+        result = processor._build_ocr_options()
+
+    MockTesseractOcrOptions.assert_called_once_with(
+        force_full_page_ocr=True,
+        lang=["eng", "fra", "deu"],
+    )
+
+
+def test_build_ocr_options_rapidocr(workspace_path: Path):
+    """Verify rapidocr backend selection."""
+    config = {
+        "workspace_path": workspace_path,
+        "ocr_backend": "rapidocr",
+    }
+    processor = DoclingProcessor(config=config)
+
+    MockRapidOcrOptions = Mock()
+    mock_pipeline_options = Mock()
+    mock_pipeline_options.RapidOcrOptions = MockRapidOcrOptions
+
+    with patch.dict(sys.modules, {
+        "docling": Mock(),
+        "docling.datamodel": Mock(),
+        "docling.datamodel.pipeline_options": mock_pipeline_options,
+    }):
+        result = processor._build_ocr_options()
+
+    MockRapidOcrOptions.assert_called_once_with(force_full_page_ocr=True)
+
+
+def test_build_ocr_options_mac_on_linux_fallback(workspace_path: Path):
+    """Verify mac backend falls back to easyocr on Linux."""
+    config = {
+        "workspace_path": workspace_path,
+        "ocr_backend": "mac",
+        "ocr_languages": ["en"],
+    }
+    processor = DoclingProcessor(config=config)
+
+    MockOcrMacOptions = Mock()
+    MockEasyOcrOptions = Mock()
+    mock_pipeline_options = Mock()
+    mock_pipeline_options.OcrMacOptions = MockOcrMacOptions
+    mock_pipeline_options.EasyOcrOptions = MockEasyOcrOptions
+
+    with patch.dict(sys.modules, {
+        "docling": Mock(),
+        "docling.datamodel": Mock(),
+        "docling.datamodel.pipeline_options": mock_pipeline_options,
+    }), patch("sys.platform", "linux"):
+        result = processor._build_ocr_options()
+
+    # Should call EasyOcrOptions instead of OcrMacOptions
+    MockOcrMacOptions.assert_not_called()
+    MockEasyOcrOptions.assert_called_once_with(
+        force_full_page_ocr=True,
+        lang=["en"],
+    )
+
+
+def test_build_ocr_options_invalid_backend(workspace_path: Path):
+    """Verify invalid backend raises ValueError."""
+    config = {
+        "workspace_path": workspace_path,
+        "ocr_backend": "invalid",
+    }
+    processor = DoclingProcessor(config=config)
+
+    with patch.dict(sys.modules, {
+        "docling": Mock(),
+        "docling.datamodel": Mock(),
+        "docling.datamodel.pipeline_options": Mock(),
+    }), pytest.raises(ValueError, match="Unknown OCR backend: invalid"):
+        processor._build_ocr_options()
+
+
+@pytest.mark.asyncio
+async def test_document_timeout_config(
+    processor: DoclingProcessor,
+    sample_message: Message,
+    workspace_path: Path,
+    mock_docling: dict,
+):
+    """Verify document_timeout is used when configured."""
+    # Create processor with timeout
+    config = {
+        "workspace_path": workspace_path,
+        "document_timeout": 5.0,
+    }
+    timeout_processor = DoclingProcessor(config=config)
+
+    # Create a saved file on disk
+    uploads_dir = workspace_path / "uploads" / "2026-02-07"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    source_file = uploads_dir / "report.pdf"
+    source_file.write_bytes(b"%PDF-1.4 fake pdf content")
+
+    sample_message.attachments = [
+        Attachment(
+            type="document",
+            data=None,
+            mime_type="application/pdf",
+            filename="report.pdf",
+            saved_path="uploads/2026-02-07/report.pdf",
+        )
+    ]
+
+    mock_docling["document"].export_to_markdown.return_value = "# Report\n\nContent here with enough text"
+
+    # Create async context manager mock
+    class MockTimeout:
+        def __init__(self, seconds):
+            self.seconds = seconds
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            return None
+
+    mock_timeout_class = Mock(side_effect=MockTimeout)
+
+    with patch.object(timeout_processor, "_check_docling_available", return_value=True), \
+         patch.dict(sys.modules, {
+             "docling": mock_docling["module"],
+             "docling.document_converter": mock_docling["module"].document_converter,
+             "docling.datamodel": Mock(),
+             "docling.datamodel.base_models": Mock(InputFormat=Mock(PDF="pdf")),
+             "docling.datamodel.pipeline_options": Mock(
+                 PdfPipelineOptions=Mock,
+                 EasyOcrOptions=Mock,
+             ),
+         }), \
+         patch("asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread, \
+         patch("openpaw.builtins.processors.docling.asyncio.timeout", mock_timeout_class) as patched_timeout:
+
+        mock_to_thread.return_value = mock_docling["result"]
+
+        result = await timeout_processor.process_inbound(sample_message)
+
+    # Verify asyncio.timeout was called with configured value
+    patched_timeout.assert_called_once_with(5.0)
+
+
+def test_ocr_language_mapping_tesseract():
+    """Verify Tesseract language code mapping."""
+    from openpaw.builtins.processors.docling import _TESSERACT_LANG_MAP
+
+    # Test common mappings
+    assert _TESSERACT_LANG_MAP["en"] == "eng"
+    assert _TESSERACT_LANG_MAP["fr"] == "fra"
+    assert _TESSERACT_LANG_MAP["de"] == "deu"
+    assert _TESSERACT_LANG_MAP["es"] == "spa"
+    assert _TESSERACT_LANG_MAP["zh"] == "chi_sim"
+    assert _TESSERACT_LANG_MAP["ja"] == "jpn"
+    assert _TESSERACT_LANG_MAP["ko"] == "kor"
+    assert _TESSERACT_LANG_MAP["ar"] == "ara"
+
+
+def test_ocr_language_mapping_ocrmac():
+    """Verify OcrMac locale mapping."""
+    from openpaw.builtins.processors.docling import _OCRMAC_LANG_MAP
+
+    # Test common mappings
+    assert _OCRMAC_LANG_MAP["en"] == "en-US"
+    assert _OCRMAC_LANG_MAP["fr"] == "fr-FR"
+    assert _OCRMAC_LANG_MAP["de"] == "de-DE"
+    assert _OCRMAC_LANG_MAP["es"] == "es-ES"
+    assert _OCRMAC_LANG_MAP["zh"] == "zh-Hans"
+    assert _OCRMAC_LANG_MAP["ja"] == "ja-JP"
+    assert _OCRMAC_LANG_MAP["ko"] == "ko-KR"

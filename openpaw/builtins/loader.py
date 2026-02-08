@@ -135,16 +135,24 @@ class BuiltinLoader:
                 if workspace_cfg and hasattr(workspace_cfg, "max_file_size"):
                     config["max_file_size"] = workspace_cfg.max_file_size
 
-        # Extract max_file_size from DoclingProcessorConfig if present
+        # Extract typed fields from DoclingBuiltinConfig
         if name == "docling":
+            _docling_fields = [
+                "max_file_size", "ocr_backend", "ocr_languages",
+                "force_full_page_ocr", "document_timeout", "do_ocr", "do_table_structure",
+            ]
             if self.global_config:
                 global_cfg = getattr(self.global_config, name, None)
-                if global_cfg and hasattr(global_cfg, "max_file_size"):
-                    config["max_file_size"] = global_cfg.max_file_size
+                if global_cfg:
+                    for field in _docling_fields:
+                        if hasattr(global_cfg, field):
+                            config[field] = getattr(global_cfg, field)
             if self.workspace_config:
                 workspace_cfg = getattr(self.workspace_config, name, None)
-                if workspace_cfg and hasattr(workspace_cfg, "max_file_size"):
-                    config["max_file_size"] = workspace_cfg.max_file_size
+                if workspace_cfg:
+                    for field in _docling_fields:
+                        if hasattr(workspace_cfg, field):
+                            config[field] = getattr(workspace_cfg, field)
 
         # Global config
         if self.global_config:

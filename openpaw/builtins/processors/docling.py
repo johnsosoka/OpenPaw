@@ -47,6 +47,22 @@ SUPPORTED_EXTENSIONS = {
 # Maximum file size for processing (default 50 MB, Telegram's limit)
 DEFAULT_MAX_FILE_SIZE = 50 * 1024 * 1024
 
+# ISO 639-1 to Tesseract ISO 639-2/3 language code mapping
+_TESSERACT_LANG_MAP: dict[str, str] = {
+    "en": "eng", "fr": "fra", "de": "deu", "es": "spa", "it": "ita",
+    "pt": "por", "nl": "nld", "ru": "rus", "zh": "chi_sim", "ja": "jpn",
+    "ko": "kor", "ar": "ara", "hi": "hin", "th": "tha", "vi": "vie",
+    "pl": "pol", "uk": "ukr", "cs": "ces", "sv": "swe", "da": "dan",
+    "fi": "fin", "no": "nor", "hu": "hun", "ro": "ron", "el": "ell",
+    "tr": "tur", "he": "heb", "id": "ind",
+}
+
+# ISO 639-1 to OcrMac locale mapping
+_OCRMAC_LANG_MAP: dict[str, str] = {
+    "en": "en-US", "fr": "fr-FR", "de": "de-DE", "es": "es-ES", "it": "it-IT",
+    "pt": "pt-BR", "zh": "zh-Hans", "ja": "ja-JP", "ko": "ko-KR",
+}
+
 
 class DoclingProcessor(BaseBuiltinProcessor):
     """Converts inbound documents to markdown using Docling.
@@ -61,6 +77,12 @@ class DoclingProcessor(BaseBuiltinProcessor):
     Config options:
         workspace_path: Path to workspace directory (required, injected by loader)
         max_file_size: Maximum file size in bytes (default: 50 MB)
+        ocr_backend: OCR backend selection ('auto', 'mac', 'easyocr', 'tesseract', 'rapidocr')
+        ocr_languages: List of ISO 639-1 language codes (default: ['en'])
+        force_full_page_ocr: Force full-page OCR (default: True, recommended for scanned docs)
+        document_timeout: Per-document timeout in seconds (default: None, no limit)
+        do_ocr: Enable OCR processing (default: True)
+        do_table_structure: Enable table structure detection (default: True)
     """
 
     metadata = BuiltinMetadata(
@@ -76,6 +98,12 @@ class DoclingProcessor(BaseBuiltinProcessor):
         super().__init__(config)
         self.workspace_path = config.get("workspace_path") if config else None
         self.max_file_size = config.get("max_file_size", DEFAULT_MAX_FILE_SIZE) if config else DEFAULT_MAX_FILE_SIZE
+        self.ocr_backend = config.get("ocr_backend", "auto") if config else "auto"
+        self.ocr_languages = config.get("ocr_languages", ["en"]) if config else ["en"]
+        self.force_full_page_ocr = config.get("force_full_page_ocr", True) if config else True
+        self.document_timeout = config.get("document_timeout", None) if config else None
+        self.do_ocr = config.get("do_ocr", True) if config else True
+        self.do_table_structure = config.get("do_table_structure", True) if config else True
 
         if not self.workspace_path:
             logger.warning("DoclingProcessor initialized without workspace_path - will pass through all messages")
@@ -264,6 +292,63 @@ class DoclingProcessor(BaseBuiltinProcessor):
             tmp.write(attachment.data)
             return Path(tmp.name), True
 
+    def _build_ocr_options(self) -> Any:
+        """Build OCR options based on configured backend and languages.
+
+        Returns:
+            An OCR options instance for the configured backend.
+
+        Raises:
+            ValueError: If the configured backend is invalid or unavailable on this platform.
+        """
+        import sys
+
+        backend = self.ocr_backend
+
+        # Auto-select based on platform
+        if backend == "auto":
+            backend = "mac" if sys.platform == "darwin" else "easyocr"
+
+        if backend == "mac":
+            from docling.datamodel.pipeline_options import OcrMacOptions
+            if sys.platform != "darwin":
+                logger.warning("OcrMacOptions requested but not on macOS, falling back to easyocr")
+                return self._build_easyocr_options()
+            langs = [_OCRMAC_LANG_MAP.get(lang, f"{lang}-{lang.upper()}") for lang in self.ocr_languages]
+            return OcrMacOptions(
+                force_full_page_ocr=self.force_full_page_ocr,
+                lang=langs,
+            )
+
+        if backend == "easyocr":
+            return self._build_easyocr_options()
+
+        if backend == "tesseract":
+            from docling.datamodel.pipeline_options import TesseractOcrOptions
+            langs = [_TESSERACT_LANG_MAP.get(lang, lang) for lang in self.ocr_languages]
+            return TesseractOcrOptions(
+                force_full_page_ocr=self.force_full_page_ocr,
+                lang=langs,
+            )
+
+        if backend == "rapidocr":
+            from docling.datamodel.pipeline_options import RapidOcrOptions
+            return RapidOcrOptions(force_full_page_ocr=self.force_full_page_ocr)
+
+        raise ValueError(f"Unknown OCR backend: {backend}")
+
+    def _build_easyocr_options(self) -> Any:
+        """Build EasyOCR options with configured languages.
+
+        Returns:
+            An EasyOcrOptions instance.
+        """
+        from docling.datamodel.pipeline_options import EasyOcrOptions
+        return EasyOcrOptions(
+            force_full_page_ocr=self.force_full_page_ocr,
+            lang=list(self.ocr_languages),
+        )
+
     async def _process_document(self, attachment: Attachment) -> str | None:
         """Process a single document attachment.
 
@@ -275,8 +360,6 @@ class DoclingProcessor(BaseBuiltinProcessor):
         """
         # Import docling (already checked for availability)
         try:
-            import sys
-
             from docling.datamodel.base_models import InputFormat
             from docling.datamodel.pipeline_options import PdfPipelineOptions
             from docling.document_converter import DocumentConverter, PdfFormatOption
@@ -303,18 +386,12 @@ class DoclingProcessor(BaseBuiltinProcessor):
             source_path, is_temp = self._write_temp_file(attachment)
 
         try:
-            # Configure pipeline with aggressive OCR for scanned/image-heavy PDFs
-            # Platform-specific OCR: OcrMacOptions on macOS, EasyOcrOptions elsewhere
-            if sys.platform == "darwin":
-                from docling.datamodel.pipeline_options import OcrMacOptions
-                ocr_options = OcrMacOptions(force_full_page_ocr=True)
-            else:
-                from docling.datamodel.pipeline_options import EasyOcrOptions
-                ocr_options = EasyOcrOptions(force_full_page_ocr=True, lang=["en"])
+            # Build OCR options from config
+            ocr_options = self._build_ocr_options()
 
             pipeline_options = PdfPipelineOptions(
-                do_ocr=True,
-                do_table_structure=True,
+                do_ocr=self.do_ocr,
+                do_table_structure=self.do_table_structure,
                 ocr_options=ocr_options,
             )
 
@@ -326,7 +403,12 @@ class DoclingProcessor(BaseBuiltinProcessor):
             )
 
             # Run docling conversion in thread pool (CPU-bound)
-            result = await asyncio.to_thread(converter.convert, source_path)
+            # Apply document timeout if configured
+            if self.document_timeout:
+                async with asyncio.timeout(self.document_timeout):
+                    result = await asyncio.to_thread(converter.convert, source_path)
+            else:
+                result = await asyncio.to_thread(converter.convert, source_path)
 
             # Export to markdown
             markdown = result.document.export_to_markdown()
@@ -338,7 +420,7 @@ class DoclingProcessor(BaseBuiltinProcessor):
 
             # Calculate relative path for agent reference (only if not temp file)
             if not is_temp:
-                relative_md_path = md_path.relative_to(Path(self.workspace_path))
+                relative_md_path = md_path.relative_to(Path(self.workspace_path).resolve())
                 # Set metadata for processed path
                 if not attachment.metadata:
                     attachment.metadata = {}
