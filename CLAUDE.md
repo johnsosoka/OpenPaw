@@ -73,7 +73,7 @@ Each workspace is fully isolated with its own channels, queue, agent runner, and
 
 **`openpaw/queue/lane.py`** - Lane-based FIFO queue with configurable concurrency per lane (main, subagent, cron). Supports OpenClaw-style queue modes: `collect`, `steer`, `followup`, `interrupt`.
 
-**`openpaw/channels/telegram.py`** - Telegram bot adapter using `python-telegram-bot`. Converts platform messages to unified `Message` format, handles allowlisting, and supports voice/audio messages.
+**`openpaw/channels/telegram.py`** - Telegram bot adapter using `python-telegram-bot`. Converts platform messages to unified `Message` format, handles allowlisting, and supports voice/audio messages, documents, and photo uploads.
 
 **`openpaw/channels/factory.py`** - Channel factory. Decouples `WorkspaceRunner` from concrete channel types via `create_channel(channel_type, config, workspace_name)`. Currently supports `telegram`; new providers register here.
 
@@ -101,7 +101,11 @@ Each workspace is fully isolated with its own channels, queue, agent runner, and
 
 **`openpaw/tools/filesystem.py`** - `FilesystemTools` providing sandboxed file operations: `ls`, `read_file`, `write_file`, `overwrite_file`, `edit_file`, `glob_files`, `grep_files`, `file_info`. Path traversal protection via `resolve_sandboxed_path()`. `read_file` has a 100K character safety valve. `grep_files` supports `context_lines` for surrounding context.
 
-**`openpaw/tools/sandbox.py`** - Standalone `resolve_sandboxed_path()` utility. Validates paths within workspace root, rejecting absolute paths, `~`, `..`, and `.openpaw/` access. Shared by `FilesystemTools` and `SendFileTool`.
+**`openpaw/tools/sandbox.py`** - Standalone `resolve_sandboxed_path()` utility. Validates paths within workspace root, rejecting absolute paths, `~`, `..`, and `.openpaw/` access. Shared by `FilesystemTools`, `SendFileTool`, and inbound processors (DoclingProcessor, WhisperProcessor).
+
+**`openpaw/utils/filename.py`** - Filename sanitization and deduplication utilities. `sanitize_filename()` removes special characters, normalizes spaces, and lowercases. `deduplicate_path()` appends counters (1), (2), etc. for uniqueness.
+
+**`openpaw/builtins/processors/file_persistence.py`** - `FilePersistenceProcessor` saves all uploaded files to `uploads/{YYYY-MM-DD}/` with date partitioning. Sets `attachment.saved_path` for downstream processors.
 
 **`openpaw/cron/scheduler.py`** - `CronScheduler` uses APScheduler to execute scheduled tasks. Each job builds a fresh agent instance, injects the cron prompt, and routes output to the configured channel. Also handles dynamic tasks from `CronTool`.
 
@@ -123,8 +127,12 @@ agent_workspaces/<name>/
 │   ├── conversations.db  # AsyncSqliteSaver checkpoint database
 │   ├── sessions.json     # Session/conversation thread state
 │   └── token_usage.jsonl # Token usage metrics (append-only)
-├── inbox/        # Inbound document conversions (from Docling processor)
-│   └── {date}/{filename}/  # Folder per document with markdown + assets
+├── uploads/      # User-uploaded files (from FilePersistenceProcessor)
+│   └── {YYYY-MM-DD}/  # Date-partitioned file storage
+│       ├── report.pdf        # Original uploaded file
+│       ├── report.md         # Docling-converted markdown (sibling)
+│       ├── voice_123.ogg     # Original audio file
+│       └── voice_123.txt     # Whisper transcript (sibling)
 ├── heartbeat_log.jsonl   # Heartbeat event log (outcomes, metrics, task counts)
 ├── memory/
 │   └── conversations/    # Archived conversation exports
@@ -396,6 +404,7 @@ OpenPaw provides optional built-in capabilities that are conditionally available
 - `send_file` - Send workspace files to users (no API key required)
 
 **Processors** - Channel-layer message transformers:
+- `file_persistence` - Saves all uploaded files to workspace uploads/ directory (no API key required)
 - `whisper` - Audio transcription for voice messages (requires `OPENAI_API_KEY`)
 - `docling` - Document conversion (PDF, DOCX, PPTX, etc.) to markdown. Saves to `{workspace}/inbox/{date}/{filename}/`. Requires `docling` package.
 
@@ -441,9 +450,50 @@ builtins:
     enabled: true
     config:
       voice_id: 21m00Tcm4TlvDq8ikWAM
+
+  file_persistence:
+    enabled: true
+    config:
+      max_file_size: 52428800  # 50 MB default
+      clear_data_after_save: false
 ```
 
 **Adding New Builtins**: Create a class extending `BaseBuiltinTool` or `BaseBuiltinProcessor`, define `metadata` with prerequisites, and register in `registry.py`.
+
+### Inbound File Handling
+
+OpenPaw provides universal file persistence for all uploaded files, with optional content enrichment via downstream processors.
+
+**Processor Pipeline Order**: `file_persistence` → `whisper` → `timestamp` → `docling`
+
+**FilePersistenceProcessor** - First processor in the pipeline. Saves all uploaded files to `{workspace}/uploads/{YYYY-MM-DD}/` with date partitioning. Sets `attachment.saved_path` (relative to workspace root) so downstream processors can read from disk. Enriches message content with file receipt notifications:
+
+```
+[File received: report.pdf (2.3 MB, application/pdf)]
+[Saved to: uploads/2026-02-07/report.pdf]
+```
+
+**Content Enrichment** - Downstream processors add content summaries as sibling files:
+
+- **WhisperProcessor**: Transcribes audio/voice messages, saves transcript as `.txt` sibling to the audio file (e.g., `voice_123.ogg` → `voice_123.txt`)
+- **DoclingProcessor**: Converts documents (PDF, DOCX, PPTX, etc.) to markdown, saves as `.md` sibling file (e.g., `report.pdf` → `report.md`)
+
+**Agent View** - The agent receives the enriched message content with file metadata and any transcripts/conversions appended inline. Original files remain in `uploads/` for agent filesystem access.
+
+**Configuration** - File persistence is enabled by default. Configure via `builtins.file_persistence`:
+
+```yaml
+builtins:
+  file_persistence:
+    enabled: true
+    config:
+      max_file_size: 52428800  # 50 MB default
+      clear_data_after_save: false  # Free memory after saving
+```
+
+**Filename Handling** - `sanitize_filename()` normalizes filenames (lowercases, removes special chars, replaces spaces with underscores). `deduplicate_path()` appends counters (1), (2), etc. to prevent overwrites.
+
+**Security** - All processors use `resolve_sandboxed_path()` for defense-in-depth path validation. Files cannot escape the workspace root.
 
 ### Framework Orientation Prompt
 
