@@ -3,7 +3,7 @@
 import sys
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -210,8 +210,13 @@ async def test_file_too_large(processor: DoclingProcessor, sample_message: Messa
 
 
 @pytest.mark.asyncio
-async def test_successful_processing(processor: DoclingProcessor, sample_message: Message, workspace_path: Path, mock_docling: dict):
-    """Verify successful document processing with mocked docling."""
+async def test_successful_processing(
+    processor: DoclingProcessor,
+    sample_message: Message,
+    workspace_path: Path,
+    mock_docling: dict,
+):
+    """Verify successful document processing with mocked docling using fallback mode."""
     pdf_data = b"%PDF-1.4 fake pdf content"
     sample_message.attachments = [
         Attachment(
@@ -223,7 +228,9 @@ async def test_successful_processing(processor: DoclingProcessor, sample_message
     ]
 
     # Update document mock to return expected content
-    mock_docling["document"].export_to_markdown.return_value = "# Quarterly Report\n\nContent here with enough text to not be minimal"
+    mock_docling["document"].export_to_markdown.return_value = (
+        "# Quarterly Report\n\nContent here with enough text to not be minimal"
+    )
 
     # Mock the import and processing
     with patch.object(processor, "_check_docling_available", return_value=True), \
@@ -243,45 +250,23 @@ async def test_successful_processing(processor: DoclingProcessor, sample_message
 
         result = await processor.process_inbound(sample_message)
 
-    # Verify message enrichment includes processing notification
-    assert "Processing document: quarterly_report.pdf" in result.message.content
-    assert "Document received: quarterly_report.pdf" in result.message.content
-    assert "Processed to: inbox/" in result.message.content
-    assert "document.md" in result.message.content
-    assert "User caption: Please review this document" in result.message.content
+    # Verify message enrichment - no processing notification, just conversion result
+    assert "[Converted to markdown:" in result.message.content
+    assert "full text" in result.message.content
+    assert "Please review this document" in result.message.content
 
     # Verify metadata
     assert result.message.metadata.get("docling_processed") is True
     assert result.message.metadata.get("processed_count") == 1
 
-    # Verify inbox structure
-    today = datetime.now().strftime("%Y-%m-%d")
-    inbox_dir = workspace_path / "inbox" / today / "quarterly_report"
-    assert inbox_dir.exists()
-    md_file = inbox_dir / "document.md"
-    assert md_file.exists()
-    assert "# Quarterly Report" in md_file.read_text()
-
 
 @pytest.mark.asyncio
-async def test_filename_sanitization(processor: DoclingProcessor):
-    """Verify filename sanitization for directory creation."""
-    test_cases = [
-        ("My Report.pdf", "my_report"),
-        ("Q1-2024 Financial.pdf", "q1-2024_financial"),
-        ("report (final).pdf", "report_final"),
-        ("file@#$%^&*.pdf", "file"),
-        ("a" * 150 + ".pdf", "a" * 100),  # Length limit
-        ("..pdf", "document"),  # Fallback for empty
-    ]
-
-    for original, expected in test_cases:
-        sanitized = processor._sanitize_filename(original)
-        assert sanitized == expected, f"Failed for {original}: got {sanitized}, expected {expected}"
-
-
-@pytest.mark.asyncio
-async def test_multiple_documents(processor: DoclingProcessor, sample_message: Message, workspace_path: Path, mock_docling: dict):
+async def test_multiple_documents(
+    processor: DoclingProcessor,
+    sample_message: Message,
+    workspace_path: Path,
+    mock_docling: dict,
+):
     """Verify processing multiple documents in one message."""
     sample_message.attachments = [
         Attachment(
@@ -299,7 +284,9 @@ async def test_multiple_documents(processor: DoclingProcessor, sample_message: M
     ]
 
     # Update document mock
-    mock_docling["document"].export_to_markdown.return_value = "# Document Content with enough text to not trigger minimal detection"
+    mock_docling["document"].export_to_markdown.return_value = (
+        "# Document Content with enough text to not trigger minimal detection"
+    )
 
     with patch.object(processor, "_check_docling_available", return_value=True), \
          patch.dict(sys.modules, {
@@ -318,9 +305,9 @@ async def test_multiple_documents(processor: DoclingProcessor, sample_message: M
 
         result = await processor.process_inbound(sample_message)
 
-    # Verify both documents processed
-    assert "report1.pdf" in result.message.content
-    assert "report2.docx" in result.message.content
+    # Verify both documents processed (two conversion messages)
+    assert result.message.content.count("[Converted to markdown:") == 2
+    assert result.message.content.count("Contents: full text") == 2
     assert result.message.metadata.get("processed_count") == 2
 
 
@@ -426,7 +413,12 @@ async def test_table_and_image_detection(processor: DoclingProcessor, sample_mes
 
 
 @pytest.mark.asyncio
-async def test_minimal_output_detection(processor: DoclingProcessor, sample_message: Message, workspace_path: Path, mock_docling: dict):
+async def test_minimal_output_detection(
+    processor: DoclingProcessor,
+    sample_message: Message,
+    workspace_path: Path,
+    mock_docling: dict,
+):
     """Verify detection and warning for minimal/empty conversion output."""
     pdf_data = b"%PDF-1.4 fake image-only pdf"
     sample_message.attachments = [
@@ -461,28 +453,34 @@ async def test_minimal_output_detection(processor: DoclingProcessor, sample_mess
     # Verify warning message is present
     assert "minimal output" in result.message.content.lower()
     assert "image-only" in result.message.content.lower() or "encrypted" in result.message.content.lower()
-    assert "Document received: scanned_image.pdf" in result.message.content
-
-    # Verify file was still saved
-    today = datetime.now().strftime("%Y-%m-%d")
-    md_file = workspace_path / "inbox" / today / "scanned_image" / "document.md"
-    assert md_file.exists()
-    assert md_file.read_text().strip() == "<!-- image -->"
+    assert "[Converted to markdown:" in result.message.content
 
 
 @pytest.mark.asyncio
-async def test_processing_notification(processor: DoclingProcessor, sample_message: Message, mock_docling: dict):
-    """Verify processing start notification is included in enriched content."""
+async def test_saved_path_reads_from_disk(
+    processor: DoclingProcessor,
+    sample_message: Message,
+    workspace_path: Path,
+    mock_docling: dict,
+):
+    """Verify that processor reads from saved_path when available."""
+    # Create a saved file on disk
+    uploads_dir = workspace_path / "uploads" / "2026-02-07"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    source_file = uploads_dir / "report.pdf"
+    source_file.write_bytes(b"%PDF-1.4 fake pdf content")
+
     sample_message.attachments = [
         Attachment(
             type="document",
-            data=b"fake pdf data",
+            data=None,  # No data - should read from saved_path
             mime_type="application/pdf",
-            filename="test.pdf",
+            filename="report.pdf",
+            saved_path="uploads/2026-02-07/report.pdf",
         )
     ]
 
-    mock_docling["document"].export_to_markdown.return_value = "# Test\n\nSome content here to avoid minimal detection"
+    mock_docling["document"].export_to_markdown.return_value = "# Report\n\nContent here with enough text"
 
     with patch.object(processor, "_check_docling_available", return_value=True), \
          patch.dict(sys.modules, {
@@ -501,11 +499,157 @@ async def test_processing_notification(processor: DoclingProcessor, sample_messa
 
         result = await processor.process_inbound(sample_message)
 
-    # Verify processing notification appears before completion notification
-    content = result.message.content
-    processing_idx = content.find("Processing document: test.pdf")
-    received_idx = content.find("Document received: test.pdf")
+    # Verify processing happened
+    assert result.message.metadata.get("docling_processed") is True
+    assert "[Converted to markdown:" in result.message.content
 
-    assert processing_idx != -1, "Processing notification should be present"
-    assert received_idx != -1, "Completion notification should be present"
-    assert processing_idx < received_idx, "Processing notification should appear before completion"
+    # Verify markdown file was created as sibling
+    md_file = uploads_dir / "report.md"
+    assert md_file.exists()
+    assert "# Report" in md_file.read_text()
+
+    # Verify attachment metadata was set
+    assert sample_message.attachments[0].metadata.get("processed_path") == "uploads/2026-02-07/report.md"
+
+
+@pytest.mark.asyncio
+async def test_fallback_to_temp_when_no_saved_path(
+    processor: DoclingProcessor,
+    sample_message: Message,
+    workspace_path: Path,
+    mock_docling: dict,
+):
+    """Verify fallback to temp file when saved_path is not available."""
+    pdf_data = b"%PDF-1.4 fake pdf content"
+    sample_message.attachments = [
+        Attachment(
+            type="document",
+            data=pdf_data,  # Has data, no saved_path
+            mime_type="application/pdf",
+            filename="report.pdf",
+        )
+    ]
+
+    mock_docling["document"].export_to_markdown.return_value = "# Report\n\nFallback content here"
+
+    with patch.object(processor, "_check_docling_available", return_value=True), \
+         patch.dict(sys.modules, {
+             "docling": mock_docling["module"],
+             "docling.document_converter": mock_docling["module"].document_converter,
+             "docling.datamodel": Mock(),
+             "docling.datamodel.base_models": Mock(InputFormat=Mock(PDF="pdf")),
+             "docling.datamodel.pipeline_options": Mock(
+                 PdfPipelineOptions=Mock,
+                 EasyOcrOptions=Mock,
+             ),
+         }), \
+         patch("asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+
+        mock_to_thread.return_value = mock_docling["result"]
+
+        result = await processor.process_inbound(sample_message)
+
+    # Verify processing happened
+    assert result.message.metadata.get("docling_processed") is True
+    assert "[Converted to markdown:" in result.message.content
+
+
+@pytest.mark.asyncio
+async def test_sibling_md_written(
+    processor: DoclingProcessor,
+    sample_message: Message,
+    workspace_path: Path,
+    mock_docling: dict,
+):
+    """Verify that .md file is written as sibling to source file."""
+    # Create a saved file on disk
+    uploads_dir = workspace_path / "uploads" / "2026-02-07"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    source_file = uploads_dir / "document.pdf"
+    source_file.write_bytes(b"%PDF-1.4 content")
+
+    sample_message.attachments = [
+        Attachment(
+            type="document",
+            data=None,
+            mime_type="application/pdf",
+            filename="document.pdf",
+            saved_path="uploads/2026-02-07/document.pdf",
+        )
+    ]
+
+    markdown_content = "# Document\n\nConverted content"
+    mock_docling["document"].export_to_markdown.return_value = markdown_content
+
+    with patch.object(processor, "_check_docling_available", return_value=True), \
+         patch.dict(sys.modules, {
+             "docling": mock_docling["module"],
+             "docling.document_converter": mock_docling["module"].document_converter,
+             "docling.datamodel": Mock(),
+             "docling.datamodel.base_models": Mock(InputFormat=Mock(PDF="pdf")),
+             "docling.datamodel.pipeline_options": Mock(
+                 PdfPipelineOptions=Mock,
+                 EasyOcrOptions=Mock,
+             ),
+         }), \
+         patch("asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+
+        mock_to_thread.return_value = mock_docling["result"]
+
+        await processor.process_inbound(sample_message)
+
+    # Verify sibling .md file exists
+    md_file = uploads_dir / "document.md"
+    assert md_file.exists()
+    assert md_file.read_text() == markdown_content
+
+    # Verify parent is the same
+    assert md_file.parent == source_file.parent
+
+
+@pytest.mark.asyncio
+async def test_processed_path_metadata_set(
+    processor: DoclingProcessor,
+    sample_message: Message,
+    workspace_path: Path,
+    mock_docling: dict,
+):
+    """Verify that attachment.metadata['processed_path'] is set correctly."""
+    # Create a saved file on disk
+    uploads_dir = workspace_path / "uploads" / "2026-02-07"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    source_file = uploads_dir / "test.pdf"
+    source_file.write_bytes(b"%PDF content")
+
+    attachment = Attachment(
+        type="document",
+        data=None,
+        mime_type="application/pdf",
+        filename="test.pdf",
+        saved_path="uploads/2026-02-07/test.pdf",
+    )
+    sample_message.attachments = [attachment]
+
+    mock_docling["document"].export_to_markdown.return_value = "# Test\n\nContent here"
+
+    with patch.object(processor, "_check_docling_available", return_value=True), \
+         patch.dict(sys.modules, {
+             "docling": mock_docling["module"],
+             "docling.document_converter": mock_docling["module"].document_converter,
+             "docling.datamodel": Mock(),
+             "docling.datamodel.base_models": Mock(InputFormat=Mock(PDF="pdf")),
+             "docling.datamodel.pipeline_options": Mock(
+                 PdfPipelineOptions=Mock,
+                 EasyOcrOptions=Mock,
+             ),
+         }), \
+         patch("asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+
+        mock_to_thread.return_value = mock_docling["result"]
+
+        await processor.process_inbound(sample_message)
+
+    # Verify processed_path metadata is set
+    assert attachment.metadata is not None
+    assert "processed_path" in attachment.metadata
+    assert attachment.metadata["processed_path"] == "uploads/2026-02-07/test.md"

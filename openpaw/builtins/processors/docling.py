@@ -2,8 +2,6 @@
 
 import asyncio
 import logging
-import re
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +13,7 @@ from openpaw.builtins.base import (
     ProcessorResult,
 )
 from openpaw.channels.base import Attachment, Message
+from openpaw.tools.sandbox import resolve_sandboxed_path
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +52,9 @@ class DoclingProcessor(BaseBuiltinProcessor):
     """Converts inbound documents to markdown using Docling.
 
     Processes document attachments before the message reaches the agent,
-    converting PDFs, DOCX, PPTX, XLSX, HTML, and images to markdown format
-    and saving them to the workspace inbox directory.
+    converting PDFs, DOCX, PPTX, XLSX, HTML, and images to markdown format.
+    Reads from saved_path (set by FilePersistenceProcessor) or falls back to
+    attachment.data. Writes converted markdown as sibling .md file.
 
     No API key required - runs locally using Docling.
 
@@ -81,7 +81,7 @@ class DoclingProcessor(BaseBuiltinProcessor):
             logger.warning("DoclingProcessor initialized without workspace_path - will pass through all messages")
 
     async def process_inbound(self, message: Message) -> ProcessorResult:
-        """Convert document attachments to markdown and save to workspace inbox.
+        """Convert document attachments to markdown and save as sibling .md files.
 
         Args:
             message: The incoming message, possibly with document attachments.
@@ -93,7 +93,7 @@ class DoclingProcessor(BaseBuiltinProcessor):
             logger.warning("No workspace_path configured, skipping document processing")
             return ProcessorResult(message=message)
 
-        # Find document attachments
+        # Find supported document attachments
         document_attachments = [
             a for a in message.attachments
             if self._is_supported_document(a)
@@ -126,25 +126,37 @@ class DoclingProcessor(BaseBuiltinProcessor):
 
         processed_files: list[str] = []
         errors: list[str] = []
-        processing_notifications: list[str] = []
-
-        # Build processing start notifications
-        for attachment in document_attachments:
-            filename = attachment.filename or "document"
-            file_size = len(attachment.data) if attachment.data else 0
-            size_mb = file_size / (1024 * 1024)
-            processing_notifications.append(
-                f"[Processing document: {filename} ({size_mb:.1f} MB)...]"
-            )
 
         for attachment in document_attachments:
-            if not attachment.data:
-                logger.warning("Document attachment has no data, skipping")
+            # Must have either saved_path or data
+            if not attachment.saved_path and not attachment.data:
+                logger.warning("Document attachment has no saved_path or data, skipping")
                 errors.append("Document attachment has no data")
                 continue
 
-            # Check file size
-            file_size = len(attachment.data)
+            # Check file size (from saved_path if available, else from data)
+            if attachment.saved_path:
+                try:
+                    source_path = resolve_sandboxed_path(
+                        Path(self.workspace_path).resolve(),
+                        attachment.saved_path,
+                    )
+                except ValueError as e:
+                    logger.error(f"Invalid saved_path: {e}")
+                    errors.append("Invalid file path")
+                    continue
+                if source_path.exists():
+                    file_size = source_path.stat().st_size
+                else:
+                    logger.warning(f"saved_path does not exist: {source_path}, skipping")
+                    errors.append(f"File not found: {attachment.saved_path}")
+                    continue
+            else:
+                # Must have data at this point
+                assert attachment.data is not None
+                file_size = len(attachment.data)
+
+            # Check file size limit
             if file_size > self.max_file_size:
                 size_mb = file_size / (1024 * 1024)
                 max_mb = self.max_file_size / (1024 * 1024)
@@ -153,7 +165,7 @@ class DoclingProcessor(BaseBuiltinProcessor):
                 continue
 
             try:
-                result_info = await self._process_document(attachment, file_size)
+                result_info = await self._process_document(attachment)
                 if result_info:
                     processed_files.append(result_info)
                 else:
@@ -165,12 +177,7 @@ class DoclingProcessor(BaseBuiltinProcessor):
         # Build enriched message content
         enrichment_parts = []
 
-        # Add processing start notifications first
-        if processing_notifications:
-            enrichment_parts.extend(processing_notifications)
-            enrichment_parts.append("")  # Blank line separator
-
-        # Add processed files info
+        # Add conversion results
         for result_info in processed_files:
             enrichment_parts.append(result_info)
 
@@ -182,20 +189,14 @@ class DoclingProcessor(BaseBuiltinProcessor):
                 f"[Note: {len(errors)} document {plural} could not be processed - {error_detail}]"
             )
 
-        # Build final content based on what we have
-        if not processed_files and errors:
-            # Only errors - add to message content
-            enrichment = "\n\n" + "\n".join(enrichment_parts)
-        elif processed_files or processing_notifications:
-            # We have processing info - add to start of message (before user caption)
-            enrichment = "\n".join(enrichment_parts)
+        # Append conversion results to existing message content
+        if enrichment_parts:
             if message.content:
-                enrichment += f"\n\nUser caption: {message.content}"
+                new_content = message.content + "\n\n" + "\n".join(enrichment_parts)
+            else:
+                new_content = "\n".join(enrichment_parts)
         else:
-            # No documents processed, no errors (shouldn't happen)
-            enrichment = ""
-
-        new_content = enrichment or message.content
+            new_content = message.content
 
         # Create updated message
         updated_message = Message(
@@ -246,12 +247,28 @@ class DoclingProcessor(BaseBuiltinProcessor):
         except ImportError:
             return False
 
-    async def _process_document(self, attachment: Attachment, file_size: int) -> str | None:
+    def _write_temp_file(self, attachment: Attachment) -> tuple[Path, bool]:
+        """Write attachment data to temp file (fallback when saved_path unavailable).
+
+        Args:
+            attachment: The attachment with data to write.
+
+        Returns:
+            Tuple of (path, is_temp) - is_temp=True means caller should clean up.
+        """
+        import tempfile
+
+        assert attachment.data is not None
+        suffix = Path(attachment.filename or "document").suffix
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(attachment.data)
+            return Path(tmp.name), True
+
+    async def _process_document(self, attachment: Attachment) -> str | None:
         """Process a single document attachment.
 
         Args:
             attachment: The document attachment to process.
-            file_size: Size of the file in bytes.
 
         Returns:
             Info string about the processed document, or None if processing failed.
@@ -267,23 +284,23 @@ class DoclingProcessor(BaseBuiltinProcessor):
             logger.error(f"Failed to import docling: {e}")
             return None
 
-        # Generate output directory
-        today = datetime.now().strftime("%Y-%m-%d")
-        filename = attachment.filename or "document"
-        sanitized_name = self._sanitize_filename(filename)
-
         # Type assertion - workspace_path is guaranteed non-None by caller check
         assert self.workspace_path is not None
-        inbox_dir = Path(self.workspace_path) / "inbox" / today / sanitized_name
-        inbox_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save raw file to temp location
-        import tempfile
-        # Type assertion - attachment.data is guaranteed non-None by caller check
-        assert attachment.data is not None
-        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(filename).suffix) as tmp_file:
-            tmp_file.write(attachment.data)
-            tmp_path = Path(tmp_file.name)
+        # Determine source file path
+        if attachment.saved_path:
+            try:
+                source_path = resolve_sandboxed_path(
+                    Path(self.workspace_path).resolve(),
+                    attachment.saved_path,
+                )
+            except ValueError as e:
+                logger.error(f"Invalid saved_path in document processing: {e}")
+                return None
+            is_temp = False
+        else:
+            # Fallback: write attachment.data to temp file
+            source_path, is_temp = self._write_temp_file(attachment)
 
         try:
             # Configure pipeline with aggressive OCR for scanned/image-heavy PDFs
@@ -309,15 +326,27 @@ class DoclingProcessor(BaseBuiltinProcessor):
             )
 
             # Run docling conversion in thread pool (CPU-bound)
-            result = await asyncio.to_thread(converter.convert, tmp_path)
+            result = await asyncio.to_thread(converter.convert, source_path)
 
             # Export to markdown
             markdown = result.document.export_to_markdown()
 
-            # Save markdown file
-            md_file = inbox_dir / "document.md"
-            md_file.write_text(markdown, encoding="utf-8")
-            logger.info(f"Saved markdown to {md_file}")
+            # Write markdown as sibling file (same directory, .md extension)
+            md_path = source_path.with_suffix(".md")
+            md_path.write_text(markdown, encoding="utf-8")
+            logger.info(f"Saved markdown to {md_path}")
+
+            # Calculate relative path for agent reference (only if not temp file)
+            if not is_temp:
+                relative_md_path = md_path.relative_to(Path(self.workspace_path))
+                # Set metadata for processed path
+                if not attachment.metadata:
+                    attachment.metadata = {}
+                attachment.metadata["processed_path"] = str(relative_md_path)
+                md_reference = str(relative_md_path)
+            else:
+                # For temp files, just use the filename (not persisted)
+                md_reference = md_path.name
 
             # Detect minimal/empty output
             markdown_stripped = markdown.strip()
@@ -332,15 +361,12 @@ class DoclingProcessor(BaseBuiltinProcessor):
             )
 
             if is_minimal:
-                logger.warning(f"Docling produced minimal output for {filename}: {len(markdown)} bytes")
-                size_mb = file_size / (1024 * 1024)
-                relative_path = f"inbox/{today}/{sanitized_name}/"
-                result_parts = [f"[Document received: {filename} ({size_mb:.1f} MB)]"]
-                result_parts.append(f"Processed to: {relative_path}")
+                logger.warning(f"Docling produced minimal output for {attachment.filename}: {len(markdown)} bytes")
+                result_parts = [f"[Converted to markdown: {md_reference}]"]
                 result_parts.append(
                     "[Warning: Document conversion produced minimal output - "
                     "PDF may be image-only, encrypted, or have extraction issues. "
-                    "Check document.md for details.]"
+                    "Check the markdown file for details.]"
                 )
                 return "\n".join(result_parts)
 
@@ -349,13 +375,9 @@ class DoclingProcessor(BaseBuiltinProcessor):
             image_count = markdown.count("![")
 
             # Build result info
-            size_mb = file_size / (1024 * 1024)
-            relative_path = f"inbox/{today}/{sanitized_name}/"
+            result_parts = [f"[Converted to markdown: {md_reference}]"]
 
-            result_parts = [f"[Document received: {filename} ({size_mb:.1f} MB)]"]
-            result_parts.append(f"Processed to: {relative_path}")
-
-            content_parts = ["document.md (full text)"]
+            content_parts = ["full text"]
             if table_count > 0:
                 content_parts.append(f"{table_count} tables")
             if image_count > 0:
@@ -369,42 +391,15 @@ class DoclingProcessor(BaseBuiltinProcessor):
             logger.error(f"Docling conversion failed: {e}", exc_info=True)
             return None
         finally:
-            # Clean up temp file
-            try:
-                tmp_path.unlink()
-            except Exception:
-                pass
-
-    def _sanitize_filename(self, filename: str) -> str:
-        """Sanitize filename for use as directory name.
-
-        Args:
-            filename: Original filename.
-
-        Returns:
-            Sanitized filename safe for directory creation.
-        """
-        # Remove extension
-        name = Path(filename).stem
-
-        # Replace spaces with underscores
-        name = name.replace(" ", "_")
-
-        # Replace dots with underscores (except extension dot, already removed)
-        name = name.replace(".", "_")
-
-        # Remove special characters (keep only alphanumeric, underscore, hyphen)
-        name = re.sub(r"[^a-zA-Z0-9_-]", "", name)
-
-        # Lowercase
-        name = name.lower()
-
-        # Limit length
-        if len(name) > 100:
-            name = name[:100]
-
-        # Fallback if empty or only underscores/hyphens
-        if not name or not re.search(r"[a-z0-9]", name):
-            name = "document"
-
-        return name
+            # Clean up temp file if we created one (both source and markdown)
+            if is_temp:
+                try:
+                    source_path.unlink()
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temp file {source_path}: {e}")
+                try:
+                    md_path = source_path.with_suffix(".md")
+                    if md_path.exists():
+                        md_path.unlink()
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temp markdown {md_path}: {e}")

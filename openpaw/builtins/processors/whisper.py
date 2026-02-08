@@ -3,6 +3,7 @@
 import logging
 import os
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 from openpaw.builtins.base import (
@@ -13,6 +14,7 @@ from openpaw.builtins.base import (
     ProcessorResult,
 )
 from openpaw.channels.base import Attachment, Message
+from openpaw.tools.sandbox import resolve_sandboxed_path
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,7 @@ class WhisperProcessor(BaseBuiltinProcessor):
     def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(config)
         self._client: Any = None
+        self.workspace_path = config.get("workspace_path") if config else None
 
     def _get_client(self) -> Any:
         """Lazy initialization of OpenAI client."""
@@ -87,6 +90,28 @@ class WhisperProcessor(BaseBuiltinProcessor):
                 if text:
                     transcriptions.append(text)
                     logger.info(f"Transcribed audio: {text[:50]}...")
+
+                    # Persist transcript as sibling .txt file
+                    if attachment.saved_path and self.workspace_path:
+                        try:
+                            source_path = resolve_sandboxed_path(
+                                Path(self.workspace_path).resolve(),
+                                attachment.saved_path,
+                            )
+                            txt_path = source_path.with_suffix(".txt")
+                            txt_path.write_text(text, encoding="utf-8")
+                            if not attachment.metadata:
+                                attachment.metadata = {}
+                            attachment.metadata["processed_path"] = str(
+                                txt_path.relative_to(
+                                    Path(self.workspace_path).resolve()
+                                )
+                            )
+                            logger.info(f"Saved transcript to {txt_path}")
+                        except ValueError as e:
+                            logger.error(f"Invalid saved_path for transcript: {e}")
+                        except Exception as e:
+                            logger.warning(f"Failed to save transcript file: {e}")
                 else:
                     errors.append("Transcription returned empty")
             except Exception as e:
