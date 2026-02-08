@@ -60,6 +60,13 @@ class WorkspaceRunner:
         # Merge workspace config with global config if workspace has agent.yaml
         self._merged_config = self._merge_workspace_config(config, self._workspace)
 
+        # Extract workspace timezone for builtin injection
+        self._workspace_timezone: str = (
+            self._workspace.config.timezone
+            if self._workspace.config
+            else "UTC"
+        )
+
         self._lane_queue = LaneQueue(
             main_concurrency=config.lanes.main_concurrency,
             subagent_concurrency=config.lanes.subagent_concurrency,
@@ -93,6 +100,7 @@ class WorkspaceRunner:
             workspace_config=workspace_builtins_config,
             workspace_path=self._workspace.path,
             channel_config=workspace_channel_config,
+            workspace_timezone=self._workspace_timezone,
         )
 
         # Load tools (LangChain tools for agent) and processors (message transformers)
@@ -397,6 +405,8 @@ class WorkspaceRunner:
                 workspace_path=self._workspace.path,
                 agent_factory=agent_factory,
                 channels=self._channels,
+                workspace_name=self.workspace_name,
+                timezone=self._workspace_timezone,
             )
 
             await self._cron_scheduler.start()
@@ -461,6 +471,7 @@ class WorkspaceRunner:
                 agent_factory=agent_factory,
                 channels=self._channels,
                 config=heartbeat_config,
+                timezone=self._workspace_timezone,
             )
 
             await self._heartbeat_scheduler.start()

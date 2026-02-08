@@ -2,7 +2,7 @@
 
 import logging
 from collections.abc import Callable, Mapping
-from datetime import datetime, time
+from datetime import time
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -10,6 +10,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from openpaw.channels.base import ChannelAdapter
 from openpaw.core.config import HeartbeatConfig
+from openpaw.core.timezone import workspace_now
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ class HeartbeatScheduler:
         agent_factory: Callable[[], Any],
         channels: Mapping[str, ChannelAdapter],
         config: HeartbeatConfig,
+        timezone: str = "UTC",
     ):
         """Initialize the heartbeat scheduler.
 
@@ -55,11 +57,13 @@ class HeartbeatScheduler:
             agent_factory: Factory function to create fresh agent instances (no checkpointer).
             channels: Dictionary mapping channel types to channel instances for routing.
             config: Heartbeat configuration settings.
+            timezone: IANA timezone identifier for workspace timezone (default: "UTC").
         """
         self.workspace_name = workspace_name
         self.agent_factory = agent_factory
         self.channels = channels
         self.config = config
+        self._timezone = timezone
         self._scheduler: AsyncIOScheduler | None = None
         self._job: Any = None
 
@@ -102,7 +106,7 @@ class HeartbeatScheduler:
         if self._active_hours is None:
             return True  # Always active if no hours specified
 
-        current_time = datetime.now().time()
+        current_time = workspace_now(self._timezone).time()
         start_time, end_time = self._active_hours
 
         # Handle case where active hours span midnight
@@ -130,7 +134,7 @@ class HeartbeatScheduler:
         Returns:
             Formatted heartbeat prompt string.
         """
-        timestamp = datetime.now().isoformat()
+        timestamp = workspace_now(self._timezone).isoformat()
         return HEARTBEAT_PROMPT.format(timestamp=timestamp)
 
     async def start(self) -> None:

@@ -134,10 +134,12 @@ class TestParseActiveHours:
 class TestIsWithinActiveHours:
     """Test active hours window checking logic."""
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    def test_is_within_active_hours_inside(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_is_within_active_hours_inside(self, mock_workspace_now: Any) -> None:
         """Test current time within active hours window returns True."""
-        mock_datetime.now.return_value.time.return_value = time(14, 30)
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(14, 30)
+        mock_workspace_now.return_value = mock_dt
 
         config = HeartbeatConfig(active_hours="08:00-22:00")
         scheduler = HeartbeatScheduler(
@@ -151,10 +153,12 @@ class TestIsWithinActiveHours:
 
         assert result is True
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    def test_is_within_active_hours_outside(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_is_within_active_hours_outside(self, mock_workspace_now: Any) -> None:
         """Test current time outside active hours window returns False."""
-        mock_datetime.now.return_value.time.return_value = time(2, 30)
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(2, 30)
+        mock_workspace_now.return_value = mock_dt
 
         config = HeartbeatConfig(active_hours="08:00-22:00")
         scheduler = HeartbeatScheduler(
@@ -168,10 +172,12 @@ class TestIsWithinActiveHours:
 
         assert result is False
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    def test_is_within_active_hours_boundary_start(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_is_within_active_hours_boundary_start(self, mock_workspace_now: Any) -> None:
         """Test current time at start boundary is included."""
-        mock_datetime.now.return_value.time.return_value = time(8, 0)
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(8, 0)
+        mock_workspace_now.return_value = mock_dt
 
         config = HeartbeatConfig(active_hours="08:00-22:00")
         scheduler = HeartbeatScheduler(
@@ -185,10 +191,12 @@ class TestIsWithinActiveHours:
 
         assert result is True
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    def test_is_within_active_hours_boundary_end(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_is_within_active_hours_boundary_end(self, mock_workspace_now: Any) -> None:
         """Test current time at end boundary is included."""
-        mock_datetime.now.return_value.time.return_value = time(22, 0)
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(22, 0)
+        mock_workspace_now.return_value = mock_dt
 
         config = HeartbeatConfig(active_hours="08:00-22:00")
         scheduler = HeartbeatScheduler(
@@ -202,10 +210,12 @@ class TestIsWithinActiveHours:
 
         assert result is True
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    def test_is_within_active_hours_midnight_span_before(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_is_within_active_hours_midnight_span_before(self, mock_workspace_now: Any) -> None:
         """Test midnight span with time before midnight."""
-        mock_datetime.now.return_value.time.return_value = time(23, 30)
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(23, 30)
+        mock_workspace_now.return_value = mock_dt
 
         config = HeartbeatConfig(active_hours="22:00-06:00")
         scheduler = HeartbeatScheduler(
@@ -219,10 +229,12 @@ class TestIsWithinActiveHours:
 
         assert result is True
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    def test_is_within_active_hours_midnight_span_after(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_is_within_active_hours_midnight_span_after(self, mock_workspace_now: Any) -> None:
         """Test midnight span with time after midnight."""
-        mock_datetime.now.return_value.time.return_value = time(3, 30)
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(3, 30)
+        mock_workspace_now.return_value = mock_dt
 
         config = HeartbeatConfig(active_hours="22:00-06:00")
         scheduler = HeartbeatScheduler(
@@ -236,10 +248,12 @@ class TestIsWithinActiveHours:
 
         assert result is True
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    def test_is_within_active_hours_midnight_span_outside(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_is_within_active_hours_midnight_span_outside(self, mock_workspace_now: Any) -> None:
         """Test midnight span with time outside window."""
-        mock_datetime.now.return_value.time.return_value = time(12, 0)
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(12, 0)
+        mock_workspace_now.return_value = mock_dt
 
         config = HeartbeatConfig(active_hours="22:00-06:00")
         scheduler = HeartbeatScheduler(
@@ -266,6 +280,52 @@ class TestIsWithinActiveHours:
         result = scheduler._is_within_active_hours()
 
         assert result is True
+
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_is_within_active_hours_timezone_aware_inside(self, mock_workspace_now: Any) -> None:
+        """Test active hours check with America/Denver timezone - inside window."""
+        # Mock workspace_now to return 10:00 AM Mountain Time
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(10, 0)
+        mock_workspace_now.return_value = mock_dt
+
+        config = HeartbeatConfig(active_hours="09:00-17:00")
+        scheduler = HeartbeatScheduler(
+            workspace_name="test",
+            agent_factory=Mock(),
+            channels={},
+            config=config,
+            timezone="America/Denver",
+        )
+
+        result = scheduler._is_within_active_hours()
+
+        assert result is True
+        # Verify workspace_now was called with the correct timezone
+        mock_workspace_now.assert_called_once_with("America/Denver")
+
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_is_within_active_hours_timezone_aware_outside(self, mock_workspace_now: Any) -> None:
+        """Test active hours check with America/Denver timezone - outside window."""
+        # Mock workspace_now to return 20:00 (8:00 PM) Mountain Time
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(20, 0)
+        mock_workspace_now.return_value = mock_dt
+
+        config = HeartbeatConfig(active_hours="09:00-17:00")
+        scheduler = HeartbeatScheduler(
+            workspace_name="test",
+            agent_factory=Mock(),
+            channels={},
+            config=config,
+            timezone="America/Denver",
+        )
+
+        result = scheduler._is_within_active_hours()
+
+        assert result is False
+        # Verify workspace_now was called with the correct timezone
+        mock_workspace_now.assert_called_once_with("America/Denver")
 
 
 class TestIsHeartbeatOk:
@@ -375,11 +435,11 @@ class TestIsHeartbeatOk:
 class TestBuildHeartbeatPrompt:
     """Test heartbeat prompt generation."""
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    def test_build_heartbeat_prompt_includes_timestamp(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    def test_build_heartbeat_prompt_includes_timestamp(self, mock_workspace_now: Any) -> None:
         """Test generated prompt includes current timestamp."""
         fixed_time = datetime(2026, 2, 6, 14, 30, 0)
-        mock_datetime.now.return_value = fixed_time
+        mock_workspace_now.return_value = fixed_time
 
         config = HeartbeatConfig()
         scheduler = HeartbeatScheduler(
@@ -595,10 +655,12 @@ class TestHeartbeatSchedulerStop:
 class TestRunHeartbeat:
     """Test heartbeat execution logic."""
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    async def test_run_heartbeat_skips_outside_active_hours(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    async def test_run_heartbeat_skips_outside_active_hours(self, mock_workspace_now: Any) -> None:
         """Test heartbeat skipped when outside active hours."""
-        mock_datetime.now.return_value.time.return_value = time(2, 0)
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(2, 0)
+        mock_workspace_now.return_value = mock_dt
 
         mock_agent_factory = Mock()
         config = HeartbeatConfig(enabled=True, active_hours="08:00-22:00")
@@ -614,10 +676,12 @@ class TestRunHeartbeat:
         # Agent factory should not be called
         mock_agent_factory.assert_not_called()
 
-    @patch("openpaw.heartbeat.scheduler.datetime")
-    async def test_run_heartbeat_executes_within_active_hours(self, mock_datetime: Any) -> None:
+    @patch("openpaw.heartbeat.scheduler.workspace_now")
+    async def test_run_heartbeat_executes_within_active_hours(self, mock_workspace_now: Any) -> None:
         """Test heartbeat executes when within active hours."""
-        mock_datetime.now.return_value.time.return_value = time(14, 0)
+        mock_dt = Mock()
+        mock_dt.time.return_value = time(14, 0)
+        mock_workspace_now.return_value = mock_dt
 
         mock_agent_runner = AsyncMock()
         mock_agent_runner.run.return_value = "HEARTBEAT_OK"

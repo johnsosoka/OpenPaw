@@ -30,6 +30,7 @@ class BuiltinLoader:
         workspace_config: "WorkspaceBuiltinsConfig | None" = None,
         workspace_path: Path | None = None,
         channel_config: dict[str, Any] | None = None,
+        workspace_timezone: str = "UTC",
     ):
         """Initialize the loader.
 
@@ -38,11 +39,13 @@ class BuiltinLoader:
             workspace_config: Workspace-specific overrides.
             workspace_path: Path to the workspace directory (for tools that need it).
             channel_config: Channel configuration for routing (e.g., telegram allowed_users).
+            workspace_timezone: Workspace timezone for temporal operations (e.g., 'America/Los_Angeles').
         """
         self.global_config = global_config
         self.workspace_config = workspace_config
         self.workspace_path = workspace_path
         self.channel_config = channel_config or {}
+        self.workspace_timezone = workspace_timezone
         self.registry = BuiltinRegistry.get_instance()
         self._tool_instances: dict[str, Any] = {}  # Track loaded tool instances
 
@@ -89,7 +92,7 @@ class BuiltinLoader:
         """Get merged configuration for a builtin.
 
         Workspace config overrides global config.
-        Automatically injects workspace_path for tools that need it.
+        Automatically injects workspace_path and timezone for tools that need it.
 
         Args:
             name: The builtin name.
@@ -102,6 +105,9 @@ class BuiltinLoader:
         # Inject workspace_path for tools that need it
         if self.workspace_path:
             config["workspace_path"] = self.workspace_path
+
+        # Inject workspace timezone for all builtins (can be overridden by explicit config)
+        config["timezone"] = self.workspace_timezone
 
         # Inject channel routing config for cron tool
         if name == "cron" and self.channel_config:
