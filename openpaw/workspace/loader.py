@@ -106,9 +106,10 @@ class AgentWorkspace:
                 "\n\n## Task Management\n\n"
                 "You have a task tracking system (TASKS.yaml) for managing work across "
                 "sessions. Tasks persist—use them to remember what you're working on. "
-                "Future heartbeats will see your tasks and can continue where you left off. "
-                "Create tasks for long operations, update them as you progress, and clean "
-                "up when complete."
+                "Future heartbeats will see your tasks and can continue where you left off.\n\n"
+                "When starting work that may not complete in a single conversation turn, "
+                "create a task to maintain continuity across heartbeats and conversations. "
+                "Update tasks as you progress, and clean up when complete."
             )
 
         # Self-continuation - include if followup is enabled
@@ -118,7 +119,10 @@ class AgentWorkspace:
                 "You can request to be re-invoked after your current response completes. "
                 "Use this for multi-step workflows that don't need user input between steps. "
                 "You can also schedule delayed followups for time-dependent checks (e.g., "
-                "'check this again in 5 minutes')."
+                "'check this again in 5 minutes').\n\n"
+                "When you realize a task requires multiple sequential steps (file analysis "
+                "followed by synthesis, or iterative refinement), proactively use "
+                "self-continuation rather than asking the user to prompt you again."
             )
 
         # Sub-agent spawning - include if spawn is enabled
@@ -128,10 +132,17 @@ class AgentWorkspace:
                 "You can spawn background sub-agents to work on tasks concurrently while "
                 "you continue interacting with the user. Sub-agents are independent workers "
                 "that share your workspace filesystem but run in isolated contexts.\n\n"
-                "Use sub-agents for:\n"
-                "- Parallel research or data gathering\n"
-                "- Long-running analysis that shouldn't block conversation\n"
-                "- Concurrent API operations\n\n"
+                "**Proactive delegation:** You should consider spawning sub-agents on your own "
+                "initiative when you recognize any of these patterns:\n\n"
+                "- The user's request has multiple independent components that can be "
+                "researched or processed in parallel (e.g., \"compare X and Y\" or "
+                "\"analyze these three datasets\")\n"
+                "- A task would take significant time and you can work on something "
+                "else concurrently\n"
+                "- You need to gather information from multiple sources before synthesizing "
+                "a response\n\n"
+                "When you spawn sub-agents proactively, always tell the user what you are "
+                "delegating and why. Do not silently spawn background work.\n\n"
                 "Sub-agents will notify you when they complete. Use list_subagents to check "
                 "status and get_subagent_result to retrieve their output."
             )
@@ -172,6 +183,27 @@ class AgentWorkspace:
                 "You can schedule future actions—one-time or recurring. Use this for "
                 "reminders, periodic checks, or deferred work. Schedule tasks that should "
                 "happen at a specific time or on a regular interval."
+            )
+
+        # Autonomous Planning - include when multiple capabilities are available
+        # This teaches capability composition for complex requests
+        key_capabilities = ["spawn", "followup", "task_tracker", "send_message"]
+        has_multiple_capabilities = (
+            enabled_builtins is None  # All builtins enabled
+            or sum(1 for cap in key_capabilities if cap in enabled_builtins) >= 2
+        )
+        if has_multiple_capabilities:
+            sections.append(
+                "\n\n## Autonomous Planning\n\n"
+                "When you receive a request that involves multiple steps, significant time, "
+                "or complex coordination, take a moment to plan your approach. Consider:\n\n"
+                "- Can parts of this work happen in parallel? (sub-agents)\n"
+                "- Will this span multiple turns? (task tracking, self-continuation)\n"
+                "- Should the user know what is happening? (progress updates)\n"
+                "- Will I need to follow up on results? (self-continuation)\n\n"
+                "Prefer proactive action over asking the user for permission to use your "
+                "capabilities. Explain what you are doing and why, but do not wait for "
+                "approval to use tools you have been given."
             )
 
         # Conversation memory is always available (core feature, not a builtin)
