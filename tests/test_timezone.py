@@ -6,7 +6,9 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytest
+from pydantic import ValidationError
 
+from openpaw.core.config import WorkspaceConfig
 from openpaw.core.timezone import format_for_display, workspace_now
 
 
@@ -204,3 +206,37 @@ class TestFormatForDisplay:
         # Should be interpreted as UTC 12:00 -> MST 05:00
         assert "05:00" in result
         assert "2026-02-08" in result
+
+
+class TestWorkspaceConfigTimezoneValidation:
+    """Test Pydantic validation of WorkspaceConfig.timezone field."""
+
+    def test_valid_timezone_denver(self) -> None:
+        """Valid IANA timezone passes validation."""
+        config = WorkspaceConfig(timezone="America/Denver")
+        assert config.timezone == "America/Denver"
+
+    def test_valid_timezone_utc(self) -> None:
+        """UTC passes validation."""
+        config = WorkspaceConfig(timezone="UTC")
+        assert config.timezone == "UTC"
+
+    def test_valid_timezone_tokyo(self) -> None:
+        """Asia/Tokyo passes validation."""
+        config = WorkspaceConfig(timezone="Asia/Tokyo")
+        assert config.timezone == "Asia/Tokyo"
+
+    def test_default_timezone_is_utc(self) -> None:
+        """Default timezone is UTC when not specified."""
+        config = WorkspaceConfig()
+        assert config.timezone == "UTC"
+
+    def test_invalid_timezone_raises_error(self) -> None:
+        """Invalid timezone string raises ValidationError."""
+        with pytest.raises(ValidationError, match="Invalid timezone"):
+            WorkspaceConfig(timezone="Bogus/Fake")
+
+    def test_empty_string_raises_error(self) -> None:
+        """Empty string raises ValidationError."""
+        with pytest.raises(ValidationError):
+            WorkspaceConfig(timezone="")

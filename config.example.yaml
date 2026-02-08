@@ -43,6 +43,10 @@ agent:
   max_turns: 50
   temperature: 0.7
 
+# Per-workspace configuration is set in agent_workspaces/<name>/agent.yaml
+# Available workspace settings include:
+#   timezone: America/Denver  # IANA timezone for cron, heartbeat, display (default: UTC)
+
 # Builtin capabilities
 # Builtins are conditionally available based on API keys in environment
 builtins:

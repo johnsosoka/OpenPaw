@@ -157,6 +157,7 @@ Place `agent.yaml` in the workspace root to customize behavior:
 ```yaml
 name: Gilfoyle
 description: Sarcastic systems architect
+timezone: America/Denver  # IANA timezone identifier (default: UTC)
 
 model:
   provider: anthropic
@@ -244,6 +245,31 @@ Every agent invocation (user messages, cron jobs, heartbeats) logs token counts 
 
 **Integration**: `AgentRunner.run()` creates a `UsageMetadataCallbackHandler` per invocation. After completion, metrics are extracted via `extract_metrics_from_callback()` and exposed via `agent_runner.last_metrics`. `WorkspaceRunner`, `CronScheduler`, and `HeartbeatScheduler` pass the logger to record each invocation.
 
+### Timezone Handling
+
+OpenPaw uses a "store in UTC, display in workspace timezone" pattern. The `timezone` field in `agent.yaml` (IANA identifier, default `"UTC"`) controls all time-related display and scheduling.
+
+**What uses workspace timezone:**
+- Heartbeat active hours window (`active_hours: "09:00-17:00"`)
+- Cron schedule expressions (APScheduler `CronTrigger`)
+- Agent-created scheduled tasks (`schedule_at` timestamp parsing)
+- File upload date partitions (`uploads/{YYYY-MM-DD}/`)
+- `/status` "tokens today" day boundary
+- Display timestamps in conversation archives, task notes, and filesystem listings
+
+**What remains UTC (internal storage):**
+- JSONL logs (token_usage.jsonl, heartbeat_log.jsonl)
+- Session state (sessions.json)
+- Task internal timestamps (created_at, started_at, completed_at in TASKS.yaml)
+- Conversation archive JSON sidecar files
+- LangGraph checkpoint data
+
+**Utilities** (`openpaw/core/timezone.py`):
+- `workspace_now(timezone_str)` — Current time in workspace timezone
+- `format_for_display(dt, timezone_str, fmt)` — Convert UTC datetime to display string
+
+**Validation:** `WorkspaceConfig.timezone` has a Pydantic validator that rejects invalid IANA identifiers at config load time.
+
 ### Cron System
 
 Workspaces can define scheduled tasks via YAML files in `crons/` directory.
@@ -268,6 +294,8 @@ output:
 - `"0 9 * * *"` - Every day at 9:00 AM
 - `"*/15 * * * *"` - Every 15 minutes
 - `"0 0 * * 0"` - Every Sunday at midnight
+
+**Note:** Cron schedule expressions fire in the workspace timezone.
 
 **Execution**: CronScheduler builds a fresh agent instance (no checkpointer), injects the prompt, routes output to specified channel.
 
@@ -322,7 +350,7 @@ heartbeat:
 
 **HEARTBEAT_OK Protocol**: If the agent determines there's nothing to report, it can respond with exactly "HEARTBEAT_OK" and no message will be sent (when `suppress_ok: true`). This prevents noisy "all clear" messages.
 
-**Active Hours**: Heartbeats only fire within the specified window (workspace timezone). Outside active hours, heartbeats are silently skipped.
+**Active Hours**: Heartbeats only fire within the specified window (workspace timezone). Outside active hours, heartbeats are silently skipped. **Note:** `active_hours` are interpreted in the workspace timezone.
 
 **Pre-flight Skip**: Before invoking the LLM, the scheduler checks HEARTBEAT.md and TASKS.yaml. If HEARTBEAT.md is empty/trivial and no active tasks exist, the heartbeat is skipped entirely — saving API costs for idle workspaces.
 

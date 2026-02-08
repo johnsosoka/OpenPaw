@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 def expand_env_vars(value: str) -> str:
@@ -299,6 +299,21 @@ class WorkspaceConfig(BaseModel):
         description="Builtin capability overrides",
     )
     heartbeat: HeartbeatConfig | None = Field(default=None, description="Per-workspace heartbeat config")
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, v: str) -> str:
+        """Validate timezone is a valid IANA timezone identifier."""
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(v)
+        except (ZoneInfoNotFoundError, KeyError):
+            raise ValueError(
+                f"Invalid timezone '{v}'. Use IANA timezone identifiers "
+                f"(e.g., 'America/Denver', 'Europe/London', 'UTC')."
+            )
+        return v
 
     model_config = {"extra": "allow"}
 
