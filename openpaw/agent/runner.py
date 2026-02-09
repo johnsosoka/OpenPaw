@@ -19,7 +19,7 @@ from openpaw.workspace.loader import AgentWorkspace
 logger = logging.getLogger(__name__)
 
 # Models known to produce thinking tokens
-THINKING_MODELS = ["moonshot.kimi-k2-thinking", "kimi-k2-thinking", "kimi-thinking", "kimi-k2.5"]
+THINKING_MODELS = ["moonshot.kimi-k2-thinking", "moonshotai.kimi-k2.5", "kimi-k2-thinking", "kimi-thinking", "kimi-k2.5"]
 
 # Bedrock tool name validation pattern (AWS requirement)
 BEDROCK_TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")

@@ -62,5 +62,8 @@ poetry.lock
 # Agent workspaces (contain tokens and personal config)
 agent_workspaces/
 
+# Runtime logs
+logs/
+
 # LLM memory/context (session-specific)
 llm_memory/
