@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from openpaw.tools.filesystem import FilesystemTools
+from openpaw.agent.tools.filesystem import FilesystemTools
 
 
 def test_openpaw_directory_rejected(tmp_path: Path):

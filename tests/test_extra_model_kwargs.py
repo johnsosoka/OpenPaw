@@ -9,8 +9,8 @@ from openpaw.core.agent import AgentRunner
 from openpaw.workspace.loader import AgentWorkspace
 
 # Common patches for isolating AgentRunner from real dependencies
-_PATCH_FS = "openpaw.core.agent.FilesystemTools"
-_PATCH_AGENT = "openpaw.core.agent.create_agent"
+_PATCH_FS = "openpaw.agent.runner.FilesystemTools"
+_PATCH_AGENT = "openpaw.agent.runner.create_agent"
 
 # Provider patches (local imports in _create_model, patch at source)
 _PATCH_OPENAI = "langchain_openai.ChatOpenAI"
@@ -41,7 +41,7 @@ def test_extra_model_kwargs_stored_on_init(mock_workspace: AgentWorkspace) -> No
     """Test that extra_model_kwargs are stored during initialization."""
     extra_kwargs = {"base_url": "https://api.example.com/v1", "custom_param": "value"}
 
-    with patch("openpaw.core.agent.AgentRunner._create_model") as mock_create, \
+    with patch("openpaw.agent.runner.AgentRunner._create_model") as mock_create, \
          patch(_PATCH_FS), patch(_PATCH_AGENT):
         mock_create.return_value = Mock()
 
@@ -57,7 +57,7 @@ def test_extra_model_kwargs_stored_on_init(mock_workspace: AgentWorkspace) -> No
 
 def test_extra_model_kwargs_defaults_to_empty_dict(mock_workspace: AgentWorkspace) -> None:
     """Test that extra_model_kwargs defaults to empty dict when None."""
-    with patch("openpaw.core.agent.AgentRunner._create_model") as mock_create, \
+    with patch("openpaw.agent.runner.AgentRunner._create_model") as mock_create, \
          patch(_PATCH_FS), patch(_PATCH_AGENT):
         mock_create.return_value = Mock()
 

@@ -106,7 +106,7 @@ class TestBrowserCleanupIntegration:
 
     def test_command_context_has_browser_builtin_field(self):
         """CommandContext should have a browser_builtin field."""
-        from openpaw.commands.base import CommandContext
+        from openpaw.channels.commands.base import CommandContext
         import inspect
 
         # Check the field exists in the dataclass

@@ -7,10 +7,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from openpaw.commands.base import CommandContext
-from openpaw.commands.handlers.status import StatusCommand
-from openpaw.core.metrics import TokenUsageLogger
-from openpaw.session.manager import SessionManager
+from openpaw.agent.metrics import TokenUsageLogger
+from openpaw.channels.commands.base import CommandContext
+from openpaw.channels.commands.handlers.status import StatusCommand
+from openpaw.runtime.session.manager import SessionManager
 
 
 @pytest.fixture

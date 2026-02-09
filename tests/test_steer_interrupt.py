@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from openpaw.core.agent import AgentRunner
-from openpaw.core.tool_middleware import InterruptSignalError, QueueAwareToolMiddleware
-from openpaw.queue.lane import QueueMode
+from openpaw.agent import AgentRunner
+from openpaw.agent.middleware import InterruptSignalError, QueueAwareToolMiddleware
+from openpaw.core.queue.lane import QueueMode
 from openpaw.workspace.loader import AgentWorkspace
 
 
@@ -40,8 +40,8 @@ def mock_middleware() -> QueueAwareToolMiddleware:
 class TestAgentRunnerMiddleware:
     """Test AgentRunner accepts and passes middleware to create_agent."""
 
-    @patch("openpaw.core.agent.create_agent")
-    @patch("openpaw.core.agent.AgentRunner._create_model")
+    @patch("openpaw.agent.runner.create_agent")
+    @patch("openpaw.agent.runner.AgentRunner._create_model")
     def test_accepts_middleware_parameter(
         self, mock_create_model: Mock, mock_create_agent: Mock, mock_workspace: AgentWorkspace
     ) -> None:
@@ -58,8 +58,8 @@ class TestAgentRunnerMiddleware:
 
         assert runner._middleware == [middleware_fn]
 
-    @patch("openpaw.core.agent.create_agent")
-    @patch("openpaw.core.agent.AgentRunner._create_model")
+    @patch("openpaw.agent.runner.create_agent")
+    @patch("openpaw.agent.runner.AgentRunner._create_model")
     def test_passes_middleware_to_create_agent(
         self, mock_create_model: Mock, mock_create_agent: Mock, mock_workspace: AgentWorkspace
     ) -> None:
@@ -80,8 +80,8 @@ class TestAgentRunnerMiddleware:
         assert "middleware" in call_kwargs
         assert call_kwargs["middleware"] == [middleware_fn]
 
-    @patch("openpaw.core.agent.create_agent")
-    @patch("openpaw.core.agent.AgentRunner._create_model")
+    @patch("openpaw.agent.runner.create_agent")
+    @patch("openpaw.agent.runner.AgentRunner._create_model")
     def test_defaults_to_empty_middleware(
         self, mock_create_model: Mock, mock_create_agent: Mock, mock_workspace: AgentWorkspace
     ) -> None:
@@ -103,8 +103,8 @@ class TestInterruptSignalPropagation:
     @pytest.mark.asyncio
     async def test_interrupt_signal_propagates(self, mock_workspace: AgentWorkspace) -> None:
         """InterruptSignalError raised during astream propagates out of run()."""
-        with patch("openpaw.core.agent.create_agent") as mock_create_agent, patch(
-            "openpaw.core.agent.AgentRunner._create_model"
+        with patch("openpaw.agent.runner.create_agent") as mock_create_agent, patch(
+            "openpaw.agent.runner.AgentRunner._create_model"
         ) as mock_create_model:
             mock_model = Mock()
             mock_create_model.return_value = mock_model
@@ -217,8 +217,8 @@ class TestCollectMode:
 class TestAgentFactoryNoMiddleware:
     """Test agent factory doesn't include queue middleware."""
 
-    @patch("openpaw.core.agent.create_agent")
-    @patch("openpaw.core.agent.AgentRunner._create_model")
+    @patch("openpaw.agent.runner.create_agent")
+    @patch("openpaw.agent.runner.AgentRunner._create_model")
     def test_factory_agent_has_empty_middleware(
         self, mock_create_model: Mock, mock_create_agent: Mock, mock_workspace: AgentWorkspace
     ) -> None:

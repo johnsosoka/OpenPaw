@@ -3,4 +3,10 @@
 from openpaw.channels.base import ChannelAdapter, Message, MessageDirection
 from openpaw.channels.telegram import TelegramChannel
 
-__all__ = ["ChannelAdapter", "Message", "MessageDirection", "TelegramChannel"]
+__all__ = [
+    "ChannelAdapter",
+    "Message",
+    "MessageDirection",
+    "TelegramChannel",
+    # commands subpackage is available at openpaw.channels.commands
+]

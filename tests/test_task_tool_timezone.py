@@ -5,7 +5,7 @@ from datetime import UTC
 import pytest
 
 from openpaw.builtins.tools.task import TaskToolBuiltin
-from openpaw.task import Task, TaskStatus, TaskStore
+from openpaw.stores.task import Task, TaskStatus, TaskStore
 
 
 @pytest.fixture

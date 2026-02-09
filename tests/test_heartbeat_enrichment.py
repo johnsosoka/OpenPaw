@@ -9,7 +9,7 @@ import yaml
 
 from openpaw.core.config import HeartbeatConfig
 from openpaw.core.metrics import InvocationMetrics
-from openpaw.heartbeat.scheduler import HeartbeatScheduler
+from openpaw.runtime.scheduling.heartbeat import HeartbeatScheduler
 
 
 @pytest.fixture

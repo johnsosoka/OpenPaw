@@ -1,103 +1,38 @@
-"""Orchestrator for managing multiple workspace runners."""
+"""DEPRECATED: This module has moved to openpaw.runtime.orchestrator.
 
-import asyncio
-import logging
-from pathlib import Path
+This shim provides backward compatibility. Update your imports to:
+    from openpaw.runtime.orchestrator import OpenPawOrchestrator
+"""
 
-from openpaw.core.config import Config
-from openpaw.main import WorkspaceRunner
-from openpaw.workspace.loader import WorkspaceLoader
+import warnings
+from typing import Any
 
-logger = logging.getLogger(__name__)
+# Import from new location
+from openpaw.runtime.orchestrator import OpenPawOrchestrator as _OpenPawOrchestrator
+
+# Re-export for backward compatibility
+OpenPawOrchestrator = _OpenPawOrchestrator
+
+# Deprecation warning on module import
+warnings.warn(
+    "Importing from openpaw.orchestrator is deprecated. "
+    "Use openpaw.runtime.orchestrator instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 
-class OpenPawOrchestrator:
-    """Manages multiple WorkspaceRunner instances."""
-
-    def __init__(self, config: Config, workspace_names: list[str]):
-        """Initialize orchestrator with workspaces.
-
-        Args:
-            config: Global application configuration.
-            workspace_names: List of workspace names to load.
-        """
-        self.config = config
-        self.runners: dict[str, WorkspaceRunner] = {}
-
-        for name in workspace_names:
-            logger.info(f"Initializing workspace: {name}")
-            self.runners[name] = WorkspaceRunner(config, name)
-
-        logger.info(f"Orchestrator initialized with {len(self.runners)} workspace(s)")
-
-    async def start(self) -> None:
-        """Start all workspace runners concurrently.
-
-        Raises:
-            RuntimeError: If any workspace runner fails to start.
-        """
-        logger.info(f"Starting {len(self.runners)} workspace runner(s)...")
-
-        results = await asyncio.gather(
-            *[runner.start() for runner in self.runners.values()],
-            return_exceptions=True,
+def __getattr__(name: str) -> Any:
+    """Provide deprecation warnings for attribute access."""
+    if name == "OpenPawOrchestrator":
+        warnings.warn(
+            "Importing OpenPawOrchestrator from openpaw.orchestrator is deprecated. "
+            "Use openpaw.runtime.orchestrator instead.",
+            DeprecationWarning,
+            stacklevel=2
         )
+        return _OpenPawOrchestrator
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-        failures: list[tuple[str, Exception]] = []
-        for name, result in zip(self.runners.keys(), results):
-            if isinstance(result, Exception):
-                logger.error(f"Failed to start workspace '{name}': {result}")
-                failures.append((name, result))
 
-        if failures:
-            failed_names = [name for name, _ in failures]
-            raise RuntimeError(f"Failed to start {len(failures)} workspace(s): {failed_names}")
-
-        logger.info("All workspace runners started successfully")
-
-    async def stop(self) -> None:
-        """Stop all workspace runners gracefully.
-
-        Logs errors but does not raise - shutdown should complete for all runners.
-        """
-        logger.info("Stopping all workspace runners...")
-
-        results = await asyncio.gather(
-            *[runner.stop() for runner in self.runners.values()],
-            return_exceptions=True,
-        )
-
-        for name, result in zip(self.runners.keys(), results):
-            if isinstance(result, Exception):
-                logger.error(f"Error stopping workspace '{name}': {result}")
-
-        logger.info("All workspace runners stopped")
-
-    @classmethod
-    def discover_workspaces(cls, workspaces_path: Path) -> list[str]:
-        """Discover all valid workspaces in the workspaces directory.
-
-        A valid workspace is a directory containing all required files
-        (AGENT.md, USER.md, SOUL.md, HEARTBEAT.md).
-
-        Args:
-            workspaces_path: Path to workspaces directory.
-
-        Returns:
-            List of workspace names found.
-        """
-        workspaces: list[str] = []
-
-        if not workspaces_path.exists():
-            logger.warning(f"Workspaces path does not exist: {workspaces_path}")
-            return workspaces
-
-        for entry in workspaces_path.iterdir():
-            if entry.is_dir() and all(
-                (entry / f).exists() for f in WorkspaceLoader.REQUIRED_FILES
-            ):
-                workspaces.append(entry.name)
-                logger.debug(f"Discovered workspace: {entry.name}")
-
-        logger.info(f"Discovered {len(workspaces)} workspace(s)")
-        return sorted(workspaces)
+__all__ = ["OpenPawOrchestrator"]

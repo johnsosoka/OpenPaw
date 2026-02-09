@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from openpaw.tools.sandbox import resolve_sandboxed_path
+from openpaw.agent.tools.sandbox import resolve_sandboxed_path
 
 
 class TestResolveSandboxedPath:

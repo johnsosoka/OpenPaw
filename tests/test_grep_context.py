@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from openpaw.tools.filesystem import FilesystemTools
+from openpaw.agent.tools.filesystem import FilesystemTools
 
 
 @pytest.fixture

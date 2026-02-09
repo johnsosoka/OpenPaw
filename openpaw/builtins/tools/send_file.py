@@ -9,6 +9,7 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
+from openpaw.agent.tools import resolve_sandboxed_path
 from openpaw.builtins.base import (
     BaseBuiltinTool,
     BuiltinMetadata,
@@ -16,7 +17,6 @@ from openpaw.builtins.base import (
     BuiltinType,
 )
 from openpaw.builtins.tools._channel_context import get_channel_context
-from openpaw.tools.sandbox import resolve_sandboxed_path
 
 logger = logging.getLogger(__name__)
 

@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from openpaw.memory.archiver import ConversationArchive, ConversationArchiver
+from openpaw.runtime.session.archiver import ConversationArchive, ConversationArchiver
 
 
 @pytest.fixture

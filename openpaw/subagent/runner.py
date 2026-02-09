@@ -6,10 +6,11 @@ import time
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 
+from openpaw.agent import AgentRunner
+from openpaw.agent.metrics import TokenUsageLogger
 from openpaw.channels.base import ChannelAdapter
-from openpaw.core.agent import AgentRunner
-from openpaw.core.metrics import TokenUsageLogger
-from openpaw.subagent.store import SubAgentRequest, SubAgentResult, SubAgentStatus, SubAgentStore
+from openpaw.domain.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
+from openpaw.stores.subagent import SubAgentStore
 
 logger = logging.getLogger(__name__)
 

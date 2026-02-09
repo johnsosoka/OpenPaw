@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from openpaw.session.manager import SessionManager, SessionState
+from openpaw.runtime.session.manager import SessionManager, SessionState
 
 
 def test_get_thread_id_format(tmp_path: Path):

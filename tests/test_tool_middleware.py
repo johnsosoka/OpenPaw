@@ -6,7 +6,7 @@ import pytest
 from langchain_core.messages import ToolMessage
 
 from openpaw.core.tool_middleware import InterruptSignalError, QueueAwareToolMiddleware
-from openpaw.queue.lane import QueueMode
+from openpaw.core.queue.lane import QueueMode
 
 
 @pytest.fixture

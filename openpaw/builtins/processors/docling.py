@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from openpaw.agent.tools import resolve_sandboxed_path
 from openpaw.builtins.base import (
     BaseBuiltinProcessor,
     BuiltinMetadata,
@@ -13,7 +14,6 @@ from openpaw.builtins.base import (
     ProcessorResult,
 )
 from openpaw.channels.base import Attachment, Message
-from openpaw.tools.sandbox import resolve_sandboxed_path
 
 logger = logging.getLogger(__name__)
 

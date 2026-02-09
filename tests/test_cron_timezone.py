@@ -7,8 +7,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from openpaw.cron.loader import CronDefinition, CronOutputConfig
-from openpaw.cron.scheduler import CronScheduler
+from openpaw.runtime.scheduling.loader import CronDefinition, CronOutputConfig
+from openpaw.runtime.scheduling.cron import CronScheduler
 
 
 @pytest.fixture
@@ -76,7 +76,7 @@ class TestCronSchedulerTimezone:
             timezone="America/Chicago",
         )
 
-        with patch("openpaw.cron.scheduler.AsyncIOScheduler") as mock_scheduler_class:
+        with patch("openpaw.runtime.scheduling.cron.AsyncIOScheduler") as mock_scheduler_class:
             mock_scheduler_instance = MagicMock()
             mock_scheduler_instance.start = MagicMock()
             mock_scheduler_class.return_value = mock_scheduler_instance
@@ -116,7 +116,7 @@ class TestCronSchedulerTimezone:
             output=CronOutputConfig(channel="telegram", chat_id=123456),
         )
 
-        with patch("openpaw.cron.scheduler.CronTrigger") as mock_cron_trigger:
+        with patch("openpaw.runtime.scheduling.cron.CronTrigger") as mock_cron_trigger:
             mock_trigger_instance = MagicMock()
             mock_cron_trigger.from_crontab = MagicMock(return_value=mock_trigger_instance)
 
@@ -140,7 +140,7 @@ class TestCronSchedulerTimezone:
         """
         from datetime import UTC, datetime, timedelta
 
-        from openpaw.cron.dynamic import create_once_task
+        from openpaw.stores.cron import create_once_task
 
         scheduler = CronScheduler(
             workspace_path=tmp_path,
@@ -151,7 +151,7 @@ class TestCronSchedulerTimezone:
         )
 
         # Start scheduler to initialize _scheduler
-        with patch("openpaw.cron.scheduler.AsyncIOScheduler") as mock_scheduler_class:
+        with patch("openpaw.runtime.scheduling.cron.AsyncIOScheduler") as mock_scheduler_class:
             mock_scheduler_instance = MagicMock()
             mock_scheduler_instance.start = MagicMock()
             mock_scheduler_instance.add_job = MagicMock()
@@ -163,7 +163,7 @@ class TestCronSchedulerTimezone:
             future_time = datetime.now(UTC) + timedelta(hours=1)
             task = create_once_task("Test task", future_time)
 
-            with patch("openpaw.cron.scheduler.DateTrigger") as mock_date_trigger:
+            with patch("openpaw.runtime.scheduling.cron.DateTrigger") as mock_date_trigger:
                 mock_trigger_instance = MagicMock()
                 mock_date_trigger.return_value = mock_trigger_instance
 
@@ -185,7 +185,7 @@ class TestCronSchedulerTimezone:
         """
         from datetime import UTC, datetime, timedelta
 
-        from openpaw.cron.dynamic import create_interval_task
+        from openpaw.stores.cron import create_interval_task
 
         scheduler = CronScheduler(
             workspace_path=tmp_path,
@@ -196,7 +196,7 @@ class TestCronSchedulerTimezone:
         )
 
         # Start scheduler to initialize _scheduler
-        with patch("openpaw.cron.scheduler.AsyncIOScheduler") as mock_scheduler_class:
+        with patch("openpaw.runtime.scheduling.cron.AsyncIOScheduler") as mock_scheduler_class:
             mock_scheduler_instance = MagicMock()
             mock_scheduler_instance.start = MagicMock()
             mock_scheduler_instance.add_job = MagicMock()
@@ -208,7 +208,7 @@ class TestCronSchedulerTimezone:
             next_run = datetime.now(UTC) + timedelta(minutes=5)
             task = create_interval_task("Recurring task", 300, next_run)
 
-            with patch("openpaw.cron.scheduler.IntervalTrigger") as mock_interval_trigger:
+            with patch("openpaw.runtime.scheduling.cron.IntervalTrigger") as mock_interval_trigger:
                 mock_trigger_instance = MagicMock()
                 mock_interval_trigger.return_value = mock_trigger_instance
 

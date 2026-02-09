@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from openpaw.builtins.tools.cron import CronToolBuiltin
-from openpaw.cron.dynamic import (
+from openpaw.stores.cron import (
     DynamicCronStore,
     DynamicCronTask,
     create_interval_task,
@@ -373,7 +373,7 @@ class TestDynamicCronStore:
 class TestFactoryFunctions:
     """Test factory functions for creating tasks."""
 
-    @patch("openpaw.cron.dynamic.datetime")
+    @patch("openpaw.stores.cron.datetime")
     def test_create_once_task(self, mock_datetime: Any) -> None:
         """Test create_once_task factory function."""
         now = datetime(2026, 2, 6, 12, 0, 0, tzinfo=UTC)
@@ -391,7 +391,7 @@ class TestFactoryFunctions:
         # UUID should be generated
         assert len(task.id) == 36  # UUID format
 
-    @patch("openpaw.cron.dynamic.datetime")
+    @patch("openpaw.stores.cron.datetime")
     def test_create_interval_task(self, mock_datetime: Any) -> None:
         """Test create_interval_task factory function."""
         now = datetime(2026, 2, 6, 12, 0, 0, tzinfo=UTC)

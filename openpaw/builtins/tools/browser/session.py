@@ -231,7 +231,10 @@ class BrowserSession:
             status = response.status if response else "unknown"
 
             logger.info(f"Navigated successfully: {title} (status: {status})")
-            return f"Navigated to: {title}\nURL: {final_url}\nStatus: {status}\n\nUse browser_snapshot to see page content."
+            return (
+                f"Navigated to: {title}\nURL: {final_url}\nStatus: {status}\n\n"
+                "Use browser_snapshot to see page content."
+            )
 
         except Exception as e:
             logger.error(f"Navigation failed: {e}")

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from openpaw.core.config import load_config
 from openpaw.core.logging import setup_logging
-from openpaw.orchestrator import OpenPawOrchestrator
+from openpaw.runtime.orchestrator import OpenPawOrchestrator
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from openpaw.commands.router import CommandRouter
+from openpaw.channels.commands.router import CommandRouter
 from openpaw.core.config import Config
 
 
@@ -55,13 +55,13 @@ def mock_config():
 @pytest.mark.asyncio
 async def test_workspace_runner_initializes_command_router(mock_config, mock_workspace, tmp_path):
     """Test that WorkspaceRunner properly initializes CommandRouter on startup."""
-    from openpaw.main import WorkspaceRunner
+    from openpaw.workspace.runner import WorkspaceRunner
 
     # Mock workspace loader
     with (
-        patch("openpaw.main.WorkspaceLoader") as mock_loader_cls,
-        patch("openpaw.main.load_workspace_tools", return_value=[]),
-        patch("openpaw.main.BuiltinLoader") as mock_builtin_loader_cls,
+        patch("openpaw.workspace.runner.WorkspaceLoader") as mock_loader_cls,
+        patch("openpaw.workspace.runner.load_workspace_tools", return_value=[]),
+        patch("openpaw.workspace.runner.BuiltinLoader") as mock_builtin_loader_cls,
     ):
         # Configure workspace mock
         mock_workspace_obj = MagicMock()
@@ -99,12 +99,12 @@ async def test_workspace_runner_initializes_command_router(mock_config, mock_wor
 @pytest.mark.asyncio
 async def test_workspace_runner_registers_framework_commands(mock_config, mock_workspace):
     """Test that WorkspaceRunner registers all framework commands."""
-    from openpaw.main import WorkspaceRunner
+    from openpaw.workspace.runner import WorkspaceRunner
 
     with (
-        patch("openpaw.main.WorkspaceLoader") as mock_loader_cls,
-        patch("openpaw.main.load_workspace_tools", return_value=[]),
-        patch("openpaw.main.BuiltinLoader") as mock_builtin_loader_cls,
+        patch("openpaw.workspace.runner.WorkspaceLoader") as mock_loader_cls,
+        patch("openpaw.workspace.runner.load_workspace_tools", return_value=[]),
+        patch("openpaw.workspace.runner.BuiltinLoader") as mock_builtin_loader_cls,
     ):
         # Configure workspace mock
         mock_workspace_obj = MagicMock()
@@ -147,12 +147,12 @@ async def test_workspace_runner_registers_framework_commands(mock_config, mock_w
 async def test_workspace_runner_build_command_context(mock_config, mock_workspace):
     """Test that _build_command_context creates valid CommandContext."""
     from openpaw.channels.base import Message, MessageDirection
-    from openpaw.main import WorkspaceRunner
+    from openpaw.workspace.runner import WorkspaceRunner
 
     with (
-        patch("openpaw.main.WorkspaceLoader") as mock_loader_cls,
-        patch("openpaw.main.load_workspace_tools", return_value=[]),
-        patch("openpaw.main.BuiltinLoader") as mock_builtin_loader_cls,
+        patch("openpaw.workspace.runner.WorkspaceLoader") as mock_loader_cls,
+        patch("openpaw.workspace.runner.load_workspace_tools", return_value=[]),
+        patch("openpaw.workspace.runner.BuiltinLoader") as mock_builtin_loader_cls,
     ):
         # Configure workspace mock
         mock_workspace_obj = MagicMock()
@@ -219,12 +219,12 @@ async def test_workspace_runner_build_command_context_missing_channel_raises(
 ):
     """Test that _build_command_context raises error when channel not found."""
     from openpaw.channels.base import Message, MessageDirection
-    from openpaw.main import WorkspaceRunner
+    from openpaw.workspace.runner import WorkspaceRunner
 
     with (
-        patch("openpaw.main.WorkspaceLoader") as mock_loader_cls,
-        patch("openpaw.main.load_workspace_tools", return_value=[]),
-        patch("openpaw.main.BuiltinLoader") as mock_builtin_loader_cls,
+        patch("openpaw.workspace.runner.WorkspaceLoader") as mock_loader_cls,
+        patch("openpaw.workspace.runner.load_workspace_tools", return_value=[]),
+        patch("openpaw.workspace.runner.BuiltinLoader") as mock_builtin_loader_cls,
     ):
         # Configure workspace mock
         mock_workspace_obj = MagicMock()

@@ -15,7 +15,7 @@ from openpaw.builtins.base import (
     BuiltinPrerequisite,
     BuiltinType,
 )
-from openpaw.cron.dynamic import (
+from openpaw.stores.cron import (
     DynamicCronStore,
     create_interval_task,
     create_once_task,

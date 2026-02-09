@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from openpaw.channels.base import Message
-from openpaw.commands.base import CommandContext
-from openpaw.commands.handlers import (
+from openpaw.channels.commands.base import CommandContext
+from openpaw.channels.commands.handlers import (
     CompactCommand,
     HelpCommand,
     NewCommand,
@@ -15,8 +15,8 @@ from openpaw.commands.handlers import (
     StartCommand,
     StatusCommand,
 )
-from openpaw.queue.lane import QueueMode
-from openpaw.session.manager import SessionState
+from openpaw.core.queue.lane import QueueMode
+from openpaw.runtime.session.manager import SessionState
 
 
 @pytest.fixture
@@ -299,7 +299,7 @@ class TestStatusCommand:
         mock_context.session_manager.get_state.return_value = state
 
         # Create a TASKS.yaml file
-        from openpaw.task.store import Task, TaskStatus, TaskStore
+        from openpaw.stores.task import Task, TaskStatus, TaskStore
 
         task_store = TaskStore(tmp_path)
         task_store.create(

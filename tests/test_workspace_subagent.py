@@ -28,9 +28,9 @@ def mock_workspace(tmp_path: Path) -> AgentWorkspace:
 class TestSubAgentStoreInitialization:
     """Test SubAgentStore initialization in WorkspaceRunner."""
 
-    @patch("openpaw.main.WorkspaceLoader")
-    @patch("openpaw.main.BuiltinLoader")
-    @patch("openpaw.main.load_workspace_tools")
+    @patch("openpaw.workspace.runner.WorkspaceLoader")
+    @patch("openpaw.workspace.runner.BuiltinLoader")
+    @patch("openpaw.workspace.runner.load_workspace_tools")
     def test_subagent_store_initialized(
         self,
         mock_load_tools: Mock,
@@ -48,7 +48,7 @@ class TestSubAgentStoreInitialization:
         mock_load_tools.return_value = []
 
         from openpaw.core.config import Config
-        from openpaw.main import WorkspaceRunner
+        from openpaw.workspace.runner import WorkspaceRunner
 
         config = Config(workspaces_path=str(tmp_path))
 
@@ -67,14 +67,14 @@ class TestSubAgentRunnerCreation:
     def test_subagent_runner_parameters(self, mock_workspace: AgentWorkspace) -> None:
         """SubAgentRunner initialization includes correct dependencies."""
         from openpaw.core.config import Config
-        from openpaw.main import WorkspaceRunner
+        from openpaw.workspace.runner import WorkspaceRunner
 
         # Verify the WorkspaceRunner has the components needed for SubAgentRunner
-        with patch("openpaw.main.WorkspaceLoader") as mock_loader:
-            with patch("openpaw.main.BuiltinLoader") as mock_builtin:
-                with patch("openpaw.main.load_workspace_tools"):
-                    with patch("openpaw.core.agent.create_agent"):
-                        with patch("openpaw.core.agent.AgentRunner._create_model"):
+        with patch("openpaw.workspace.runner.WorkspaceLoader") as mock_loader:
+            with patch("openpaw.workspace.runner.BuiltinLoader") as mock_builtin:
+                with patch("openpaw.workspace.runner.load_workspace_tools"):
+                    with patch("openpaw.agent.runner.create_agent"):
+                        with patch("openpaw.agent.runner.AgentRunner._create_model"):
                             mock_loader.return_value.load.return_value = mock_workspace
                             mock_builtin.return_value.load_tools.return_value = []
                             mock_builtin.return_value.load_processors.return_value = []
@@ -91,9 +91,10 @@ class TestSubAgentRunnerCreation:
                             assert hasattr(runner, "workspace_name")
                             assert runner.workspace_name == "test_workspace"
 
-                            # Verify agent factory is callable
-                            factory = runner._create_agent_factory()
-                            assert callable(factory)
+                            # Verify agent factory exists and has closure method
+                            assert hasattr(runner, "_agent_factory")
+                            factory_closure = runner._agent_factory.get_agent_factory_closure()
+                            assert callable(factory_closure)
 
 
 class TestSpawnToolConnection:
@@ -102,12 +103,12 @@ class TestSpawnToolConnection:
     def test_spawn_tool_connected(self) -> None:
         """_connect_spawn_tool_to_runner calls set_runner on spawn tool."""
         from openpaw.core.config import Config
-        from openpaw.main import WorkspaceRunner
+        from openpaw.workspace.runner import WorkspaceRunner
 
         # Create a mock workspace runner with minimal setup
-        with patch("openpaw.main.WorkspaceLoader") as mock_loader:
-            with patch("openpaw.main.BuiltinLoader") as mock_builtin:
-                with patch("openpaw.main.load_workspace_tools"):
+        with patch("openpaw.workspace.runner.WorkspaceLoader") as mock_loader:
+            with patch("openpaw.workspace.runner.BuiltinLoader") as mock_builtin:
+                with patch("openpaw.workspace.runner.load_workspace_tools"):
                     # Mock builtin loader to return spawn tool
                     mock_spawn_tool = MagicMock()
                     mock_spawn_tool.set_runner = MagicMock()
@@ -124,8 +125,8 @@ class TestSpawnToolConnection:
                     mock_workspace.crons = []
                     mock_loader.return_value.load.return_value = mock_workspace
 
-                    with patch("openpaw.core.agent.create_agent"):
-                        with patch("openpaw.core.agent.AgentRunner._create_model"):
+                    with patch("openpaw.agent.runner.create_agent"):
+                        with patch("openpaw.agent.runner.AgentRunner._create_model"):
                             config = Config(workspaces_path="/tmp")
                             runner = WorkspaceRunner(config=config, workspace_name="test")
 
@@ -146,7 +147,7 @@ class TestSubAgentRunnerShutdown:
     @pytest.mark.asyncio
     async def test_subagent_runner_shutdown_on_stop(self) -> None:
         """SubAgentRunner.shutdown() is called during stop()."""
-        from openpaw.main import WorkspaceRunner
+        from openpaw.workspace.runner import WorkspaceRunner
 
         # Create a minimal workspace runner and mock the subagent runner
         runner = MagicMock(spec=WorkspaceRunner)
@@ -155,8 +156,6 @@ class TestSubAgentRunnerShutdown:
         runner._subagent_runner = mock_subagent_runner
         runner._running = True
         runner._queue_processor_task = None
-        runner._cron_scheduler = None
-        runner._heartbeat_scheduler = None
         runner._channels = {}
         runner._db_conn = None
         runner._approval_manager = None
@@ -166,8 +165,15 @@ class TestSubAgentRunnerShutdown:
         runner._session_manager = MagicMock()
         runner._get_browser_builtin = MagicMock(return_value=None)  # No browser loaded
 
+        # Mock lifecycle manager
+        mock_lifecycle = AsyncMock()
+        mock_lifecycle.stop_cron_scheduler = AsyncMock()
+        mock_lifecycle.stop_heartbeat_scheduler = AsyncMock()
+        mock_lifecycle.stop_channels = AsyncMock()
+        runner._lifecycle_manager = mock_lifecycle
+
         # Call stop using the real implementation
-        from openpaw.main import WorkspaceRunner as RealRunner
+        from openpaw.workspace.runner import WorkspaceRunner as RealRunner
         await RealRunner.stop(runner)
 
         # Verify shutdown was called
@@ -206,25 +212,25 @@ class TestFrameworkPromptSubagent:
 class TestAgentFactory:
     """Test agent factory creates fresh runners for sub-agents."""
 
-    @patch("openpaw.core.agent.create_agent")
-    @patch("openpaw.core.agent.AgentRunner._create_model")
+    @patch("openpaw.agent.runner.create_agent")
+    @patch("openpaw.agent.runner.AgentRunner._create_model")
     def test_agent_factory_creates_fresh_runners(
         self, mock_create_model: Mock, mock_create_agent: Mock, mock_workspace: AgentWorkspace
     ) -> None:
-        """Agent factory source code shows middleware=[] and checkpointer=None."""
+        """Agent factory creates stateless runners with no middleware and checkpointer."""
         import inspect
 
         from openpaw.core.config import Config
-        from openpaw.main import WorkspaceRunner
+        from openpaw.workspace.runner import WorkspaceRunner
 
         # Setup mocks
         mock_model = Mock()
         mock_create_model.return_value = mock_model
         mock_create_agent.return_value = Mock()
 
-        with patch("openpaw.main.WorkspaceLoader") as mock_loader:
-            with patch("openpaw.main.BuiltinLoader") as mock_builtin:
-                with patch("openpaw.main.load_workspace_tools"):
+        with patch("openpaw.workspace.runner.WorkspaceLoader") as mock_loader:
+            with patch("openpaw.workspace.runner.BuiltinLoader") as mock_builtin:
+                with patch("openpaw.workspace.runner.load_workspace_tools"):
                     mock_loader.return_value.load.return_value = mock_workspace
                     mock_builtin.return_value.load_tools.return_value = []
                     mock_builtin.return_value.load_processors.return_value = []
@@ -233,14 +239,14 @@ class TestAgentFactory:
                     config = Config(workspaces_path="/tmp")
                     runner = WorkspaceRunner(config=config, workspace_name="test")
 
-                    # Get the factory and inspect its source
-                    factory = runner._create_agent_factory()
+                    # Get the factory closure and inspect its source
+                    factory_closure = runner._agent_factory.get_agent_factory_closure()
 
-                    # Verify by reading the source code of the factory that it passes middleware=[]
-                    # This is a code inspection test, not a runtime test
-                    factory_source = inspect.getsource(factory)
-                    assert "middleware=[]" in factory_source
-                    assert "checkpointer=None" in factory_source
+                    # Verify by reading the source code of create_stateless_agent
+                    # that it passes middleware=[] and checkpointer=None
+                    agent_factory_source = inspect.getsource(runner._agent_factory.create_stateless_agent)
+                    assert "middleware=[]" in agent_factory_source
+                    assert "checkpointer=None" in agent_factory_source
 
 
 class TestQueueInjection:
@@ -250,8 +256,8 @@ class TestQueueInjection:
     async def test_inject_system_event_creates_message(self) -> None:
         """_inject_system_event creates a Message and submits to queue."""
         from openpaw.channels.base import Message, MessageDirection
-        from openpaw.main import WorkspaceRunner
-        from openpaw.queue.lane import QueueMode
+        from openpaw.workspace.runner import WorkspaceRunner
+        from openpaw.core.queue.lane import QueueMode
 
         # Create a minimal workspace runner and mock the queue manager
         runner = MagicMock(spec=WorkspaceRunner)
@@ -260,7 +266,7 @@ class TestQueueInjection:
         runner.logger = MagicMock()
 
         # Call the real implementation
-        from openpaw.main import WorkspaceRunner as RealRunner
+        from openpaw.workspace.runner import WorkspaceRunner as RealRunner
 
         await RealRunner._inject_system_event(
             runner, session_key="telegram:12345", content="[SYSTEM] Test event"
@@ -290,12 +296,12 @@ class TestQueueInjection:
     def test_subagent_runner_created_with_result_callback(self) -> None:
         """SubAgentRunner is created with result_callback parameter."""
         from openpaw.core.config import Config
-        from openpaw.main import WorkspaceRunner
+        from openpaw.workspace.runner import WorkspaceRunner
 
         # Create a mock workspace runner with minimal setup
-        with patch("openpaw.main.WorkspaceLoader") as mock_loader:
-            with patch("openpaw.main.BuiltinLoader") as mock_builtin:
-                with patch("openpaw.main.load_workspace_tools"):
+        with patch("openpaw.workspace.runner.WorkspaceLoader") as mock_loader:
+            with patch("openpaw.workspace.runner.BuiltinLoader") as mock_builtin:
+                with patch("openpaw.workspace.runner.load_workspace_tools"):
                     # Mock workspace
                     mock_workspace = MagicMock()
                     mock_workspace.path = Path("/tmp/workspace")
@@ -307,8 +313,8 @@ class TestQueueInjection:
                     mock_builtin.return_value.load_processors.return_value = []
                     mock_builtin.return_value.get_loaded_tool_names.return_value = []
 
-                    with patch("openpaw.core.agent.create_agent"):
-                        with patch("openpaw.core.agent.AgentRunner._create_model"):
+                    with patch("openpaw.agent.runner.create_agent"):
+                        with patch("openpaw.agent.runner.AgentRunner._create_model"):
                             config = Config(workspaces_path="/tmp")
                             runner = WorkspaceRunner(config=config, workspace_name="test")
 

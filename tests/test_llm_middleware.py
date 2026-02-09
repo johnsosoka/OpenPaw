@@ -2,7 +2,7 @@
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from openpaw.llm.middleware import (
+from openpaw.agent.middleware.llm_hooks import (
     build_pre_model_hook,
     build_post_model_hook,
     _sanitize_reasoning_content,

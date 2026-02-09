@@ -53,51 +53,126 @@ OpenPawOrchestrator
 
 Each workspace is fully isolated with its own channels, queue, agent runner, and cron scheduler.
 
+### Package Architecture
+
+OpenPaw follows a layered architecture with clear separation of concerns:
+
+```
+openpaw/
+├── domain/           # Pure business models (stable foundation)
+│   ├── message.py    # Message, MessageAttachment
+│   ├── task.py       # Task, TaskStatus
+│   ├── session.py    # SessionState
+│   ├── subagent.py   # SubAgentRequest, SubAgentStatus
+│   └── cron.py       # CronJobDefinition, DynamicCronTask
+├── core/             # Configuration, logging, timezone
+│   ├── config/       # Pydantic config models and loaders
+│   │   ├── models.py         # WorkspaceConfig, GlobalConfig
+│   │   ├── loader.py         # Config loading and merging
+│   │   └── env_expansion.py  # ${VAR} substitution
+│   ├── logging.py    # Structured logging
+│   └── timezone.py   # Workspace timezone utilities
+├── agent/            # Agent execution
+│   ├── runner.py     # AgentRunner (LangGraph wrapper)
+│   ├── metrics.py    # Token usage tracking
+│   ├── middleware/   # Tool middleware (queue-aware, approval, llm hooks)
+│   └── tools/        # Filesystem tools and sandbox
+│       ├── filesystem.py  # Sandboxed file operations
+│       └── sandbox.py     # Path validation
+├── workspace/        # Workspace management
+│   ├── loader.py     # Load AGENT.md, USER.md, SOUL.md, HEARTBEAT.md
+│   ├── runner.py     # WorkspaceRunner (slim orchestrator)
+│   ├── message_processor.py  # Message processing loop
+│   ├── agent_factory.py      # Agent creation with middleware
+│   ├── lifecycle.py          # Startup/shutdown hooks
+│   └── tool_loader.py        # Custom tool loading
+├── runtime/          # Runtime services
+│   ├── orchestrator.py       # OpenPawOrchestrator
+│   ├── scheduling/   # Cron and heartbeat schedulers
+│   │   ├── cron.py           # CronScheduler
+│   │   ├── heartbeat.py      # HeartbeatScheduler
+│   │   └── dynamic_cron.py   # DynamicCronStore
+│   ├── queue/        # Message queueing
+│   │   ├── lane.py           # LaneQueue
+│   │   └── manager.py        # QueueManager
+│   └── session/      # Session management and archiving
+│       ├── manager.py        # SessionManager
+│       └── archiver.py       # ConversationArchiver
+├── stores/           # Persistence layer
+│   ├── task.py       # TaskStore (TASKS.yaml)
+│   ├── subagent.py   # SubAgentStore (subagents.yaml)
+│   ├── cron.py       # DynamicCronStore (dynamic_crons.json)
+│   └── approval.py   # ApprovalGateManager (in-memory)
+├── channels/         # External communication
+│   ├── factory.py    # Channel factory
+│   ├── telegram.py   # Telegram adapter
+│   └── commands/     # Slash command handlers
+│       ├── router.py         # CommandRouter
+│       └── handlers/         # Built-in commands (/new, /status, etc.)
+├── builtins/         # Extensible capabilities
+│   ├── tools/        # Brave search, cron, spawn, browser, etc.
+│   └── processors/   # Whisper, docling, file persistence
+├── subagent/         # Background agent coordination
+│   └── runner.py     # SubAgentRunner
+└── utils/            # Generic utilities
+    └── filename.py   # Sanitization and deduplication
+```
+
+**Stability Contract**: Code moves down the stack (agent → workspace → runtime → domain), never up. Domain models are pure data, free of framework dependencies.
+
 ### Key Components
 
 **`openpaw/cli.py`** - CLI entry point. Parses arguments, supports single workspace (`-w name`), multiple workspaces (`-w name1,name2`), or all workspaces (`--all` or `-w "*"`).
 
-**`openpaw/orchestrator.py`** - `OpenPawOrchestrator` manages multiple `WorkspaceRunner` instances. Handles concurrent startup/shutdown and workspace discovery.
+**`openpaw/runtime/orchestrator.py`** - `OpenPawOrchestrator` manages multiple `WorkspaceRunner` instances. Handles concurrent startup/shutdown and workspace discovery.
 
-**`openpaw/main.py`** - `WorkspaceRunner` manages a single workspace: loads workspace config, merges with global config, initializes queue system, sets up channels via factory, manages `AsyncSqliteSaver` lifecycle, wires command routing, schedules crons, and runs the message loop.
+**`openpaw/workspace/runner.py`** - `WorkspaceRunner` manages a single workspace: loads workspace config, merges with global config, initializes queue system, sets up channels via factory, manages `AsyncSqliteSaver` lifecycle, wires command routing, schedules crons, and runs the message loop.
 
-**`openpaw/core/agent.py`** - `AgentRunner` wraps LangGraph's `create_react_agent()`. It stitches workspace markdown files into a system prompt via `init_chat_model()` for multi-provider support, configures sandboxed filesystem tools for workspace access, and tracks per-invocation token usage via `UsageMetadataCallbackHandler`. Supports `extra_model_kwargs` for OpenAI-compatible API endpoints (e.g., `base_url`).
+**`openpaw/workspace/message_processor.py`** - Core message processing loop. Handles queue modes (collect, steer, interrupt), invokes agent, manages approval gates, and processes system events.
 
-**`openpaw/core/metrics.py`** - Token usage tracking infrastructure. `InvocationMetrics` dataclass, `extract_metrics_from_callback()` for `UsageMetadataCallbackHandler`, `TokenUsageLogger` (thread-safe JSONL append to `.openpaw/token_usage.jsonl`), and `TokenUsageReader` for aggregation (today/session).
+**`openpaw/workspace/agent_factory.py`** - Agent creation with middleware wiring. Composes queue-aware and approval middleware, configures builtins, and initializes checkpointer.
 
-**`openpaw/core/config.py`** - Pydantic models for global and workspace configuration. Handles environment variable expansion (`${VAR}`) and deep-merging workspace config over global defaults.
+**`openpaw/workspace/lifecycle.py`** - Startup and shutdown hooks. Handles AsyncSqliteSaver initialization, tool requirements, cron/heartbeat scheduling, and graceful cleanup.
+
+**`openpaw/agent/runner.py`** - `AgentRunner` wraps LangGraph's `create_react_agent()`. It stitches workspace markdown files into a system prompt via `init_chat_model()` for multi-provider support, configures sandboxed filesystem tools for workspace access, and tracks per-invocation token usage via `UsageMetadataCallbackHandler`. Supports `extra_model_kwargs` for OpenAI-compatible API endpoints (e.g., `base_url`).
+
+**`openpaw/agent/metrics.py`** - Token usage tracking infrastructure. `InvocationMetrics` dataclass, `extract_metrics_from_callback()` for `UsageMetadataCallbackHandler`, `TokenUsageLogger` (thread-safe JSONL append to `.openpaw/token_usage.jsonl`), and `TokenUsageReader` for aggregation (today/session).
+
+**`openpaw/core/config/models.py`** - Pydantic models for global and workspace configuration. Handles environment variable expansion (`${VAR}`) and deep-merging workspace config over global defaults.
+
+**`openpaw/core/config/loader.py`** - Configuration loading and merging. Discovers workspace directories, loads global and per-workspace config, and performs deep merge.
 
 **`openpaw/workspace/loader.py`** - Loads agent "workspaces" from `agent_workspaces/<name>/`. Each workspace requires: `AGENT.md`, `USER.md`, `SOUL.md`, `HEARTBEAT.md`. Optional `agent.yaml` and `crons/*.yaml` are loaded if present. These are combined into XML-tagged sections for the system prompt.
 
 **`openpaw/workspace/tool_loader.py`** - Dynamically loads LangChain tools from workspace `tools/` directories. Imports Python files and extracts `@tool` decorated functions (BaseTool instances).
 
-**`openpaw/queue/lane.py`** - Lane-based FIFO queue with configurable concurrency per lane (main, subagent, cron). Supports OpenClaw-style queue modes: `collect`, `steer`, `followup`, `interrupt`.
+**`openpaw/runtime/queue/lane.py`** - Lane-based FIFO queue with configurable concurrency per lane (main, subagent, cron). Supports OpenClaw-style queue modes: `collect`, `steer`, `followup`, `interrupt`.
 
-**`openpaw/core/tool_middleware.py`** - `QueueAwareToolMiddleware` wraps tool calls to inject pending messages (steer mode) or abort execution (interrupt mode) when users send new messages during agent runs. Provides responsive agent behavior via queue awareness.
+**`openpaw/runtime/queue/manager.py`** - `QueueManager` coordinates message routing across lanes. Manages debouncing, queue modes, and pending message tracking.
 
-**`openpaw/subagent/store.py`** - `SubAgentStore` for YAML-based persistence of sub-agent requests and results at `.openpaw/subagents.yaml`. Thread-safe with status lifecycle tracking (pending → running → completed/failed/cancelled/timed_out).
+**`openpaw/agent/middleware/queue_aware.py`** - `QueueAwareToolMiddleware` wraps tool calls to inject pending messages (steer mode) or abort execution (interrupt mode) when users send new messages during agent runs. Provides responsive agent behavior via queue awareness.
+
+**`openpaw/stores/subagent.py`** - `SubAgentStore` for YAML-based persistence of sub-agent requests and results at `.openpaw/subagents.yaml`. Thread-safe with status lifecycle tracking (pending → running → completed/failed/cancelled/timed_out).
 
 **`openpaw/subagent/runner.py`** - `SubAgentRunner` manages spawned background agents with concurrency control (default: 8 concurrent). Creates fresh AgentRunner instances with filtered tools (no recursion, no unsolicited messaging).
 
 **`openpaw/builtins/tools/spawn.py`** - `SpawnToolBuiltin` provides `spawn_agent`, `list_subagents`, `get_subagent_result`, `cancel_subagent` tools for concurrent task execution.
 
-**`openpaw/approval/config.py`** - `ApprovalGatesConfig` Pydantic models for per-tool approval requirements, timeout behavior, and default action (approve/deny).
+**`openpaw/stores/approval.py`** - `ApprovalGateManager` state machine for pending approval requests. Manages lifecycle: create → wait → resolve → cleanup, with automatic timeout handling. Includes `ApprovalGatesConfig` Pydantic models.
 
-**`openpaw/approval/manager.py`** - `ApprovalGateManager` state machine for pending approval requests. Manages lifecycle: create → wait → resolve → cleanup, with automatic timeout handling.
-
-**`openpaw/approval/middleware.py`** - `ApprovalToolMiddleware` intercepts tool calls requiring user authorization. Raises `ApprovalRequiredError` to pause execution, sends UI to user, and resumes on approval.
+**`openpaw/agent/middleware/approval.py`** - `ApprovalToolMiddleware` intercepts tool calls requiring user authorization. Raises `ApprovalRequiredError` to pause execution, sends UI to user, and resumes on approval.
 
 **`openpaw/channels/telegram.py`** - Telegram bot adapter using `python-telegram-bot`. Converts platform messages to unified `Message` format, handles allowlisting, and supports voice/audio messages, documents, and photo uploads.
 
 **`openpaw/channels/factory.py`** - Channel factory. Decouples `WorkspaceRunner` from concrete channel types via `create_channel(channel_type, config, workspace_name)`. Currently supports `telegram`; new providers register here.
 
-**`openpaw/session/manager.py`** - `SessionManager` for tracking conversation threads per session. Thread-safe JSON persistence at `{workspace}/.openpaw/sessions.json`. Provides `get_thread_id()`, `new_conversation()`, `get_state()`, `increment_message_count()`.
+**`openpaw/runtime/session/manager.py`** - `SessionManager` for tracking conversation threads per session. Thread-safe JSON persistence at `{workspace}/.openpaw/sessions.json`. Provides `get_thread_id()`, `new_conversation()`, `get_state()`, `increment_message_count()`.
 
-**`openpaw/commands/`** - Framework command system. `CommandHandler` ABC + `CommandRouter` registry + `CommandContext` for runtime dependencies. Commands are routed BEFORE inbound processors to avoid content modification breaking `is_command` detection.
+**`openpaw/channels/commands/router.py`** - Framework command system. `CommandHandler` ABC + `CommandRouter` registry + `CommandContext` for runtime dependencies. Commands are routed BEFORE inbound processors to avoid content modification breaking `is_command` detection.
 
-**`openpaw/commands/handlers/`** - Built-in command handlers: `/start`, `/new`, `/compact`, `/help`, `/queue`, `/status`. See "Command System" section.
+**`openpaw/channels/commands/handlers/`** - Built-in command handlers: `/start`, `/new`, `/compact`, `/help`, `/queue`, `/status`. See "Command System" section.
 
-**`openpaw/memory/archiver.py`** - `ConversationArchiver` for exporting conversations from the LangGraph checkpointer. Produces dual-format output: markdown (human-readable) + JSON sidecar (machine-readable) at `{workspace}/memory/conversations/`.
+**`openpaw/runtime/session/archiver.py`** - `ConversationArchiver` for exporting conversations from the LangGraph checkpointer. Produces dual-format output: markdown (human-readable) + JSON sidecar (machine-readable) at `{workspace}/memory/conversations/`.
 
 **`openpaw/builtins/`** - Optional capabilities (tools and processors) conditionally loaded based on API key availability. See "Builtins System" section.
 
@@ -111,11 +186,11 @@ Each workspace is fully isolated with its own channels, queue, agent runner, and
 
 **`openpaw/builtins/tools/task.py`** - Task management tools (`create_task`, `update_task`, `list_tasks`, `get_task`). CRUD over `TASKS.yaml` for tracking long-running operations across heartbeats.
 
-**`openpaw/task/store.py`** - `TaskStore` for YAML-based task persistence. Thread-safe with `_load_unlocked`/`_save_unlocked` pattern for atomic compound operations.
+**`openpaw/stores/task.py`** - `TaskStore` for YAML-based task persistence. Thread-safe with `_load_unlocked`/`_save_unlocked` pattern for atomic compound operations.
 
-**`openpaw/tools/filesystem.py`** - `FilesystemTools` providing sandboxed file operations: `ls`, `read_file`, `write_file`, `overwrite_file`, `edit_file`, `glob_files`, `grep_files`, `file_info`. Path traversal protection via `resolve_sandboxed_path()`. `read_file` has a 100K character safety valve. `grep_files` supports `context_lines` for surrounding context.
+**`openpaw/agent/tools/filesystem.py`** - `FilesystemTools` providing sandboxed file operations: `ls`, `read_file`, `write_file`, `overwrite_file`, `edit_file`, `glob_files`, `grep_files`, `file_info`. Path traversal protection via `resolve_sandboxed_path()`. `read_file` has a 100K character safety valve. `grep_files` supports `context_lines` for surrounding context.
 
-**`openpaw/tools/sandbox.py`** - Standalone `resolve_sandboxed_path()` utility. Validates paths within workspace root, rejecting absolute paths, `~`, `..`, and `.openpaw/` access. Shared by `FilesystemTools`, `SendFileTool`, and inbound processors (DoclingProcessor, WhisperProcessor).
+**`openpaw/agent/tools/sandbox.py`** - Standalone `resolve_sandboxed_path()` utility. Validates paths within workspace root, rejecting absolute paths, `~`, `..`, and `.openpaw/` access. Shared by `FilesystemTools`, `SendFileTool`, and inbound processors (DoclingProcessor, WhisperProcessor).
 
 **`openpaw/utils/filename.py`** - Filename sanitization and deduplication utilities. `sanitize_filename()` removes special characters, normalizes spaces, and lowercases. `deduplicate_path()` appends counters (1), (2), etc. for uniqueness.
 
@@ -123,11 +198,11 @@ Each workspace is fully isolated with its own channels, queue, agent runner, and
 
 **`openpaw/builtins/tools/browser.py`** - `BrowserToolBuiltin` provides Playwright-based web automation with accessibility tree navigation. Agents interact with pages via numeric element references instead of selectors. Lazy initialization creates browser instances per session, with lifecycle management tied to conversation resets and workspace shutdown.
 
-**`openpaw/cron/scheduler.py`** - `CronScheduler` uses APScheduler to execute scheduled tasks. Each job builds a fresh agent instance, injects the cron prompt, and routes output to the configured channel. Also handles dynamic tasks from `CronTool`.
+**`openpaw/runtime/scheduling/cron.py`** - `CronScheduler` uses APScheduler to execute scheduled tasks. Each job builds a fresh agent instance, injects the cron prompt, and routes output to the configured channel. Also handles dynamic tasks from `CronTool`.
 
-**`openpaw/cron/dynamic.py`** - `DynamicCronStore` for persisting agent-scheduled tasks to workspace-local JSON. Includes `DynamicCronTask` dataclass and factory functions.
+**`openpaw/runtime/scheduling/dynamic_cron.py`** - `DynamicCronStore` for persisting agent-scheduled tasks to workspace-local JSON. Includes `DynamicCronTask` dataclass and factory functions.
 
-**`openpaw/heartbeat/scheduler.py`** - `HeartbeatScheduler` for proactive agent check-ins. Supports active hours, HEARTBEAT_OK suppression, configurable intervals, pre-flight skip (avoids LLM call when HEARTBEAT.md is empty and no active tasks), task summary injection into heartbeat prompt, and JSONL event logging with token metrics.
+**`openpaw/runtime/scheduling/heartbeat.py`** - `HeartbeatScheduler` for proactive agent check-ins. Supports active hours, HEARTBEAT_OK suppression, configurable intervals, pre-flight skip (avoids LLM call when HEARTBEAT.md is empty and no active tasks), task summary injection into heartbeat prompt, and JSONL event logging with token metrics.
 
 ### Agent Workspace Structure
 
@@ -260,9 +335,9 @@ model:
 
 Every agent invocation (user messages, cron jobs, heartbeats) logs token counts to `{workspace}/.openpaw/token_usage.jsonl`. The `/status` command displays tokens today and tokens this session.
 
-**Components**: `InvocationMetrics` (dataclass), `TokenUsageLogger` (thread-safe JSONL writer), `TokenUsageReader` (aggregation). All in `openpaw/core/metrics.py`.
+**Components**: `InvocationMetrics` (dataclass), `TokenUsageLogger` (thread-safe JSONL writer), `TokenUsageReader` (aggregation). All in `openpaw/agent/metrics.py`.
 
-**Integration**: `AgentRunner.run()` creates a `UsageMetadataCallbackHandler` per invocation. After completion, metrics are extracted via `extract_metrics_from_callback()` and exposed via `agent_runner.last_metrics`. `WorkspaceRunner`, `CronScheduler`, and `HeartbeatScheduler` pass the logger to record each invocation.
+**Integration**: `AgentRunner.run()` creates a `UsageMetadataCallbackHandler` per invocation. After completion, metrics are extracted via `extract_metrics_from_callback()` and exposed via `agent_runner.last_metrics`. `WorkspaceRunner` (message processor), `CronScheduler`, and `HeartbeatScheduler` pass the logger to record each invocation.
 
 ### Timezone Handling
 
@@ -528,7 +603,7 @@ heartbeat:
 
 ### Filesystem Access
 
-Agents have sandboxed filesystem access to their workspace directory via `FilesystemTools` (`openpaw/tools/filesystem.py`). Available operations: `ls`, `read_file`, `write_file`, `overwrite_file`, `edit_file`, `glob_files`, `grep_files`, `file_info`. Path traversal protection via `resolve_sandboxed_path()` in `openpaw/tools/sandbox.py`.
+Agents have sandboxed filesystem access to their workspace directory via `FilesystemTools` (`openpaw/agent/tools/filesystem.py`). Available operations: `ls`, `read_file`, `write_file`, `overwrite_file`, `edit_file`, `glob_files`, `grep_files`, `file_info`. Path traversal protection via `resolve_sandboxed_path()` in `openpaw/agent/tools/sandbox.py`.
 
 - `file_info`: Lightweight metadata (size, line count, binary detection, read strategy hints) without reading content
 - `grep_files`: Supports `context_lines` parameter for surrounding context (maps to ripgrep `-C`)
@@ -720,7 +795,7 @@ Framework commands are handled by `CommandRouter` before messages reach the agen
 
 **Adding Commands**: Extend `CommandHandler` ABC, implement `definition` property and `handle()` method, register in `get_framework_commands()`.
 
-**Command Flow**: `Channel._handle_command()` → `WorkspaceRunner._handle_inbound_message()` → `CommandRouter.route()` → `CommandHandler.handle()` → `CommandResult`
+**Command Flow**: `Channel._handle_command()` → `WorkspaceRunner._handle_inbound_message()` → `CommandRouter.route()` (from `openpaw/channels/commands/router.py`) → `CommandHandler.handle()` → `CommandResult`
 
 ### Channel Abstraction
 
@@ -729,7 +804,7 @@ Channels are created via the factory pattern in `openpaw/channels/factory.py`. `
 ```python
 # Adding a new channel provider:
 # 1. Create adapter extending ChannelAdapter in openpaw/channels/
-# 2. Register in create_channel() factory
+# 2. Register in create_channel() factory in openpaw/channels/factory.py
 # 3. Use channel type string in workspace config
 ```
 
