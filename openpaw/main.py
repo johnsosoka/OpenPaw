@@ -479,6 +479,7 @@ class WorkspaceRunner:
             command_router=self._command_router,
             workspace_timezone=self._workspace_timezone,
             conversation_archiver=self._conversation_archiver,
+            browser_builtin=self._get_browser_builtin(),
         )
 
     async def _handle_inbound_message(self, message: Message) -> None:
@@ -991,6 +992,14 @@ class WorkspaceRunner:
                 exc_info=True,
             )
 
+    def _get_browser_builtin(self) -> Any | None:
+        """Get the browser builtin instance if loaded.
+
+        Returns:
+            Browser builtin instance or None if not loaded.
+        """
+        return self._builtin_loader.get_tool_instance("browser")
+
     def _connect_send_message_tool(self, channel: Any, session_key: str) -> None:
         """Connect send_message tool to active session context.
 
@@ -1118,6 +1127,12 @@ class WorkspaceRunner:
         if self._subagent_runner:
             await self._subagent_runner.shutdown()
             self.logger.info("Stopped sub-agent runner")
+
+        # Close browser session if active
+        browser_builtin = self._get_browser_builtin()
+        if browser_builtin:
+            await browser_builtin.cleanup()
+            self.logger.info("Closed browser session")
 
         for name, channel in self._channels.items():
             await channel.stop()

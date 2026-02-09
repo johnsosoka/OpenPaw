@@ -147,6 +147,30 @@ class AgentWorkspace:
                 "status and get_subagent_result to retrieve their output."
             )
 
+        # Web browsing - include if browser is enabled
+        if enabled_builtins is None or "browser" in enabled_builtins:
+            sections.append(
+                "\n\n## Web Browsing\n\n"
+                "You have browser automation tools for web interaction. The primary workflow is: "
+                "navigate → snapshot → interact → re-snapshot.\n\n"
+                "**browser_snapshot is your primary page understanding tool.** It returns the page "
+                "content as a structured accessibility tree with text, headings, links, and "
+                "interactive elements — each tagged with numbered refs for interaction. This is "
+                "how you READ and UNDERSTAND web pages. Describe what you find in the snapshot "
+                "to the user.\n\n"
+                "**Do NOT send screenshots to users unless they specifically ask for a visual.** "
+                "Screenshots are expensive and don't help you navigate. Use browser_snapshot to "
+                "extract semantic content, then summarize it in text.\n\n"
+                "**Workflow:**\n"
+                "1. Navigate to a URL with browser_navigate\n"
+                "2. Read the page content with browser_snapshot (accessibility tree with refs)\n"
+                "3. Interact with elements using their ref numbers (browser_click, browser_type)\n"
+                "4. Re-snapshot after actions that change the page (refs are ephemeral)\n"
+                "5. Close the browser with browser_close when finished to free resources\n\n"
+                "Domain restrictions may apply based on workspace configuration. The browser "
+                "persists across tool calls until explicitly closed or conversation rotation."
+            )
+
         # Progress updates - include if send_message is enabled
         if enabled_builtins is None or "send_message" in enabled_builtins:
             sections.append(

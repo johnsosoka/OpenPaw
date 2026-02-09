@@ -164,6 +164,7 @@ class TestSubAgentRunnerShutdown:
         runner.logger = MagicMock()
         runner._archive_active_conversations = AsyncMock()
         runner._session_manager = MagicMock()
+        runner._get_browser_builtin = MagicMock(return_value=None)  # No browser loaded
 
         # Call stop using the real implementation
         from openpaw.main import WorkspaceRunner as RealRunner

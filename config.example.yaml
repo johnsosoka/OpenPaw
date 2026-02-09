@@ -80,6 +80,18 @@ builtins:
       voice_id: 21m00Tcm4TlvDq8ikWAM  # Default voice
       model_id: eleven_monolingual_v1
 
+  # Browser - web automation with Playwright
+  # Requires: playwright package (poetry add playwright)
+  #           playwright install chromium
+  # browser:
+  #   enabled: true
+  #   config:
+  #     headless: true                    # Run browser without GUI
+  #     allowed_domains: []               # Empty = allow all domains
+  #     blocked_domains: []               # Takes precedence over allowed
+  #     timeout_seconds: 30               # Default timeout for operations
+  #     persist_cookies: false            # Keep cookies across agent runs
+
 # Scheduled jobs (cron)
 cron_jobs: []
   # - name: daily-summary
