@@ -62,6 +62,14 @@ class NewCommand(CommandHandler):
             except Exception as e:
                 logger.warning(f"Failed to archive conversation {old_conv_id}: {e}")
 
+        # Close browser session if active (conversation context changing)
+        if context.browser_builtin:
+            try:
+                await context.browser_builtin.cleanup()
+                logger.debug("Closed browser session on conversation rotation")
+            except Exception as e:
+                logger.warning(f"Failed to close browser on /new: {e}")
+
         # Rotate to new conversation
         context.session_manager.new_conversation(message.session_key)
         new_thread_id = context.session_manager.get_thread_id(message.session_key)

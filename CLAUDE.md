@@ -121,6 +121,8 @@ Each workspace is fully isolated with its own channels, queue, agent runner, and
 
 **`openpaw/builtins/processors/file_persistence.py`** - `FilePersistenceProcessor` saves all uploaded files to `uploads/{YYYY-MM-DD}/` with date partitioning. Sets `attachment.saved_path` for downstream processors.
 
+**`openpaw/builtins/tools/browser.py`** - `BrowserToolBuiltin` provides Playwright-based web automation with accessibility tree navigation. Agents interact with pages via numeric element references instead of selectors. Lazy initialization creates browser instances per session, with lifecycle management tied to conversation resets and workspace shutdown.
+
 **`openpaw/cron/scheduler.py`** - `CronScheduler` uses APScheduler to execute scheduled tasks. Each job builds a fresh agent instance, injects the cron prompt, and routes output to the configured channel. Also handles dynamic tasks from `CronTool`.
 
 **`openpaw/cron/dynamic.py`** - `DynamicCronStore` for persisting agent-scheduled tasks to workspace-local JSON. Includes `DynamicCronTask` dataclass and factory functions.
@@ -148,6 +150,8 @@ agent_workspaces/<name>/
 │       ├── report.md         # Docling-converted markdown (sibling)
 │       ├── voice_123.ogg     # Original audio file
 │       └── voice_123.txt     # Whisper transcript (sibling)
+├── downloads/    # Browser-downloaded files (from browser builtin)
+├── screenshots/  # Browser screenshots (from browser_screenshot)
 ├── heartbeat_log.jsonl   # Heartbeat event log (outcomes, metrics, task counts)
 ├── memory/
 │   └── conversations/    # Archived conversation exports
@@ -346,6 +350,65 @@ builtins:
 - Agent calls `schedule_at` with timestamp 10 minutes from now
 - Task fires, agent sends reminder to user's chat
 
+### Web Browsing
+
+Agents can interact with websites via Playwright-based browser automation. The browser builtin provides accessibility tree snapshots where elements are numbered, allowing agents to reference elements by numeric ID instead of writing CSS selectors.
+
+**Available Tools**:
+- `browser_navigate` - Navigate to a URL (respects domain allowlist/blocklist)
+- `browser_snapshot` - Get current page state as numbered accessibility tree
+- `browser_click` - Click an element by numeric reference
+- `browser_type` - Type text into an input field by numeric reference
+- `browser_select` - Select dropdown option by numeric reference
+- `browser_scroll` - Scroll the page (up/down/top/bottom)
+- `browser_back` - Navigate back in browser history
+- `browser_screenshot` - Capture page screenshot (saved to `screenshots/`)
+- `browser_close` - Close current page/tab
+- `browser_tabs` - List all open tabs
+- `browser_switch_tab` - Switch to a different tab by index
+
+**Security Model**: Domain allowlist and blocklist prevent unauthorized navigation. If `allowed_domains` is non-empty, only those domains (and subdomains with `*.` prefix) are permitted. The `blocked_domains` list takes precedence and denies specific domains even if allowed by the allowlist.
+
+**Lifecycle**: Browser instances are lazily initialized (no browser created until first use). Each session gets its own browser context. Browsers are automatically cleaned up on `/new`, `/compact`, and workspace shutdown.
+
+**Cookie Persistence**: When `persist_cookies: true`, authentication state and cookies survive across agent runs within the same session. Cookies are cleared on conversation reset.
+
+**Downloads**: Files downloaded by the browser are saved to `{workspace}/downloads/` with sanitized filenames. Agents can access downloaded files via filesystem tools.
+
+**Screenshots**: Page screenshots are saved to `{workspace}/screenshots/` with sanitized filenames and returned as relative paths for agent reference.
+
+**Configuration** (optional, in `agent.yaml` or global config):
+
+```yaml
+builtins:
+  browser:
+    enabled: true
+    config:
+      headless: true                # Run browser without GUI
+      allowed_domains:              # Allowlist (empty = allow all)
+        - "calendly.com"
+        - "*.google.com"            # Subdomain wildcard
+      blocked_domains: []           # Blocklist (takes precedence)
+      timeout_seconds: 30           # Default timeout for operations
+      persist_cookies: false        # Persist cookies across agent runs
+      downloads_dir: "downloads"    # Where to save downloaded files
+      screenshots_dir: "screenshots"  # Where to save screenshots
+```
+
+**Prerequisites**: Requires optional `playwright` package and browser installation:
+
+```bash
+poetry add playwright
+poetry run playwright install chromium
+```
+
+**Example Usage** (by agent):
+- User: "Book a meeting on my Calendly for tomorrow at 2pm"
+- Agent calls `browser_navigate("https://calendly.com/myaccount")`
+- Agent calls `browser_snapshot()` to see page elements
+- Agent calls `browser_click(42)` to click the "Schedule" button (element #42)
+- Agent fills in meeting details and confirms booking
+
 ### Sub-Agent Spawning
 
 Agents can spawn background workers for concurrent task execution using the `spawn` builtin. Sub-agents run in isolated contexts with filtered tools to prevent recursion and unsolicited messaging.
@@ -534,6 +597,7 @@ OpenPaw provides optional built-in capabilities that are conditionally available
 - `task_tracker` - Task management via TASKS.yaml for persistent cross-session work tracking (no API key required)
 - `send_file` - Send workspace files to users (no API key required)
 - `spawn` - Sub-agent spawning for background tasks (no API key required, see "Sub-Agent Spawning" section)
+- `browser` - Web automation via Playwright with accessibility tree navigation (requires `playwright` package, see "Web Browsing" section)
 
 **Processors** - Channel-layer message transformers:
 - `file_persistence` - Saves all uploaded files to workspace uploads/ directory (no API key required)
@@ -551,6 +615,7 @@ builtins/
 │   ├── elevenlabs_tts.py
 │   ├── cron.py       # Agent self-scheduling
 │   ├── spawn.py      # Sub-agent spawning (spawn_agent, list, get_result, cancel)
+│   ├── browser.py    # Web automation with Playwright + accessibility tree
 │   ├── _channel_context.py # Shared contextvars for channel/session state
 │   ├── send_message.py  # Mid-execution messaging
 │   ├── send_file.py     # Send workspace files to users

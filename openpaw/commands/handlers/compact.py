@@ -93,11 +93,19 @@ class CompactCommand(CommandHandler):
             except Exception as e:
                 logger.warning(f"Failed to archive conversation {old_conv_id}: {e}")
 
-        # Step 3: Rotate to new conversation
+        # Step 3: Close browser session if active (conversation context changing)
+        if context.browser_builtin:
+            try:
+                await context.browser_builtin.cleanup()
+                logger.debug("Closed browser session on conversation compaction")
+            except Exception as e:
+                logger.warning(f"Failed to close browser on /compact: {e}")
+
+        # Step 4: Rotate to new conversation
         context.session_manager.new_conversation(message.session_key)
         new_thread_id = context.session_manager.get_thread_id(message.session_key)
 
-        # Step 4: Inject summary into new thread as first message
+        # Step 5: Inject summary into new thread as first message
         if summary:
             try:
                 injection_prompt = (
