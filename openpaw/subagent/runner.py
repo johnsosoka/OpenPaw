@@ -272,6 +272,17 @@ class SubAgentRunner:
                 try:
                     async with asyncio.timeout(request.timeout_minutes * 60):
                         response = await runner.run(message=request.task)
+
+                    # Check if we were cancelled during execution
+                    # (cancel() sets status to CANCELLED before task.cancel())
+                    current_request = self._store.get(request.id)
+                    if current_request and current_request.status == SubAgentStatus.CANCELLED:
+                        logger.info(
+                            f"Sub-agent {request.id} completed but was cancelled - "
+                            "discarding result"
+                        )
+                        return  # Don't save result or send notification
+
                 except TimeoutError:
                     # Handle timeout
                     duration_ms = (time.monotonic() - start_time) * 1000
