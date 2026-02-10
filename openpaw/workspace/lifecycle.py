@@ -69,47 +69,65 @@ class LifecycleManager:
     async def setup_channels(self) -> dict[str, ChannelAdapter]:
         """Initialize configured channels via factory.
 
+        Supports both 'channels' (list) and 'channel' (single, backward compat).
+
         Returns:
             Dictionary of initialized channels.
 
         Raises:
             ValueError: If channel configuration is invalid.
         """
-        workspace_channel = self._merged_config.get("channel", {})
-        if not workspace_channel:
-            raise ValueError(
-                f"Workspace '{self._workspace_name}' must define channel configuration in agent.yaml"
-            )
+        # Support both 'channels' (list) and 'channel' (single, backward compat)
+        channel_configs = self._merged_config.get("channels")
+        if not channel_configs:
+            single_channel = self._merged_config.get("channel", {})
+            if not single_channel:
+                raise ValueError(
+                    f"Workspace '{self._workspace_name}' must define channel or channels in agent.yaml"
+                )
+            channel_configs = [single_channel]
 
-        channel_type = workspace_channel.get("type", "telegram")
-        token = workspace_channel.get("token")
-        if not token:
-            raise ValueError(
-                f"Workspace '{self._workspace_name}' must define channel.token in agent.yaml"
-            )
+        for channel_config in channel_configs:
+            channel_type = channel_config.get("type", "telegram")
+            token = channel_config.get("token")
+            if not token:
+                raise ValueError(
+                    f"Workspace '{self._workspace_name}': {channel_type} channel requires a token"
+                )
 
-        channel = create_channel(channel_type, workspace_channel, self._workspace_name)
-        channel.on_message(self._message_handler)
-        self._channels[channel_type] = channel
-        await self._queue_manager.register_handler(channel_type, self._queue_handler)
+            # Slack-specific validation: Socket Mode requires app_token
+            if channel_type == "slack":
+                app_token = channel_config.get("app_token")
+                if not app_token:
+                    raise ValueError(
+                        f"Workspace '{self._workspace_name}': Slack channel requires app_token for Socket Mode"
+                    )
 
-        # Log security mode
-        allow_all = workspace_channel.get("allow_all", False)
-        allowed_users = workspace_channel.get("allowed_users", [])
-        allowed_groups = workspace_channel.get("allowed_groups", [])
-        if allow_all:
-            self._logger.warning(f"Workspace '{self._workspace_name}': allow_all=true (insecure mode)")
-        elif allowed_users or allowed_groups:
-            self._logger.info(
-                f"Workspace '{self._workspace_name}': Allowlist mode "
-                f"({len(allowed_users)} users, {len(allowed_groups)} groups)"
-            )
-        else:
-            self._logger.warning(
-                f"Workspace '{self._workspace_name}': Empty allowlist - all requests will be denied"
-            )
+            channel = create_channel(channel_type, channel_config, self._workspace_name)
+            channel.on_message(self._message_handler)
+            self._channels[channel_type] = channel
+            await self._queue_manager.register_handler(channel_type, self._queue_handler)
 
-        self._logger.info(f"Initialized {channel_type} channel for workspace: {self._workspace_name}")
+            # Log security mode
+            allow_all = channel_config.get("allow_all", False)
+            allowed_users = channel_config.get("allowed_users", [])
+            allowed_groups = channel_config.get("allowed_groups", [])
+            if allow_all:
+                self._logger.warning(
+                    f"Workspace '{self._workspace_name}': {channel_type} allow_all=true (insecure mode)"
+                )
+            elif allowed_users or allowed_groups:
+                self._logger.info(
+                    f"Workspace '{self._workspace_name}': {channel_type} allowlist "
+                    f"({len(allowed_users)} users, {len(allowed_groups)} groups)"
+                )
+            else:
+                self._logger.warning(
+                    f"Workspace '{self._workspace_name}': {channel_type} empty allowlist - all requests denied"
+                )
+
+            self._logger.info(f"Initialized {channel_type} channel for workspace: {self._workspace_name}")
+
         return self._channels
 
     async def start_channels(self) -> None:

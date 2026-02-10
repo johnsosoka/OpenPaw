@@ -36,4 +36,24 @@ def create_channel(
             allow_all=config.get("allow_all", False),
             workspace_name=workspace_name,
         )
+    elif channel_type == "slack":
+        from openpaw.channels.slack import SlackChannel
+
+        # Validate required tokens
+        bot_token = config.get("token")
+        app_token = config.get("app_token")
+        if not bot_token:
+            raise ValueError(f"Workspace '{workspace_name}' missing required channel.token for Slack")
+        if not app_token:
+            raise ValueError(f"Workspace '{workspace_name}' missing required channel.app_token for Slack")
+
+        return SlackChannel(
+            bot_token=bot_token,
+            app_token=app_token,
+            signing_secret=config.get("signing_secret"),
+            allowed_users=config.get("allowed_users", []),
+            allowed_channels=config.get("allowed_channels", []),
+            allow_all=config.get("allow_all", False),
+            workspace_name=workspace_name,
+        )
     raise ValueError(f"Unsupported channel type: {channel_type}")

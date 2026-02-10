@@ -32,6 +32,14 @@ channels:
     allowed_users: []   # Empty = allow all (list of user IDs)
     allowed_groups: []  # Empty = allow all (list of group IDs)
 
+  # Slack (Socket Mode - no public URL needed)
+  # slack:
+  #   token: null              # Bot token (xoxb-...) or use ${SLACK_BOT_TOKEN}
+  #   app_token: null          # App-level token (xapp-...) for Socket Mode
+  #   signing_secret: null     # Signing secret (optional for Socket Mode)
+  #   allowed_users: []        # Slack user IDs (e.g., ["U0ABC123DEF"])
+  #   allowed_channels: []     # Slack channel IDs (e.g., ["C0XYZ789ABC"])
+
 # Agent defaults
 agent:
   # Model format: provider:model_id
@@ -46,6 +54,16 @@ agent:
 # Per-workspace configuration is set in agent_workspaces/<name>/agent.yaml
 # Available workspace settings include:
 #   timezone: America/Denver  # IANA timezone for cron, heartbeat, display (default: UTC)
+#
+# Per-workspace Slack configuration (agent.yaml):
+# channel:
+#   type: slack
+#   token: ${SLACK_BOT_TOKEN}
+#   app_token: ${SLACK_APP_TOKEN}
+#   allowed_users:
+#     - U0ABC123DEF
+#   allowed_channels:
+#     - C0XYZ789ABC
 
 # Builtin capabilities
 # Builtins are conditionally available based on API keys in environment

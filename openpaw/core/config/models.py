@@ -78,9 +78,20 @@ class WorkspaceChannelConfig(BaseModel):
 
     type: str | None = Field(default=None, description="Channel type (telegram, slack, etc.)")
     token: str | None = Field(default=None, description="Channel bot token")
-    allowed_users: list[int] = Field(default_factory=list, description="Allowed user IDs")
-    allowed_groups: list[int] = Field(default_factory=list, description="Allowed group IDs")
+    allowed_users: list[int | str] = Field(
+        default_factory=list, description="Allowed user IDs"
+    )
+    allowed_groups: list[int | str] = Field(
+        default_factory=list, description="Allowed group IDs"
+    )
     allow_all: bool = Field(default=False, description="Allow all users (insecure, use with caution)")
+
+    # Slack-specific fields
+    app_token: str | None = Field(default=None, description="Slack Socket Mode app token (xapp-...)")
+    signing_secret: str | None = Field(default=None, description="Slack signing secret")
+    allowed_channels: list[str] = Field(
+        default_factory=list, description="Slack channel allowlist"
+    )
 
     model_config = {"extra": "allow"}
 
@@ -216,7 +227,9 @@ class HeartbeatConfig(BaseModel):
     )
     suppress_ok: bool = Field(default=True, description="Suppress HEARTBEAT_OK responses from channel")
     target_channel: str = Field(default="telegram", description="Channel to route heartbeat responses")
-    target_chat_id: int | None = Field(default=None, description="Default chat ID for heartbeat output")
+    target_chat_id: int | str | None = Field(
+        default=None, description="Chat ID for heartbeat output"
+    )
 
 
 class ToolApprovalConfig(BaseModel):

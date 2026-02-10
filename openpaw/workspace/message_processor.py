@@ -57,6 +57,47 @@ class MessageProcessor:
         self._token_logger = token_logger
         self._logger = logger
 
+    def _build_combined_content(self, messages: list[Message]) -> str:
+        """Build combined content from messages with multi-user attribution.
+
+        When multiple users contribute to a message batch, each message is prefixed
+        with the user's display name. System messages are never attributed.
+
+        Args:
+            messages: List of messages to combine.
+
+        Returns:
+            Combined content string with optional user attribution.
+        """
+        if not messages:
+            return ""
+
+        # Count unique non-system users
+        unique_users = {
+            m.user_id for m in messages if m.user_id != "system"
+        }
+
+        # Single user batch (or all system messages) - no attribution
+        if len(unique_users) <= 1:
+            return "\n".join(m.content for m in messages)
+
+        # Multi-user batch - add attribution
+        formatted_messages = []
+        for msg in messages:
+            # System messages are never attributed
+            if msg.user_id == "system":
+                formatted_messages.append(msg.content)
+            else:
+                # Resolve display name from metadata fallback chain
+                display_name = (
+                    msg.metadata.get("first_name")
+                    or msg.metadata.get("username")
+                    or msg.user_id
+                )
+                formatted_messages.append(f"[{display_name}]: {msg.content}")
+
+        return "\n".join(formatted_messages)
+
     async def process_messages(
         self,
         session_key: str,
@@ -70,7 +111,7 @@ class MessageProcessor:
             messages: List of messages to process.
             channel: Channel adapter for sending responses.
         """
-        combined_content = "\n".join(m.content for m in messages)
+        combined_content = self._build_combined_content(messages)
         thread_id = self._session_manager.get_thread_id(session_key)
         followup_depth = 0
         max_followup_depth = 5
@@ -219,13 +260,23 @@ class MessageProcessor:
                 # Use the pending messages as the new input
                 pending_msgs = e.pending_messages
                 if pending_msgs:
-                    new_contents = []
+                    extracted_messages = []
                     for _channel_name, msg in pending_msgs:
                         if hasattr(msg, 'content'):
-                            new_contents.append(msg.content)
+                            extracted_messages.append(msg)
                         else:
-                            new_contents.append(str(msg))
-                    combined_content = "\n".join(new_contents)
+                            # Fallback for non-Message objects
+                            from openpaw.channels.base import Message as BaseMessage
+                            extracted_messages.append(
+                                BaseMessage(
+                                    id="unknown",
+                                    channel="unknown",
+                                    session_key=session_key,
+                                    user_id="unknown",
+                                    content=str(msg),
+                                )
+                            )
+                    combined_content = self._build_combined_content(extracted_messages)
 
                 followup_depth = 0  # Reset followup depth on interrupt
                 continue  # Re-enter loop with new message
@@ -244,13 +295,23 @@ class MessageProcessor:
 
             # Check steer (captured before reset)
             if steered and steer_messages:
-                new_contents = []
+                extracted_messages = []
                 for _channel_name, msg in steer_messages:
                     if hasattr(msg, 'content'):
-                        new_contents.append(msg.content)
+                        extracted_messages.append(msg)
                     else:
-                        new_contents.append(str(msg))
-                combined_content = "\n".join(new_contents)
+                        # Fallback for non-Message objects
+                        from openpaw.channels.base import Message as BaseMessage
+                        extracted_messages.append(
+                            BaseMessage(
+                                id="unknown",
+                                channel="unknown",
+                                session_key=session_key,
+                                user_id="unknown",
+                                content=str(msg),
+                            )
+                        )
+                combined_content = self._build_combined_content(extracted_messages)
                 followup_depth = 0  # Reset followup depth on steer
                 self._logger.info(f"Steer redirect: processing {len(steer_messages)} new message(s)")
                 continue

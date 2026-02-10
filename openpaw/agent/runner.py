@@ -19,7 +19,13 @@ from openpaw.workspace.loader import AgentWorkspace
 logger = logging.getLogger(__name__)
 
 # Models known to produce thinking tokens
-THINKING_MODELS = ["moonshot.kimi-k2-thinking", "moonshotai.kimi-k2.5", "kimi-k2-thinking", "kimi-thinking", "kimi-k2.5"]
+THINKING_MODELS = [
+    "moonshot.kimi-k2-thinking",
+    "moonshotai.kimi-k2.5",
+    "kimi-k2-thinking",
+    "kimi-thinking",
+    "kimi-k2.5",
+]
 
 # Bedrock tool name validation pattern (AWS requirement)
 BEDROCK_TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -71,6 +77,7 @@ class AgentRunner:
         enabled_builtins: list[str] | None = None,
         extra_model_kwargs: dict[str, Any] | None = None,
         middleware: list[Any] | None = None,
+        has_group_sessions: bool = False,
     ):
         """Initialize the agent runner.
 
@@ -90,6 +97,7 @@ class AgentRunner:
                 (e.g., base_url for OpenAI-compatible APIs).
             middleware: Optional list of middleware functions for tool execution
                 (e.g., queue-aware middleware for steer/interrupt modes).
+            has_group_sessions: Whether workspace may be accessed from group conversations.
         """
         self.workspace = workspace
         self.model_id = model
@@ -104,6 +112,7 @@ class AgentRunner:
         self.enabled_builtins = enabled_builtins
         self.extra_model_kwargs = extra_model_kwargs or {}
         self._middleware = middleware or []
+        self._has_group_sessions = has_group_sessions
 
         # Token usage tracking (populated after each run)
         self._last_metrics: InvocationMetrics | None = None
@@ -278,7 +287,10 @@ class AgentRunner:
             self._validate_tool_names(all_tools)
 
         # 5. Get system prompt from workspace
-        system_prompt = self.workspace.build_system_prompt(enabled_builtins=self.enabled_builtins)
+        system_prompt = self.workspace.build_system_prompt(
+            enabled_builtins=self.enabled_builtins,
+            has_group_sessions=self._has_group_sessions,
+        )
 
         # 6. Call create_agent (successor to create_react_agent)
         # Note: create_agent handles tool binding internally - do NOT pre-bind

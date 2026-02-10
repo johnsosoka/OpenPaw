@@ -29,7 +29,11 @@ class AgentWorkspace:
     config: "WorkspaceConfig | None" = None
     crons: "list[CronDefinition]" = field(default_factory=list)
 
-    def build_system_prompt(self, enabled_builtins: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self,
+        enabled_builtins: list[str] | None = None,
+        has_group_sessions: bool = False,
+    ) -> str:
         """Stitch together workspace files into a system prompt.
 
         The prompt structure follows DeepAgents conventions with clear sections.
@@ -39,6 +43,8 @@ class AgentWorkspace:
             enabled_builtins: List of enabled builtin names. Used to conditionally
                 include framework capabilities (task_tracker, cron, followup, etc.).
                 If None (default), all capabilities are included for backward compat.
+            has_group_sessions: Whether this workspace may be accessed from group/channel
+                conversations. When True, includes session privacy warnings.
 
         Returns:
             String containing workspace prompt sections and framework orientation.
@@ -55,7 +61,7 @@ class AgentWorkspace:
             sections.append(f"<user>\n{self.user_md.strip()}\n</user>")
 
         # Framework orientation comes before heartbeat
-        framework_context = self._build_framework_context(enabled_builtins)
+        framework_context = self._build_framework_context(enabled_builtins, has_group_sessions)
         if framework_context:
             sections.append(f"<framework>\n{framework_context}\n</framework>")
 
@@ -64,7 +70,11 @@ class AgentWorkspace:
 
         return "\n\n".join(sections)
 
-    def _build_framework_context(self, enabled_builtins: list[str] | None) -> str:
+    def _build_framework_context(
+        self,
+        enabled_builtins: list[str] | None,
+        has_group_sessions: bool = False,
+    ) -> str:
         """Build the framework orientation section for the system prompt.
 
         This explains how the agent exists within the OpenPaw framework and what
@@ -72,6 +82,7 @@ class AgentWorkspace:
 
         Args:
             enabled_builtins: List of enabled builtin names, or None to include all.
+            has_group_sessions: Whether workspace may be accessed from group conversations.
 
         Returns:
             Formatted framework context with conditional capability descriptions.
@@ -239,6 +250,21 @@ class AgentWorkspace:
             "You can read these archives with your filesystem tools to reference past interactions. "
             "Use /new to start a fresh conversation when the current topic is complete."
         )
+
+        # Session privacy - include if workspace may have group sessions
+        if has_group_sessions:
+            sections.append(
+                "\n\n## Session Privacy\n\n"
+                "This workspace may be accessed from both private (DM) and group/channel "
+                "conversations. Each conversation has its own isolated history—you do NOT "
+                "carry conversational context between sessions. However, your workspace files "
+                "(TASKS.yaml, notes, uploaded files, etc.) are shared across ALL sessions.\n\n"
+                "**Important:** When a user shares sensitive information in a private DM, do NOT "
+                "write it to workspace files unless they explicitly ask you to. Information in "
+                "workspace files is accessible from any session, including group conversations.\n\n"
+                "When messages are attributed (e.g., '[Anna]: message'), address the appropriate "
+                "user by name. Maintain awareness of who asked what."
+            )
 
         return "".join(sections)
 

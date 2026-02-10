@@ -128,7 +128,7 @@ openpaw/
 
 **`openpaw/workspace/runner.py`** - `WorkspaceRunner` manages a single workspace: loads workspace config, merges with global config, initializes queue system, sets up channels via factory, manages `AsyncSqliteSaver` lifecycle, wires command routing, schedules crons, and runs the message loop.
 
-**`openpaw/workspace/message_processor.py`** - Core message processing loop. Handles queue modes (collect, steer, interrupt), invokes agent, manages approval gates, and processes system events.
+**`openpaw/workspace/message_processor.py`** - Core message processing loop. Handles queue modes (collect, steer, interrupt), invokes agent, manages approval gates, processes system events, and implements multi-user attribution (prefixes messages with display names when multiple users contribute to a batch).
 
 **`openpaw/workspace/agent_factory.py`** - Agent creation with middleware wiring. Composes queue-aware and approval middleware, configures builtins, and initializes checkpointer.
 
@@ -142,7 +142,7 @@ openpaw/
 
 **`openpaw/core/config/loader.py`** - Configuration loading and merging. Discovers workspace directories, loads global and per-workspace config, and performs deep merge.
 
-**`openpaw/workspace/loader.py`** - Loads agent "workspaces" from `agent_workspaces/<name>/`. Each workspace requires: `AGENT.md`, `USER.md`, `SOUL.md`, `HEARTBEAT.md`. Optional `agent.yaml` and `crons/*.yaml` are loaded if present. These are combined into XML-tagged sections for the system prompt.
+**`openpaw/workspace/loader.py`** - Loads agent "workspaces" from `agent_workspaces/<name>/`. Each workspace requires: `AGENT.md`, `USER.md`, `SOUL.md`, `HEARTBEAT.md`. Optional `agent.yaml` and `crons/*.yaml` are loaded if present. These are combined into XML-tagged sections for the system prompt. Conditionally injects session privacy warnings when workspace has `allowed_groups` or `allowed_channels` configured.
 
 **`openpaw/workspace/tool_loader.py`** - Dynamically loads LangChain tools from workspace `tools/` directories. Imports Python files and extracts `@tool` decorated functions (BaseTool instances).
 
@@ -164,7 +164,9 @@ openpaw/
 
 **`openpaw/channels/telegram.py`** - Telegram bot adapter using `python-telegram-bot`. Converts platform messages to unified `Message` format, handles allowlisting, and supports voice/audio messages, documents, and photo uploads.
 
-**`openpaw/channels/factory.py`** - Channel factory. Decouples `WorkspaceRunner` from concrete channel types via `create_channel(channel_type, config, workspace_name)`. Currently supports `telegram`; new providers register here.
+**`openpaw/channels/slack.py`** - Slack channel adapter using `slack_bolt` and Socket Mode. Handles @mention activation in channels/groups, DM processing, file upload/download via `files_upload_v2`, Block Kit approval buttons, user display name caching, and ephemeral unauthorized responses. Uses `aiohttp` for file downloads with bot token authorization.
+
+**`openpaw/channels/factory.py`** - Channel factory. Decouples `WorkspaceRunner` from concrete channel types via `create_channel(channel_type, config, workspace_name)`. Currently supports `telegram` and `slack`; new providers register here.
 
 **`openpaw/runtime/session/manager.py`** - `SessionManager` for tracking conversation threads per session. Thread-safe JSON persistence at `{workspace}/.openpaw/sessions.json`. Provides `get_thread_id()`, `new_conversation()`, `get_state()`, `increment_message_count()`.
 
@@ -266,6 +268,16 @@ channel:
   allowed_users: []
   allowed_groups: []
 
+# Or Slack:
+channel:
+  type: slack
+  token: ${SLACK_BOT_TOKEN}
+  app_token: ${SLACK_APP_TOKEN}
+  allowed_users:
+    - U0ABC123DEF
+  allowed_channels:
+    - C0XYZ789ABC
+
 queue:
   mode: collect
   debounce_ms: 1000
@@ -274,6 +286,51 @@ queue:
 **Environment Variables**: Use `${VAR_NAME}` syntax for secrets and dynamic values. OpenPaw expands these from environment at load time.
 
 **Config Merging**: Workspace settings deep-merge over global config. Missing fields inherit from global, present fields override.
+
+#### Slack Channel Configuration
+
+OpenPaw supports Slack workspaces via Socket Mode (no public URL required). Slack configuration requires bot and app-level tokens with appropriate scopes.
+
+**Per-workspace (`agent.yaml`)**:
+
+```yaml
+channel:
+  type: slack
+  token: ${SLACK_BOT_TOKEN}        # Bot user OAuth token (xoxb-...)
+  app_token: ${SLACK_APP_TOKEN}    # Socket Mode app token (xapp-...)
+  allowed_users:                   # Slack user IDs (not @usernames)
+    - U0ABC123DEF
+  allowed_channels:                # Channel IDs (empty = all channels allowed)
+    - C0XYZ789ABC
+```
+
+**Required Bot Token Scopes** (`OAuth & Permissions` in Slack app config):
+- `chat:write` - Send messages
+- `files:read` - Read uploaded files
+- `files:write` - Send files to users
+- `users:read` - Fetch user display names
+- `app_mentions:read` - Receive @mentions in channels
+- `channels:history` - Read messages in public channels
+- `groups:history` - Read messages in private channels
+- `im:history` - Read DM messages
+- `im:read` - Access DM metadata
+- `im:write` - Send DMs
+
+**Event Subscriptions** (`Event Subscriptions` in Slack app config):
+- `message.im` - Direct messages
+- `message.channels` - Public channel messages
+- `message.groups` - Private channel messages
+- `app_mention` - @mentions in channels
+
+**Behavior**:
+- **DMs**: Always process (no @mention required)
+- **Channels/Groups**: Only process messages containing @mention of the bot
+- **Access Control**: User must be in `allowed_users` list; if `allowed_channels` is non-empty, channel must also be in the list
+- **Unauthorized Users**: Receive ephemeral message with their user/channel IDs and instructions for adding to allowlist
+- **File Uploads**: Files are downloaded via `url_private_download` with bot token authorization
+- **Approval Gates**: Block Kit interactive buttons (Approve/Deny) update original message on response
+
+**Socket Mode**: Eliminates need for public webhook URL. App-level token (`xapp-...`) enables real-time event delivery over WebSocket connection.
 
 #### AWS Bedrock Configuration
 
@@ -519,6 +576,24 @@ builtins:
 - Agent calls `spawn_agent(task="Research topic X...", label="research-x")`
 - Sub-agent runs concurrently, agent continues working on Y
 - When complete, user receives notification with result summary
+
+### Multi-User Support
+
+When multiple users contribute to a message batch (e.g., rapid-fire messages in a Slack channel), OpenPaw automatically attributes messages to their senders using display name prefixes.
+
+**Attribution Behavior**:
+- **Single-user batches**: No attribution. Messages are combined as plain text: `"message1\nmessage2"`.
+- **Multi-user batches**: Each message prefixed with display name: `"[Alice]: message1\n[Bob]: message2"`.
+- **System messages**: Never attributed, always appear as plain text regardless of batch composition.
+
+**Display Name Resolution** (fallback chain):
+1. `metadata.first_name` (Slack display_name, Telegram first name)
+2. `metadata.username` (platform username)
+3. `user_id` (Slack user ID, Telegram numeric ID)
+
+**When It Activates**: Attribution triggers when `len(unique_users) > 1` (excluding `user_id="system"`). Implemented in `MessageProcessor._build_combined_content()`.
+
+**Use Case**: Enables agents to respond appropriately in group conversations by knowing who said what, improving context awareness in multi-user sessions.
 
 ### Queue-Aware Tool Middleware
 
@@ -778,6 +853,7 @@ Agents automatically receive a dynamic system prompt section (`<framework>`) exp
 - **Progress Updates**: If `send_message` enabled — mid-execution user communication
 - **File Sharing**: If `send_file` enabled — sending workspace files to users
 - **Self-Scheduling**: If `cron` enabled — future action scheduling
+- **Session Privacy**: If workspace has `allowed_groups` or `allowed_channels` — multi-session file sharing warnings, DM vs group context isolation
 
 This explains HOW the agent exists in the framework (philosophy), not WHAT tools are available (LangChain handles that).
 
@@ -799,7 +875,7 @@ Framework commands are handled by `CommandRouter` before messages reach the agen
 
 ### Channel Abstraction
 
-Channels are created via the factory pattern in `openpaw/channels/factory.py`. `WorkspaceRunner` is fully decoupled from concrete channel types.
+Channels are created via the factory pattern in `openpaw/channels/factory.py`. `WorkspaceRunner` is fully decoupled from concrete channel types. Both Telegram and Slack are currently supported.
 
 ```python
 # Adding a new channel provider:

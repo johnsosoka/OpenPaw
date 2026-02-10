@@ -192,6 +192,18 @@ class WorkspaceRunner:
         if self._approval_manager:
             middlewares.append(self._approval_middleware.get_middleware())
 
+        # Detect if workspace may be used in group/public contexts
+        # Check across all configured channels
+        channel_configs = self._merged_config.get("channels")
+        if not channel_configs:
+            single = self._merged_config.get("channel", {})
+            channel_configs = [single] if single else []
+
+        has_group_sessions = any(
+            cc.get("allowed_groups") or cc.get("allowed_channels")
+            for cc in channel_configs
+        )
+
         # Create agent factory
         self._agent_factory = AgentFactory(
             workspace=self._workspace,
@@ -206,6 +218,7 @@ class WorkspaceRunner:
             enabled_builtin_names=self._enabled_builtin_names,
             extra_model_kwargs=extra_model_kwargs,
             middleware=middlewares,
+            has_group_sessions=has_group_sessions,
             logger=self.logger,
         )
 

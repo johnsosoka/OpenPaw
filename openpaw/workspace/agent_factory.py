@@ -25,6 +25,7 @@ class AgentFactory:
         enabled_builtin_names: list[str],
         extra_model_kwargs: dict[str, Any],
         middleware: list[Any],
+        has_group_sessions: bool,
         logger: logging.Logger,
     ):
         """Initialize agent factory.
@@ -42,6 +43,7 @@ class AgentFactory:
             enabled_builtin_names: Names of enabled builtins.
             extra_model_kwargs: Additional model parameters.
             middleware: List of middleware instances.
+            has_group_sessions: Whether workspace may be accessed from group conversations.
             logger: Logger instance.
         """
         self._workspace = workspace
@@ -56,6 +58,7 @@ class AgentFactory:
         self._enabled_builtin_names = enabled_builtin_names
         self._extra_model_kwargs = extra_model_kwargs
         self._middleware = middleware
+        self._has_group_sessions = has_group_sessions
         self._logger = logger
 
     def create_agent(self, checkpointer: Any | None = None) -> AgentRunner:
@@ -82,6 +85,7 @@ class AgentFactory:
             enabled_builtins=self._enabled_builtin_names,
             extra_model_kwargs=self._extra_model_kwargs,
             middleware=self._middleware,
+            has_group_sessions=self._has_group_sessions,
         )
 
     def create_stateless_agent(self) -> AgentRunner:
@@ -105,6 +109,7 @@ class AgentFactory:
             enabled_builtins=self._enabled_builtin_names,
             extra_model_kwargs=self._extra_model_kwargs,
             middleware=[],  # No middleware for stateless agents
+            has_group_sessions=self._has_group_sessions,
         )
 
     def get_agent_factory_closure(self) -> Callable[[], AgentRunner]:

@@ -1,5 +1,7 @@
 """Tests for channel factory."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from openpaw.channels.base import ChannelAdapter
@@ -55,6 +57,60 @@ def test_create_telegram_channel_empty_allowlists() -> None:
     assert channel.allow_all is False
 
 
+def test_create_slack_channel() -> None:
+    """Test creating a Slack channel via factory."""
+    with patch("openpaw.channels.slack.SlackChannel") as mock_slack_cls:
+        mock_instance = MagicMock()
+        mock_slack_cls.return_value = mock_instance
+
+        config = {
+            "token": "xoxb-test-bot-token",
+            "app_token": "xapp-test-app-token",
+            "signing_secret": "test-signing-secret",
+            "allowed_users": ["U123", "U456"],
+            "allowed_channels": ["C789"],
+            "allow_all": False,
+        }
+
+        channel = create_channel("slack", config, "test_workspace")
+
+        assert channel is mock_instance
+        mock_slack_cls.assert_called_once_with(
+            bot_token="xoxb-test-bot-token",
+            app_token="xapp-test-app-token",
+            signing_secret="test-signing-secret",
+            allowed_users=["U123", "U456"],
+            allowed_channels=["C789"],
+            allow_all=False,
+            workspace_name="test_workspace",
+        )
+
+
+def test_create_slack_channel_minimal_config() -> None:
+    """Test creating a Slack channel with minimal config (only required fields)."""
+    with patch("openpaw.channels.slack.SlackChannel") as mock_slack_cls:
+        mock_instance = MagicMock()
+        mock_slack_cls.return_value = mock_instance
+
+        config = {
+            "token": "xoxb-test-bot-token",
+            "app_token": "xapp-test-app-token",
+        }
+
+        channel = create_channel("slack", config, "minimal_workspace")
+
+        assert channel is mock_instance
+        mock_slack_cls.assert_called_once_with(
+            bot_token="xoxb-test-bot-token",
+            app_token="xapp-test-app-token",
+            signing_secret=None,
+            allowed_users=[],
+            allowed_channels=[],
+            allow_all=False,
+            workspace_name="minimal_workspace",
+        )
+
+
 def test_create_channel_unsupported_type() -> None:
     """Test that unsupported channel types raise ValueError."""
     config = {"token": "test_token"}
@@ -62,8 +118,8 @@ def test_create_channel_unsupported_type() -> None:
     with pytest.raises(ValueError, match="Unsupported channel type: discord"):
         create_channel("discord", config, "test_workspace")
 
-    with pytest.raises(ValueError, match="Unsupported channel type: slack"):
-        create_channel("slack", config, "test_workspace")
+    with pytest.raises(ValueError, match="Unsupported channel type: matrix"):
+        create_channel("matrix", config, "test_workspace")
 
 
 def test_create_channel_passes_workspace_name() -> None:
