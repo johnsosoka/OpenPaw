@@ -336,6 +336,42 @@ class TestApprovalToolMiddleware:
             is False
         )
 
+    async def test_contextvar_isolation_between_tasks(self):
+        """ContextVars isolate state between concurrent asyncio tasks."""
+        from openpaw.agent.middleware.approval import (
+            _approval_manager_var,
+            _approval_session_key_var,
+            _approval_thread_id_var,
+        )
+
+        middleware = ApprovalToolMiddleware()
+        config = ApprovalGatesConfig(enabled=True)
+        manager1 = ApprovalGateManager(config)
+        manager2 = ApprovalGateManager(config)
+
+        results = {}
+
+        async def task_a():
+            middleware.set_context(manager1, "session_a", "thread_a")
+            await asyncio.sleep(0.01)
+            results["a_session"] = _approval_session_key_var.get()
+            results["a_thread"] = _approval_thread_id_var.get()
+            middleware.reset()
+
+        async def task_b():
+            middleware.set_context(manager2, "session_b", "thread_b")
+            await asyncio.sleep(0.01)
+            results["b_session"] = _approval_session_key_var.get()
+            results["b_thread"] = _approval_thread_id_var.get()
+            middleware.reset()
+
+        await asyncio.gather(task_a(), task_b())
+
+        assert results["a_session"] == "session_a"
+        assert results["a_thread"] == "thread_a"
+        assert results["b_session"] == "session_b"
+        assert results["b_thread"] == "thread_b"
+
 
 class TestChannelApprovalIntegration:
     """Test channel approval integration."""

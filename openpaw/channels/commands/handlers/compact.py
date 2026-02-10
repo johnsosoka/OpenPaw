@@ -96,7 +96,7 @@ class CompactCommand(CommandHandler):
         # Step 3: Close browser session if active (conversation context changing)
         if context.browser_builtin:
             try:
-                await context.browser_builtin.cleanup()
+                await context.browser_builtin.cleanup(session_key=message.session_key)
                 logger.debug("Closed browser session on conversation compaction")
             except Exception as e:
                 logger.warning(f"Failed to close browser on /compact: {e}")

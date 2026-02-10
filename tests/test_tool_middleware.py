@@ -1,11 +1,20 @@
 """Tests for QueueAwareToolMiddleware."""
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.messages import ToolMessage
 
-from openpaw.core.tool_middleware import InterruptSignalError, QueueAwareToolMiddleware
+from openpaw.agent.middleware.queue_aware import (
+    InterruptSignalError,
+    QueueAwareToolMiddleware,
+    _queue_manager_var,
+    _session_key_var,
+    _queue_mode_var,
+    _pending_steer_message_var,
+    _steered_var,
+)
 from openpaw.core.queue.lane import QueueMode
 
 
@@ -176,18 +185,18 @@ async def test_reset_clears_state(middleware, mock_queue_manager):
     """reset() clears all state."""
     # Set up state
     middleware.set_queue_awareness(mock_queue_manager, "test_session", QueueMode.STEER)
-    middleware._pending_steer_message = [("telegram", "Message")]
-    middleware._steered = True
+    _pending_steer_message_var.set([("telegram", "Message")])
+    _steered_var.set(True)
 
     # Reset
     middleware.reset()
 
     # State is cleared
-    assert middleware._queue_manager is None
-    assert middleware._session_key is None
-    assert middleware._queue_mode == QueueMode.COLLECT
-    assert middleware._pending_steer_message is None
-    assert middleware._steered is False
+    assert _queue_manager_var.get() is None
+    assert _session_key_var.get() is None
+    assert _queue_mode_var.get() == QueueMode.COLLECT
+    assert _pending_steer_message_var.get() is None
+    assert _steered_var.get() is False
     assert middleware.was_steered is False
     assert middleware.pending_steer_message is None
 
@@ -197,11 +206,11 @@ async def test_set_queue_awareness_configures_state(middleware, mock_queue_manag
     """set_queue_awareness() configures state correctly."""
     middleware.set_queue_awareness(mock_queue_manager, "test_session", QueueMode.INTERRUPT)
 
-    assert middleware._queue_manager is mock_queue_manager
-    assert middleware._session_key == "test_session"
-    assert middleware._queue_mode == QueueMode.INTERRUPT
-    assert middleware._pending_steer_message is None
-    assert middleware._steered is False
+    assert _queue_manager_var.get() is mock_queue_manager
+    assert _session_key_var.get() == "test_session"
+    assert _queue_mode_var.get() == QueueMode.INTERRUPT
+    assert _pending_steer_message_var.get() is None
+    assert _steered_var.get() is False
 
 
 @pytest.mark.asyncio
@@ -319,3 +328,36 @@ async def test_steer_backlog_mode_executes_normally(
     # Handler was called (STEER_BACKLOG doesn't interrupt tools yet)
     mock_handler.assert_called_once_with(mock_request)
     assert result.content == "Tool executed successfully"
+
+
+@pytest.mark.asyncio
+async def test_contextvar_isolation_between_tasks():
+    """ContextVars isolate state between concurrent asyncio tasks."""
+    middleware = QueueAwareToolMiddleware()
+    manager1 = MagicMock()
+    manager1.peek_pending = AsyncMock(return_value=False)
+    manager2 = MagicMock()
+    manager2.peek_pending = AsyncMock(return_value=False)
+
+    results = {}
+
+    async def task_a():
+        middleware.set_queue_awareness(manager1, "session_a", QueueMode.STEER)
+        await asyncio.sleep(0.01)  # Yield to let task_b run
+        results["a_session"] = _session_key_var.get()
+        results["a_mode"] = _queue_mode_var.get()
+        middleware.reset()
+
+    async def task_b():
+        middleware.set_queue_awareness(manager2, "session_b", QueueMode.INTERRUPT)
+        await asyncio.sleep(0.01)  # Yield to let task_a run
+        results["b_session"] = _session_key_var.get()
+        results["b_mode"] = _queue_mode_var.get()
+        middleware.reset()
+
+    await asyncio.gather(task_a(), task_b())
+
+    assert results["a_session"] == "session_a"
+    assert results["a_mode"] == QueueMode.STEER
+    assert results["b_session"] == "session_b"
+    assert results["b_mode"] == QueueMode.INTERRUPT

@@ -9,6 +9,13 @@ import pytest
 
 from openpaw.agent import AgentRunner
 from openpaw.agent.middleware import InterruptSignalError, QueueAwareToolMiddleware
+from openpaw.agent.middleware.queue_aware import (
+    _queue_manager_var,
+    _session_key_var,
+    _queue_mode_var,
+    _pending_steer_message_var,
+    _steered_var,
+)
 from openpaw.core.queue.lane import QueueMode
 from openpaw.workspace.loader import AgentWorkspace
 
@@ -142,9 +149,9 @@ class TestMiddlewareSetReset:
             queue_mode=QueueMode.STEER,
         )
 
-        assert mock_middleware._queue_manager == mock_queue_manager
-        assert mock_middleware._session_key == session_key
-        assert mock_middleware._queue_mode == QueueMode.STEER
+        assert _queue_manager_var.get() == mock_queue_manager
+        assert _session_key_var.get() == session_key
+        assert _queue_mode_var.get() == QueueMode.STEER
 
     def test_middleware_reset_clears_state(self, mock_middleware: QueueAwareToolMiddleware) -> None:
         """reset() clears per-invocation state."""
@@ -157,11 +164,11 @@ class TestMiddlewareSetReset:
 
         mock_middleware.reset()
 
-        assert mock_middleware._queue_manager is None
-        assert mock_middleware._session_key is None
-        assert mock_middleware._queue_mode == QueueMode.COLLECT
-        assert mock_middleware._pending_steer_message is None
-        assert mock_middleware._steered is False
+        assert _queue_manager_var.get() is None
+        assert _session_key_var.get() is None
+        assert _queue_mode_var.get() == QueueMode.COLLECT
+        assert _pending_steer_message_var.get() is None
+        assert _steered_var.get() is False
 
 
 class TestSteerMode:
@@ -175,9 +182,9 @@ class TestSteerMode:
 
         mock_middleware = QueueAwareToolMiddleware()
 
-        # Simulate steer by setting internal state
-        mock_middleware._steered = True
-        mock_middleware._pending_steer_message = [("telegram", Mock(content="new message"))]
+        # Simulate steer by setting contextvar state
+        _steered_var.set(True)
+        _pending_steer_message_var.set([("telegram", Mock(content="new message"))])
 
         # Verify steer state
         assert mock_middleware.was_steered is True

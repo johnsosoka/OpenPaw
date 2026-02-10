@@ -36,7 +36,7 @@ def test_initialization(config: dict):
     """Test builtin initializes with config."""
     builtin = BrowserToolBuiltin(config)
     assert builtin.config == config
-    assert builtin._session is None
+    assert builtin._sessions == {}
 
 
 def test_get_langchain_tool_returns_list(config: dict):
@@ -84,15 +84,20 @@ def test_tool_descriptions_exist(config: dict):
 def test_get_session_lazy_init(config: dict):
     """Test _get_session creates session on first call."""
     builtin = BrowserToolBuiltin(config)
-    assert builtin._session is None
+    assert builtin._sessions == {}
 
-    session = builtin._get_session()
+    session = builtin._get_session("test:123")
     assert session is not None
-    assert builtin._session is session
+    assert "test:123" in builtin._sessions
+    assert builtin._sessions["test:123"] is session
 
     # Second call returns same session
-    session2 = builtin._get_session()
+    session2 = builtin._get_session("test:123")
     assert session2 is session
+
+    # Different user gets different session
+    session3 = builtin._get_session("test:456")
+    assert session3 is not session
 
 
 @pytest.mark.asyncio
@@ -100,23 +105,23 @@ async def test_cleanup_closes_session(config: dict):
     """Test cleanup delegates to session.close."""
     builtin = BrowserToolBuiltin(config)
 
-    # Create mock session
     mock_session = AsyncMock()
     mock_session.is_active = True
     mock_session.close = AsyncMock()
-    builtin._session = mock_session
+    builtin._sessions["test:123"] = mock_session
 
-    await builtin.cleanup()
+    await builtin.cleanup(session_key="test:123")
 
     mock_session.close.assert_called_once()
-    assert builtin._session is None
+    assert "test:123" not in builtin._sessions
 
 
 @pytest.mark.asyncio
 async def test_cleanup_handles_no_session(config: dict):
     """Test cleanup works when no session exists."""
     builtin = BrowserToolBuiltin(config)
-    await builtin.cleanup()  # Should not raise
+    await builtin.cleanup()  # Close all (empty dict)
+    await builtin.cleanup(session_key="nonexistent")  # Specific user
 
 
 @pytest.mark.asyncio
@@ -124,12 +129,12 @@ async def test_cleanup_handles_inactive_session(config: dict):
     """Test cleanup works when session is not active."""
     builtin = BrowserToolBuiltin(config)
 
-    # Create mock inactive session
     mock_session = AsyncMock()
     mock_session.is_active = False
-    builtin._session = mock_session
+    builtin._sessions["test:123"] = mock_session
 
-    await builtin.cleanup()  # Should not raise
+    await builtin.cleanup(session_key="test:123")
+    assert "test:123" not in builtin._sessions
 
 
 def test_navigate_tool_has_url_parameter(config: dict):
@@ -235,6 +240,52 @@ def test_tabs_tool_has_no_parameters(config: dict):
 
 
 @pytest.mark.asyncio
+async def test_cleanup_per_user_isolation(config: dict):
+    """Test cleanup only closes the specified user's session."""
+    builtin = BrowserToolBuiltin(config)
+
+    mock_session_a = AsyncMock()
+    mock_session_a.is_active = True
+    mock_session_a.close = AsyncMock()
+    builtin._sessions["user_a"] = mock_session_a
+
+    mock_session_b = AsyncMock()
+    mock_session_b.is_active = True
+    mock_session_b.close = AsyncMock()
+    builtin._sessions["user_b"] = mock_session_b
+
+    # Close only user_a
+    await builtin.cleanup(session_key="user_a")
+
+    mock_session_a.close.assert_called_once()
+    mock_session_b.close.assert_not_called()
+    assert "user_a" not in builtin._sessions
+    assert "user_b" in builtin._sessions
+
+
+@pytest.mark.asyncio
+async def test_cleanup_all_sessions(config: dict):
+    """Test cleanup with no session_key closes all sessions."""
+    builtin = BrowserToolBuiltin(config)
+
+    mock_session_a = AsyncMock()
+    mock_session_a.is_active = True
+    mock_session_a.close = AsyncMock()
+    builtin._sessions["user_a"] = mock_session_a
+
+    mock_session_b = AsyncMock()
+    mock_session_b.is_active = True
+    mock_session_b.close = AsyncMock()
+    builtin._sessions["user_b"] = mock_session_b
+
+    await builtin.cleanup()
+
+    mock_session_a.close.assert_called_once()
+    mock_session_b.close.assert_called_once()
+    assert builtin._sessions == {}
+
+
+@pytest.mark.asyncio
 async def test_config_passes_through_to_session(config: dict):
     """Test builtin config is passed to BrowserSession."""
     builtin = BrowserToolBuiltin(config)
@@ -245,7 +296,7 @@ async def test_config_passes_through_to_session(config: dict):
         mock_instance = AsyncMock()
         MockSession.return_value = mock_instance
 
-        session = builtin._get_session()
+        session = builtin._get_session("test:123")
 
-        # Check BrowserSession was called with config
-        MockSession.assert_called_once_with(config)
+        # Check BrowserSession was called with config and session_key
+        MockSession.assert_called_once_with(config, session_key="test:123")

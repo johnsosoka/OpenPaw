@@ -1,5 +1,6 @@
 """Browser session management for Playwright lifecycle."""
 
+import hashlib
 import json
 import logging
 from datetime import datetime
@@ -28,7 +29,7 @@ class BrowserSession:
     navigation or page-changing actions.
     """
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], session_key: str = ""):
         """Initialize browser session with configuration.
 
         Args:
@@ -44,6 +45,7 @@ class BrowserSession:
                 - allowed_domains: List of allowed domains (empty = all allowed)
                 - blocked_domains: List of blocked domains (always takes precedence)
                 - max_snapshot_depth: Maximum snapshot tree depth (default: 10)
+            session_key: Session key for per-user cookie isolation (default: "")
         """
         self.config = config
         self.headless = config.get("headless", True)
@@ -59,7 +61,13 @@ class BrowserSession:
         self.screenshots_dir = workspace_path / config.get(
             "screenshots_dir", "screenshots"
         )
-        self.cookie_file = workspace_path / ".openpaw" / "browser_cookies.json"
+
+        # Per-user cookie file
+        if session_key:
+            key_hash = hashlib.sha256(session_key.encode()).hexdigest()[:12]
+            self.cookie_file = workspace_path / ".openpaw" / f"browser_cookies_{key_hash}.json"
+        else:
+            self.cookie_file = workspace_path / ".openpaw" / "browser_cookies.json"
 
         # Create directories if needed
         self.downloads_dir.mkdir(parents=True, exist_ok=True)

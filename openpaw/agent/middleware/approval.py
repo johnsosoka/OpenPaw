@@ -1,5 +1,6 @@
 """Approval gate tool middleware for human-in-the-loop authorization."""
 
+import contextvars
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -9,6 +10,17 @@ from langchain.agents.middleware import wrap_tool_call
 from openpaw.stores.approval import ApprovalGateManager
 
 logger = logging.getLogger(__name__)
+
+# Context variables for per-invocation state (multi-user safety)
+_approval_manager_var: contextvars.ContextVar[ApprovalGateManager | None] = contextvars.ContextVar(
+    "_approval_manager", default=None
+)
+_approval_session_key_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_approval_session_key", default=None
+)
+_approval_thread_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_approval_thread_id", default=None
+)
 
 
 class ApprovalRequiredError(Exception):
@@ -32,13 +44,12 @@ class ApprovalToolMiddleware:
     5. On denial: sends denial message to user
 
     Designed for composition with QueueAwareToolMiddleware in the
-    create_agent(middleware=[...]) list.
+    create_agent(middleware=[...]) list. State stored in contextvars for multi-user safety.
     """
 
     def __init__(self) -> None:
-        self._manager: ApprovalGateManager | None = None
-        self._session_key: str | None = None
-        self._thread_id: str | None = None
+        """Initialize middleware. State is stored in contextvars, not instance attributes."""
+        logger.debug("ApprovalToolMiddleware initialized (using contextvars)")
 
     def set_context(
         self,
@@ -47,15 +58,15 @@ class ApprovalToolMiddleware:
         thread_id: str,
     ) -> None:
         """Configure approval context for current invocation."""
-        self._manager = manager
-        self._session_key = session_key
-        self._thread_id = thread_id
+        _approval_manager_var.set(manager)
+        _approval_session_key_var.set(session_key)
+        _approval_thread_id_var.set(thread_id)
 
     def reset(self) -> None:
         """Reset per-invocation state."""
-        self._manager = None
-        self._session_key = None
-        self._thread_id = None
+        _approval_manager_var.set(None)
+        _approval_session_key_var.set(None)
+        _approval_thread_id_var.set(None)
 
     def get_middleware(self) -> Any:
         """Return the @wrap_tool_call compatible middleware function."""
@@ -73,33 +84,38 @@ class ApprovalToolMiddleware:
         self, request: Any, handler: Callable[[Any], Awaitable[Any]]
     ) -> Any:
         """Check if tool requires approval, otherwise execute normally."""
+        # Read from contextvars
+        manager = _approval_manager_var.get()
+        session_key = _approval_session_key_var.get()
+        thread_id = _approval_thread_id_var.get()
+
         # If no manager configured, execute normally
-        if self._manager is None or self._session_key is None:
+        if manager is None or session_key is None:
             return await handler(request)
 
         tool_name = request.tool_call.get("name", "")
 
         # Check if this tool requires approval
-        if not self._manager.requires_approval(tool_name):
+        if not manager.requires_approval(tool_name):
             return await handler(request)
 
         # Check if this tool was recently approved (bypass check after user approval)
-        if self._manager.check_recent_approval(self._session_key, tool_name):
+        if manager.check_recent_approval(session_key, tool_name):
             logger.info(
                 f"Tool {tool_name} has recent approval, executing without prompt"
             )
             result = await handler(request)
             # Clear the approval after successful execution
-            self._manager.clear_recent_approval(self._session_key, tool_name)
+            manager.clear_recent_approval(session_key, tool_name)
             return result
 
         # Tool requires approval - create pending approval and raise
         tool_args = request.tool_call.get("args", {})
-        approval = await self._manager.request_approval(
+        approval = await manager.request_approval(
             tool_name=tool_name,
             tool_args=tool_args,
-            session_key=self._session_key,
-            thread_id=self._thread_id or "",
+            session_key=session_key,
+            thread_id=thread_id or "",
         )
 
         logger.info(f"Approval required: {tool_name} (approval_id={approval.id})")

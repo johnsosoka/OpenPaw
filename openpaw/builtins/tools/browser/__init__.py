@@ -114,8 +114,8 @@ class BrowserToolBuiltin(BaseBuiltinTool):
         """
         super().__init__(config)
 
-        # Browser session (lazy init on first navigate)
-        self._session: BrowserSession | None = None
+        # Browser sessions per user (lazy init on first navigate)
+        self._sessions: dict[str, BrowserSession] = {}
 
         logger.info("BrowserToolBuiltin initialized")
 
@@ -135,26 +135,62 @@ class BrowserToolBuiltin(BaseBuiltinTool):
             self._create_switch_tab_tool(),
         ]
 
-    def _get_session(self) -> BrowserSession:
-        """Get or create browser session (lazy init).
+    def _get_session(self, session_key: str) -> BrowserSession:
+        """Get or create browser session for a specific user.
+
+        Each user (identified by session_key) gets an isolated BrowserSession
+        with separate page state, element refs, and cookies.
+
+        Args:
+            session_key: User session key (e.g., "telegram:123456").
 
         Returns:
-            Active browser session.
+            Browser session for the specified user.
         """
-        if self._session is None:
-            self._session = BrowserSession(self.config)
-            logger.debug("Created new browser session")
-        return self._session
+        session = self._sessions.get(session_key)
+        if session is None:
+            session = BrowserSession(self.config, session_key=session_key)
+            self._sessions[session_key] = session
+            logger.debug(f"Created new browser session for {session_key}")
+        return session
 
-    async def cleanup(self) -> None:
-        """Close browser session.
+    def _get_session_for_current_user(self) -> BrowserSession:
+        """Get browser session for the current user via channel context.
 
-        Called by WorkspaceRunner on stop/conversation rotation.
+        Returns:
+            Browser session for the current user.
+
+        Raises:
+            RuntimeError: If no session key is available in channel context.
         """
-        if self._session and self._session.is_active:
-            logger.info("Cleaning up browser session")
-            await self._session.close()
-            self._session = None
+        from openpaw.builtins.tools._channel_context import get_current_session_key
+
+        session_key = get_current_session_key()
+        if not session_key:
+            raise RuntimeError("No session key in channel context — browser tools require a user session")
+        return self._get_session(session_key)
+
+    async def cleanup(self, session_key: str | None = None) -> None:
+        """Close browser session(s).
+
+        Args:
+            session_key: If provided, close only that user's session.
+                         If None, close ALL sessions (for workspace shutdown).
+        """
+        if session_key:
+            session = self._sessions.get(session_key)
+            if session and session.is_active:
+                logger.info(f"Cleaning up browser session for {session_key}")
+                await session.close()
+            self._sessions.pop(session_key, None)
+        else:
+            # Snapshot and clear first to prevent new sessions during cleanup
+            sessions_to_close = list(self._sessions.items())
+            self._sessions.clear()
+            for key, session in sessions_to_close:
+                if session.is_active:
+                    logger.info(f"Cleaning up browser session for {key}")
+                    await session.close()
 
     def _create_navigate_tool(self) -> StructuredTool:
         """Create browser_navigate tool."""
@@ -175,7 +211,7 @@ class BrowserToolBuiltin(BaseBuiltinTool):
             Returns:
                 Page title and status, or error message.
             """
-            session = self._get_session()
+            session = self._get_session_for_current_user()
             return await session.navigate(url)
 
         return StructuredTool.from_function(
@@ -211,7 +247,7 @@ class BrowserToolBuiltin(BaseBuiltinTool):
             Returns:
                 Formatted snapshot with interactive element refs.
             """
-            session = self._get_session()
+            session = self._get_session_for_current_user()
             return await session.snapshot()
 
         return StructuredTool.from_function(
@@ -242,7 +278,7 @@ class BrowserToolBuiltin(BaseBuiltinTool):
             Returns:
                 Confirmation or error message.
             """
-            session = self._get_session()
+            session = self._get_session_for_current_user()
             return await session.click(ref)
 
         return StructuredTool.from_function(
@@ -275,7 +311,7 @@ class BrowserToolBuiltin(BaseBuiltinTool):
             Returns:
                 Confirmation or error message.
             """
-            session = self._get_session()
+            session = self._get_session_for_current_user()
             return await session.type_text(ref, text, press_enter)
 
         return StructuredTool.from_function(
@@ -307,7 +343,7 @@ class BrowserToolBuiltin(BaseBuiltinTool):
             Returns:
                 Confirmation or error message.
             """
-            session = self._get_session()
+            session = self._get_session_for_current_user()
             return await session.select_option(ref, value)
 
         return StructuredTool.from_function(
@@ -338,7 +374,7 @@ class BrowserToolBuiltin(BaseBuiltinTool):
             Returns:
                 Confirmation or error message.
             """
-            session = self._get_session()
+            session = self._get_session_for_current_user()
             return await session.scroll(direction, amount)
 
         return StructuredTool.from_function(
@@ -366,7 +402,7 @@ class BrowserToolBuiltin(BaseBuiltinTool):
             Returns:
                 Confirmation with page title or error.
             """
-            session = self._get_session()
+            session = self._get_session_for_current_user()
             return await session.back()
 
         return StructuredTool.from_function(
@@ -395,7 +431,7 @@ class BrowserToolBuiltin(BaseBuiltinTool):
             Returns:
                 Relative path to saved screenshot file.
             """
-            session = self._get_session()
+            session = self._get_session_for_current_user()
             return await session.screenshot(full_page)
 
         return StructuredTool.from_function(
@@ -424,7 +460,11 @@ class BrowserToolBuiltin(BaseBuiltinTool):
             Returns:
                 Confirmation message.
             """
-            await self.cleanup()
+            from openpaw.builtins.tools._channel_context import get_current_session_key
+
+            session_key = get_current_session_key()
+            if session_key:
+                await self.cleanup(session_key=session_key)
             return "Browser closed. Use browser_navigate to start a new session."
 
         return StructuredTool.from_function(
@@ -451,7 +491,7 @@ class BrowserToolBuiltin(BaseBuiltinTool):
             Returns:
                 Formatted list of tabs with indices and titles.
             """
-            session = self._get_session()
+            session = self._get_session_for_current_user()
             return await session.get_tabs()
 
         return StructuredTool.from_function(
@@ -480,7 +520,7 @@ class BrowserToolBuiltin(BaseBuiltinTool):
             Returns:
                 Confirmation with new tab title or error.
             """
-            session = self._get_session()
+            session = self._get_session_for_current_user()
             return await session.switch_tab(index)
 
         return StructuredTool.from_function(
