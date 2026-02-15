@@ -643,3 +643,54 @@ async def test_pdf_pipeline_order(tmp_path, base_message, mock_docling):
     # Then conversion info
     assert lines[7].startswith("[Converted to markdown:")
     assert lines[8].startswith("Contents:")
+
+
+@pytest.mark.asyncio
+async def test_pdf_pipeline_async_with_callback(tmp_path, base_message):
+    """Test PDF pipeline with async Docling (callback wired).
+
+    Verifies:
+    - FilePersistence and Timestamp run synchronously
+    - Docling returns immediately with 'processing started'
+    - Background processing happens and callback fires
+    """
+    callback = AsyncMock()
+
+    file_processor = FilePersistenceProcessor({"workspace_path": str(tmp_path)})
+    timestamp_processor = TimestampProcessor({"timezone": "America/Chicago"})
+    docling_processor = DoclingProcessor({"workspace_path": str(tmp_path)})
+    docling_processor.set_event_callback(callback)
+
+    processors = [file_processor, timestamp_processor, docling_processor]
+
+    pdf_data = b"%PDF-1.4\nfake"
+    attachment = Attachment(
+        type="document",
+        data=pdf_data,
+        filename="report.pdf",
+        mime_type="application/pdf",
+    )
+    message = Message(
+        id=base_message.id,
+        channel=base_message.channel,
+        session_key=base_message.session_key,
+        user_id=base_message.user_id,
+        content="Summarize this.",
+        direction=base_message.direction,
+        timestamp=base_message.timestamp,
+        attachments=[attachment],
+    )
+
+    result_message = await _run_pipeline(processors, message)
+
+    content = result_message.content
+
+    # Should have timestamp
+    assert "[Current time:" in content
+    # Should have file receipt
+    assert "[File received: report.pdf" in content
+    # Should have processing started (NOT conversion result)
+    assert "[Document processing started:" in content
+    assert "[Converted to markdown:" not in content
+    # User caption preserved
+    assert "Summarize this." in content

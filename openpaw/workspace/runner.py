@@ -209,6 +209,9 @@ class WorkspaceRunner:
         if self._processors:
             self.logger.info(f"Loaded {len(self._processors)} builtin processors for workspace: {workspace_name}")
 
+        # Connect DoclingProcessor to system event injection
+        self._connect_docling_processor_callback()
+
         # Load workspace tools
         self._workspace_tools = load_workspace_tools(self._ctx.workspace.tools_path)
         if self._workspace_tools:
@@ -515,6 +518,17 @@ class WorkspaceRunner:
         except Exception as e:
             self.logger.warning(f"Failed to connect SpawnTool to runner: {e}")
 
+    def _connect_docling_processor_callback(self) -> None:
+        """Connect DoclingProcessor to system event injection for async notifications."""
+        from openpaw.builtins.processors.docling import DoclingProcessor
+
+        for processor in self._processors:
+            if isinstance(processor, DoclingProcessor):
+                processor.set_event_callback(self._inject_system_event)
+                self.logger.info("Connected DoclingProcessor to event callback")
+                return
+        self.logger.debug("DoclingProcessor not loaded for this workspace")
+
     async def _inject_system_event(self, session_key: str, content: str) -> None:
         """Inject a system event into the queue for agent processing."""
         parts = session_key.split(":", 1)
@@ -552,6 +566,16 @@ class WorkspaceRunner:
     def _get_browser_builtin(self) -> Any | None:
         """Get the browser builtin instance if loaded."""
         return self._builtin_loader.get_tool_instance("browser")
+
+    async def _cleanup_docling_processor(self) -> None:
+        """Clean up DoclingProcessor background tasks on shutdown."""
+        from openpaw.builtins.processors.docling import DoclingProcessor
+
+        for processor in self._processors:
+            if isinstance(processor, DoclingProcessor):
+                await processor.cleanup()
+                self.logger.info("Cleaned up DoclingProcessor")
+                return
 
     async def _archive_active_conversations(self) -> None:
         """Archive all active conversations on shutdown."""
@@ -626,6 +650,9 @@ class WorkspaceRunner:
         if browser_builtin:
             await browser_builtin.cleanup()
             self.logger.info("Closed browser session")
+
+        # Cleanup document processors
+        await self._cleanup_docling_processor()
 
         # Stop channels
         await self._lifecycle_manager.stop_channels()

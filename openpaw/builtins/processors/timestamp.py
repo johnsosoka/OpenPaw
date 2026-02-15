@@ -68,17 +68,6 @@ class TimestampProcessor(BaseBuiltinProcessor):
             new_content = message.content
 
         # Create new message with updated content
-        updated_message = Message(
-            id=message.id,
-            channel=message.channel,
-            session_key=message.session_key,
-            user_id=message.user_id,
-            content=new_content,
-            direction=message.direction,
-            timestamp=message.timestamp,
-            reply_to_id=message.reply_to_id,
-            metadata={**message.metadata, "timestamp_added": True},
-            attachments=message.attachments,
-        )
+        updated_message = message.with_updates(content=new_content, timestamp_added=True)
 
         return ProcessorResult(message=updated_message)

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -90,12 +91,78 @@ class DoclingProcessor(BaseBuiltinProcessor):
         self.ocr_backend = config.get("ocr_backend", "auto") if config else "auto"
         self.ocr_languages = config.get("ocr_languages", ["en"]) if config else ["en"]
         self.force_full_page_ocr = config.get("force_full_page_ocr", True) if config else True
-        self.document_timeout = config.get("document_timeout", None) if config else None
+        self.document_timeout = config.get("document_timeout", 180) if config else 180
         self.do_ocr = config.get("do_ocr", True) if config else True
         self.do_table_structure = config.get("do_table_structure", True) if config else True
 
+        # Event callback for notifying agent (set via set_event_callback)
+        self._event_callback: Callable[[str, str], Awaitable[None]] | None = None
+
+        # Track in-flight background processing tasks for cleanup
+        self._active_tasks: set[asyncio.Task[None]] = set()
+
+        # Cached converter instance (lazily created)
+        self._converter: Any | None = None
+
         if not self.workspace_path:
             logger.warning("DoclingProcessor initialized without workspace_path - will pass through all messages")
+
+    def set_event_callback(
+        self, callback: Callable[[str, str], Awaitable[None]]
+    ) -> None:
+        """Set the callback for notifying the agent when processing completes.
+
+        Called by WorkspaceRunner after processor construction to provide
+        the _inject_system_event callback for async notifications.
+
+        Args:
+            callback: Async callable(session_key, content) for queue injection.
+        """
+        self._event_callback = callback
+        logger.info("DoclingProcessor connected to event callback")
+
+    def _get_or_create_converter(self) -> Any:
+        """Get or create a cached DocumentConverter instance.
+
+        Returns:
+            DocumentConverter configured with current OCR settings.
+        """
+        if self._converter is None:
+            from docling.datamodel.base_models import InputFormat
+            from docling.datamodel.pipeline_options import PdfPipelineOptions
+            from docling.document_converter import DocumentConverter, PdfFormatOption
+
+            ocr_options = self._build_ocr_options()
+            pipeline_options = PdfPipelineOptions(
+                do_ocr=self.do_ocr,
+                do_table_structure=self.do_table_structure,
+                ocr_options=ocr_options,
+            )
+            self._converter = DocumentConverter(
+                format_options={
+                    InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+                }
+            )
+        return self._converter
+
+    async def cleanup(self) -> None:
+        """Cancel all in-flight document processing tasks.
+
+        Called during workspace shutdown for graceful cleanup.
+        """
+        if not self._active_tasks:
+            return
+
+        logger.info(f"Cancelling {len(self._active_tasks)} in-flight document processing task(s)")
+        for task in list(self._active_tasks):
+            task.cancel()
+
+        # Wait for all tasks to finish cancellation
+        if self._active_tasks:
+            await asyncio.gather(*self._active_tasks, return_exceptions=True)
+
+        self._active_tasks.clear()
+        logger.info("Document processing cleanup complete")
 
     async def process_inbound(self, message: Message) -> ProcessorResult:
         """Convert document attachments to markdown and save as sibling .md files.
@@ -127,21 +194,11 @@ class DoclingProcessor(BaseBuiltinProcessor):
                 "Install with: pip install docling]"
             )
             new_content = message.content + error_note if message.content else error_note
-            updated_message = Message(
-                id=message.id,
-                channel=message.channel,
-                session_key=message.session_key,
-                user_id=message.user_id,
-                content=new_content,
-                direction=message.direction,
-                timestamp=message.timestamp,
-                reply_to_id=message.reply_to_id,
-                metadata={**message.metadata, "docling_unavailable": True},
-                attachments=message.attachments,
-            )
+            updated_message = message.with_updates(content=new_content, docling_unavailable=True)
             return ProcessorResult(message=updated_message)
 
-        processed_files: list[str] = []
+        # Validate attachments and separate into valid documents and errors
+        valid_documents: list[tuple[Attachment, Path, bool]] = []
         errors: list[str] = []
 
         for attachment in document_attachments:
@@ -151,7 +208,7 @@ class DoclingProcessor(BaseBuiltinProcessor):
                 errors.append("Document attachment has no data")
                 continue
 
-            # Check file size (from saved_path if available, else from data)
+            # Determine source path and check file size
             if attachment.saved_path:
                 try:
                     source_path = resolve_sandboxed_path(
@@ -162,16 +219,19 @@ class DoclingProcessor(BaseBuiltinProcessor):
                     logger.error(f"Invalid saved_path: {e}")
                     errors.append("Invalid file path")
                     continue
-                if source_path.exists():
-                    file_size = source_path.stat().st_size
-                else:
+                if not source_path.exists():
                     logger.warning(f"saved_path does not exist: {source_path}, skipping")
                     errors.append(f"File not found: {attachment.saved_path}")
                     continue
+                file_size = source_path.stat().st_size
+                is_temp = False
             else:
                 # Must have data at this point
                 assert attachment.data is not None
                 file_size = len(attachment.data)
+                # Will create temp file later
+                source_path = Path("")  # Placeholder, will be set in background processing
+                is_temp = True
 
             # Check file size limit
             if file_size > self.max_file_size:
@@ -181,15 +241,75 @@ class DoclingProcessor(BaseBuiltinProcessor):
                 errors.append(f"Document too large ({size_mb:.1f} MB, max {max_mb:.1f} MB)")
                 continue
 
+            valid_documents.append((attachment, source_path, is_temp))
+
+        # When callback is set, process async. When not set, fall back to sync.
+        if self._event_callback and valid_documents:
+            # Async path: return immediately with "processing started" enrichment
+            filenames = [a.filename or "document" for a, _, _ in valid_documents]
+
+            # Build enrichment
+            enrichment_parts = []
+
+            if len(filenames) == 1:
+                enrichment_parts.append(
+                    f"[Document processing started: {filenames[0]} - "
+                    "you will be notified when the markdown conversion is ready]"
+                )
+            else:
+                file_list = ", ".join(filenames)
+                enrichment_parts.append(
+                    f"[Document processing started: {file_list} - "
+                    "you will be notified when the markdown conversions are ready]"
+                )
+
+            # Add error notes inline
+            if errors:
+                error_detail = "; ".join(errors)
+                plural = "files" if len(errors) > 1 else "file"
+                enrichment_parts.append(
+                    f"[Note: {len(errors)} document {plural} could not be processed - {error_detail}]"
+                )
+
+            # Append to message content
+            if message.content:
+                new_content = message.content + "\n\n" + "\n".join(enrichment_parts)
+            else:
+                new_content = "\n".join(enrichment_parts)
+
+            # Spawn background processing
+            asyncio.create_task(
+                self._process_documents_background(
+                    valid_documents,
+                    message.session_key,
+                    filenames,
+                )
+            )
+
+            updated_message = message.with_updates(content=new_content)
+            return ProcessorResult(message=updated_message)
+
+        # Sync fallback path (no callback or no valid documents)
+        if not self._event_callback and valid_documents:
+            logger.warning("No event callback set, falling back to synchronous document processing")
+
+        # Process synchronously (original behavior)
+        processed_files: list[str] = []
+
+        for attachment, source_path, is_temp in valid_documents:
+            # If temp file needed, create it now
+            if is_temp:
+                source_path, is_temp = self._write_temp_file(attachment)
+
             try:
                 result_info = await self._process_document(attachment)
                 if result_info:
                     processed_files.append(result_info)
                 else:
-                    errors.append("Conversion failed")
+                    errors.append(f"{attachment.filename or 'document'}: conversion failed")
             except Exception as e:
                 logger.error(f"Failed to process document: {e}", exc_info=True)
-                errors.append(str(e))
+                errors.append(f"{attachment.filename or 'document'}: {e}")
 
         # Build enriched message content
         enrichment_parts = []
@@ -216,20 +336,90 @@ class DoclingProcessor(BaseBuiltinProcessor):
             new_content = message.content
 
         # Create updated message
-        updated_message = Message(
-            id=message.id,
-            channel=message.channel,
-            session_key=message.session_key,
-            user_id=message.user_id,
+        updated_message = message.with_updates(
             content=new_content,
-            direction=message.direction,
-            timestamp=message.timestamp,
-            reply_to_id=message.reply_to_id,
-            metadata={**message.metadata, "docling_processed": True, "processed_count": len(processed_files)},
-            attachments=message.attachments,
+            docling_processed=True,
+            processed_count=len(processed_files),
         )
 
         return ProcessorResult(message=updated_message)
+
+    async def _process_documents_background(
+        self,
+        documents: list[tuple[Attachment, Path, bool]],
+        session_key: str,
+        filenames: list[str],
+    ) -> None:
+        """Process documents in the background and notify via system event.
+
+        Args:
+            documents: List of (attachment, source_path, is_temp) tuples.
+            session_key: Session key for the notification callback.
+            filenames: Original filenames for notification message.
+        """
+        task = asyncio.current_task()
+        if task:
+            self._active_tasks.add(task)
+
+        try:
+            results: list[str] = []
+            errors: list[str] = []
+
+            for attachment, source_path, is_temp in documents:
+                # If temp file needed, create it now
+                if is_temp:
+                    source_path, is_temp = self._write_temp_file(attachment)
+
+                try:
+                    result_info = await self._process_document(attachment)
+                    if result_info:
+                        results.append(result_info)
+                    else:
+                        errors.append(f"{attachment.filename or 'document'}: conversion failed")
+                except Exception as e:
+                    logger.error(f"Background document processing failed: {e}", exc_info=True)
+                    errors.append(f"{attachment.filename or 'document'}: {e}")
+
+            # Build notification content
+            notification_parts = ["[SYSTEM] Document processing complete"]
+
+            if results:
+                for result_info in results:
+                    notification_parts.append(result_info)
+
+            if errors:
+                error_detail = "; ".join(errors)
+                plural = "files" if len(errors) > 1 else "file"
+                notification_parts.append(
+                    f"[Note: {len(errors)} document {plural} could not be processed - {error_detail}]"
+                )
+
+            notification_content = "\n".join(notification_parts)
+
+            # Notify agent via system event
+            if self._event_callback:
+                await self._event_callback(session_key, notification_content)
+            else:
+                logger.warning("No event callback to deliver document processing result")
+
+        except asyncio.CancelledError:
+            logger.info("Background document processing cancelled")
+            raise
+        except Exception as e:
+            # Notify agent of catastrophic failure
+            logger.error(f"Background document processing failed: {e}", exc_info=True)
+            if self._event_callback:
+                error_content = (
+                    f"[SYSTEM] Document processing failed for: {', '.join(filenames)}\n"
+                    f"Error: {e}"
+                )
+                try:
+                    await self._event_callback(session_key, error_content)
+                except Exception as cb_error:
+                    logger.error(f"Failed to send error notification: {cb_error}")
+        finally:
+            if task:
+                self._active_tasks.discard(task)
 
     def _is_supported_document(self, attachment: Attachment) -> bool:
         """Check if attachment is a supported document type.
@@ -347,15 +537,6 @@ class DoclingProcessor(BaseBuiltinProcessor):
         Returns:
             Info string about the processed document, or None if processing failed.
         """
-        # Import docling (already checked for availability)
-        try:
-            from docling.datamodel.base_models import InputFormat
-            from docling.datamodel.pipeline_options import PdfPipelineOptions
-            from docling.document_converter import DocumentConverter, PdfFormatOption
-        except ImportError as e:
-            logger.error(f"Failed to import docling: {e}")
-            return None
-
         # Type assertion - workspace_path is guaranteed non-None by caller check
         assert self.workspace_path is not None
 
@@ -375,21 +556,8 @@ class DoclingProcessor(BaseBuiltinProcessor):
             source_path, is_temp = self._write_temp_file(attachment)
 
         try:
-            # Build OCR options from config
-            ocr_options = self._build_ocr_options()
-
-            pipeline_options = PdfPipelineOptions(
-                do_ocr=self.do_ocr,
-                do_table_structure=self.do_table_structure,
-                ocr_options=ocr_options,
-            )
-
-            # Create converter with optimized PDF processing
-            converter = DocumentConverter(
-                format_options={
-                    InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
-                }
-            )
+            # Get or create cached converter
+            converter = self._get_or_create_converter()
 
             # Run docling conversion in thread pool (CPU-bound)
             # Apply document timeout if configured

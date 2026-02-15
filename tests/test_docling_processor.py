@@ -1,5 +1,6 @@
 """Tests for Docling document processor."""
 
+import asyncio
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -667,7 +668,7 @@ def test_config_defaults(workspace_path: Path):
     assert processor.ocr_backend == "auto"
     assert processor.ocr_languages == ["en"]
     assert processor.force_full_page_ocr is True
-    assert processor.document_timeout is None
+    assert processor.document_timeout == 180
     assert processor.do_ocr is True
     assert processor.do_table_structure is True
 
@@ -960,3 +961,216 @@ def test_ocr_language_mapping_ocrmac():
     assert _OCRMAC_LANG_MAP["zh"] == "zh-Hans"
     assert _OCRMAC_LANG_MAP["ja"] == "ja-JP"
     assert _OCRMAC_LANG_MAP["ko"] == "ko-KR"
+
+
+# ============================================================================
+# Async Refactor Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_async_returns_immediately_with_callback(processor, sample_message, workspace_path):
+    """Verify processor returns immediately with 'processing started' when callback is set."""
+    callback = AsyncMock()
+    processor.set_event_callback(callback)
+
+    uploads_dir = workspace_path / "uploads" / "2026-02-14"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    (uploads_dir / "report.pdf").write_bytes(b"%PDF content")
+
+    sample_message.attachments = [
+        Attachment(
+            type="document",
+            data=None,
+            mime_type="application/pdf",
+            filename="report.pdf",
+            saved_path="uploads/2026-02-14/report.pdf",
+        )
+    ]
+
+    with patch.object(processor, "_check_docling_available", return_value=True):
+        result = await processor.process_inbound(sample_message)
+
+    # Should return immediately with "processing started" enrichment
+    assert "[Document processing started:" in result.message.content
+    assert "report.pdf" in result.message.content
+    assert "you will be notified" in result.message.content
+    # Should NOT have "[Converted to markdown:" (that comes later via callback)
+    assert "[Converted to markdown:" not in result.message.content
+
+
+@pytest.mark.asyncio
+async def test_sync_fallback_when_no_callback(processor, sample_message, workspace_path):
+    """Verify synchronous fallback when no event callback is set."""
+    assert processor._event_callback is None
+    # This is already covered by existing sync tests, but verify explicitly
+    uploads_dir = workspace_path / "uploads" / "2026-02-14"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    (uploads_dir / "report.pdf").write_bytes(b"%PDF content")
+
+    sample_message.attachments = [
+        Attachment(
+            type="document",
+            data=None,
+            mime_type="application/pdf",
+            filename="report.pdf",
+            saved_path="uploads/2026-02-14/report.pdf",
+        )
+    ]
+
+    # Patch _process_document to return a result (avoid docling dependency)
+    with patch.object(processor, "_check_docling_available", return_value=True), \
+         patch.object(processor, "_process_document", new_callable=AsyncMock) as mock_process:
+        mock_process.return_value = "[Converted to markdown: uploads/2026-02-14/report.md]\nContents: full text"
+        result = await processor.process_inbound(sample_message)
+
+    # Should have processed synchronously (old behavior)
+    assert "[Converted to markdown:" in result.message.content
+    assert result.message.metadata.get("docling_processed") is True
+
+
+@pytest.mark.asyncio
+async def test_cleanup_cancels_active_tasks(processor):
+    """Verify cleanup() cancels all in-flight processing tasks."""
+    callback = AsyncMock()
+    processor.set_event_callback(callback)
+
+    # Create a mock long-running task
+    async def slow_task():
+        await asyncio.sleep(100)
+
+    task = asyncio.create_task(slow_task())
+    processor._active_tasks.add(task)
+
+    assert len(processor._active_tasks) == 1
+
+    await processor.cleanup()
+
+    assert len(processor._active_tasks) == 0
+    assert task.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_noop_when_no_tasks(processor):
+    """Verify cleanup() is a no-op when there are no active tasks."""
+    assert len(processor._active_tasks) == 0
+    await processor.cleanup()
+    assert len(processor._active_tasks) == 0
+
+
+@pytest.mark.asyncio
+async def test_set_event_callback(processor):
+    """Verify set_event_callback stores the callback."""
+    assert processor._event_callback is None
+    callback = AsyncMock()
+    processor.set_event_callback(callback)
+    assert processor._event_callback is callback
+
+
+@pytest.mark.asyncio
+async def test_multiple_documents_async(processor, sample_message, workspace_path):
+    """Verify multiple documents in one message spawn a single background task."""
+    callback = AsyncMock()
+    processor.set_event_callback(callback)
+
+    uploads_dir = workspace_path / "uploads" / "2026-02-14"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    (uploads_dir / "report1.pdf").write_bytes(b"%PDF content")
+    (uploads_dir / "report2.pdf").write_bytes(b"%PDF content")
+
+    sample_message.attachments = [
+        Attachment(type="document", data=None, mime_type="application/pdf",
+                   filename="report1.pdf", saved_path="uploads/2026-02-14/report1.pdf"),
+        Attachment(type="document", data=None, mime_type="application/pdf",
+                   filename="report2.pdf", saved_path="uploads/2026-02-14/report2.pdf"),
+    ]
+
+    with patch.object(processor, "_check_docling_available", return_value=True):
+        result = await processor.process_inbound(sample_message)
+
+    # Should mention both files in the "processing started" enrichment
+    assert "report1.pdf" in result.message.content
+    assert "report2.pdf" in result.message.content
+    assert "[Document processing started:" in result.message.content
+
+
+@pytest.mark.asyncio
+async def test_async_callback_receives_completion(processor, sample_message, workspace_path):
+    """Verify callback receives completion notification after background processing."""
+    callback = AsyncMock()
+    processor.set_event_callback(callback)
+
+    uploads_dir = workspace_path / "uploads" / "2026-02-14"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    (uploads_dir / "report.pdf").write_bytes(b"%PDF content")
+
+    sample_message.attachments = [
+        Attachment(
+            type="document",
+            data=None,
+            mime_type="application/pdf",
+            filename="report.pdf",
+            saved_path="uploads/2026-02-14/report.pdf",
+        )
+    ]
+
+    # Patch _process_document to return a result without needing docling
+    with patch.object(processor, "_check_docling_available", return_value=True), \
+         patch.object(processor, "_process_document", new_callable=AsyncMock) as mock_process:
+        mock_process.return_value = "[Converted to markdown: uploads/2026-02-14/report.md]\nContents: full text"
+        result = await processor.process_inbound(sample_message)
+
+        # Wait for background task to complete
+        await asyncio.sleep(0.1)
+        for task in list(processor._active_tasks):
+            await task
+
+    # Callback should have been called with completion notification
+    callback.assert_called_once()
+    call_args = callback.call_args
+    session_key = call_args[0][0]
+    content = call_args[0][1]
+
+    assert session_key == sample_message.session_key
+    assert "[SYSTEM] Document processing complete" in content
+    assert "[Converted to markdown:" in content
+
+
+@pytest.mark.asyncio
+async def test_async_callback_receives_error(processor, sample_message, workspace_path):
+    """Verify callback receives error notification when processing fails."""
+    callback = AsyncMock()
+    processor.set_event_callback(callback)
+
+    uploads_dir = workspace_path / "uploads" / "2026-02-14"
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    (uploads_dir / "report.pdf").write_bytes(b"%PDF content")
+
+    sample_message.attachments = [
+        Attachment(
+            type="document",
+            data=None,
+            mime_type="application/pdf",
+            filename="report.pdf",
+            saved_path="uploads/2026-02-14/report.pdf",
+        )
+    ]
+
+    with patch.object(processor, "_check_docling_available", return_value=True), \
+         patch.object(processor, "_process_document", new_callable=AsyncMock) as mock_process:
+        mock_process.side_effect = Exception("Conversion exploded")
+        result = await processor.process_inbound(sample_message)
+
+        # Wait for background task
+        await asyncio.sleep(0.1)
+        for task in list(processor._active_tasks):
+            try:
+                await task
+            except Exception:
+                pass
+
+    # Callback should have been called with error
+    callback.assert_called_once()
+    content = callback.call_args[0][1]
+    assert "[SYSTEM] Document processing complete" in content
+    assert "could not be processed" in content

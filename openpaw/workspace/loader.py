@@ -194,10 +194,14 @@ class AgentWorkspace:
             "\n\n## File Uploads\n\n"
             "When users send you files (documents, images, audio, etc.), they are "
             "automatically saved to your uploads/ directory, organized by date. "
-            "You'll see a notification in the message like [Saved to: uploads/...]. "
-            "You can read, reference, and process these files using your filesystem tools. "
-            "Supported document types (PDF, DOCX, etc.) are also automatically converted "
-            "to markdown for easier reading."
+            "You'll see a notification in the message like [Saved to: uploads/...].\n\n"
+            "Supported document types (PDF, DOCX, PPTX, etc.) are automatically converted "
+            "to markdown in the background. You will see a [Document processing started] "
+            "notice in the initial message. When conversion completes, you will receive a "
+            "[SYSTEM] notification with the converted markdown path and content summary. "
+            "Do NOT attempt to read the markdown file until you receive this notification. "
+            "You can acknowledge receipt of the file immediately and let the user know "
+            "the document is being processed."
         )
 
         # Self-scheduling - include if cron tools are enabled

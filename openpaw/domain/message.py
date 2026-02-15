@@ -72,3 +72,30 @@ class Message:
         command = parts[0][1:]
         args = parts[1] if len(parts) > 1 else ""
         return (command, args)
+
+    def with_updates(self, content: str | None = None, **metadata_updates: Any) -> "Message":
+        """Create a copy with updated content and/or metadata.
+
+        Produces a new Message with the same id, channel, session_key, user_id,
+        direction, timestamp, reply_to_id, and attachments. Content and metadata
+        can be selectively overridden.
+
+        Args:
+            content: New content string. If None, keeps existing content.
+            **metadata_updates: Key-value pairs merged into existing metadata.
+
+        Returns:
+            New Message instance with the requested updates.
+        """
+        return Message(
+            id=self.id,
+            channel=self.channel,
+            session_key=self.session_key,
+            user_id=self.user_id,
+            content=content if content is not None else self.content,
+            direction=self.direction,
+            timestamp=self.timestamp,
+            reply_to_id=self.reply_to_id,
+            metadata={**self.metadata, **metadata_updates},
+            attachments=self.attachments,
+        )
