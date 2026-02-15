@@ -152,9 +152,9 @@ openpaw/
 
 **`openpaw/workspace/tool_loader.py`** - Dynamically loads LangChain tools from workspace `tools/` directories. Imports Python files and extracts `@tool` decorated functions (BaseTool instances).
 
-**`openpaw/runtime/queue/lane.py`** - Lane-based FIFO queue with configurable concurrency per lane (main, subagent, cron). Supports OpenClaw-style queue modes: `collect`, `steer`, `followup`, `interrupt`.
+**`openpaw/core/queue/lane.py`** - Lane-based FIFO queue with configurable concurrency per lane (main, subagent, cron). Supports OpenClaw-style queue modes: `collect`, `steer`, `followup`, `interrupt`.
 
-**`openpaw/runtime/queue/manager.py`** - `QueueManager` coordinates message routing across lanes. Manages debouncing, queue modes, and pending message tracking.
+**`openpaw/core/queue/manager.py`** - `QueueManager` coordinates message routing across lanes. Manages debouncing, queue modes, and pending message tracking.
 
 **`openpaw/agent/middleware/queue_aware.py`** - `QueueAwareToolMiddleware` wraps tool calls to inject pending messages (steer mode) or abort execution (interrupt mode) when users send new messages during agent runs. Provides responsive agent behavior via queue awareness.
 

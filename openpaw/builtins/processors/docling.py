@@ -75,7 +75,7 @@ class DoclingProcessor(BaseBuiltinProcessor):
         ocr_backend: OCR backend selection ('auto', 'mac', 'easyocr', 'tesseract', 'rapidocr')
         ocr_languages: List of ISO 639-1 language codes (default: ['en'])
         force_full_page_ocr: Force full-page OCR (default: True, recommended for scanned docs)
-        document_timeout: Per-document timeout in seconds (default: None, no limit)
+        document_timeout: Per-document timeout in seconds (default: 180)
         do_ocr: Enable OCR processing (default: True)
         do_table_structure: Enable table structure detection (default: True)
     """
