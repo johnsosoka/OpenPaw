@@ -1,6 +1,6 @@
 """Tests for thinking token stripping in AgentRunner."""
 
-from openpaw.core.agent import AgentRunner
+from openpaw.agent.runner import AgentRunner
 
 
 class TestThinkingTokenStripping:

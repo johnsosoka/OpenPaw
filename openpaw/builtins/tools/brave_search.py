@@ -4,12 +4,7 @@ import logging
 import os
 from typing import Any
 
-from openpaw.builtins.base import (
-    BaseBuiltinTool,
-    BuiltinMetadata,
-    BuiltinPrerequisite,
-    BuiltinType,
-)
+from openpaw.builtins.base import BaseBuiltinTool
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +19,9 @@ class BraveSearchTool(BaseBuiltinTool):
         count: Number of results to return (default: 5)
     """
 
-    metadata = BuiltinMetadata(
-        name="brave_search",
-        display_name="Brave Web Search",
-        description="Search the web using Brave Search API",
-        builtin_type=BuiltinType.TOOL,
-        group="web",
-        prerequisites=BuiltinPrerequisite(env_vars=["BRAVE_API_KEY"]),
-    )
+    name = "brave_search"
+    group = "web"
+    required_env_vars = ["BRAVE_API_KEY"]
 
     def get_langchain_tool(self) -> Any:
         """Return configured BraveSearch tool.

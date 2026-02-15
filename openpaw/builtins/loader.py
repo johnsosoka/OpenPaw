@@ -216,17 +216,14 @@ class BuiltinLoader:
         """
         tools: list[Any] = []
 
-        # Check all registered tools, not just those with satisfied prerequisites
-        all_tools = self.registry.list_all()["tools"]
-        for metadata in all_tools:
-            name = metadata.name
-
+        # Iterate over tool classes directly
+        for name, tool_class in self.registry._tools.items():
             # Check if available via env vars OR config api_key
-            if not metadata.prerequisites.is_satisfied() and not self._has_config_api_key(name):
+            if not tool_class.is_available() and not self._has_config_api_key(name):
                 logger.debug(f"Tool '{name}' not available (no env var or config api_key)")
                 continue
 
-            if not self._is_allowed(name, metadata.group):
+            if not self._is_allowed(name, tool_class.group):
                 logger.debug(f"Tool '{name}' denied by config")
                 continue
 
@@ -234,21 +231,19 @@ class BuiltinLoader:
                 logger.debug(f"Tool '{name}' disabled")
                 continue
 
-            tool_class = self.registry.get_tool_class(name)
-            if tool_class:
-                config = self._get_builtin_config(name)
-                try:
-                    instance = tool_class(config=config)
-                    self._tool_instances[name] = instance  # Store for later access
-                    tool_result = instance.get_langchain_tool()
-                    # Handle tools that return a list (like CronTool with multiple methods)
-                    if isinstance(tool_result, list):
-                        tools.extend(tool_result)
-                    else:
-                        tools.append(tool_result)
-                    logger.info(f"Loaded tool builtin: {name}")
-                except Exception as e:
-                    logger.warning(f"Failed to load tool '{name}': {e}")
+            config = self._get_builtin_config(name)
+            try:
+                instance = tool_class(config=config)
+                self._tool_instances[name] = instance  # Store for later access
+                tool_result = instance.get_langchain_tool()
+                # Handle tools that return a list (like CronTool with multiple methods)
+                if isinstance(tool_result, list):
+                    tools.extend(tool_result)
+                else:
+                    tools.append(tool_result)
+                logger.info(f"Loaded tool builtin: {name}")
+            except Exception as e:
+                logger.warning(f"Failed to load tool '{name}': {e}")
 
         return tools
 
@@ -279,21 +274,18 @@ class BuiltinLoader:
         - Its config contains an api_key
 
         Returns:
-            List of processor instances.
+            List of processor instances, sorted by order attribute.
         """
         processors: list[BaseBuiltinProcessor] = []
 
-        # Check all registered processors, not just those with satisfied prerequisites
-        all_processors = self.registry.list_all()["processors"]
-        for metadata in all_processors:
-            name = metadata.name
-
+        # Iterate over processor classes directly
+        for name, proc_class in self.registry._processors.items():
             # Check if available via env vars OR config api_key
-            if not metadata.prerequisites.is_satisfied() and not self._has_config_api_key(name):
+            if not proc_class.is_available() and not self._has_config_api_key(name):
                 logger.debug(f"Processor '{name}' not available (no env var or config api_key)")
                 continue
 
-            if not self._is_allowed(name, metadata.group):
+            if not self._is_allowed(name, proc_class.group):
                 logger.debug(f"Processor '{name}' denied by config")
                 continue
 
@@ -301,14 +293,14 @@ class BuiltinLoader:
                 logger.debug(f"Processor '{name}' disabled")
                 continue
 
-            processor_class = self.registry.get_processor_class(name)
-            if processor_class:
-                config = self._get_builtin_config(name)
-                try:
-                    instance = processor_class(config=config)
-                    processors.append(instance)
-                    logger.info(f"Loaded processor builtin: {name}")
-                except Exception as e:
-                    logger.warning(f"Failed to load processor '{name}': {e}")
+            config = self._get_builtin_config(name)
+            try:
+                instance = proc_class(config=config)
+                processors.append(instance)
+                logger.info(f"Loaded processor builtin: {name}")
+            except Exception as e:
+                logger.warning(f"Failed to load processor '{name}': {e}")
 
+        # Sort by order attribute
+        processors.sort(key=lambda p: p.order)
         return processors

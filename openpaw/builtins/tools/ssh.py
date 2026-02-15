@@ -5,12 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from openpaw.builtins.base import (
-    BaseBuiltinTool,
-    BuiltinMetadata,
-    BuiltinPrerequisite,
-    BuiltinType,
-)
+from openpaw.builtins.base import BaseBuiltinTool
 
 logger = logging.getLogger(__name__)
 
@@ -45,14 +40,8 @@ class SSHTool(BaseBuiltinTool):
         timeout: Connection timeout in seconds (default: 30)
     """
 
-    metadata = BuiltinMetadata(
-        name="ssh",
-        display_name="SSH Remote Execution",
-        description="Execute commands on remote hosts via SSH",
-        builtin_type=BuiltinType.TOOL,
-        group="system",
-        prerequisites=BuiltinPrerequisite(),
-    )
+    name = "ssh"
+    group = "system"
 
     def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(config)

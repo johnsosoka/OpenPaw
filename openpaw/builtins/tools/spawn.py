@@ -8,12 +8,7 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from openpaw.builtins.base import (
-    BaseBuiltinTool,
-    BuiltinMetadata,
-    BuiltinPrerequisite,
-    BuiltinType,
-)
+from openpaw.builtins.base import BaseBuiltinTool
 from openpaw.builtins.tools._channel_context import get_current_session_key
 from openpaw.domain.subagent import SubAgentStatus
 from openpaw.stores.subagent import create_subagent_request
@@ -69,14 +64,8 @@ class SpawnToolBuiltin(BaseBuiltinTool):
         max_concurrent: Maximum simultaneous sub-agents (default: 8)
     """
 
-    metadata = BuiltinMetadata(
-        name="spawn",
-        display_name="Sub-Agent Spawning",
-        description="Spawn background sub-agents for concurrent task execution",
-        builtin_type=BuiltinType.TOOL,
-        group="automation",
-        prerequisites=BuiltinPrerequisite(),  # No API key required
-    )
+    name = "spawn"
+    group = "automation"
 
     def __init__(self, config: dict[str, Any] | None = None):
         """Initialize the spawn tool builtin.

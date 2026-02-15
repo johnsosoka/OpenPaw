@@ -1,13 +1,13 @@
 """Tests for token usage and invocation metrics tracking."""
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from openpaw.core.metrics import (
+from openpaw.agent.metrics import (
     InvocationMetrics,
     TokenUsageLogger,
     TokenUsageReader,

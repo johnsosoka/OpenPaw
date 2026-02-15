@@ -1,7 +1,7 @@
 """Integration tests for command system in WorkspaceRunner."""
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -204,12 +204,12 @@ async def test_workspace_runner_build_command_context(mock_config, mock_workspac
 
         # Verify context fields
         assert context.channel == mock_channel
-        assert context.session_manager == runner._session_manager
+        assert context.session_manager == runner._ctx.session_manager
         assert context.checkpointer == runner._checkpointer
         assert context.agent_runner == runner._agent_runner
         assert context.workspace_name == "test_workspace"
         assert context.workspace_path == mock_workspace
-        assert context.queue_manager == runner._queue_manager
+        assert context.queue_manager == runner._ctx.queue_manager
         assert context.command_router == runner._command_router
 
 

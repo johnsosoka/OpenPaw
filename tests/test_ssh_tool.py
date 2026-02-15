@@ -11,7 +11,6 @@ class TestSSHTool:
     def test_metadata(self):
         """Test SSH tool metadata is correct."""
         assert SSHTool.metadata.name == "ssh"
-        assert SSHTool.metadata.display_name == "SSH Remote Execution"
         assert SSHTool.metadata.group == "system"
         assert SSHTool.metadata.prerequisites.env_vars == []
 

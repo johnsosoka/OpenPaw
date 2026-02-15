@@ -55,6 +55,7 @@ class NewCommand(CommandHandler):
                     session_key=message.session_key,
                     conversation_id=old_conv_id,
                     tags=["manual"],
+                    delete_checkpoints=True,
                 )
                 if archive:
                     archived = True

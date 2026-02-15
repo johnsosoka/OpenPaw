@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from openpaw.agent.middleware.approval import ApprovalRequiredError, ApprovalToolMiddleware
 from openpaw.core.config.approval import ApprovalGatesConfig, ToolApprovalConfig
 from openpaw.stores.approval import ApprovalGateManager
-from openpaw.agent.middleware.approval import ApprovalRequiredError, ApprovalToolMiddleware
 
 
 class TestApprovalConfig:
@@ -339,7 +339,6 @@ class TestApprovalToolMiddleware:
     async def test_contextvar_isolation_between_tasks(self):
         """ContextVars isolate state between concurrent asyncio tasks."""
         from openpaw.agent.middleware.approval import (
-            _approval_manager_var,
             _approval_session_key_var,
             _approval_thread_id_var,
         )

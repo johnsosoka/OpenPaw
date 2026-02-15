@@ -485,3 +485,62 @@ async def test_archive_default_timezone_utc(tmp_path: Path, mock_checkpointer):
 
     # Verify timestamps show UTC
     assert " UTC" in markdown_content
+
+
+@pytest.mark.asyncio
+async def test_archive_deletes_checkpoints_when_requested(
+    archiver: ConversationArchiver, mock_checkpointer
+):
+    """Verify adelete_thread is called when delete_checkpoints=True."""
+    mock_checkpointer.adelete_thread = AsyncMock()
+
+    archive = await archiver.archive(
+        checkpointer=mock_checkpointer,
+        thread_id="telegram:123:conv_delete",
+        session_key="telegram:123",
+        conversation_id="conv_delete",
+        delete_checkpoints=True,
+    )
+
+    assert archive is not None
+    mock_checkpointer.adelete_thread.assert_called_once_with("telegram:123:conv_delete")
+
+
+@pytest.mark.asyncio
+async def test_archive_preserves_checkpoints_by_default(
+    archiver: ConversationArchiver, mock_checkpointer
+):
+    """Verify adelete_thread is NOT called when delete_checkpoints is False (default)."""
+    mock_checkpointer.adelete_thread = AsyncMock()
+
+    archive = await archiver.archive(
+        checkpointer=mock_checkpointer,
+        thread_id="telegram:123:conv_keep",
+        session_key="telegram:123",
+        conversation_id="conv_keep",
+    )
+
+    assert archive is not None
+    mock_checkpointer.adelete_thread.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_archive_deletion_failure_does_not_block(
+    archiver: ConversationArchiver, mock_checkpointer
+):
+    """Archive succeeds even if checkpoint deletion fails."""
+    mock_checkpointer.adelete_thread = AsyncMock(side_effect=Exception("DB error"))
+
+    archive = await archiver.archive(
+        checkpointer=mock_checkpointer,
+        thread_id="telegram:123:conv_fail",
+        session_key="telegram:123",
+        conversation_id="conv_fail",
+        delete_checkpoints=True,
+    )
+
+    # Archive should still succeed
+    assert archive is not None
+    assert archive.markdown_path.exists()
+    assert archive.json_path.exists()
+    mock_checkpointer.adelete_thread.assert_called_once()

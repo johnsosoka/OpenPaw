@@ -6,12 +6,7 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from openpaw.builtins.base import (
-    BaseBuiltinTool,
-    BuiltinMetadata,
-    BuiltinPrerequisite,
-    BuiltinType,
-)
+from openpaw.builtins.base import BaseBuiltinTool
 from openpaw.builtins.tools.browser.session import BrowserSession
 
 logger = logging.getLogger(__name__)
@@ -97,14 +92,9 @@ class BrowserToolBuiltin(BaseBuiltinTool):
         blocked_domains: List of blocked domains (takes precedence)
     """
 
-    metadata = BuiltinMetadata(
-        name="browser",
-        display_name="Web Browser",
-        description="Browser automation via Playwright with semantic snapshots",
-        builtin_type=BuiltinType.TOOL,
-        group="browser",
-        prerequisites=BuiltinPrerequisite(packages=["playwright"]),
-    )
+    name = "browser"
+    group = "browser"
+    required_packages = ["playwright"]
 
     def __init__(self, config: dict[str, Any] | None = None):
         """Initialize the browser tool builtin.

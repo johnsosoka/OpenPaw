@@ -8,12 +8,7 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from openpaw.builtins.base import (
-    BaseBuiltinTool,
-    BuiltinMetadata,
-    BuiltinPrerequisite,
-    BuiltinType,
-)
+from openpaw.builtins.base import BaseBuiltinTool
 from openpaw.core.timezone import format_for_display
 from openpaw.domain.task import TaskPriority, TaskStatus
 from openpaw.stores.task import TaskStore, create_task
@@ -118,14 +113,8 @@ class TaskToolBuiltin(BaseBuiltinTool):
         max_age_days: Auto-cleanup completed tasks older than N days (default: 7)
     """
 
-    metadata = BuiltinMetadata(
-        name="task_tracker",
-        display_name="Task Tracker",
-        description="Track long-running operations across heartbeat invocations",
-        builtin_type=BuiltinType.TOOL,
-        group="automation",
-        prerequisites=BuiltinPrerequisite(),  # No env vars required
-    )
+    name = "task_tracker"
+    group = "automation"
 
     def __init__(self, config: dict[str, Any] | None = None):
         """Initialize the task tool builtin.

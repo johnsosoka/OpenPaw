@@ -1,6 +1,5 @@
 """Tests for browser accessibility tree snapshot transformer."""
 
-import pytest
 
 from openpaw.builtins.tools.browser.snapshot import SnapshotTransformer
 

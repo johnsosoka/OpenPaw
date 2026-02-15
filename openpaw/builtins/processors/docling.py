@@ -6,13 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from openpaw.agent.tools import resolve_sandboxed_path
-from openpaw.builtins.base import (
-    BaseBuiltinProcessor,
-    BuiltinMetadata,
-    BuiltinPrerequisite,
-    BuiltinType,
-    ProcessorResult,
-)
+from openpaw.builtins.base import BaseBuiltinProcessor, ProcessorResult
 from openpaw.channels.base import Attachment, Message
 
 logger = logging.getLogger(__name__)
@@ -85,14 +79,9 @@ class DoclingProcessor(BaseBuiltinProcessor):
         do_table_structure: Enable table structure detection (default: True)
     """
 
-    metadata = BuiltinMetadata(
-        name="docling",
-        display_name="Docling Document Processor",
-        description="Converts inbound documents (PDF, DOCX, etc.) to markdown for agent consumption",
-        builtin_type=BuiltinType.PROCESSOR,
-        group="document",
-        prerequisites=BuiltinPrerequisite(),  # No API key needed (local processing)
-    )
+    name = "docling"
+    group = "document"
+    order = 30
 
     def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(config)

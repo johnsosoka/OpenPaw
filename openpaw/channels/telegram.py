@@ -633,6 +633,25 @@ class TelegramChannel(ChannelAdapter):
             parse_mode="Markdown",
         )
 
+    async def send_typing_action(self, session_key: str) -> None:
+        """Send typing indicator to a Telegram chat.
+
+        Args:
+            session_key: Session key in format "telegram:{chat_id}".
+        """
+        if not self._app:
+            return
+
+        try:
+            # Extract chat_id from session_key (format: "telegram:{chat_id}")
+            chat_id = session_key.split(":", 1)[1] if ":" in session_key else session_key
+            await self._app.bot.send_chat_action(
+                chat_id=int(chat_id),
+                action="typing",
+            )
+        except Exception as e:
+            logger.debug(f"Failed to send typing action to {session_key}: {e}")
+
     async def _handle_approval_callback(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:

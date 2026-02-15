@@ -46,7 +46,6 @@ def test_send_file_tool_metadata() -> None:
     """Test SendFileTool has correct metadata."""
     tool = SendFileTool()
     assert tool.metadata.name == "send_file"
-    assert tool.metadata.display_name == "Send File"
     assert tool.metadata.group == "communication"
     assert tool.metadata.prerequisites.is_satisfied()  # No API key needed
 

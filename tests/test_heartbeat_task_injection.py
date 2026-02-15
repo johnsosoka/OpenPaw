@@ -1,7 +1,6 @@
 """Tests for heartbeat task summary injection."""
 
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from unittest.mock import Mock
 
 import pytest

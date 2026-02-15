@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 import yaml
 
+from openpaw.agent.metrics import InvocationMetrics
 from openpaw.core.config import HeartbeatConfig
-from openpaw.core.metrics import InvocationMetrics
 from openpaw.runtime.scheduling.heartbeat import HeartbeatScheduler
 
 

@@ -1,6 +1,5 @@
 """Tests for the SpawnToolBuiltin."""
 
-import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -9,8 +8,9 @@ import pytest
 
 from openpaw.builtins.registry import BuiltinRegistry
 from openpaw.builtins.tools.spawn import SpawnToolBuiltin
+from openpaw.domain.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
+from openpaw.stores.subagent import SubAgentStore
 from openpaw.subagent.runner import SubAgentRunner
-from openpaw.subagent.store import SubAgentRequest, SubAgentResult, SubAgentStatus, SubAgentStore
 
 
 @pytest.fixture
@@ -54,7 +54,6 @@ def test_metadata():
     meta = SpawnToolBuiltin.metadata
 
     assert meta.name == "spawn"
-    assert meta.display_name == "Sub-Agent Spawning"
     assert meta.group == "automation"
     assert meta.builtin_type.value == "tool"
     assert len(meta.prerequisites.env_vars) == 0  # No API key required

@@ -8,8 +8,6 @@ Builtins come in two types:
 from openpaw.builtins.base import (
     BaseBuiltinProcessor,
     BaseBuiltinTool,
-    BuiltinMetadata,
-    BuiltinPrerequisite,
     BuiltinType,
 )
 from openpaw.builtins.loader import BuiltinLoader
@@ -19,8 +17,6 @@ __all__ = [
     "BaseBuiltinProcessor",
     "BaseBuiltinTool",
     "BuiltinLoader",
-    "BuiltinMetadata",
-    "BuiltinPrerequisite",
     "BuiltinRegistry",
     "BuiltinType",
 ]

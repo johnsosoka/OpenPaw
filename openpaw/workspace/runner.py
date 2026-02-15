@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -33,10 +34,117 @@ from openpaw.stores.subagent import SubAgentStore
 from openpaw.stores.task import TaskStore
 from openpaw.subagent.runner import SubAgentRunner
 from openpaw.workspace.agent_factory import AgentFactory, filter_workspace_tools
+from openpaw.workspace.context import WorkspaceContext
 from openpaw.workspace.lifecycle import LifecycleManager
 from openpaw.workspace.loader import WorkspaceLoader
 from openpaw.workspace.message_processor import MessageProcessor
 from openpaw.workspace.tool_loader import load_workspace_tools
+
+
+def _merge_workspace_config(global_config: Config, workspace: Any) -> dict[str, Any]:
+    """Merge workspace config over global config."""
+    if not workspace.config:
+        return {}
+
+    global_dict: dict[str, Any] = {
+        "model": {
+            "provider": None,
+            "model": global_config.agent.model,
+            "api_key": global_config.agent.api_key,
+            "temperature": global_config.agent.temperature,
+            "max_turns": global_config.agent.max_turns,
+            "region": None,
+        },
+        "queue": {
+            "mode": global_config.queue.mode,
+            "debounce_ms": global_config.queue.debounce_ms,
+        },
+    }
+
+    workspace_dict: dict[str, Any] = {}
+    if workspace.config.model:
+        model_dict = workspace.config.model.model_dump(exclude_none=True)
+        if model_dict:
+            workspace_dict["model"] = model_dict
+
+    if workspace.config.queue:
+        queue_dict = workspace.config.queue.model_dump(exclude_none=True)
+        if queue_dict:
+            workspace_dict["queue"] = queue_dict
+
+    if workspace.config.channel:
+        channel_dict = workspace.config.channel.model_dump(exclude_none=True)
+        if channel_dict:
+            workspace_dict["channel"] = channel_dict
+
+    return merge_configs(global_dict, workspace_dict)
+
+
+def _build_workspace_context(config: Config, workspace_name: str, logger: logging.Logger) -> WorkspaceContext:
+    """Build WorkspaceContext from config and workspace name.
+
+    Handles env loading, workspace loading, config merging, and store initialization.
+    """
+    workspace_loader = WorkspaceLoader(config.workspaces_path)
+
+    # Load workspace-specific .env
+    workspace_env = Path(config.workspaces_path) / workspace_name / ".env"
+    if workspace_env.exists():
+        load_dotenv(workspace_env, override=True)
+        logger.info(f"Loaded environment from: {workspace_env}")
+
+    workspace = workspace_loader.load(workspace_name)
+    merged_config = _merge_workspace_config(config, workspace)
+
+    timezone = workspace.config.timezone if workspace.config else "UTC"
+
+    # Initialize stores
+    task_store = TaskStore(workspace.path)
+    subagent_store = SubAgentStore(workspace.path)
+    token_logger = TokenUsageLogger(workspace.path)
+
+    # Initialize queue system
+    lane_queue = LaneQueue(
+        main_concurrency=config.lanes.main_concurrency,
+        subagent_concurrency=config.lanes.subagent_concurrency,
+        cron_concurrency=config.lanes.cron_concurrency,
+    )
+
+    queue_config = merged_config.get("queue", {})
+    queue_manager = QueueManager(
+        lane_queue=lane_queue,
+        default_mode=QueueMode(queue_config.get("mode", config.queue.mode)),
+        default_debounce_ms=queue_config.get("debounce_ms", config.queue.debounce_ms),
+        default_cap=queue_config.get("cap", config.queue.cap),
+        default_drop_policy=queue_config.get("drop_policy", config.queue.drop_policy),
+    )
+
+    db_path = workspace.path / ".openpaw" / "conversations.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    session_manager = SessionManager(workspace.path)
+    conversation_archiver = ConversationArchiver(
+        workspace_path=workspace.path,
+        workspace_name=workspace_name,
+        timezone=timezone,
+    )
+
+    return WorkspaceContext(
+        workspace_name=workspace_name,
+        workspace_path=workspace.path,
+        workspace=workspace,
+        merged_config=merged_config,
+        timezone=timezone,
+        task_store=task_store,
+        subagent_store=subagent_store,
+        token_logger=token_logger,
+        lane_queue=lane_queue,
+        queue_manager=queue_manager,
+        session_manager=session_manager,
+        conversation_archiver=conversation_archiver,
+        db_path=db_path,
+        logger=logger,
+    )
 
 
 class WorkspaceRunner:
@@ -63,61 +171,13 @@ class WorkspaceRunner:
         else:
             self.logger = logging.getLogger(f"{__name__}.{workspace_name}")
 
-        self._workspace_loader = WorkspaceLoader(config.workspaces_path)
-
-        # Load workspace-specific .env BEFORE workspace load so ${VAR} expansion works
-        workspace_env = Path(config.workspaces_path) / workspace_name / ".env"
-        if workspace_env.exists():
-            load_dotenv(workspace_env, override=True)
-            self.logger.info(f"Loaded environment from: {workspace_env}")
-
-        self._workspace = self._workspace_loader.load(workspace_name)
-
-        # Merge workspace config with global config
-        self._merged_config = self._merge_workspace_config(config, self._workspace)
-
-        # Extract workspace timezone
-        self._workspace_timezone: str = (
-            self._workspace.config.timezone
-            if self._workspace.config
-            else "UTC"
-        )
-
-        # Initialize stores
-        self._task_store = TaskStore(self._workspace.path)
+        # Build shared context
+        self._ctx = _build_workspace_context(config, workspace_name, self.logger)
         self._cleanup_old_tasks()
-        self._subagent_store = SubAgentStore(self._workspace.path)
-        self._token_logger = TokenUsageLogger(self._workspace.path)
 
-        # Initialize queue system
-        self._lane_queue = LaneQueue(
-            main_concurrency=config.lanes.main_concurrency,
-            subagent_concurrency=config.lanes.subagent_concurrency,
-            cron_concurrency=config.lanes.cron_concurrency,
-        )
-
-        queue_config = self._merged_config.get("queue", {})
-        self._queue_manager = QueueManager(
-            lane_queue=self._lane_queue,
-            default_mode=QueueMode(queue_config.get("mode", config.queue.mode)),
-            default_debounce_ms=queue_config.get("debounce_ms", config.queue.debounce_ms),
-            default_cap=queue_config.get("cap", config.queue.cap),
-            default_drop_policy=queue_config.get("drop_policy", config.queue.drop_policy),
-        )
-
-        # Checkpointer (initialized in start())
-        self._db_path = self._workspace.path / ".openpaw" / "conversations.db"
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Runtime state (managed by start/stop)
         self._db_conn: aiosqlite.Connection | None = None
         self._checkpointer: Any | None = None
-
-        # Session and archiving
-        self._session_manager = SessionManager(self._workspace.path)
-        self._conversation_archiver = ConversationArchiver(
-            workspace_path=self._workspace.path,
-            workspace_name=self.workspace_name,
-            timezone=self._workspace_timezone,
-        )
 
         # Command routing
         self._command_router = CommandRouter()
@@ -125,18 +185,18 @@ class WorkspaceRunner:
 
         # Load builtins
         workspace_builtins_config = None
-        if self._workspace.config and self._workspace.config.builtins:
-            workspace_builtins_config = self._workspace.config.builtins
+        if self._ctx.workspace.config and self._ctx.workspace.config.builtins:
+            workspace_builtins_config = self._ctx.workspace.config.builtins
 
-        workspace_channel_config = self._merged_config.get("channel", {})
+        workspace_channel_config = self._ctx.merged_config.get("channel", {})
 
         self._builtin_loader = BuiltinLoader(
             global_config=config.builtins,
             workspace_config=workspace_builtins_config,
-            workspace_path=self._workspace.path,
+            workspace_path=self._ctx.workspace_path,
             channel_config=workspace_channel_config,
-            workspace_timezone=self._workspace_timezone,
-            task_store=self._task_store,
+            workspace_timezone=self._ctx.timezone,
+            task_store=self._ctx.task_store,
         )
 
         self._builtin_tools = self._builtin_loader.load_tools()
@@ -149,16 +209,16 @@ class WorkspaceRunner:
             self.logger.info(f"Loaded {len(self._processors)} builtin processors for workspace: {workspace_name}")
 
         # Load workspace tools
-        self._workspace_tools = load_workspace_tools(self._workspace.tools_path)
+        self._workspace_tools = load_workspace_tools(self._ctx.workspace.tools_path)
         if self._workspace_tools:
             tool_names = [t.name for t in self._workspace_tools]
             self.logger.info(f"Loaded {len(self._workspace_tools)} workspace tools: {tool_names}")
 
         # Apply workspace tool filtering
-        if self._workspace_tools and self._workspace.config:
+        if self._workspace_tools and self._ctx.workspace.config:
             self._workspace_tools = filter_workspace_tools(
                 self._workspace_tools,
-                self._workspace.config.workspace_tools,
+                self._ctx.workspace.config.workspace_tools,
                 self.logger,
             )
 
@@ -173,7 +233,7 @@ class WorkspaceRunner:
             self.logger.info("Approval gates enabled")
 
         # Build agent configuration
-        agent_config = self._merged_config.get("model", {})
+        agent_config = self._ctx.merged_config.get("model", {})
         model_str = agent_config.get("model", config.agent.model)
         if agent_config.get("provider"):
             model_str = f"{agent_config['provider']}:{agent_config['model']}"
@@ -188,13 +248,18 @@ class WorkspaceRunner:
             self.logger.info(f"Passing extra model kwargs: {list(extra_model_kwargs.keys())}")
 
         # Build middleware list
-        middlewares = [self._queue_middleware.get_middleware()]
+        from openpaw.agent.middleware.queue_check import get_queue_check_middleware
+        from openpaw.agent.middleware.tool_call_sanitizer import get_tool_call_sanitizer
+
+        middlewares = [get_tool_call_sanitizer()]  # Sanitize before checkpoint
+        middlewares.append(self._queue_middleware.get_middleware())
         if self._approval_manager:
             middlewares.append(self._approval_middleware.get_middleware())
+        middlewares.append(get_queue_check_middleware())
 
         # Create agent factory
         self._agent_factory = AgentFactory(
-            workspace=self._workspace,
+            workspace=self._ctx.workspace,
             model=model_str,
             api_key=agent_config.get("api_key", config.agent.api_key),
             max_turns=agent_config.get("max_turns", config.agent.max_turns),
@@ -215,30 +280,30 @@ class WorkspaceRunner:
         # Create message processor
         self._message_processor = MessageProcessor(
             agent_runner=self._agent_runner,
-            session_manager=self._session_manager,
-            queue_manager=self._queue_manager,
+            session_manager=self._ctx.session_manager,
+            queue_manager=self._ctx.queue_manager,
             builtin_loader=self._builtin_loader,
             queue_middleware=self._queue_middleware,
             approval_middleware=self._approval_middleware,
             approval_manager=self._approval_manager,
             workspace_name=self.workspace_name,
-            token_logger=self._token_logger,
+            token_logger=self._ctx.token_logger,
             logger=self.logger,
         )
 
         # Create lifecycle manager
         self._lifecycle_manager = LifecycleManager(
             workspace_name=self.workspace_name,
-            workspace_path=self._workspace.path,
-            workspace_config=self._workspace.config,
-            merged_config=self._merged_config,
+            workspace_path=self._ctx.workspace_path,
+            workspace_config=self._ctx.workspace.config,
+            merged_config=self._ctx.merged_config,
             config=config,
-            queue_manager=self._queue_manager,
+            queue_manager=self._ctx.queue_manager,
             message_handler=self._handle_inbound_message,
             queue_handler=self._process_messages,
             builtin_loader=self._builtin_loader,
-            workspace_timezone=self._workspace_timezone,
-            session_manager=self._session_manager,
+            workspace_timezone=self._ctx.timezone,
+            session_manager=self._ctx.session_manager,
             approval_handler=self._handle_approval_resolution,
             logger=self.logger,
         )
@@ -251,45 +316,7 @@ class WorkspaceRunner:
     @property
     def token_logger(self) -> TokenUsageLogger:
         """Get the token usage logger for this workspace."""
-        return self._token_logger
-
-    def _merge_workspace_config(self, global_config: Config, workspace: Any) -> dict[str, Any]:
-        """Merge workspace config over global config."""
-        if not workspace.config:
-            return {}
-
-        global_dict: dict[str, Any] = {
-            "model": {
-                "provider": None,
-                "model": global_config.agent.model,
-                "api_key": global_config.agent.api_key,
-                "temperature": global_config.agent.temperature,
-                "max_turns": global_config.agent.max_turns,
-                "region": None,
-            },
-            "queue": {
-                "mode": global_config.queue.mode,
-                "debounce_ms": global_config.queue.debounce_ms,
-            },
-        }
-
-        workspace_dict: dict[str, Any] = {}
-        if workspace.config.model:
-            model_dict = workspace.config.model.model_dump(exclude_none=True)
-            if model_dict:
-                workspace_dict["model"] = model_dict
-
-        if workspace.config.queue:
-            queue_dict = workspace.config.queue.model_dump(exclude_none=True)
-            if queue_dict:
-                workspace_dict["queue"] = queue_dict
-
-        if workspace.config.channel:
-            channel_dict = workspace.config.channel.model_dump(exclude_none=True)
-            if channel_dict:
-                workspace_dict["channel"] = channel_dict
-
-        return merge_configs(global_dict, workspace_dict)
+        return self._ctx.token_logger
 
     def _register_framework_commands(self) -> None:
         """Register all framework command handlers."""
@@ -301,9 +328,9 @@ class WorkspaceRunner:
 
     def _get_approval_config(self) -> ApprovalGatesConfig | None:
         """Get approval gates config from workspace or global."""
-        if self._workspace.config and self._workspace.config.approval_gates:
-            if self._workspace.config.approval_gates.enabled:
-                return self._workspace.config.approval_gates
+        if self._ctx.workspace.config and self._ctx.workspace.config.approval_gates:
+            if self._ctx.workspace.config.approval_gates.enabled:
+                return self._ctx.workspace.config.approval_gates
         if hasattr(self.config, "approval_gates") and self.config.approval_gates:
             if self.config.approval_gates.enabled:
                 return self.config.approval_gates
@@ -325,15 +352,15 @@ class WorkspaceRunner:
     def _cleanup_old_tasks(self) -> None:
         """Clean up old completed tasks from TaskStore on startup."""
         try:
-            removed = self._task_store.cleanup_old_tasks(max_age_days=7)
+            removed = self._ctx.task_store.cleanup_old_tasks(max_age_days=7)
             if removed > 0:
                 self.logger.info(f"Cleaned up {removed} old task(s) from TaskStore")
 
             from openpaw.domain.task import TaskStatus
 
-            active_tasks = self._task_store.list(status=TaskStatus.IN_PROGRESS)
-            pending_tasks = self._task_store.list(status=TaskStatus.PENDING)
-            awaiting_tasks = self._task_store.list(status=TaskStatus.AWAITING_CHECK)
+            active_tasks = self._ctx.task_store.list(status=TaskStatus.IN_PROGRESS)
+            pending_tasks = self._ctx.task_store.list(status=TaskStatus.PENDING)
+            awaiting_tasks = self._ctx.task_store.list(status=TaskStatus.AWAITING_CHECK)
 
             total_active = len(active_tasks) + len(pending_tasks) + len(awaiting_tasks)
             if total_active > 0:
@@ -354,15 +381,15 @@ class WorkspaceRunner:
             raise RuntimeError(f"No channel found for message.channel: {message.channel}")
         return CommandContext(
             channel=channel,
-            session_manager=self._session_manager,
+            session_manager=self._ctx.session_manager,
             checkpointer=self._checkpointer,
             agent_runner=self._agent_runner,
             workspace_name=self.workspace_name,
-            workspace_path=self._workspace.path,
-            queue_manager=self._queue_manager,
+            workspace_path=self._ctx.workspace_path,
+            queue_manager=self._ctx.queue_manager,
             command_router=self._command_router,
-            workspace_timezone=self._workspace_timezone,
-            conversation_archiver=self._conversation_archiver,
+            workspace_timezone=self._ctx.timezone,
+            conversation_archiver=self._ctx.conversation_archiver,
             browser_builtin=self._get_browser_builtin(),
         )
 
@@ -386,15 +413,27 @@ class WorkspaceRunner:
                 result = await processor.process_inbound(processed_message)
                 processed_message = result.message
                 if result.skip_agent:
-                    self.logger.debug(f"Processor {processor.metadata.name} handled message, skipping agent")
+                    self.logger.debug(f"Processor {processor.name} handled message, skipping agent")
                     return
             except Exception as e:
-                self.logger.error(f"Processor {processor.metadata.name} failed: {e}")
+                self.logger.error(f"Processor {processor.name} failed: {e}")
 
         content_preview = processed_message.content[:50] if processed_message.content else "(empty)"
         self.logger.info(f"Received message from {processed_message.channel}: {content_preview}...")
 
-        await self._queue_manager.submit(
+        # Send typing indicator if session is busy (agent already running).
+        # Note: locked() is non-blocking. The lock could release between check
+        # and send — a brief spurious indicator is benign (auto-expires 5s).
+        session_lock = await self._ctx.lane_queue.get_session_lock(processed_message.session_key)
+        if session_lock.locked():
+            channel = self._channels.get(processed_message.channel)
+            if channel:
+                try:
+                    await channel.send_typing_action(processed_message.session_key)
+                except Exception as e:
+                    self.logger.debug(f"Typing indicator failed: {e}")
+
+        await self._ctx.queue_manager.submit(
             session_key=processed_message.session_key,
             channel_name=processed_message.channel,
             message=processed_message,
@@ -410,22 +449,22 @@ class WorkspaceRunner:
         """Background task processing the lane queue."""
         async def handler(item: QueueItem) -> None:
             channel_name, messages = item.payload
-            handler_func = self._queue_manager._handlers.get(channel_name)
+            handler_func = self._ctx.queue_manager._handlers.get(channel_name)
             if handler_func:
                 await handler_func(item.session_key, messages)
 
-        await self._lane_queue.process("main", handler)
+        await self._ctx.lane_queue.process("main", handler)
 
     async def start(self) -> None:
         """Start workspace runner."""
         self.logger.info(f"Starting workspace runner: {self.workspace_name}")
 
         # Initialize SQLite checkpointer
-        self._db_conn = await aiosqlite.connect(str(self._db_path))
+        self._db_conn = await aiosqlite.connect(str(self._ctx.db_path))
         self._checkpointer = AsyncSqliteSaver(self._db_conn)
         await self._checkpointer.setup()
         self._agent_runner.update_checkpointer(self._checkpointer)
-        self.logger.info(f"Initialized SQLite checkpointer: {self._db_path}")
+        self.logger.info(f"Initialized SQLite checkpointer: {self._ctx.db_path}")
 
         # Setup channels
         self._channels = await self._lifecycle_manager.setup_channels()
@@ -433,25 +472,25 @@ class WorkspaceRunner:
 
         # Start schedulers if needed
         cron_tool_loaded = self._builtin_loader.get_tool_instance("cron") is not None
-        if self._workspace.crons or cron_tool_loaded:
+        if self._ctx.workspace.crons or cron_tool_loaded:
             agent_factory = self._agent_factory.get_agent_factory_closure()
             await self._lifecycle_manager.setup_cron_scheduler(
-                self._workspace.crons,
+                self._ctx.workspace.crons,
                 agent_factory,
-                self._token_logger,
+                self._ctx.token_logger,
             )
 
         await self._lifecycle_manager.setup_heartbeat_scheduler(
             self._agent_factory.get_agent_factory_closure(),
-            self._token_logger,
+            self._ctx.token_logger,
         )
 
         # Start sub-agent runner
         self._subagent_runner = SubAgentRunner(
             agent_factory=self._agent_factory.get_agent_factory_closure(),
-            store=self._subagent_store,
+            store=self._ctx.subagent_store,
             channels=self._channels,
-            token_logger=self._token_logger,
+            token_logger=self._ctx.token_logger,
             workspace_name=self.workspace_name,
             max_concurrent=8,
             result_callback=self._inject_system_event,
@@ -494,7 +533,7 @@ class WorkspaceRunner:
                 direction=MessageDirection.INBOUND,
             )
 
-            await self._queue_manager.submit(
+            await self._ctx.queue_manager.submit(
                 session_key=session_key,
                 channel_name=channel_name,
                 message=msg,
@@ -515,10 +554,10 @@ class WorkspaceRunner:
 
     async def _archive_active_conversations(self) -> None:
         """Archive all active conversations on shutdown."""
-        if not self._checkpointer or not hasattr(self, '_conversation_archiver'):
+        if not self._checkpointer:
             return
 
-        sessions = self._session_manager.list_sessions()
+        sessions = self._ctx.session_manager.list_sessions()
         if not sessions:
             self.logger.debug("No active sessions to archive on shutdown")
             return
@@ -527,12 +566,13 @@ class WorkspaceRunner:
         for session_key, state in sessions.items():
             try:
                 thread_id = f"{session_key}:{state.conversation_id}"
-                archive = await self._conversation_archiver.archive(
+                archive = await self._ctx.conversation_archiver.archive(
                     checkpointer=self._checkpointer,
                     thread_id=thread_id,
                     session_key=session_key,
                     conversation_id=state.conversation_id,
                     tags=["shutdown"],
+                    delete_checkpoints=True,
                 )
                 if archive:
                     archived_count += 1
@@ -544,6 +584,18 @@ class WorkspaceRunner:
 
         if archived_count > 0:
             self.logger.info(f"Archived {archived_count} conversation(s) on shutdown")
+
+    async def _vacuum_checkpoint_db(self) -> None:
+        """Run VACUUM on the checkpoint database to reclaim disk space."""
+        if not self._db_conn:
+            return
+        try:
+            start = time.monotonic()
+            await self._db_conn.execute("VACUUM")
+            elapsed = time.monotonic() - start
+            self.logger.info(f"VACUUM completed on checkpoint DB in {elapsed:.1f}s")
+        except Exception as e:
+            self.logger.warning(f"VACUUM failed on checkpoint DB: {e}")
 
     async def stop(self) -> None:
         """Stop workspace runner gracefully."""
@@ -584,6 +636,9 @@ class WorkspaceRunner:
 
         # Archive conversations
         await self._archive_active_conversations()
+
+        # Reclaim disk space from deleted checkpoints
+        await self._vacuum_checkpoint_db()
 
         # Close database
         if self._db_conn:

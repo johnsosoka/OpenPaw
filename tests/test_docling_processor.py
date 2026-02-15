@@ -73,7 +73,6 @@ def mock_docling():
 def test_processor_metadata():
     """Verify DoclingProcessor metadata is correctly defined."""
     assert DoclingProcessor.metadata.name == "docling"
-    assert DoclingProcessor.metadata.display_name == "Docling Document Processor"
     assert DoclingProcessor.metadata.group == "document"
     assert not DoclingProcessor.metadata.prerequisites.env_vars
 

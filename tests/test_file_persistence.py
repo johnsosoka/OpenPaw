@@ -483,7 +483,6 @@ async def test_binary_file_no_extension(processor, sample_message, temp_workspac
 @pytest.mark.asyncio
 async def test_date_partitioning(processor, sample_message, temp_workspace):
     """Test that files are saved in date-based subdirectories."""
-    from datetime import datetime
 
     attachment = Attachment(
         type="document",
@@ -495,8 +494,10 @@ async def test_date_partitioning(processor, sample_message, temp_workspace):
 
     await processor.process_inbound(sample_message)
 
-    # Verify date-based directory
-    today = datetime.now().strftime("%Y-%m-%d")
+    # Verify date-based directory (processor defaults to UTC timezone)
+    from openpaw.core.timezone import workspace_now
+
+    today = workspace_now("UTC").strftime("%Y-%m-%d")
     expected_dir = Path(temp_workspace) / "uploads" / today
     assert expected_dir.exists()
     assert expected_dir.is_dir()
@@ -540,7 +541,6 @@ async def test_timezone_aware_date_partition(temp_workspace, sample_message):
     If server is UTC, that's 06:30am UTC on Feb 8.
     File should land in 2026-02-07 folder (Mountain Time), not 2026-02-08.
     """
-    from openpaw.core.timezone import workspace_now
 
     # Create processor with Mountain Time timezone
     processor = FilePersistenceProcessor(

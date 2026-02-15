@@ -4,13 +4,7 @@ import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from openpaw.builtins.base import (
-    BaseBuiltinProcessor,
-    BuiltinMetadata,
-    BuiltinPrerequisite,
-    BuiltinType,
-    ProcessorResult,
-)
+from openpaw.builtins.base import BaseBuiltinProcessor, ProcessorResult
 from openpaw.channels.base import Message
 
 logger = logging.getLogger(__name__)
@@ -34,14 +28,9 @@ class TimestampProcessor(BaseBuiltinProcessor):
                   Use {datetime} as placeholder for formatted timestamp
     """
 
-    metadata = BuiltinMetadata(
-        name="timestamp",
-        display_name="Message Timestamp Context",
-        description="Prepends current date/time to inbound messages for temporal awareness",
-        builtin_type=BuiltinType.PROCESSOR,
-        group="context",
-        prerequisites=BuiltinPrerequisite(),
-    )
+    name = "timestamp"
+    group = "context"
+    order = 20
 
     async def process_inbound(self, message: Message) -> ProcessorResult:
         """Prepend timestamp context to message content.

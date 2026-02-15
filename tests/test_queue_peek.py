@@ -1,12 +1,11 @@
 """Tests for QueueManager peek_pending and consume_pending methods."""
 
 import asyncio
-from collections import deque
 
 import pytest
 
 from openpaw.core.queue.lane import LaneQueue, QueueMode
-from openpaw.core.queue.manager import QueueManager, SessionQueue
+from openpaw.core.queue.manager import QueueManager
 
 
 @pytest.fixture
@@ -131,3 +130,102 @@ async def test_peek_and_consume_workflow(queue_manager):
 
     # No longer pending
     assert await queue_manager.peek_pending(session_key) is False
+
+
+# Tests for Fix 4: In-Flight Items Visibility
+
+
+@pytest.mark.asyncio
+async def test_peek_detects_in_flight_items():
+    """Test peek_session_pending detects items between dequeue and session lock."""
+    from openpaw.core.queue.lane import LaneQueue, QueueItem
+
+    lane_queue = LaneQueue()
+    session_key = "test:123"
+
+    # Manually add item to in_flight dict (simulating dequeued but not yet processing)
+    item = QueueItem(session_key=session_key, payload="test", mode=QueueMode.COLLECT)
+    lane_queue._in_flight[session_key] = [item]
+
+    # Peek should detect the in-flight item
+    result = await lane_queue.peek_session_pending(session_key)
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_consume_includes_in_flight_items():
+    """Test consume_session_pending drains both queue and in-flight."""
+    from openpaw.core.queue.lane import LaneQueue, QueueItem
+
+    lane_queue = LaneQueue()
+    session_key = "test:123"
+
+    # Add item to queue
+    queued_item = QueueItem(session_key=session_key, payload="queued", mode=QueueMode.COLLECT)
+    await lane_queue.enqueue(queued_item, lane_name="main")
+
+    # Add item to in_flight (simulating dequeued but not yet processing)
+    in_flight_item = QueueItem(session_key=session_key, payload="in_flight", mode=QueueMode.COLLECT)
+    lane_queue._in_flight[session_key] = [in_flight_item]
+
+    # Consume should get BOTH items
+    consumed = await lane_queue.consume_session_pending(session_key, lane_name="main")
+
+    assert len(consumed) == 2
+    # Check that both items are present (order doesn't matter)
+    payloads = {item.payload for item in consumed}
+    assert payloads == {"queued", "in_flight"}
+
+    # Verify in_flight is now empty for this session
+    assert session_key not in lane_queue._in_flight
+
+
+@pytest.mark.asyncio
+async def test_in_flight_tracking_during_process():
+    """Test that items are correctly tracked as in-flight during process()."""
+    from openpaw.core.queue.lane import LaneQueue, QueueItem
+
+    lane_queue = LaneQueue()
+    session_key = "test:123"
+    processed_items = []
+
+    async def handler(item: QueueItem):
+        """Handler that records when items are processed."""
+        # Check if item is in in_flight at start of processing
+        in_flight_at_start = bool(lane_queue._in_flight.get(session_key))
+
+        # Simulate work
+        await asyncio.sleep(0.01)
+
+        # Check if item is still in in_flight (should be removed by now)
+        in_flight_at_end = bool(lane_queue._in_flight.get(session_key))
+
+        processed_items.append({
+            "item": item,
+            "in_flight_at_start": in_flight_at_start,
+            "in_flight_at_end": in_flight_at_end,
+        })
+
+    # Enqueue an item
+    item = QueueItem(session_key=session_key, payload="test", mode=QueueMode.COLLECT)
+    await lane_queue.enqueue(item, lane_name="main")
+
+    # Start processing in background
+    process_task = asyncio.create_task(lane_queue.process("main", handler))
+
+    # Give it time to process
+    await asyncio.sleep(0.05)
+
+    # Cancel processing task
+    process_task.cancel()
+    try:
+        await process_task
+    except asyncio.CancelledError:
+        pass
+
+    # Verify item was processed
+    assert len(processed_items) == 1
+    # Item should NOT be in in_flight at start (removed before handler call)
+    assert processed_items[0]["in_flight_at_start"] is False
+    # Item should NOT be in in_flight at end
+    assert processed_items[0]["in_flight_at_end"] is False

@@ -5,13 +5,7 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
-from openpaw.builtins.base import (
-    BaseBuiltinProcessor,
-    BuiltinMetadata,
-    BuiltinPrerequisite,
-    BuiltinType,
-    ProcessorResult,
-)
+from openpaw.builtins.base import BaseBuiltinProcessor, ProcessorResult
 from openpaw.channels.base import Attachment, Message
 from openpaw.core.timezone import workspace_now
 from openpaw.utils.filename import deduplicate_path, sanitize_filename
@@ -79,14 +73,9 @@ class FilePersistenceProcessor(BaseBuiltinProcessor):
         clear_data_after_save: Free attachment data bytes after saving (default: False)
     """
 
-    metadata = BuiltinMetadata(
-        name="file_persistence",
-        display_name="File Persistence",
-        description="Saves uploaded files to workspace and notifies agent",
-        builtin_type=BuiltinType.PROCESSOR,
-        group="file",
-        prerequisites=BuiltinPrerequisite(),  # Always available, no API key
-    )
+    name = "file_persistence"
+    group = "file"
+    order = 0
 
     def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(config)

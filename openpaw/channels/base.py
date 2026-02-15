@@ -157,3 +157,14 @@ class ChannelAdapter(ABC):
         message += "Reply /approve or /deny to this request."
 
         await self.send_message(session_key, message)
+
+    async def send_typing_action(self, session_key: str) -> None:
+        """Send a typing indicator to show the bot is processing.
+
+        Default implementation is a no-op. Channels that support
+        typing indicators should override this method.
+
+        Args:
+            session_key: Session to send typing indicator to.
+        """
+        pass

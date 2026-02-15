@@ -8,12 +8,7 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from openpaw.builtins.base import (
-    BaseBuiltinTool,
-    BuiltinMetadata,
-    BuiltinPrerequisite,
-    BuiltinType,
-)
+from openpaw.builtins.base import BaseBuiltinTool
 
 logger = logging.getLogger(__name__)
 
@@ -65,14 +60,8 @@ class FollowupTool(BaseBuiltinTool):
     chain actions without requiring user intervention.
     """
 
-    metadata = BuiltinMetadata(
-        name="followup",
-        display_name="Request Followup",
-        description="Request self-continuation after current response",
-        builtin_type=BuiltinType.TOOL,
-        group="automation",
-        prerequisites=BuiltinPrerequisite(),
-    )
+    name = "followup"
+    group = "automation"
 
     def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(config)

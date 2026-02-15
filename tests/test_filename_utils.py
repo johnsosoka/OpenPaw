@@ -3,8 +3,6 @@
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from openpaw.utils.filename import deduplicate_path, sanitize_filename
 
 

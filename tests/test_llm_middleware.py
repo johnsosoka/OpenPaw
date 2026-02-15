@@ -1,12 +1,11 @@
 """Tests for openpaw/llm/middleware.py - LangGraph pre/post model hooks."""
-import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from openpaw.agent.middleware.llm_hooks import (
-    build_pre_model_hook,
-    build_post_model_hook,
     _sanitize_reasoning_content,
     _strip_thinking_tokens,
+    build_post_model_hook,
+    build_pre_model_hook,
 )
 
 

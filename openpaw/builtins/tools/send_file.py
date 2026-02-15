@@ -10,12 +10,7 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from openpaw.agent.tools import resolve_sandboxed_path
-from openpaw.builtins.base import (
-    BaseBuiltinTool,
-    BuiltinMetadata,
-    BuiltinPrerequisite,
-    BuiltinType,
-)
+from openpaw.builtins.base import BaseBuiltinTool
 from openpaw.builtins.tools._channel_context import get_channel_context
 
 logger = logging.getLogger(__name__)
@@ -57,14 +52,8 @@ class SendFileTool(BaseBuiltinTool):
     Files are validated against the workspace sandbox and size limits.
     """
 
-    metadata = BuiltinMetadata(
-        name="send_file",
-        display_name="Send File",
-        description="Send files from workspace to users",
-        builtin_type=BuiltinType.TOOL,
-        group="communication",
-        prerequisites=BuiltinPrerequisite(),
-    )
+    name = "send_file"
+    group = "communication"
 
     def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(config)

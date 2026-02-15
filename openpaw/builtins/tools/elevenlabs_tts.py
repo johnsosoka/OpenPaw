@@ -6,12 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from openpaw.builtins.base import (
-    BaseBuiltinTool,
-    BuiltinMetadata,
-    BuiltinPrerequisite,
-    BuiltinType,
-)
+from openpaw.builtins.base import BaseBuiltinTool
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +35,9 @@ class ElevenLabsTTSTool(BaseBuiltinTool):
         output_format: Audio format (default: "mp3_44100_128")
     """
 
-    metadata = BuiltinMetadata(
-        name="elevenlabs",
-        display_name="ElevenLabs Text-to-Speech",
-        description="Convert text responses to audio using ElevenLabs",
-        builtin_type=BuiltinType.TOOL,
-        group="voice",
-        prerequisites=BuiltinPrerequisite(env_vars=["ELEVENLABS_API_KEY"]),
-    )
+    name = "elevenlabs"
+    group = "voice"
+    required_env_vars = ["ELEVENLABS_API_KEY"]
 
     # Class-level storage for pending audio (allows retrieval after agent run)
     _pending_audio: dict[str, bytes] = {}

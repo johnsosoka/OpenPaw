@@ -3,66 +3,60 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openpaw.channels.base import Message
 
+if TYPE_CHECKING:
+    from openpaw.builtins.base import BaseBuiltinProcessor, BaseBuiltinTool
+
 
 class BuiltinType(Enum):
-    """Classification of builtin capabilities."""
+    """Classification of builtin capabilities (for backward compatibility)."""
 
     TOOL = "tool"
     PROCESSOR = "processor"
 
 
-@dataclass
-class BuiltinPrerequisite:
-    """Defines what a builtin needs to be available.
+class _BuiltinMetadataCompat:
+    """Backward compatibility shim for code accessing .metadata attributes."""
 
-    Attributes:
-        env_vars: Environment variables that must be set.
-        packages: Python packages that must be installed (future use).
-    """
+    def __init__(self, builtin_cls: type) -> None:
+        self._cls = builtin_cls
 
-    env_vars: list[str] = field(default_factory=list)
-    packages: list[str] = field(default_factory=list)
+    @property
+    def name(self) -> str:
+        return self._cls.name
+
+    @property
+    def group(self) -> str | None:
+        return getattr(self._cls, "group", None)
+
+    @property
+    def display_name(self) -> str:
+        return self._cls.name
+
+    @property
+    def prerequisites(self) -> "_BuiltinMetadataCompat":
+        return self
+
+    @property
+    def env_vars(self) -> list[str]:
+        return getattr(self._cls, "required_env_vars", [])
+
+    @property
+    def packages(self) -> list[str]:
+        return getattr(self._cls, "required_packages", [])
 
     def is_satisfied(self) -> bool:
-        """Check if all prerequisites are met."""
-        import os
+        return self._cls.is_available()
 
-        return all(os.environ.get(var) for var in self.env_vars)
-
-    def missing(self) -> list[str]:
-        """Return list of missing prerequisites."""
-        import os
-
-        missing = []
-        for var in self.env_vars:
-            if not os.environ.get(var):
-                missing.append(f"env:{var}")
-        return missing
-
-
-@dataclass
-class BuiltinMetadata:
-    """Metadata describing a builtin capability.
-
-    Attributes:
-        name: Internal identifier (e.g., "brave_search").
-        display_name: Human-readable name (e.g., "Brave Web Search").
-        description: What the builtin does.
-        builtin_type: Whether this is a tool or processor.
-        group: Optional group for allow/deny (e.g., "web", "voice").
-        prerequisites: What's needed to use this builtin.
-    """
-
-    name: str
-    display_name: str
-    description: str
-    builtin_type: BuiltinType
-    group: str | None = None
-    prerequisites: BuiltinPrerequisite = field(default_factory=BuiltinPrerequisite)
+    @property
+    def builtin_type(self) -> BuiltinType:
+        # Import locally to avoid circular dependency
+        if issubclass(self._cls, BaseBuiltinTool):
+            return BuiltinType.TOOL
+        return BuiltinType.PROCESSOR
 
 
 class BaseBuiltinTool(ABC):
@@ -70,9 +64,24 @@ class BaseBuiltinTool(ABC):
 
     Tools are LangChain-compatible callables that agents can invoke.
     Examples: web search, text-to-speech, image generation.
+
+    Subclasses MUST set these class attributes:
+        name: Internal identifier (e.g., "brave_search")
+        group: Optional group for allow/deny (e.g., "web", "voice")
+        required_env_vars: Environment variables that must be set
+        required_packages: Python packages that must be installed
     """
 
-    metadata: BuiltinMetadata
+    name: str
+    group: str | None = None
+    required_env_vars: list[str] = []
+    required_packages: list[str] = []
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Create backward-compatible metadata attribute on subclass."""
+        super().__init_subclass__(**kwargs)
+        if hasattr(cls, "name") and isinstance(cls.name, str):
+            cls.metadata = _BuiltinMetadataCompat(cls)
 
     def __init__(self, config: dict[str, Any] | None = None):
         """Initialize with optional configuration.
@@ -81,6 +90,17 @@ class BaseBuiltinTool(ABC):
             config: Builtin-specific configuration from workspace/global config.
         """
         self.config = config or {}
+
+    @classmethod
+    def is_available(cls) -> bool:
+        """Check if prerequisites are met (env vars set).
+
+        Returns:
+            True if all required environment variables are set.
+        """
+        import os
+
+        return all(os.environ.get(var) for var in cls.required_env_vars)
 
     @abstractmethod
     def get_langchain_tool(self) -> Any:
@@ -113,9 +133,26 @@ class BaseBuiltinProcessor(ABC):
     Processors transform messages at the channel layer, either before
     the agent sees them (inbound) or after the agent responds (outbound).
     Examples: audio transcription, language translation, content filtering.
+
+    Subclasses MUST set these class attributes:
+        name: Internal identifier (e.g., "whisper")
+        group: Optional group for allow/deny (e.g., "voice", "document")
+        required_env_vars: Environment variables that must be set
+        required_packages: Python packages that must be installed
+        order: Pipeline position (lower = earlier, default 100)
     """
 
-    metadata: BuiltinMetadata
+    name: str
+    group: str | None = None
+    required_env_vars: list[str] = []
+    required_packages: list[str] = []
+    order: int = 100
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Create backward-compatible metadata attribute on subclass."""
+        super().__init_subclass__(**kwargs)
+        if hasattr(cls, "name") and isinstance(cls.name, str):
+            cls.metadata = _BuiltinMetadataCompat(cls)
 
     def __init__(self, config: dict[str, Any] | None = None):
         """Initialize with optional configuration.
@@ -124,6 +161,17 @@ class BaseBuiltinProcessor(ABC):
             config: Builtin-specific configuration from workspace/global config.
         """
         self.config = config or {}
+
+    @classmethod
+    def is_available(cls) -> bool:
+        """Check if prerequisites are met (env vars set).
+
+        Returns:
+            True if all required environment variables are set.
+        """
+        import os
+
+        return all(os.environ.get(var) for var in cls.required_env_vars)
 
     async def process_inbound(self, message: Message) -> ProcessorResult:
         """Transform an inbound message before it reaches the agent.

@@ -7,13 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from openpaw.agent.tools import resolve_sandboxed_path
-from openpaw.builtins.base import (
-    BaseBuiltinProcessor,
-    BuiltinMetadata,
-    BuiltinPrerequisite,
-    BuiltinType,
-    ProcessorResult,
-)
+from openpaw.builtins.base import BaseBuiltinProcessor, ProcessorResult
 from openpaw.channels.base import Attachment, Message
 
 logger = logging.getLogger(__name__)
@@ -32,14 +26,10 @@ class WhisperProcessor(BaseBuiltinProcessor):
         language: Language hint for transcription (default: auto-detect)
     """
 
-    metadata = BuiltinMetadata(
-        name="whisper",
-        display_name="Whisper Audio Transcription",
-        description="Transcribes voice/audio messages before sending to agent",
-        builtin_type=BuiltinType.PROCESSOR,
-        group="voice",
-        prerequisites=BuiltinPrerequisite(env_vars=["OPENAI_API_KEY"]),
-    )
+    name = "whisper"
+    group = "voice"
+    required_env_vars = ["OPENAI_API_KEY"]
+    order = 10
 
     def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(config)

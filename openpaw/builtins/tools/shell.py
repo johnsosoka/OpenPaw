@@ -5,12 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from openpaw.builtins.base import (
-    BaseBuiltinTool,
-    BuiltinMetadata,
-    BuiltinPrerequisite,
-    BuiltinType,
-)
+from openpaw.builtins.base import BaseBuiltinTool
 
 logger = logging.getLogger(__name__)
 
@@ -36,16 +31,11 @@ class ShellToolBuiltin(BaseBuiltinTool):
                          If set, only commands starting with these prefixes are allowed.
         blocked_commands: List of blocked command prefixes (default includes dangerous commands).
         working_directory: Optional working directory constraint for command execution.
+                          Defaults to workspace_path if not specified.
     """
 
-    metadata = BuiltinMetadata(
-        name="shell",
-        display_name="Shell Command Execution",
-        description="Execute shell commands on the host system",
-        builtin_type=BuiltinType.TOOL,
-        group="system",
-        prerequisites=BuiltinPrerequisite(),  # No env vars required
-    )
+    name = "shell"
+    group = "system"
 
     def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(config)
@@ -63,7 +53,10 @@ class ShellToolBuiltin(BaseBuiltinTool):
             "mv /*",
             "rm /",
             "rm /*",
-            "format",
+            "format c:",            # Windows disk formatting
+            "format d:",            # Windows disk formatting
+            "diskutil erasedisk",   # macOS disk erase
+            "diskutil erasevolume", # macOS volume erase
             "del /",
             ":(){:|:&};:",  # Fork bomb
         ]
@@ -82,7 +75,7 @@ class ShellToolBuiltin(BaseBuiltinTool):
         # Get configuration
         allowed_commands = self.config.get("allowed_commands", [])
         blocked_commands = self.config.get("blocked_commands", self.default_blocked)
-        working_directory = self.config.get("working_directory")
+        working_directory = self.config.get("working_directory") or str(self.config.get("workspace_path", ""))
 
         # Create underlying shell tool
         shell_tool = ShellTool()

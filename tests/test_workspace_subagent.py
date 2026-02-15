@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from openpaw.subagent.store import SubAgentStore
+from openpaw.agent.metrics import TokenUsageLogger
+from openpaw.stores.subagent import SubAgentStore
 from openpaw.workspace.loader import AgentWorkspace, WorkspaceLoader
 
 
@@ -56,9 +57,9 @@ class TestSubAgentStoreInitialization:
         runner = WorkspaceRunner(config=config, workspace_name="test_workspace")
 
         # Verify SubAgentStore was created
-        assert hasattr(runner, "_subagent_store")
-        assert isinstance(runner._subagent_store, SubAgentStore)
-        assert runner._subagent_store.workspace_path == mock_workspace.path
+        assert hasattr(runner, "_ctx")
+        assert isinstance(runner._ctx.subagent_store, SubAgentStore)
+        assert runner._ctx.subagent_store.workspace_path == mock_workspace.path
 
 
 class TestSubAgentRunnerCreation:
@@ -84,9 +85,9 @@ class TestSubAgentRunnerCreation:
                             runner = WorkspaceRunner(config=config, workspace_name="test_workspace")
 
                             # Verify runner has all the components needed for SubAgentRunner
-                            assert hasattr(runner, "_subagent_store")
-                            assert isinstance(runner._subagent_store, SubAgentStore)
-                            assert hasattr(runner, "_token_logger")
+                            assert hasattr(runner, "_ctx")
+                            assert isinstance(runner._ctx.subagent_store, SubAgentStore)
+                            assert isinstance(runner._ctx.token_logger, TokenUsageLogger)
                             assert hasattr(runner, "_channels")
                             assert hasattr(runner, "workspace_name")
                             assert runner.workspace_name == "test_workspace"
@@ -256,13 +257,14 @@ class TestQueueInjection:
     async def test_inject_system_event_creates_message(self) -> None:
         """_inject_system_event creates a Message and submits to queue."""
         from openpaw.channels.base import Message, MessageDirection
-        from openpaw.workspace.runner import WorkspaceRunner
         from openpaw.core.queue.lane import QueueMode
+        from openpaw.workspace.runner import WorkspaceRunner
 
         # Create a minimal workspace runner and mock the queue manager
         runner = MagicMock(spec=WorkspaceRunner)
-        runner._queue_manager = AsyncMock()
-        runner._queue_manager.submit = AsyncMock()
+        runner._ctx = MagicMock()
+        runner._ctx.queue_manager = AsyncMock()
+        runner._ctx.queue_manager.submit = AsyncMock()
         runner.logger = MagicMock()
 
         # Call the real implementation
@@ -273,8 +275,8 @@ class TestQueueInjection:
         )
 
         # Verify submit was called
-        runner._queue_manager.submit.assert_called_once()
-        call_kwargs = runner._queue_manager.submit.call_args[1]
+        runner._ctx.queue_manager.submit.assert_called_once()
+        call_kwargs = runner._ctx.queue_manager.submit.call_args[1]
 
         # Verify session_key and channel_name
         assert call_kwargs["session_key"] == "telegram:12345"

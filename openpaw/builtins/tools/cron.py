@@ -9,12 +9,7 @@ from zoneinfo import ZoneInfo
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from openpaw.builtins.base import (
-    BaseBuiltinTool,
-    BuiltinMetadata,
-    BuiltinPrerequisite,
-    BuiltinType,
-)
+from openpaw.builtins.base import BaseBuiltinTool
 from openpaw.stores.cron import (
     DynamicCronStore,
     create_interval_task,
@@ -81,14 +76,8 @@ class CronToolBuiltin(BaseBuiltinTool):
         timezone: Workspace timezone for display (default: UTC)
     """
 
-    metadata = BuiltinMetadata(
-        name="cron",
-        display_name="Task Scheduler",
-        description="Schedule future actions and reminders",
-        builtin_type=BuiltinType.TOOL,
-        group="automation",
-        prerequisites=BuiltinPrerequisite(),  # No env vars required
-    )
+    name = "cron"
+    group = "automation"
 
     def __init__(self, config: dict[str, Any] | None = None):
         """Initialize the cron tool builtin.

@@ -124,6 +124,7 @@ class ConversationArchiver:
         conversation_id: str,
         summary: str | None = None,
         tags: list[str] | None = None,
+        delete_checkpoints: bool = False,
     ) -> ConversationArchive | None:
         """Archive a conversation from the checkpointer.
 
@@ -136,6 +137,7 @@ class ConversationArchiver:
             conversation_id: Conversation ID (e.g., "conv_2026-02-07T14-30-00").
             summary: Optional summary text (from /compact).
             tags: Optional metadata tags (e.g., ["shutdown", "manual"]).
+            delete_checkpoints: Whether to delete checkpoints from DB after archiving.
 
         Returns:
             ConversationArchive if successful, None if no messages found.
@@ -181,6 +183,13 @@ class ConversationArchiver:
             f"Archived conversation {conversation_id} ({len(messages)} messages) "
             f"to {archive.markdown_path.name}"
         )
+
+        if delete_checkpoints:
+            try:
+                await checkpointer.adelete_thread(thread_id)
+                logger.info(f"Deleted checkpoints for thread: {thread_id}")
+            except Exception as e:
+                logger.warning(f"Failed to delete checkpoints for {thread_id}: {e}")
 
         return archive
 

@@ -1,6 +1,5 @@
 """Tests for command handlers."""
 
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -110,6 +109,7 @@ class TestNewCommand:
             session_key="telegram:123456",
             conversation_id=old_conv_id,
             tags=["manual"],
+            delete_checkpoints=True,
         )
 
         # Verify new conversation was created
@@ -421,6 +421,7 @@ class TestCompactCommand:
             conversation_id=old_conv_id,
             summary=summary_text,
             tags=["compact"],
+            delete_checkpoints=True,
         )
 
     @pytest.mark.asyncio
@@ -537,6 +538,7 @@ class TestCompactCommand:
             conversation_id=old_conv_id,
             summary=None,
             tags=["compact"],
+            delete_checkpoints=True,
         )
 
         # Verify new conversation was still created

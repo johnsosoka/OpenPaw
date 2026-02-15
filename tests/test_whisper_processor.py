@@ -63,7 +63,6 @@ def mock_openai_client():
 def test_processor_metadata():
     """Verify WhisperProcessor metadata is correctly defined."""
     assert WhisperProcessor.metadata.name == "whisper"
-    assert WhisperProcessor.metadata.display_name == "Whisper Audio Transcription"
     assert WhisperProcessor.metadata.group == "voice"
     assert WhisperProcessor.metadata.prerequisites.env_vars == ["OPENAI_API_KEY"]
 

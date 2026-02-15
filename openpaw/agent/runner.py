@@ -19,7 +19,13 @@ from openpaw.workspace.loader import AgentWorkspace
 logger = logging.getLogger(__name__)
 
 # Models known to produce thinking tokens
-THINKING_MODELS = ["moonshot.kimi-k2-thinking", "moonshotai.kimi-k2.5", "kimi-k2-thinking", "kimi-thinking", "kimi-k2.5"]
+THINKING_MODELS = [
+    "moonshot.kimi-k2-thinking",
+    "moonshotai.kimi-k2.5",
+    "kimi-k2-thinking",
+    "kimi-thinking",
+    "kimi-k2.5",
+]
 
 # Bedrock tool name validation pattern (AWS requirement)
 BEDROCK_TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -390,7 +396,19 @@ class AgentRunner:
             last_message = final_messages[-1]
             raw_response = ""
             if hasattr(last_message, "content"):
-                raw_response = str(last_message.content)
+                content = last_message.content
+                # Handle list content (Bedrock returns [] for tool-call-only responses,
+                # or list of content blocks for multi-modal). Extract text parts only.
+                if isinstance(content, list):
+                    text_parts = [
+                        block if isinstance(block, str)
+                        else block.get("text", "")
+                        for block in content
+                        if isinstance(block, (str, dict))
+                    ]
+                    raw_response = "\n".join(part for part in text_parts if part)
+                else:
+                    raw_response = str(content) if content else ""
             else:
                 raw_response = str(last_message)
 

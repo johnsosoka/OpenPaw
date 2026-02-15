@@ -1,9 +1,10 @@
-"""Central registry for OpenPaw builtins."""
+"""Builtin auto-discovery for OpenPaw."""
 
+import importlib
+import inspect
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
-
-from openpaw.builtins.base import BuiltinMetadata
 
 if TYPE_CHECKING:
     from openpaw.builtins.base import BaseBuiltinProcessor, BaseBuiltinTool
@@ -11,237 +12,132 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class BuiltinRegistry:
-    """Central registry of all available builtins.
+def discover_builtins() -> tuple[
+    dict[str, type["BaseBuiltinTool"]],
+    dict[str, type["BaseBuiltinProcessor"]],
+]:
+    """Scan builtins/tools/ and builtins/processors/ for builtin classes.
 
-    Supports:
-    - Registration of tool and processor builtins
-    - Lookup by name or group
-    - Availability checking based on prerequisites
-
-    This is a singleton - use get_instance() to access.
+    Returns:
+        Tuple of (tools_dict, processors_dict) keyed by builtin name.
     """
+    from openpaw.builtins.base import BaseBuiltinProcessor, BaseBuiltinTool
+
+    tools: dict[str, type[BaseBuiltinTool]] = {}
+    processors: dict[str, type[BaseBuiltinProcessor]] = {}
+
+    builtins_dir = Path(__file__).parent
+
+    # Scan tools/
+    tools_dir = builtins_dir / "tools"
+    for module_path in sorted(tools_dir.glob("*.py")):
+        if module_path.name.startswith("_"):
+            continue
+        _scan_module(
+            f"openpaw.builtins.tools.{module_path.stem}",
+            BaseBuiltinTool,
+            tools,
+        )
+
+    # Scan browser/ subdirectory
+    browser_init = tools_dir / "browser" / "__init__.py"
+    if browser_init.exists():
+        _scan_module(
+            "openpaw.builtins.tools.browser",
+            BaseBuiltinTool,
+            tools,
+        )
+
+    # Scan processors/
+    processors_dir = builtins_dir / "processors"
+    for module_path in sorted(processors_dir.glob("*.py")):
+        if module_path.name.startswith("_"):
+            continue
+        _scan_module(
+            f"openpaw.builtins.processors.{module_path.stem}",
+            BaseBuiltinProcessor,
+            processors,
+        )
+
+    logger.debug(
+        f"Discovered {len(tools)} tools and {len(processors)} processors"
+    )
+    return tools, processors
+
+
+def _scan_module(
+    module_name: str,
+    base_class: type,
+    registry: dict[str, type],
+) -> None:
+    """Import a module and register any concrete subclasses of base_class."""
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError as e:
+        logger.debug(f"Skipping {module_name}: {e}")
+        return
+    except Exception as e:
+        logger.warning(f"Error loading {module_name}: {e}")
+        return
+
+    for _attr_name, obj in inspect.getmembers(module, inspect.isclass):
+        if (
+            issubclass(obj, base_class)
+            and obj is not base_class
+            and hasattr(obj, "name")
+            and isinstance(obj.name, str)
+            and obj.__module__ == module.__name__  # Only classes defined in this module
+        ):
+            registry[obj.name] = obj
+            logger.debug(f"Registered {base_class.__name__}: {obj.name}")
+
+
+# Backward-compatible singleton API (used by loader)
+class BuiltinRegistry:
+    """Registry of discovered builtins. Singleton for backward compat."""
 
     _instance: "BuiltinRegistry | None" = None
+    _tools: dict[str, type["BaseBuiltinTool"]]
+    _processors: dict[str, type["BaseBuiltinProcessor"]]
+    _groups: dict[str, list[str]]
 
     def __init__(self) -> None:
-        self._tools: dict[str, type[BaseBuiltinTool]] = {}
-        self._processors: dict[str, type[BaseBuiltinProcessor]] = {}
-        self._groups: dict[str, list[str]] = {}
+        self._tools, self._processors = discover_builtins()
+        self._groups = self._build_groups()
+
+    def _build_groups(self) -> dict[str, list[str]]:
+        groups: dict[str, list[str]] = {}
+        for name, cls in {**self._tools, **self._processors}.items():
+            if cls.group:
+                groups.setdefault(cls.group, []).append(name)
+        return groups
 
     @classmethod
     def get_instance(cls) -> "BuiltinRegistry":
-        """Get or create the singleton registry instance."""
         if cls._instance is None:
             cls._instance = cls()
-            cls._instance._register_defaults()
         return cls._instance
 
     @classmethod
     def reset(cls) -> None:
-        """Reset the singleton instance. Useful for testing."""
         cls._instance = None
 
-    def _register_defaults(self) -> None:
-        """Register all built-in builtins.
-
-        Uses lazy imports to avoid loading dependencies for unused builtins.
-        """
-        # Tools
-        try:
-            from openpaw.builtins.tools.brave_search import BraveSearchTool
-
-            self.register_tool(BraveSearchTool)
-        except ImportError as e:
-            logger.debug(f"Brave Search not available: {e}")
-
-        try:
-            from openpaw.builtins.tools.elevenlabs_tts import ElevenLabsTTSTool
-
-            self.register_tool(ElevenLabsTTSTool)
-        except ImportError as e:
-            logger.debug(f"ElevenLabs TTS not available: {e}")
-
-        try:
-            from openpaw.builtins.tools.shell import ShellToolBuiltin
-
-            self.register_tool(ShellToolBuiltin)
-        except ImportError as e:
-            logger.debug(f"Shell tool not available: {e}")
-
-        try:
-            from openpaw.builtins.tools.ssh import SSHTool
-
-            self.register_tool(SSHTool)
-        except ImportError as e:
-            logger.debug(f"SSH tool not available: {e}")
-
-        try:
-            from openpaw.builtins.tools.cron import CronToolBuiltin
-
-            self.register_tool(CronToolBuiltin)
-        except ImportError as e:
-            logger.debug(f"Cron tool not available: {e}")
-
-        try:
-            from openpaw.builtins.tools.task import TaskToolBuiltin
-
-            self.register_tool(TaskToolBuiltin)
-        except ImportError as e:
-            logger.debug(f"Task tool not available: {e}")
-
-        try:
-            from openpaw.builtins.tools.send_message import SendMessageTool
-
-            self.register_tool(SendMessageTool)
-        except ImportError as e:
-            logger.debug(f"Send message tool not available: {e}")
-
-        try:
-            from openpaw.builtins.tools.followup import FollowupTool
-
-            self.register_tool(FollowupTool)
-        except ImportError as e:
-            logger.debug(f"Followup tool not available: {e}")
-
-        try:
-            from openpaw.builtins.tools.send_file import SendFileTool
-
-            self.register_tool(SendFileTool)
-        except ImportError as e:
-            logger.debug(f"Send file tool not available: {e}")
-
-        try:
-            from openpaw.builtins.tools.spawn import SpawnToolBuiltin
-
-            self.register_tool(SpawnToolBuiltin)
-        except ImportError as e:
-            logger.debug(f"Spawn tool not available: {e}")
-
-        try:
-            from openpaw.builtins.tools.browser import BrowserToolBuiltin
-
-            self.register_tool(BrowserToolBuiltin)
-        except ImportError as e:
-            logger.debug(f"Browser tool not available: {e}")
-
-        # Processors (ORDER MATTERS: file_persistence must run first in pipeline)
-        try:
-            from openpaw.builtins.processors.file_persistence import FilePersistenceProcessor
-
-            self.register_processor(FilePersistenceProcessor)
-        except ImportError as e:
-            logger.debug(f"File persistence processor not available: {e}")
-
-        try:
-            from openpaw.builtins.processors.whisper import WhisperProcessor
-
-            self.register_processor(WhisperProcessor)
-        except ImportError as e:
-            logger.debug(f"Whisper processor not available: {e}")
-
-        try:
-            from openpaw.builtins.processors.timestamp import TimestampProcessor
-
-            self.register_processor(TimestampProcessor)
-        except ImportError as e:
-            logger.debug(f"Timestamp processor not available: {e}")
-
-        try:
-            from openpaw.builtins.processors.docling import DoclingProcessor
-
-            self.register_processor(DoclingProcessor)
-        except ImportError as e:
-            logger.debug(f"Docling processor not available: {e}")
-
-    def register_tool(self, tool_class: type["BaseBuiltinTool"]) -> None:
-        """Register a tool builtin.
-
-        Args:
-            tool_class: The tool class to register.
-        """
-        meta = tool_class.metadata
-        self._tools[meta.name] = tool_class
-        if meta.group:
-            self._groups.setdefault(meta.group, []).append(meta.name)
-        logger.debug(f"Registered tool builtin: {meta.name}")
-
-    def register_processor(self, processor_class: type["BaseBuiltinProcessor"]) -> None:
-        """Register a processor builtin.
-
-        Args:
-            processor_class: The processor class to register.
-        """
-        meta = processor_class.metadata
-        self._processors[meta.name] = processor_class
-        if meta.group:
-            self._groups.setdefault(meta.group, []).append(meta.name)
-        logger.debug(f"Registered processor builtin: {meta.name}")
-
-    def get_available_tools(self) -> dict[str, BuiltinMetadata]:
-        """Get all tools with satisfied prerequisites.
-
-        Returns:
-            Dict mapping tool name to metadata for available tools.
-        """
-        return {
-            name: cls.metadata
-            for name, cls in self._tools.items()
-            if cls.metadata.prerequisites.is_satisfied()
-        }
-
-    def get_available_processors(self) -> dict[str, BuiltinMetadata]:
-        """Get all processors with satisfied prerequisites.
-
-        Returns:
-            Dict mapping processor name to metadata for available processors.
-        """
-        return {
-            name: cls.metadata
-            for name, cls in self._processors.items()
-            if cls.metadata.prerequisites.is_satisfied()
-        }
-
     def get_tool_class(self, name: str) -> type["BaseBuiltinTool"] | None:
-        """Get a tool class by name.
-
-        Args:
-            name: The builtin name.
-
-        Returns:
-            The tool class or None if not found.
-        """
         return self._tools.get(name)
 
     def get_processor_class(self, name: str) -> type["BaseBuiltinProcessor"] | None:
-        """Get a processor class by name.
-
-        Args:
-            name: The builtin name.
-
-        Returns:
-            The processor class or None if not found.
-        """
         return self._processors.get(name)
 
     def get_group_members(self, group: str) -> list[str]:
-        """Get all builtin names in a group.
-
-        Args:
-            group: The group name (e.g., "web", "voice").
-
-        Returns:
-            List of builtin names in the group.
-        """
         return self._groups.get(group, [])
 
-    def list_all(self) -> dict[str, list[BuiltinMetadata]]:
-        """List all registered builtins by type.
+    def list_all(self) -> dict[str, list[type]]:
+        """List all registered builtin classes by type.
 
         Returns:
-            Dict with "tools" and "processors" keys containing metadata lists.
+            Dict with "tools" and "processors" keys containing class lists.
         """
         return {
-            "tools": [cls.metadata for cls in self._tools.values()],
-            "processors": [cls.metadata for cls in self._processors.values()],
+            "tools": list(self._tools.values()),
+            "processors": list(self._processors.values()),
         }

@@ -86,6 +86,7 @@ class CompactCommand(CommandHandler):
                     conversation_id=old_conv_id,
                     summary=summary,
                     tags=["compact"],
+                    delete_checkpoints=True,
                 )
                 if archive:
                     message_count = archive.message_count

@@ -83,6 +83,7 @@ class LaneQueue:
         }
         self._session_locks: dict[str, asyncio.Lock] = {}
         self._global_lock = asyncio.Lock()
+        self._in_flight: dict[str, list[QueueItem]] = {}
 
     def get_lane(self, name: str) -> Lane:
         """Get or create a lane by name."""
@@ -145,12 +146,24 @@ class LaneQueue:
                 await lane._item_available.wait()
                 continue
 
+            # Track as in-flight (visible to peek but not in lane queue)
+            self._in_flight.setdefault(item.session_key, []).append(item)
+
             session_lock = await self.get_session_lock(item.session_key)
 
             try:
+                # Remove from in-flight once we start processing
+                in_flight_list = self._in_flight.get(item.session_key, [])
+                if item in in_flight_list:
+                    in_flight_list.remove(item)
+
                 async with session_lock:
                     await handler(item)
             finally:
+                # Clean up in case of error (item might still be in in_flight)
+                in_flight_list = self._in_flight.get(item.session_key, [])
+                if item in in_flight_list:
+                    in_flight_list.remove(item)
                 async with lane._lock:
                     lane.active_count -= 1
 
@@ -168,7 +181,9 @@ class LaneQueue:
         """
         lane = self.get_lane(lane_name)
         async with lane._lock:
-            return any(item.session_key == session_key for item in lane.queue)
+            in_queue = any(item.session_key == session_key for item in lane.queue)
+        in_flight = bool(self._in_flight.get(session_key))
+        return in_queue or in_flight
 
     async def consume_session_pending(self, session_key: str, lane_name: str = "main") -> list[QueueItem]:
         """Remove and return all pending items for a session from a lane queue.
@@ -194,7 +209,10 @@ class LaneQueue:
             lane.queue = remaining
             if not lane.queue:
                 lane._item_available.clear()
-            return consumed
+        # Also consume in-flight items for this session
+        in_flight_items = self._in_flight.pop(session_key, [])
+        consumed.extend(in_flight_items)
+        return consumed
 
     def get_stats(self) -> dict[str, dict[str, int]]:
         """Get current queue statistics."""

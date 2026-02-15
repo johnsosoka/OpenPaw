@@ -1,5 +1,6 @@
 """Message processing logic for WorkspaceRunner."""
 
+import asyncio
 import logging
 from typing import Any
 
@@ -76,6 +77,7 @@ class MessageProcessor:
         max_followup_depth = 5
 
         while True:
+            await asyncio.sleep(0)  # Yield to event loop between followup iterations
             # Capture steer state before finally block resets it
             steered = False
             steer_messages = None

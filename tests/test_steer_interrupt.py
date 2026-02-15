@@ -1,20 +1,19 @@
 """Tests for steer/interrupt WorkspaceRunner integration."""
 
-import asyncio
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from openpaw.agent import AgentRunner
 from openpaw.agent.middleware import InterruptSignalError, QueueAwareToolMiddleware
 from openpaw.agent.middleware.queue_aware import (
+    SteerState,
     _queue_manager_var,
-    _session_key_var,
     _queue_mode_var,
-    _pending_steer_message_var,
-    _steered_var,
+    _session_key_var,
+    _steer_state_var,
 )
 from openpaw.core.queue.lane import QueueMode
 from openpaw.workspace.loader import AgentWorkspace
@@ -167,8 +166,9 @@ class TestMiddlewareSetReset:
         assert _queue_manager_var.get() is None
         assert _session_key_var.get() is None
         assert _queue_mode_var.get() == QueueMode.COLLECT
-        assert _pending_steer_message_var.get() is None
-        assert _steered_var.get() is False
+        state = _steer_state_var.get()
+        assert state.steered is False
+        assert state.pending_messages is None
 
 
 class TestSteerMode:
@@ -183,8 +183,7 @@ class TestSteerMode:
         mock_middleware = QueueAwareToolMiddleware()
 
         # Simulate steer by setting contextvar state
-        _steered_var.set(True)
-        _pending_steer_message_var.set([("telegram", Mock(content="new message"))])
+        _steer_state_var.set(SteerState(steered=True, pending_messages=[("telegram", Mock(content="new message"))]))
 
         # Verify steer state
         assert mock_middleware.was_steered is True

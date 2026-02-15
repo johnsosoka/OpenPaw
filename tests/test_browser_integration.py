@@ -18,11 +18,10 @@ class TestBrowserBuiltinRegistration:
     def test_browser_builtin_registered(self):
         """Browser builtin should be registered in the registry."""
         registry = BuiltinRegistry.get_instance()
-        available_tools = registry.get_available_tools()
 
         # If playwright is installed, browser should be available
         # If not installed, it should not error during registration
-        # (the try/except in registry._register_defaults catches ImportError)
+        # (the try/except in registry discover_builtins catches ImportError)
         assert "browser" in registry._tools or True  # Always passes if not installed
 
 
@@ -32,6 +31,7 @@ class TestBrowserFrameworkPrompt:
     def test_browser_prompt_appears_when_enabled(self):
         """Browser framework prompt should appear when 'browser' is in enabled_builtins."""
         from pathlib import Path
+
         from openpaw.workspace.loader import AgentWorkspace
 
         workspace = AgentWorkspace(
@@ -54,6 +54,7 @@ class TestBrowserFrameworkPrompt:
     def test_browser_prompt_absent_when_not_enabled(self):
         """Browser framework prompt should be absent when 'browser' not in enabled_builtins."""
         from pathlib import Path
+
         from openpaw.workspace.loader import AgentWorkspace
 
         workspace = AgentWorkspace(
@@ -74,6 +75,7 @@ class TestBrowserFrameworkPrompt:
     def test_browser_prompt_key_concepts(self):
         """Browser prompt should mention key concepts."""
         from pathlib import Path
+
         from openpaw.workspace.loader import AgentWorkspace
 
         workspace = AgentWorkspace(
@@ -106,8 +108,9 @@ class TestBrowserCleanupIntegration:
 
     def test_command_context_has_browser_builtin_field(self):
         """CommandContext should have a browser_builtin field."""
-        from openpaw.channels.commands.base import CommandContext
         import inspect
+
+        from openpaw.channels.commands.base import CommandContext
 
         # Check the field exists in the dataclass
         sig = inspect.signature(CommandContext)
@@ -115,5 +118,5 @@ class TestBrowserCleanupIntegration:
 
     def test_workspace_runner_has_get_browser_builtin(self):
         """WorkspaceRunner should have _get_browser_builtin method."""
-        from openpaw.main import WorkspaceRunner
+        from openpaw.workspace.runner import WorkspaceRunner
         assert hasattr(WorkspaceRunner, "_get_browser_builtin")

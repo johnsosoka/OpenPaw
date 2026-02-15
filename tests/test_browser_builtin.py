@@ -26,7 +26,6 @@ def config(tmp_path: Path) -> dict:
 def test_metadata():
     """Test builtin metadata is correct."""
     assert BrowserToolBuiltin.metadata.name == "browser"
-    assert BrowserToolBuiltin.metadata.display_name == "Web Browser"
     assert BrowserToolBuiltin.metadata.builtin_type == BuiltinType.TOOL
     assert BrowserToolBuiltin.metadata.group == "browser"
     assert "playwright" in BrowserToolBuiltin.metadata.prerequisites.packages
@@ -300,3 +299,111 @@ async def test_config_passes_through_to_session(config: dict):
 
         # Check BrowserSession was called with config and session_key
         MockSession.assert_called_once_with(config, session_key="test:123")
+
+
+# Tests for Fix 3: Thread-Offload CPU-Bound Snapshot Processing
+
+
+def test_build_tree_from_nodes_basic():
+    """Test _build_tree_from_nodes produces correct tree structure."""
+    from openpaw.builtins.tools.browser.session import _build_tree_from_nodes
+
+    nodes = [
+        {
+            "nodeId": "1",
+            "role": {"value": "RootWebArea"},
+            "name": {"value": "Test Page"},
+            "childIds": ["2", "3"],
+        },
+        {
+            "nodeId": "2",
+            "role": {"value": "button"},
+            "name": {"value": "Click Me"},
+            "childIds": [],
+        },
+        {
+            "nodeId": "3",
+            "role": {"value": "link"},
+            "name": {"value": "Home"},
+            "childIds": [],
+        },
+    ]
+
+    tree = _build_tree_from_nodes(nodes)
+
+    assert tree is not None
+    assert tree["role"] == "WebArea"
+    assert tree["name"] == "Test Page"
+    assert len(tree["children"]) == 2
+    assert tree["children"][0]["role"] == "button"
+    assert tree["children"][0]["name"] == "Click Me"
+    assert tree["children"][1]["role"] == "link"
+    assert tree["children"][1]["name"] == "Home"
+
+
+def test_build_tree_from_nodes_empty():
+    """Test _build_tree_from_nodes returns None for empty nodes."""
+    from openpaw.builtins.tools.browser.session import _build_tree_from_nodes
+
+    tree = _build_tree_from_nodes([])
+    assert tree is None
+
+
+def test_build_tree_from_nodes_ignored_nodes():
+    """Test _build_tree_from_nodes flattens ignored nodes."""
+    from openpaw.builtins.tools.browser.session import _build_tree_from_nodes
+
+    nodes = [
+        {
+            "nodeId": "1",
+            "role": {"value": "RootWebArea"},
+            "name": {"value": "Page"},
+            "childIds": ["2"],
+        },
+        {
+            "nodeId": "2",
+            "ignored": True,
+            "childIds": ["3"],
+        },
+        {
+            "nodeId": "3",
+            "role": {"value": "button"},
+            "name": {"value": "Submit"},
+            "childIds": [],
+        },
+    ]
+
+    tree = _build_tree_from_nodes(nodes)
+
+    assert tree is not None
+    assert tree["role"] == "WebArea"
+    # Ignored node should be flattened
+    assert len(tree["children"]) == 1
+    assert tree["children"][0]["role"] == "button"
+    assert tree["children"][0]["name"] == "Submit"
+
+
+def test_build_tree_from_nodes_with_properties():
+    """Test _build_tree_from_nodes extracts properties correctly."""
+    from openpaw.builtins.tools.browser.session import _build_tree_from_nodes
+
+    nodes = [
+        {
+            "nodeId": "1",
+            "role": {"value": "checkbox"},
+            "name": {"value": "Subscribe"},
+            "properties": [
+                {"name": "checked", "value": {"value": True}},
+                {"name": "disabled", "value": {"value": False}},
+            ],
+            "childIds": [],
+        },
+    ]
+
+    tree = _build_tree_from_nodes(nodes)
+
+    assert tree is not None
+    assert tree["role"] == "checkbox"
+    assert tree["name"] == "Subscribe"
+    assert tree["checked"] is True
+    assert tree["disabled"] is False

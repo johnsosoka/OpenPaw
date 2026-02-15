@@ -420,7 +420,6 @@ class TestCronToolBuiltin:
     def test_metadata(self) -> None:
         """Test CronToolBuiltin metadata."""
         assert CronToolBuiltin.metadata.name == "cron"
-        assert CronToolBuiltin.metadata.display_name == "Task Scheduler"
         assert CronToolBuiltin.metadata.group == "automation"
         assert CronToolBuiltin.metadata.prerequisites.env_vars == []
 

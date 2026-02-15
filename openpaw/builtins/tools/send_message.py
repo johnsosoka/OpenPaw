@@ -7,12 +7,7 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from openpaw.builtins.base import (
-    BaseBuiltinTool,
-    BuiltinMetadata,
-    BuiltinPrerequisite,
-    BuiltinType,
-)
+from openpaw.builtins.base import BaseBuiltinTool
 from openpaw.builtins.tools._channel_context import (
     clear_channel_context,
     get_channel_context,
@@ -46,14 +41,8 @@ class SendMessageTool(BaseBuiltinTool):
     Without context (e.g., in cron/heartbeat), it returns a clean error.
     """
 
-    metadata = BuiltinMetadata(
-        name="send_message",
-        display_name="Send Message",
-        description="Send a message to the user mid-execution",
-        builtin_type=BuiltinType.TOOL,
-        group="communication",
-        prerequisites=BuiltinPrerequisite(),
-    )
+    name = "send_message"
+    group = "communication"
 
     def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(config)

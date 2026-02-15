@@ -7,13 +7,14 @@ import pytest
 from langchain_core.messages import ToolMessage
 
 from openpaw.agent.middleware.queue_aware import (
+    STEER_EXEMPT_TOOLS,
     InterruptSignalError,
     QueueAwareToolMiddleware,
+    SteerState,
     _queue_manager_var,
-    _session_key_var,
     _queue_mode_var,
-    _pending_steer_message_var,
-    _steered_var,
+    _session_key_var,
+    _steer_state_var,
 )
 from openpaw.core.queue.lane import QueueMode
 
@@ -185,8 +186,7 @@ async def test_reset_clears_state(middleware, mock_queue_manager):
     """reset() clears all state."""
     # Set up state
     middleware.set_queue_awareness(mock_queue_manager, "test_session", QueueMode.STEER)
-    _pending_steer_message_var.set([("telegram", "Message")])
-    _steered_var.set(True)
+    _steer_state_var.set(SteerState(steered=True, pending_messages=[("telegram", "Message")]))
 
     # Reset
     middleware.reset()
@@ -195,8 +195,9 @@ async def test_reset_clears_state(middleware, mock_queue_manager):
     assert _queue_manager_var.get() is None
     assert _session_key_var.get() is None
     assert _queue_mode_var.get() == QueueMode.COLLECT
-    assert _pending_steer_message_var.get() is None
-    assert _steered_var.get() is False
+    state = _steer_state_var.get()
+    assert state.steered is False
+    assert state.pending_messages is None
     assert middleware.was_steered is False
     assert middleware.pending_steer_message is None
 
@@ -209,8 +210,9 @@ async def test_set_queue_awareness_configures_state(middleware, mock_queue_manag
     assert _queue_manager_var.get() is mock_queue_manager
     assert _session_key_var.get() == "test_session"
     assert _queue_mode_var.get() == QueueMode.INTERRUPT
-    assert _pending_steer_message_var.get() is None
-    assert _steered_var.get() is False
+    state = _steer_state_var.get()
+    assert state.steered is False
+    assert state.pending_messages is None
 
 
 @pytest.mark.asyncio
@@ -279,15 +281,15 @@ async def test_multiple_tools_first_triggers_steer_subsequent_skipped(
     request2 = MagicMock()
     request2.tool_call = {"id": "tool-2", "name": "tool_2", "args": {}}
 
-    # Reset peek to still return True (messages were consumed, but steered flag is set)
-    # In reality, after consume, peek would return False. But we're testing that
-    # once steered, subsequent tools are skipped even if peek returns False now.
+    # After consume, peek returns False. But steered flag means non-exempt
+    # tools should still be skipped to end the run quickly.
     mock_queue_manager.peek_pending.return_value = False
     result2 = await middleware._check_and_execute(request2, mock_handler)
 
-    # Second call should execute normally (no pending messages now)
-    mock_handler.assert_called_once_with(request2)
-    assert result2.content == "Tool executed successfully"
+    # Second call should be skipped (steered, non-exempt, even with no new pending)
+    assert isinstance(result2, ToolMessage)
+    assert "[Skipped" in result2.content
+    mock_handler.assert_not_called()
 
     # More realistic test: messages are still pending (user keeps typing)
     mock_queue_manager.peek_pending.return_value = True
@@ -361,3 +363,103 @@ async def test_contextvar_isolation_between_tasks():
     assert results["a_mode"] == QueueMode.STEER
     assert results["b_session"] == "session_b"
     assert results["b_mode"] == QueueMode.INTERRUPT
+
+
+@pytest.mark.asyncio
+async def test_steer_exempt_tool_executes_during_steer(
+    middleware, mock_queue_manager, mock_handler
+):
+    """Steer-exempt tool (send_message) executes normally during steer."""
+    middleware.set_queue_awareness(mock_queue_manager, "test_session", QueueMode.STEER)
+    mock_queue_manager.peek_pending.return_value = True
+    mock_queue_manager.consume_pending.return_value = [("telegram", "New message")]
+
+    # Create request for steer-exempt tool
+    request = MagicMock()
+    request.tool_call = {
+        "id": "test-tool-call-id",
+        "name": "send_message",  # Steer-exempt
+        "args": {"message": "Progress update"},
+    }
+
+    result = await middleware._check_and_execute(request, mock_handler)
+
+    # Handler WAS called (exempt tool executes)
+    mock_handler.assert_called_once_with(request)
+    assert result.content == "Tool executed successfully"
+
+    # Steer state captured
+    assert middleware.was_steered is True
+    assert middleware.pending_steer_message == [("telegram", "New message")]
+
+    # Queue was checked and consumed
+    mock_queue_manager.peek_pending.assert_called_once_with("test_session")
+    mock_queue_manager.consume_pending.assert_called_once_with("test_session")
+
+
+@pytest.mark.asyncio
+async def test_non_exempt_tool_skipped_during_steer(
+    middleware, mock_queue_manager, mock_handler
+):
+    """Non-exempt tool (brave_search) is still skipped during steer."""
+    middleware.set_queue_awareness(mock_queue_manager, "test_session", QueueMode.STEER)
+    mock_queue_manager.peek_pending.return_value = True
+    mock_queue_manager.consume_pending.return_value = [("telegram", "New message")]
+
+    # Create request for non-exempt tool
+    request = MagicMock()
+    request.tool_call = {
+        "id": "test-tool-call-id",
+        "name": "brave_search",  # Non-exempt
+        "args": {"query": "test"},
+    }
+
+    result = await middleware._check_and_execute(request, mock_handler)
+
+    # Handler was NOT called
+    mock_handler.assert_not_called()
+
+    # Result is a skip message
+    assert isinstance(result, ToolMessage)
+    assert "[Skipped: user sent new message" in result.content
+    assert result.tool_call_id == "test-tool-call-id"
+
+    # Steer state captured
+    assert middleware.was_steered is True
+
+
+@pytest.mark.asyncio
+async def test_exempt_tool_after_steer_already_triggered(
+    middleware, mock_queue_manager, mock_handler
+):
+    """Exempt tool executes even when steer was already triggered by previous tool."""
+    middleware.set_queue_awareness(mock_queue_manager, "test_session", QueueMode.STEER)
+
+    # Set up state as if steer already triggered
+    _steer_state_var.set(SteerState(steered=True, pending_messages=[("telegram", "Previous message")]))
+
+    # New message arrives
+    mock_queue_manager.peek_pending.return_value = True
+
+    # Create request for exempt tool
+    request = MagicMock()
+    request.tool_call = {
+        "id": "test-tool-call-id",
+        "name": "update_task",  # Steer-exempt
+        "args": {"task_id": "1", "status": "completed"},
+    }
+
+    result = await middleware._check_and_execute(request, mock_handler)
+
+    # Handler WAS called (exempt tool executes)
+    mock_handler.assert_called_once_with(request)
+    assert result.content == "Tool executed successfully"
+
+    # consume_pending NOT called again (already consumed on first steer)
+    mock_queue_manager.consume_pending.assert_not_called()
+
+
+def test_steer_exempt_tools_constant_contains_expected_tools():
+    """STEER_EXEMPT_TOOLS constant contains the expected tools."""
+    expected = {"send_message", "send_file", "update_task", "create_task"}
+    assert STEER_EXEMPT_TOOLS == expected
