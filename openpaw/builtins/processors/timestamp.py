@@ -5,7 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from openpaw.builtins.base import BaseBuiltinProcessor, ProcessorResult
-from openpaw.channels.base import Message
+from openpaw.domain.message import Message
 
 logger = logging.getLogger(__name__)
 

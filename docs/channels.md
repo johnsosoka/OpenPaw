@@ -266,7 +266,8 @@ OpenPaw's channel system is extensible. To add a new platform:
 Create `openpaw/channels/<platform>.py`:
 
 ```python
-from openpaw.channels.base import BaseChannel, Message
+from openpaw.channels.base import BaseChannel
+from openpaw.domain.message import Message
 
 class DiscordChannel(BaseChannel):
     def __init__(self, config: dict):

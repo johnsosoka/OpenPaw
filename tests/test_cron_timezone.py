@@ -7,8 +7,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from openpaw.domain.cron import CronDefinition, CronOutputConfig
 from openpaw.runtime.scheduling.cron import CronScheduler
-from openpaw.runtime.scheduling.loader import CronDefinition, CronOutputConfig
 
 
 @pytest.fixture

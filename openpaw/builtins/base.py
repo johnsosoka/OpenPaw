@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from openpaw.channels.base import Message
+from openpaw.domain.message import Message
 
 if TYPE_CHECKING:
     from openpaw.builtins.base import BaseBuiltinProcessor, BaseBuiltinTool

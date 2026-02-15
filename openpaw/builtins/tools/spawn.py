@@ -8,11 +8,11 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
+from openpaw.agent.subagent import SubAgentRunner
 from openpaw.builtins.base import BaseBuiltinTool
 from openpaw.builtins.tools._channel_context import get_current_session_key
 from openpaw.domain.subagent import SubAgentStatus
 from openpaw.stores.subagent import create_subagent_request
-from openpaw.subagent.runner import SubAgentRunner
 
 logger = logging.getLogger(__name__)
 

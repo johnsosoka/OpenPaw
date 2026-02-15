@@ -16,23 +16,24 @@ from openpaw.agent.middleware import (
     ApprovalToolMiddleware,
     QueueAwareToolMiddleware,
 )
+from openpaw.agent.subagent import SubAgentRunner
 from openpaw.builtins.base import BaseBuiltinProcessor
 from openpaw.builtins.loader import BuiltinLoader
-from openpaw.channels.base import ChannelAdapter, Message, MessageDirection
+from openpaw.channels.base import ChannelAdapter
 from openpaw.channels.commands.base import CommandContext
 from openpaw.channels.commands.handlers import get_framework_commands
 from openpaw.channels.commands.router import CommandRouter
 from openpaw.core.config import Config, merge_configs
-from openpaw.core.config.approval import ApprovalGatesConfig
+from openpaw.core.config.models import ApprovalGatesConfig
 from openpaw.core.logging import setup_workspace_logger
 from openpaw.core.queue.lane import LaneQueue, QueueItem, QueueMode
 from openpaw.core.queue.manager import QueueManager
+from openpaw.domain.message import Message, MessageDirection
 from openpaw.runtime.session.archiver import ConversationArchiver
 from openpaw.runtime.session.manager import SessionManager
 from openpaw.stores.approval import ApprovalGateManager
 from openpaw.stores.subagent import SubAgentStore
 from openpaw.stores.task import TaskStore
-from openpaw.subagent.runner import SubAgentRunner
 from openpaw.workspace.agent_factory import AgentFactory, filter_workspace_tools
 from openpaw.workspace.context import WorkspaceContext
 from openpaw.workspace.lifecycle import LifecycleManager

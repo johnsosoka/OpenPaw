@@ -7,8 +7,8 @@ from openpaw.channels.commands.base import CommandDefinition, CommandHandler, Co
 from openpaw.stores.task import TaskStore
 
 if TYPE_CHECKING:
-    from openpaw.channels.base import Message
     from openpaw.channels.commands.base import CommandContext
+    from openpaw.domain.message import Message
 
 
 class StatusCommand(CommandHandler):

@@ -8,7 +8,7 @@ from typing import Any
 
 from openpaw.agent.tools import resolve_sandboxed_path
 from openpaw.builtins.base import BaseBuiltinProcessor, ProcessorResult
-from openpaw.channels.base import Attachment, Message
+from openpaw.domain.message import Attachment, Message
 
 logger = logging.getLogger(__name__)
 

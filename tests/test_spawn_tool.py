@@ -6,11 +6,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from openpaw.agent.subagent import SubAgentRunner
 from openpaw.builtins.registry import BuiltinRegistry
 from openpaw.builtins.tools.spawn import SpawnToolBuiltin
 from openpaw.domain.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
 from openpaw.stores.subagent import SubAgentStore
-from openpaw.subagent.runner import SubAgentRunner
 
 
 @pytest.fixture

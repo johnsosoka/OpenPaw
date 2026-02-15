@@ -256,8 +256,8 @@ class TestQueueInjection:
     @pytest.mark.asyncio
     async def test_inject_system_event_creates_message(self) -> None:
         """_inject_system_event creates a Message and submits to queue."""
-        from openpaw.channels.base import Message, MessageDirection
         from openpaw.core.queue.lane import QueueMode
+        from openpaw.domain.message import Message, MessageDirection
         from openpaw.workspace.runner import WorkspaceRunner
 
         # Create a minimal workspace runner and mock the queue manager

@@ -546,7 +546,7 @@ export MY_API_KEY="your-key"
 
 ```python
 from openpaw.builtins.base import BaseBuiltinProcessor, BuiltinMetadata
-from openpaw.channels.base import Message
+from openpaw.domain.message import Message
 
 class MyCustomProcessor(BaseBuiltinProcessor):
     """Custom message processor"""

@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING
 from openpaw.channels.commands.base import CommandDefinition, CommandHandler, CommandResult
 
 if TYPE_CHECKING:
-    from openpaw.channels.base import Message
     from openpaw.channels.commands.base import CommandContext
+    from openpaw.domain.message import Message
 
 
 class StartCommand(CommandHandler):

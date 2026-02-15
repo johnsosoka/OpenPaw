@@ -7,10 +7,10 @@ import pytest
 
 from openpaw.agent.metrics import InvocationMetrics, TokenUsageLogger
 from openpaw.agent.runner import AgentRunner
+from openpaw.agent.subagent import SUBAGENT_EXCLUDED_TOOLS, SubAgentRunner
 from openpaw.channels.base import ChannelAdapter
 from openpaw.domain.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
 from openpaw.stores.subagent import SubAgentStore
-from openpaw.subagent.runner import SUBAGENT_EXCLUDED_TOOLS, SubAgentRunner
 
 
 @pytest.fixture

@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from openpaw.builtins.base import BaseBuiltinProcessor, ProcessorResult
-from openpaw.channels.base import Attachment, Message
 from openpaw.core.timezone import workspace_now
+from openpaw.domain.message import Attachment, Message
 from openpaw.utils.filename import deduplicate_path, sanitize_filename
 
 logger = logging.getLogger(__name__)

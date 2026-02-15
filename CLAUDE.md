@@ -60,26 +60,30 @@ OpenPaw follows a layered architecture with clear separation of concerns:
 ```
 openpaw/
 ├── domain/           # Pure business models (stable foundation)
-│   ├── message.py    # Message, MessageAttachment
+│   ├── message.py    # Message, Attachment, MessageDirection
 │   ├── task.py       # Task, TaskStatus
 │   ├── session.py    # SessionState
 │   ├── subagent.py   # SubAgentRequest, SubAgentStatus
-│   └── cron.py       # CronJobDefinition, DynamicCronTask
-├── core/             # Configuration, logging, timezone
+│   └── cron.py       # CronDefinition, CronOutputConfig, DynamicCronTask
+├── core/             # Configuration, logging, queue, timezone
 │   ├── config/       # Pydantic config models and loaders
-│   │   ├── models.py         # WorkspaceConfig, GlobalConfig
-│   │   ├── loader.py         # Config loading and merging
-│   │   └── env_expansion.py  # ${VAR} substitution
+│   │   ├── models.py         # WorkspaceConfig, GlobalConfig, ApprovalGatesConfig
+│   │   └── loader.py         # Config loading, merging, ${VAR} expansion
+│   ├── queue/        # Message queueing
+│   │   ├── lane.py           # LaneQueue
+│   │   └── manager.py        # QueueManager
 │   ├── logging.py    # Structured logging
 │   └── timezone.py   # Workspace timezone utilities
 ├── agent/            # Agent execution
 │   ├── runner.py     # AgentRunner (LangGraph wrapper)
+│   ├── subagent.py   # SubAgentRunner (background agent lifecycle)
 │   ├── metrics.py    # Token usage tracking
-│   ├── middleware/   # Tool middleware (queue-aware, approval, llm hooks)
+│   ├── middleware/   # Tool middleware (queue-aware, approval, sanitizer, queue-check)
 │   └── tools/        # Filesystem tools and sandbox
 │       ├── filesystem.py  # Sandboxed file operations
 │       └── sandbox.py     # Path validation
 ├── workspace/        # Workspace management
+│   ├── context.py    # WorkspaceContext (shared dependency injection)
 │   ├── loader.py     # Load AGENT.md, USER.md, SOUL.md, HEARTBEAT.md
 │   ├── runner.py     # WorkspaceRunner (slim orchestrator)
 │   ├── message_processor.py  # Message processing loop
@@ -91,10 +95,7 @@ openpaw/
 │   ├── scheduling/   # Cron and heartbeat schedulers
 │   │   ├── cron.py           # CronScheduler
 │   │   ├── heartbeat.py      # HeartbeatScheduler
-│   │   └── dynamic_cron.py   # DynamicCronStore
-│   ├── queue/        # Message queueing
-│   │   ├── lane.py           # LaneQueue
-│   │   └── manager.py        # QueueManager
+│   │   └── loader.py         # CronLoader (YAML parsing)
 │   └── session/      # Session management and archiving
 │       ├── manager.py        # SessionManager
 │       └── archiver.py       # ConversationArchiver
@@ -104,16 +105,19 @@ openpaw/
 │   ├── cron.py       # DynamicCronStore (dynamic_crons.json)
 │   └── approval.py   # ApprovalGateManager (in-memory)
 ├── channels/         # External communication
+│   ├── base.py       # ChannelAdapter (abstract base)
 │   ├── factory.py    # Channel factory
 │   ├── telegram.py   # Telegram adapter
 │   └── commands/     # Slash command handlers
+│       ├── base.py           # CommandHandler, CommandContext, CommandResult
 │       ├── router.py         # CommandRouter
 │       └── handlers/         # Built-in commands (/new, /status, etc.)
-├── builtins/         # Extensible capabilities
-│   ├── tools/        # Brave search, cron, spawn, browser, etc.
-│   └── processors/   # Whisper, docling, file persistence
-├── subagent/         # Background agent coordination
-│   └── runner.py     # SubAgentRunner
+├── builtins/         # Extensible capabilities (auto-discovered)
+│   ├── base.py       # BaseBuiltinTool, BaseBuiltinProcessor
+│   ├── registry.py   # Convention-based auto-discovery
+│   ├── loader.py     # Workspace-aware loading with allow/deny
+│   ├── tools/        # Brave search, cron, spawn, browser, shell, ssh, etc.
+│   └── processors/   # File persistence, whisper, timestamp, docling
 └── utils/            # Generic utilities
     └── filename.py   # Sanitization and deduplication
 ```
@@ -154,7 +158,7 @@ openpaw/
 
 **`openpaw/stores/subagent.py`** - `SubAgentStore` for YAML-based persistence of sub-agent requests and results at `.openpaw/subagents.yaml`. Thread-safe with status lifecycle tracking (pending → running → completed/failed/cancelled/timed_out).
 
-**`openpaw/subagent/runner.py`** - `SubAgentRunner` manages spawned background agents with concurrency control (default: 8 concurrent). Creates fresh AgentRunner instances with filtered tools (no recursion, no unsolicited messaging).
+**`openpaw/agent/subagent.py`** - `SubAgentRunner` manages spawned background agents with concurrency control (default: 8 concurrent). Creates fresh AgentRunner instances with filtered tools (no recursion, no unsolicited messaging).
 
 **`openpaw/builtins/tools/spawn.py`** - `SpawnToolBuiltin` provides `spawn_agent`, `list_subagents`, `get_subagent_result`, `cancel_subagent` tools for concurrent task execution.
 
@@ -200,7 +204,7 @@ openpaw/
 
 **`openpaw/runtime/scheduling/cron.py`** - `CronScheduler` uses APScheduler to execute scheduled tasks. Each job builds a fresh agent instance, injects the cron prompt, and routes output to the configured channel. Also handles dynamic tasks from `CronTool`.
 
-**`openpaw/runtime/scheduling/dynamic_cron.py`** - `DynamicCronStore` for persisting agent-scheduled tasks to workspace-local JSON. Includes `DynamicCronTask` dataclass and factory functions.
+**`openpaw/stores/cron.py`** - `DynamicCronStore` for persisting agent-scheduled tasks to workspace-local JSON. Includes `DynamicCronTask` dataclass and factory functions.
 
 **`openpaw/runtime/scheduling/heartbeat.py`** - `HeartbeatScheduler` for proactive agent check-ins. Supports active hours, HEARTBEAT_OK suppression, configurable intervals, pre-flight skip (avoids LLM call when HEARTBEAT.md is empty and no active tasks), task summary injection into heartbeat prompt, and JSONL event logging with token metrics.
 
@@ -682,8 +686,8 @@ OpenPaw provides optional built-in capabilities that are conditionally available
 **`openpaw/builtins/`** - Package structure:
 ```
 builtins/
-├── base.py           # BaseBuiltinTool, BaseBuiltinProcessor, BuiltinMetadata
-├── registry.py       # Singleton registry of all builtins
+├── base.py           # BaseBuiltinTool, BaseBuiltinProcessor
+├── registry.py       # Convention-based auto-discovery
 ├── loader.py         # Workspace-aware loading with allow/deny
 ├── tools/            # LangChain tool implementations
 │   ├── brave_search.py
@@ -731,7 +735,7 @@ builtins:
       clear_data_after_save: false
 ```
 
-**Adding New Builtins**: Create a class extending `BaseBuiltinTool` or `BaseBuiltinProcessor`, define `metadata` with prerequisites, and register in `registry.py`.
+**Adding New Builtins**: Create a single file in `builtins/tools/` or `builtins/processors/` with a class extending `BaseBuiltinTool` or `BaseBuiltinProcessor`. Set class attributes (`name`, `group`, `required_env_vars`). The registry auto-discovers it — no manual registration needed.
 
 ### Inbound File Handling
 

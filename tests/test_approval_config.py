@@ -2,7 +2,7 @@
 
 
 from openpaw.core.config import Config, WorkspaceConfig, merge_configs
-from openpaw.core.config.approval import ApprovalGatesConfig, ToolApprovalConfig
+from openpaw.core.config.models import ApprovalGatesConfig, ToolApprovalConfig
 
 
 class TestToolApprovalConfig:

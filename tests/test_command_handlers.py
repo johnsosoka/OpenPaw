@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from openpaw.channels.base import Message
 from openpaw.channels.commands.base import CommandContext
 from openpaw.channels.commands.handlers import (
     CompactCommand,
@@ -15,6 +14,7 @@ from openpaw.channels.commands.handlers import (
     StatusCommand,
 )
 from openpaw.core.queue.lane import QueueMode
+from openpaw.domain.message import Message
 from openpaw.runtime.session.manager import SessionState
 
 
