@@ -16,6 +16,14 @@ OpenPaw is a multi-channel AI agent framework built on [LangGraph](https://langc
 - **Agent Autonomy** - Self-continuation (followup), mid-execution messaging, and persistent task tracking across sessions
 - **Heartbeat System** - Proactive agent check-ins with HEARTBEAT_OK suppression and active hours
 - **Dynamic Framework Prompt** - Agents automatically understand their capabilities based on loaded builtins
+- **Conversation Persistence** - Durable conversations via SQLite checkpointing with archival to markdown + JSON
+- **Sub-Agent Spawning** - Spawn background agents for concurrent task execution with semaphore concurrency control
+- **Web Browsing** - Playwright-based browser automation with accessibility tree navigation (agents interact via numbered element references)
+- **Approval Gates** - Human-in-the-loop authorization for dangerous tool calls with configurable timeout and default actions
+- **Queue-Aware Middleware** - Responsive agent behavior: steer, interrupt, and redirect mid-execution based on new user messages
+- **Document Processing** - Inbound file handling with Docling (PDF/DOCX to markdown) and Whisper (audio transcription)
+- **Timezone Awareness** - Per-workspace timezone configuration with "store UTC, display local" pattern
+- **Token Usage Tracking** - Per-invocation token logging with daily/session aggregation via /status command
 
 ## Quick Start
 
@@ -33,6 +41,9 @@ poetry install
 poetry install --extras voice      # Whisper + ElevenLabs
 poetry install --extras web        # Brave Search
 poetry install --extras all-builtins  # Everything
+
+# Install browser automation (optional, for web browsing builtin)
+poetry run playwright install chromium
 ```
 
 ### Configuration
@@ -162,9 +173,44 @@ poetry run ruff check openpaw/ --fix
 poetry run mypy openpaw/
 ```
 
+## Deployment
+
+### Running as a Service (macOS)
+
+A launchd plist template is provided at `deploy/launchd/com.openpaw.agent.plist`.
+
+```bash
+# 1. Copy and customize the plist
+cp deploy/launchd/com.openpaw.agent.plist ~/Library/LaunchAgents/
+
+# 2. Edit paths in the plist to match your installation
+#    - WorkingDirectory: your OpenPaw project root
+#    - StandardOutPath/StandardErrorPath: log file paths
+#    - ProgramArguments: path to poetry binary
+
+# 3. Load the service
+launchctl load ~/Library/LaunchAgents/com.openpaw.agent.plist
+
+# 4. Check status
+launchctl list | grep openpaw
+
+# 5. Unload (to stop)
+launchctl unload ~/Library/LaunchAgents/com.openpaw.agent.plist
+```
+
+### Browser Automation
+
+For workspaces using the `browser` builtin, install Chromium on the target machine:
+
+```bash
+poetry run playwright install chromium
+```
+
+The browser runs headless by default. On macOS, you may need to grant accessibility permissions for full functionality.
+
 ## Requirements
 
-- Python 3.12+
+- Python 3.11+ (3.12+ recommended)
 - Poetry for dependency management
 - Telegram Bot Token (for Telegram channel)
 - Model provider credentials (one of):

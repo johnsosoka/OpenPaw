@@ -124,6 +124,8 @@ openpaw/
 
 **Stability Contract**: Code moves down the stack (agent → workspace → runtime → domain), never up. Domain models are pure data, free of framework dependencies.
 
+**Domain Models**: `Message.with_updates(content, **metadata_updates)` creates a shallow copy with optionally replaced content and merged metadata. Used by all inbound processors to reduce boilerplate Message reconstruction.
+
 ### Key Components
 
 **`openpaw/cli.py`** - CLI entry point. Parses arguments, supports single workspace (`-w name`), multiple workspaces (`-w name1,name2`), or all workspaces (`--all` or `-w "*"`).
@@ -681,7 +683,7 @@ OpenPaw provides optional built-in capabilities that are conditionally available
 **Processors** - Channel-layer message transformers:
 - `file_persistence` - Saves all uploaded files to workspace uploads/ directory (no API key required)
 - `whisper` - Audio transcription for voice messages (requires `OPENAI_API_KEY`)
-- `docling` - Document conversion (PDF, DOCX, PPTX, etc.) to markdown. Saves to `{workspace}/inbox/{date}/{filename}/`. Requires `docling` package.
+- `docling` - Document conversion (PDF, DOCX, PPTX, etc.) to markdown in the background with async processing. Uses `set_event_callback()` for late-binding WorkspaceRunner dependency, `_get_or_create_converter()` for cached DocumentConverter instance, and `cleanup()` for graceful shutdown. Requires `docling` package.
 
 **`openpaw/builtins/`** - Package structure:
 ```
@@ -741,7 +743,7 @@ builtins:
 
 OpenPaw provides universal file persistence for all uploaded files, with optional content enrichment via downstream processors.
 
-**Processor Pipeline Order**: `file_persistence` → `whisper` → `timestamp` → `docling`
+**Processor Pipeline Order**: `file_persistence` → `whisper` → `timestamp` → `docling` (async: returns immediately, notifies on completion)
 
 **FilePersistenceProcessor** - First processor in the pipeline. Saves all uploaded files to `{workspace}/uploads/{YYYY-MM-DD}/` with date partitioning. Sets `attachment.saved_path` (relative to workspace root) so downstream processors can read from disk. Enriches message content with file receipt notifications:
 
@@ -753,7 +755,16 @@ OpenPaw provides universal file persistence for all uploaded files, with optiona
 **Content Enrichment** - Downstream processors add content summaries as sibling files:
 
 - **WhisperProcessor**: Transcribes audio/voice messages, saves transcript as `.txt` sibling to the audio file (e.g., `voice_123.ogg` → `voice_123.txt`)
-- **DoclingProcessor**: Converts documents (PDF, DOCX, PPTX, etc.) to markdown, saves as `.md` sibling file (e.g., `report.pdf` → `report.md`)
+- **DoclingProcessor**: Converts documents (PDF, DOCX, PPTX, etc.) to markdown in the background. Returns immediately with a "[Document processing started]" enrichment, then notifies the agent via `[SYSTEM]` event when conversion completes. Saves converted markdown as `.md` sibling file. Falls back to synchronous processing when no event callback is configured.
+
+**Async Document Processing**: DoclingProcessor uses a background task pattern for document conversion. When documents are detected:
+1. Processor validates attachments (size, path, docling availability)
+2. Returns immediately with `[Document processing started: filename]` enrichment
+3. Spawns `asyncio.create_task()` for background conversion
+4. On completion, calls `WorkspaceRunner._inject_system_event()` with conversion results
+5. Agent receives `[SYSTEM] Document processing complete` notification in a new turn
+
+The `set_event_callback()` method follows the same pattern as `SpawnTool.set_runner()` for late-binding runtime dependencies. Without a callback (e.g., in tests), the processor falls back to synchronous processing.
 
 **Agent View** - The agent receives the enriched message content with file metadata and any transcripts/conversions appended inline. Original files remain in `uploads/` for agent filesystem access.
 

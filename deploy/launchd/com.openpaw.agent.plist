@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.openpaw.agent</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <!-- Update this path to match your Poetry install -->
+        <string>/usr/local/bin/poetry</string>
+        <string>run</string>
+        <string>openpaw</string>
+        <string>-c</string>
+        <string>config.yaml</string>
+        <string>--all</string>
+    </array>
+
+    <!-- REQUIRED: Set this to your OpenPaw project root -->
+    <key>WorkingDirectory</key>
+    <string>/path/to/OpenPaw</string>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/path/to/OpenPaw/logs/launchd-stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/path/to/OpenPaw/logs/launchd-stderr.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <!-- Restart throttle: wait 10 seconds before restarting after crash -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>
