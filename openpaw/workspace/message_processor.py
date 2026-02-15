@@ -236,7 +236,10 @@ class MessageProcessor:
             except Exception as e:
                 self._logger.error(f"Error processing messages for {session_key}: {e}", exc_info=True)
                 if channel:
-                    await channel.send_message(session_key, f"Error: {e}")
+                    await channel.send_message(
+                        session_key,
+                        "An error occurred while processing your request. Please try again.",
+                    )
                 break  # Don't continue followup chain on error
 
             finally:

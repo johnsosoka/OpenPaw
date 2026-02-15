@@ -91,7 +91,7 @@ def _build_workspace_context(config: Config, workspace_name: str, logger: loggin
     # Load workspace-specific .env
     workspace_env = Path(config.workspaces_path) / workspace_name / ".env"
     if workspace_env.exists():
-        load_dotenv(workspace_env, override=True)
+        load_dotenv(workspace_env, override=False)
         logger.info(f"Loaded environment from: {workspace_env}")
 
     workspace = workspace_loader.load(workspace_name)
