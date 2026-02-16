@@ -106,8 +106,9 @@ class AgentRunner:
         self.extra_model_kwargs = extra_model_kwargs or {}
         self._middleware = middleware or []
 
-        # Token usage tracking (populated after each run)
+        # Per-invocation tracking (populated after each run)
         self._last_metrics: InvocationMetrics | None = None
+        self._last_tools_used: list[str] = []
 
         # Auto-enable thinking stripping for known thinking models
         if not self.strip_thinking and any(
@@ -129,6 +130,15 @@ class AgentRunner:
             InvocationMetrics from the last run() call, or None if no invocations yet.
         """
         return self._last_metrics
+
+    @property
+    def last_tools_used(self) -> list[str]:
+        """Get list of tool names invoked during the most recent run.
+
+        Returns:
+            List of tool name strings (may contain duplicates if called multiple times).
+        """
+        return self._last_tools_used
 
     def update_checkpointer(self, checkpointer: Any) -> None:
         """Update the checkpointer and rebuild the agent graph.
@@ -327,8 +337,9 @@ class AgentRunner:
         Returns:
             Agent's response text with thinking tokens stripped.
         """
-        # Reset metrics from previous invocation
+        # Reset per-invocation tracking
         self._last_metrics = None
+        self._last_tools_used = []
 
         # Set recursion_limit for multi-turn execution (2 supersteps per turn)
         config: dict[str, Any] = {"recursion_limit": self.max_turns * 2}
@@ -361,6 +372,11 @@ class AgentRunner:
                     if "model" in update:
                         messages_in_update = update["model"].get("messages", [])
                         final_messages.extend(messages_in_update)
+                        # Capture tool names from AI messages with tool_calls
+                        for msg in messages_in_update:
+                            for tc in getattr(msg, "tool_calls", []):
+                                if name := tc.get("name"):
+                                    self._last_tools_used.append(name)
         except InterruptSignalError:
             # Re-raise for WorkspaceRunner to handle
             raise

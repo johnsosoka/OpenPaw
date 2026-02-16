@@ -43,6 +43,7 @@ def mock_agent_runner() -> Mock:
         duration_ms=3200.0,
         model="anthropic:claude-sonnet-4-20250514",
     )
+    runner.last_tools_used = []
     return runner
 
 

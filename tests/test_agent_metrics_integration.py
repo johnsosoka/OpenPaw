@@ -64,8 +64,9 @@ async def test_agent_runner_populates_metrics_after_run(mock_workspace: AgentWor
 
     # Mock the agent to stream updates with messages
     async def mock_astream(*args, **kwargs):
-        # Simulate streaming updates
-        yield {"model": {"messages": [Mock(content="Test response")]}}
+        # Simulate streaming updates (spec-less mock so tool_calls falls back to [])
+        msg = Mock(content="Test response", tool_calls=[])
+        yield {"model": {"messages": [msg]}}
 
     runner._agent = Mock()
     runner._agent.astream = mock_astream
@@ -90,7 +91,7 @@ async def test_agent_runner_metrics_include_duration(mock_workspace: AgentWorksp
 
     # Mock the agent to stream updates
     async def mock_astream(*args, **kwargs):
-        yield {"model": {"messages": [Mock(content="Test response")]}}
+        yield {"model": {"messages": [Mock(content="Test response", tool_calls=[])]}}
 
     runner._agent = Mock()
     runner._agent.astream = mock_astream

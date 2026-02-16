@@ -275,6 +275,8 @@ class HeartbeatScheduler:
         total_tokens: int | None = None,
         llm_calls: int | None = None,
         task_count: int | None = None,
+        response: str | None = None,
+        tools_used: list[str] | None = None,
     ) -> None:
         """Append heartbeat event to workspace JSONL log.
 
@@ -288,11 +290,13 @@ class HeartbeatScheduler:
             total_tokens: Total token count from invocation.
             llm_calls: Number of LLM calls made.
             task_count: Number of active tasks when heartbeat ran.
+            response: Full agent response text.
+            tools_used: List of tool names invoked during the heartbeat.
         """
         from datetime import UTC, datetime
 
         log_path = self.workspace_path / HEARTBEAT_LOG_FILENAME
-        event: dict[str, str | float | int] = {
+        event: dict[str, Any] = {
             "timestamp": datetime.now(UTC).isoformat(),
             "workspace": self.workspace_name,
             "outcome": outcome,
@@ -313,6 +317,10 @@ class HeartbeatScheduler:
             event["llm_calls"] = llm_calls
         if task_count is not None:
             event["task_count"] = task_count
+        if tools_used:
+            event["tools_used"] = tools_used
+        if response:
+            event["response"] = response
 
         try:
             with log_path.open("a", encoding="utf-8") as f:
@@ -383,12 +391,13 @@ class HeartbeatScheduler:
             response = await agent_runner.run(message=heartbeat_prompt)
             duration_ms = (time_module.monotonic() - start_time) * 1000
 
-            # Extract token metrics from agent runner
+            # Extract metrics and activity from agent runner
             metrics = agent_runner.last_metrics
             input_tokens = metrics.input_tokens if metrics else None
             output_tokens = metrics.output_tokens if metrics else None
             total_tokens = metrics.total_tokens if metrics else None
             llm_calls = metrics.llm_calls if metrics else None
+            tools_used = agent_runner.last_tools_used or None
 
             if self.config.suppress_ok and self._is_heartbeat_ok(response):
                 logger.debug(f"Heartbeat OK for workspace: {self.workspace_name} (suppressed)")
@@ -400,6 +409,8 @@ class HeartbeatScheduler:
                     total_tokens=total_tokens,
                     llm_calls=llm_calls,
                     task_count=task_count,
+                    response=response,
+                    tools_used=tools_used,
                 )
 
                 # Log to token_usage.jsonl if available
@@ -427,6 +438,8 @@ class HeartbeatScheduler:
                     total_tokens=total_tokens,
                     llm_calls=llm_calls,
                     task_count=task_count,
+                    response=response,
+                    tools_used=tools_used,
                 )
 
                 # Log to token_usage.jsonl even on error
@@ -451,6 +464,8 @@ class HeartbeatScheduler:
                     total_tokens=total_tokens,
                     llm_calls=llm_calls,
                     task_count=task_count,
+                    response=response,
+                    tools_used=tools_used,
                 )
 
                 # Log to token_usage.jsonl
@@ -475,6 +490,8 @@ class HeartbeatScheduler:
                     total_tokens=total_tokens,
                     llm_calls=llm_calls,
                     task_count=task_count,
+                    response=response,
+                    tools_used=tools_used,
                 )
 
                 # Log to token_usage.jsonl
