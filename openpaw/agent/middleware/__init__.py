@@ -9,6 +9,7 @@ Provides middleware components for:
 from openpaw.agent.middleware.approval import ApprovalRequiredError, ApprovalToolMiddleware
 from openpaw.agent.middleware.llm_hooks import (
     THINKING_TAG_PATTERN,
+    ThinkingTokenMiddleware,
     build_post_model_hook,
     build_pre_model_hook,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "InterruptSignalError",
     "QueueAwareToolMiddleware",
     "THINKING_TAG_PATTERN",
+    "ThinkingTokenMiddleware",
     "build_post_model_hook",
     "build_pre_model_hook",
 ]

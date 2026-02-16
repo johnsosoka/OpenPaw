@@ -11,7 +11,7 @@ from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.language_models import BaseChatModel
 
 from openpaw.agent.metrics import InvocationMetrics, extract_metrics_from_callback
-from openpaw.agent.middleware.llm_hooks import THINKING_TAG_PATTERN
+from openpaw.agent.middleware.llm_hooks import THINKING_TAG_PATTERN, ThinkingTokenMiddleware
 from openpaw.agent.middleware.queue_aware import InterruptSignalError
 from openpaw.agent.tools.filesystem import FilesystemTools
 from openpaw.core.timezone import workspace_now
@@ -37,25 +37,43 @@ class AgentRunner:
     - Automatic stripping of model thinking tokens (<think>...</think>)
     - Tool name validation for Bedrock compatibility
     - Streaming execution via astream() for behavioral parity with ainvoke()
-    - Empty middleware list (foundation for T4.2 steer/interrupt features)
+    - Middleware support (thinking token stripping, queue awareness, approval gates)
     """
 
     @staticmethod
     def _strip_thinking_tokens(text: str) -> str:
-        """Strip thinking tokens from model response.
+        """Strip thinking tokens from string content (fallback).
 
-        Some models (e.g., Bedrock moonshot.kimi-k2-thinking) output internal
-        reasoning wrapped in <think>...</think> tags. These should be removed
-        before showing the response to users.
-
-        Args:
-            text: Raw response text potentially containing thinking tokens.
-
-        Returns:
-            Response text with thinking tokens removed and trimmed.
+        Handles edge cases where ThinkingTokenMiddleware doesn't catch
+        <think>...</think> tags in string content.
         """
         cleaned = THINKING_TAG_PATTERN.sub("", text)
         return cleaned.strip()
+
+    @staticmethod
+    def _extract_text_from_content(content: Any) -> str:
+        """Extract text from message content, handling both string and structured formats.
+
+        Bedrock models return content as a list of typed blocks:
+        [{"type": "thinking", ...}, {"type": "text", "text": "answer"}]
+
+        Blocks may be dicts or objects with type/text attributes.
+
+        Returns:
+            Extracted text content, or empty string if no text blocks found.
+        """
+        if not isinstance(content, list):
+            return str(content)
+
+        text_parts = []
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") == "text" and block.get("text"):
+                    text_parts.append(block["text"])
+            elif hasattr(block, "type") and hasattr(block, "text"):
+                if getattr(block, "type") == "text" and getattr(block, "text"):
+                    text_parts.append(block.text)
+        return "\n".join(text_parts)
 
     def __init__(
         self,
@@ -254,7 +272,7 @@ class AgentRunner:
                 kwargs["region_name"] = self.region
             # Bedrock uses AWS credentials, not api_key
             kwargs.pop("api_key", None)
-            logger.info(f"Creating ChatBedrockConverse: model={model_name}")
+            logger.info(f"Creating ChatBedrockConverse: model={model_name}, kwargs_keys={list(kwargs.keys())}")
             return ChatBedrockConverse(**kwargs)
 
         raise ValueError(
@@ -310,9 +328,16 @@ class AgentRunner:
             current_datetime=current_dt,
         )
 
-        # 6. Call create_agent (successor to create_react_agent)
+        # 6. Wire middleware in dependency order:
+        #    - ThinkingTokenMiddleware (first): strips reasoning before other middleware sees it
+        #    - Custom middleware (after): queue-aware, approval gates, etc.
+        if self.strip_thinking:
+            middleware = [ThinkingTokenMiddleware(), *self._middleware]
+        else:
+            middleware = list(self._middleware)
+
+        # 7. Call create_agent (successor to create_react_agent)
         # Note: create_agent handles tool binding internally - do NOT pre-bind
-        # Note: middleware=[] is empty for now - T4.2 will populate with steer/interrupt logic
         logger.info(
             f"Creating agent with {len(all_tools)} tools "
             f"({len(filesystem_tools)} filesystem, {len(self.additional_tools)} additional)"
@@ -327,7 +352,7 @@ class AgentRunner:
             tools=all_tools,
             system_prompt=system_prompt,
             checkpointer=self.checkpointer,
-            middleware=self._middleware,  # Populated by WorkspaceRunner for steer/interrupt
+            middleware=middleware,  # Thinking tokens + steer/interrupt + approval gates
         )
 
         return agent
@@ -346,7 +371,8 @@ class AgentRunner:
             thread_id: Thread identifier for multi-turn conversations.
 
         Returns:
-            Agent's response text with thinking tokens stripped.
+            Agent's response text. Thinking tokens are stripped by ThinkingTokenMiddleware
+            in the agent graph. Fallback stripping handles edge cases.
         """
         # Reset per-invocation tracking
         self._last_metrics = None
@@ -385,7 +411,11 @@ class AgentRunner:
                         final_messages.extend(messages_in_update)
                         # Capture tool names from AI messages with tool_calls
                         for msg in messages_in_update:
-                            for tc in getattr(msg, "tool_calls", []):
+                            tool_calls = getattr(msg, "tool_calls", [])
+                            if tool_calls:
+                                tool_names = [tc.get("name", "?") for tc in tool_calls]
+                                logger.debug(f"Model called tools: {tool_names}")
+                            for tc in tool_calls:
                                 if name := tc.get("name"):
                                     self._last_tools_used.append(name)
         except InterruptSignalError:
@@ -424,15 +454,17 @@ class AgentRunner:
         # Extract response from final messages
         if final_messages:
             last_message = final_messages[-1]
-            raw_response = ""
             if hasattr(last_message, "content"):
-                raw_response = str(last_message.content)
+                raw_response = self._extract_text_from_content(last_message.content)
             else:
                 raw_response = str(last_message)
 
-            # Apply thinking token stripping fallback (no hooks in create_agent yet)
-            # Future: T4.2 will move this to middleware
+            # Fallback: strip <think> tags from string content if middleware missed them
             if self.strip_thinking and "<think>" in raw_response.lower():
+                logger.warning(
+                    f"Fallback thinking stripping triggered "
+                    f"(workspace: {self.workspace.name}, model: {self.model_id})"
+                )
                 return self._strip_thinking_tokens(raw_response)
             return raw_response
 
@@ -447,7 +479,8 @@ class AgentRunner:
         """Synchronous version of run for non-async contexts.
 
         Returns:
-            Agent's response text with thinking tokens stripped.
+            Agent's response text. Thinking tokens are stripped by ThinkingTokenMiddleware
+            in the agent graph. Fallback stripping handles edge cases.
         """
         # Set recursion_limit for multi-turn execution (2 supersteps per turn)
         config: dict[str, Any] = {"recursion_limit": self.max_turns * 2}
@@ -467,14 +500,16 @@ class AgentRunner:
         messages = result.get("messages", [])
         if messages:
             last_message = messages[-1]
-            raw_response = ""
             if hasattr(last_message, "content"):
-                raw_response = str(last_message.content)
+                raw_response = self._extract_text_from_content(last_message.content)
             else:
                 raw_response = str(last_message)
 
-            # Thinking tokens should already be stripped by hook, but apply fallback
             if self.strip_thinking and "<think>" in raw_response.lower():
+                logger.warning(
+                    f"Fallback thinking stripping triggered "
+                    f"(workspace: {self.workspace.name}, model: {self.model_id})"
+                )
                 return self._strip_thinking_tokens(raw_response)
             return raw_response
 

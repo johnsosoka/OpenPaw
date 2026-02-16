@@ -1,17 +1,16 @@
-"""Pre/post model hooks for LangGraph create_react_agent.
+"""Middleware for LangGraph agent LLM call interception.
 
-These hooks intercept the agent state before and after model calls,
-enabling message sanitization, thinking token stripping, and other
-cross-cutting concerns.
+Provides middleware components for:
+- Thinking token stripping (Kimi K2.5, Claude reasoning blocks)
+- Reasoning content sanitization (prevents stale thinking artifacts)
 
-Usage with create_react_agent:
-    from openpaw.agent.middleware.llm_hooks import build_pre_model_hook, build_post_model_hook
+Usage with create_agent:
+    from openpaw.agent.middleware.llm_hooks import ThinkingTokenMiddleware
 
-    agent = create_react_agent(
+    agent = create_agent(
         model=model,
         tools=tools,
-        pre_model_hook=build_pre_model_hook(strip_reasoning=True),
-        post_model_hook=build_post_model_hook(strip_thinking=True),
+        middleware=[ThinkingTokenMiddleware()],
     )
 """
 
@@ -19,6 +18,7 @@ import logging
 import re
 from typing import Any
 
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import AIMessage
 
 logger = logging.getLogger(__name__)
@@ -93,10 +93,40 @@ def _strip_thinking_tokens(state: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
+class ThinkingTokenMiddleware(AgentMiddleware):
+    """Middleware for stripping thinking tokens and reasoning content.
+
+    This middleware hooks into the agent graph before and after model calls:
+    - before_model: Strips reasoning_content from conversation history
+    - after_model: Strips thinking blocks from model responses
+
+    Required for Kimi K2.5 and other thinking models to prevent API errors
+    and clean up reasoning artifacts from final responses.
+    """
+
+    def before_model(self, state: dict[str, Any], runtime: Any) -> dict[str, Any] | None:
+        """Strip reasoning_content from all AI messages before model call.
+
+        Returns the mutated state for LangGraph to apply.
+        """
+        return _sanitize_reasoning_content(state)
+
+    def after_model(self, state: dict[str, Any], runtime: Any) -> dict[str, Any] | None:
+        """Strip thinking tokens from the last AI message after model call.
+
+        Returns the mutated state for LangGraph to apply.
+        """
+        return _strip_thinking_tokens(state)
+
+
 def build_pre_model_hook(
     strip_reasoning: bool = False,
 ) -> Any | None:
     """Build a pre-model hook from enabled middleware options.
+
+    .. deprecated::
+        Use ThinkingTokenMiddleware instead. This function is kept for
+        backwards compatibility with legacy code.
 
     Args:
         strip_reasoning: Strip reasoning_content from AI messages in history.
@@ -121,6 +151,10 @@ def build_post_model_hook(
     strip_thinking: bool = False,
 ) -> Any | None:
     """Build a post-model hook from enabled middleware options.
+
+    .. deprecated::
+        Use ThinkingTokenMiddleware instead. This function is kept for
+        backwards compatibility with legacy code.
 
     Args:
         strip_thinking: Strip <think>...</think> tags and thinking content
