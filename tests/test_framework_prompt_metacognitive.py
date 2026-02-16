@@ -181,11 +181,13 @@ class TestConditionalInclusion:
         prompt = mock_workspace.build_system_prompt(enabled_builtins=None)
 
         # All sections should be present
+        assert "## Framework Capabilities" in prompt
         assert "## Task Management" in prompt
         assert "## Self-Continuation" in prompt
         assert "## Sub-Agent Spawning" in prompt
         assert "## Progress Updates" in prompt
         assert "## Self-Scheduling" in prompt
+        assert "## Memory Search" in prompt
         assert "## Autonomous Planning" in prompt
 
     def test_only_specified_sections_included(self, mock_workspace: AgentWorkspace) -> None:
@@ -253,3 +255,101 @@ class TestPromptTone:
 
         for pattern in transparency_patterns:
             assert pattern in prompt, f"Expected transparency pattern '{pattern}' in prompt"
+
+
+class TestFrameworkCapabilitySummary:
+    """Test the Framework Capabilities summary section."""
+
+    def test_capability_summary_always_present(self, mock_workspace: AgentWorkspace) -> None:
+        """Capability summary section is always present regardless of builtins."""
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=[])
+        assert "## Framework Capabilities" in prompt
+        assert "**Filesystem**" in prompt
+        assert "**Conversation Archives**" in prompt
+
+    def test_capability_summary_with_all_builtins(self, mock_workspace: AgentWorkspace) -> None:
+        """All capability bullets appear when enabled_builtins is None."""
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=None)
+
+        assert "## Framework Capabilities" in prompt
+        assert "**Filesystem**" in prompt
+        assert "**Conversation Archives**" in prompt
+        assert "**Task Tracking**" in prompt
+        assert "**Sub-Agent Spawning**" in prompt
+        assert "**Web Browsing**" in prompt
+        assert "**Self-Scheduling**" in prompt
+        assert "**Self-Continuation**" in prompt
+        assert "**Progress Updates**" in prompt
+        assert "**File Sharing**" in prompt
+        assert "**Memory Search**" in prompt
+
+    def test_capability_summary_with_subset(self, mock_workspace: AgentWorkspace) -> None:
+        """Only enabled capabilities appear in the summary."""
+        prompt = mock_workspace.build_system_prompt(
+            enabled_builtins=["task_tracker", "browser"]
+        )
+
+        assert "## Framework Capabilities" in prompt
+        assert "**Filesystem**" in prompt
+        assert "**Task Tracking**" in prompt
+        assert "**Web Browsing**" in prompt
+
+        # These should not appear
+        assert "**Sub-Agent Spawning**" not in prompt
+        assert "**Self-Scheduling**" not in prompt
+        assert "**Memory Search**" not in prompt
+
+    def test_capability_summary_appears_before_detailed_sections(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """Capability summary appears before detailed section descriptions."""
+        prompt = mock_workspace.build_system_prompt(
+            enabled_builtins=["task_tracker", "spawn"]
+        )
+        capabilities_pos = prompt.index("## Framework Capabilities")
+        task_mgmt_pos = prompt.index("## Task Management")
+        subagent_pos = prompt.index("## Sub-Agent Spawning")
+
+        assert capabilities_pos < task_mgmt_pos
+        assert capabilities_pos < subagent_pos
+
+
+class TestMemorySearchSection:
+    """Test the Memory Search prompt section."""
+
+    def test_memory_search_section_present_when_enabled(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """Memory search section appears when memory_search is in enabled builtins."""
+        prompt = mock_workspace.build_system_prompt(
+            enabled_builtins=["memory_search"]
+        )
+        assert "## Memory Search" in prompt
+        assert "search_conversations" in prompt
+        assert "past conversations" in prompt
+
+    def test_memory_search_section_present_when_all_builtins(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """Memory search section appears when enabled_builtins is None."""
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=None)
+        assert "## Memory Search" in prompt
+
+    def test_memory_search_section_absent_when_not_enabled(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """Memory search section absent when memory_search not in enabled builtins."""
+        prompt = mock_workspace.build_system_prompt(
+            enabled_builtins=["task_tracker", "spawn"]
+        )
+        assert "## Memory Search" not in prompt
+
+    def test_memory_search_includes_use_cases(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """Memory search section describes when to use it."""
+        prompt = mock_workspace.build_system_prompt(
+            enabled_builtins=["memory_search"]
+        )
+        assert "references something discussed in a prior conversation" in prompt
+        assert "past decisions, instructions, or findings" in prompt

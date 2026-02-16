@@ -125,6 +125,13 @@ class BuiltinRegistry:
         except ImportError as e:
             logger.debug(f"Browser tool not available: {e}")
 
+        try:
+            from openpaw.builtins.tools.memory_search import MemorySearchToolBuiltin
+
+            self.register_tool(MemorySearchToolBuiltin)
+        except ImportError as e:
+            logger.debug(f"Memory search tool not available: {e}")
+
         # Processors (ORDER MATTERS: file_persistence must run first in pipeline)
         try:
             from openpaw.builtins.processors.file_persistence import FilePersistenceProcessor

@@ -51,6 +51,8 @@ class SubAgentRequest:
     completed_at: datetime | None = None
     timeout_minutes: int = 30
     notify: bool = True
+    allowed_tools: list[str] | None = None
+    denied_tools: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary with ISO 8601 datetime strings.
@@ -69,6 +71,12 @@ class SubAgentRequest:
             data["started_at"] = self.started_at.isoformat()
         if self.completed_at:
             data["completed_at"] = self.completed_at.isoformat()
+
+        # Omit allowed_tools and denied_tools if None
+        if self.allowed_tools is None:
+            data.pop("allowed_tools", None)
+        if self.denied_tools is None:
+            data.pop("denied_tools", None)
 
         return data
 
@@ -101,6 +109,8 @@ class SubAgentRequest:
             completed_at=completed_at,
             timeout_minutes=data.get("timeout_minutes", 30),
             notify=data.get("notify", True),
+            allowed_tools=data.get("allowed_tools"),
+            denied_tools=data.get("denied_tools"),
         )
 
 

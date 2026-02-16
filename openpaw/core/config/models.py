@@ -233,6 +233,35 @@ class ApprovalGatesConfig(BaseModel):
     )
 
 
+class EmbeddingConfig(BaseModel):
+    """Configuration for the embedding provider."""
+
+    provider: str = Field(default="openai", description="Embedding provider (openai)")
+    model: str = Field(default="text-embedding-3-small", description="Embedding model name")
+    api_key: str | None = Field(default=None, description="API key for embedding provider")
+
+
+class VectorStoreConfig(BaseModel):
+    """Configuration for the vector store backend."""
+
+    provider: str = Field(
+        default="sqlite_vec", description="Vector store provider (sqlite_vec)"
+    )
+    dimensions: int = Field(default=1536, description="Embedding dimensions")
+
+
+class MemoryConfig(BaseModel):
+    """Configuration for conversation memory and vector search."""
+
+    enabled: bool = Field(default=False, description="Enable conversation vector search")
+    vector_store: VectorStoreConfig = Field(
+        default_factory=VectorStoreConfig, description="Vector store backend config"
+    )
+    embedding: EmbeddingConfig = Field(
+        default_factory=EmbeddingConfig, description="Embedding provider config"
+    )
+
+
 class WorkspaceConfig(BaseModel):
     """Configuration for a workspace agent (loaded from agent.yaml)."""
 
@@ -252,6 +281,10 @@ class WorkspaceConfig(BaseModel):
     approval_gates: ApprovalGatesConfig = Field(
         default_factory=ApprovalGatesConfig,
         description="Approval gates configuration",
+    )
+    memory: MemoryConfig = Field(
+        default_factory=MemoryConfig,
+        description="Conversation memory and vector search configuration",
     )
 
     @field_validator("timezone")

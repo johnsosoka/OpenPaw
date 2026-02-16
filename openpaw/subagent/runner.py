@@ -5,9 +5,11 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
+from typing import Any
 
 from openpaw.agent import AgentRunner
 from openpaw.agent.metrics import TokenUsageLogger
+from openpaw.builtins.registry import BuiltinRegistry
 from openpaw.channels.base import ChannelAdapter
 from openpaw.domain.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
 from openpaw.stores.subagent import SubAgentStore
@@ -32,6 +34,92 @@ SUBAGENT_EXCLUDED_TOOLS = {
     "list_scheduled",
     "cancel_scheduled",
 }
+
+
+def filter_subagent_tools(
+    tools: list[Any],
+    allowed_tools: list[str] | None = None,
+    denied_tools: list[str] | None = None,
+    group_resolver: Callable[[str], list[str]] | None = None,
+) -> list[Any]:
+    """Filter tools for a sub-agent based on allowed/denied lists.
+
+    Filtering order:
+    1. SUBAGENT_EXCLUDED_TOOLS floor (always applied, never overridable)
+    2. allowed_tools whitelist (if specified, only matching tools survive)
+    3. denied_tools blocklist (removes additional tools)
+
+    The group: prefix is resolved via group_resolver (e.g., "group:web" → ["browser_navigate", "browser_click", ...]).
+    Unknown tool names in allowed/denied produce a warning log, not an error.
+
+    Args:
+        tools: List of LangChain tools to filter.
+        allowed_tools: Optional whitelist of tool names (supports group: prefix).
+        denied_tools: Optional additional deny list (supports group: prefix).
+        group_resolver: Callable that resolves group names to tool name lists.
+            Defaults to BuiltinRegistry.get_instance().get_group_members.
+
+    Returns:
+        Filtered list of tools.
+    """
+    if group_resolver is None:
+        group_resolver = BuiltinRegistry.get_instance().get_group_members
+
+    def _resolve_tool_names(names: list[str] | None) -> set[str]:
+        """Expand group: prefixes and return a set of tool names."""
+        if not names:
+            return set()
+
+        resolved = set()
+        for name in names:
+            if name.startswith("group:"):
+                group_name = name[6:]  # Strip "group:" prefix
+                try:
+                    group_tools = group_resolver(group_name)
+                    resolved.update(group_tools)
+                except Exception as e:
+                    logger.warning(f"Failed to resolve group '{group_name}': {e}")
+            else:
+                resolved.add(name)
+        return resolved
+
+    # Get tool names from the tools list
+    tool_names = {getattr(tool, "name", str(tool)) for tool in tools}
+
+    # Step 1: Always remove SUBAGENT_EXCLUDED_TOOLS
+    filtered = [
+        tool
+        for tool in tools
+        if getattr(tool, "name", str(tool)) not in SUBAGENT_EXCLUDED_TOOLS
+    ]
+
+    # Step 2: Apply allowed_tools whitelist (if specified)
+    if allowed_tools is not None:
+        allowed_set = _resolve_tool_names(allowed_tools)
+        # Warn about unknown tools in allowed list
+        unknown_allowed = allowed_set - tool_names - SUBAGENT_EXCLUDED_TOOLS
+        if unknown_allowed:
+            logger.warning(
+                f"Unknown tools in allowed_tools list: {sorted(unknown_allowed)}"
+            )
+        filtered = [
+            tool for tool in filtered if getattr(tool, "name", str(tool)) in allowed_set
+        ]
+
+    # Step 3: Apply denied_tools blocklist (if specified)
+    if denied_tools is not None:
+        denied_set = _resolve_tool_names(denied_tools)
+        # Warn about unknown tools in denied list
+        unknown_denied = denied_set - tool_names
+        if unknown_denied:
+            logger.warning(
+                f"Unknown tools in denied_tools list: {sorted(unknown_denied)}"
+            )
+        filtered = [
+            tool for tool in filtered if getattr(tool, "name", str(tool)) not in denied_set
+        ]
+
+    return filtered
 
 
 class SubAgentRunner:
@@ -245,13 +333,13 @@ class SubAgentRunner:
                 # Create fresh agent instance
                 runner = self._agent_factory()
 
-                # Filter out excluded tools (prevent recursion and unsolicited messaging)
+                # Filter tools based on request configuration
                 original_tool_count = len(runner.additional_tools)
-                runner.additional_tools = [
-                    tool
-                    for tool in runner.additional_tools
-                    if getattr(tool, "name", str(tool)) not in SUBAGENT_EXCLUDED_TOOLS
-                ]
+                runner.additional_tools = filter_subagent_tools(
+                    runner.additional_tools,
+                    allowed_tools=request.allowed_tools,
+                    denied_tools=request.denied_tools,
+                )
                 filtered_count = original_tool_count - len(runner.additional_tools)
 
                 if filtered_count > 0:

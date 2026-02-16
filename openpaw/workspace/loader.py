@@ -120,6 +120,11 @@ class AgentWorkspace:
             "and maintain continuity across conversations."
         )
 
+        # Framework Capabilities summary - always included, lists available infrastructure
+        capabilities = self._build_capability_summary(enabled_builtins)
+        if capabilities:
+            sections.append(capabilities)
+
         # Heartbeat system - include if heartbeat content exists (non-empty, non-trivial)
         has_heartbeat = bool(self.heartbeat_md and len(self.heartbeat_md.strip()) > 20)
         if has_heartbeat:
@@ -262,6 +267,19 @@ class AgentWorkspace:
                 "approval to use tools you have been given."
             )
 
+        # Memory search - include if memory_search is enabled
+        if enabled_builtins is None or "memory_search" in enabled_builtins:
+            sections.append(
+                "\n\n## Memory Search\n\n"
+                "You have semantic search over your past conversations. Use `search_conversations` "
+                "to find relevant context from previous interactions. This is useful when:\n\n"
+                "- The user references something discussed in a prior conversation\n"
+                "- You need context from past decisions, instructions, or findings\n"
+                "- You want to avoid asking the user to repeat information\n\n"
+                "Search results include conversation snippets with timestamps and IDs. "
+                "You can then read the full archived conversation file if you need more detail."
+            )
+
         # Conversation memory is always available (core feature, not a builtin)
         sections.append(
             "\n\n## Conversation Memory\n\n"
@@ -273,6 +291,55 @@ class AgentWorkspace:
         )
 
         return "".join(sections)
+
+    def _build_capability_summary(self, enabled_builtins: list[str] | None) -> str:
+        """Build a concise summary of available framework capabilities.
+
+        Lists enabled capabilities as bullet points so agents can quickly
+        understand what infrastructure is available to them.
+
+        Args:
+            enabled_builtins: List of enabled builtin names, or None for all.
+
+        Returns:
+            Formatted capability summary section, or empty string if minimal.
+        """
+        def _is_enabled(name: str) -> bool:
+            return enabled_builtins is None or name in enabled_builtins
+
+        capabilities = [
+            "- **Filesystem**: Read, write, edit, search, and organize files in your workspace",
+            "- **Conversation Archives**: Past conversations stored as markdown and JSON in memory/conversations/",
+        ]
+
+        if _is_enabled("task_tracker"):
+            capabilities.append("- **Task Tracking**: Persistent TASKS.yaml for cross-session work management")
+        if _is_enabled("spawn"):
+            capabilities.append("- **Sub-Agent Spawning**: Spawn background workers for concurrent tasks")
+        if _is_enabled("browser"):
+            capabilities.append(
+                "- **Web Browsing**: Playwright-based browser automation with accessibility tree navigation"
+            )
+        if _is_enabled("brave_search"):
+            capabilities.append("- **Web Search**: Brave-powered internet search")
+        if _is_enabled("cron"):
+            capabilities.append("- **Self-Scheduling**: Schedule one-time or recurring future actions")
+        if _is_enabled("followup"):
+            capabilities.append("- **Self-Continuation**: Request re-invocation for multi-step workflows")
+        if _is_enabled("send_message"):
+            capabilities.append("- **Progress Updates**: Send messages to users during long operations")
+        if _is_enabled("send_file"):
+            capabilities.append("- **File Sharing**: Send workspace files to users")
+        if _is_enabled("memory_search"):
+            capabilities.append("- **Memory Search**: Semantic search over past conversations")
+        if _is_enabled("elevenlabs"):
+            capabilities.append("- **Text-to-Speech**: Voice response generation")
+
+        return (
+            "\n\n## Framework Capabilities\n\n"
+            "The following infrastructure is available to you:\n\n"
+            + "\n".join(capabilities)
+        )
 
 
 class WorkspaceLoader:

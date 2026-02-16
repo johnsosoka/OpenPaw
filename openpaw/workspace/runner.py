@@ -113,10 +113,54 @@ class WorkspaceRunner:
 
         # Session and archiving
         self._session_manager = SessionManager(self._workspace.path)
+
+        # Memory search infrastructure (vector store + indexer)
+        self._vector_store: Any | None = None
+        self._embedding_provider: Any | None = None
+        self._indexer: Any | None = None
+
+        memory_config = self._workspace.config.memory if self._workspace.config else None
+        if memory_config and memory_config.enabled:
+            try:
+                from openpaw.stores.vector.factory import (
+                    create_embedding_provider,
+                    create_vector_store,
+                )
+                from openpaw.stores.vector.indexer import ConversationIndexer
+
+                # Create vector store
+                self._vector_store = create_vector_store(
+                    provider=memory_config.vector_store.provider,
+                    config=memory_config.vector_store.model_dump(),
+                    workspace_path=self._workspace.path,
+                )
+
+                # Create embedding provider
+                embedding_config = memory_config.embedding.model_dump()
+                self._embedding_provider = create_embedding_provider(
+                    provider=memory_config.embedding.provider,
+                    config=embedding_config,
+                )
+
+                # Create indexer
+                self._indexer = ConversationIndexer(
+                    vector_store=self._vector_store,
+                    embedding_provider=self._embedding_provider,
+                )
+
+                self.logger.info("Memory search infrastructure initialized")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize memory search: {e}")
+                self._vector_store = None
+                self._embedding_provider = None
+                self._indexer = None
+
+        # Initialize conversation archiver with optional indexer
         self._conversation_archiver = ConversationArchiver(
             workspace_path=self._workspace.path,
             workspace_name=self.workspace_name,
             timezone=self._workspace_timezone,
+            indexer=self._indexer,
         )
 
         # Command routing
@@ -448,6 +492,14 @@ class WorkspaceRunner:
         self._agent_runner.update_checkpointer(self._checkpointer)
         self.logger.info(f"Initialized SQLite checkpointer: {self._db_path}")
 
+        # Initialize vector store if memory search is enabled
+        if self._vector_store:
+            await self._vector_store.initialize()
+            self.logger.info("Vector store initialized")
+
+        # Wire memory search tool
+        self._connect_memory_search_tool()
+
         # Setup channels
         self._channels = await self._lifecycle_manager.setup_channels()
         await self._lifecycle_manager.start_channels()
@@ -496,6 +548,20 @@ class WorkspaceRunner:
                 self.logger.debug("SpawnTool not loaded for this workspace")
         except Exception as e:
             self.logger.warning(f"Failed to connect SpawnTool to runner: {e}")
+
+    def _connect_memory_search_tool(self) -> None:
+        """Connect MemorySearchTool builtin to vector store and embedding provider."""
+        try:
+            memory_tool = self._builtin_loader.get_tool_instance("memory_search")
+            if memory_tool and self._vector_store and self._embedding_provider:
+                memory_tool.set_context(self._vector_store, self._embedding_provider)
+                self.logger.info("Connected MemorySearchTool to vector store")
+            elif memory_tool:
+                self.logger.debug("MemorySearchTool loaded but vector store not initialized")
+            else:
+                self.logger.debug("MemorySearchTool not loaded for this workspace")
+        except Exception as e:
+            self.logger.warning(f"Failed to connect MemorySearchTool: {e}")
 
     async def _inject_system_event(self, session_key: str, content: str) -> None:
         """Inject a system event into the queue for agent processing."""
@@ -615,6 +681,11 @@ class WorkspaceRunner:
 
         # Archive conversations
         await self._archive_active_conversations()
+
+        # Close vector store
+        if self._vector_store:
+            await self._vector_store.close()
+            self.logger.info("Closed vector store connection")
 
         # Close database
         if self._db_conn:

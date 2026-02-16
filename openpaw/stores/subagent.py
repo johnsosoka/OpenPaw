@@ -420,6 +420,8 @@ def create_subagent_request(
     status: SubAgentStatus = SubAgentStatus.PENDING,
     timeout_minutes: int = 30,
     notify: bool = True,
+    allowed_tools: list[str] | None = None,
+    denied_tools: list[str] | None = None,
 ) -> SubAgentRequest:
     """Factory function for creating a new sub-agent request with auto-generated ID.
 
@@ -430,6 +432,8 @@ def create_subagent_request(
         status: Initial request status (default: pending).
         timeout_minutes: Maximum runtime before timeout.
         notify: Whether to notify session on completion.
+        allowed_tools: Optional whitelist of tool names (supports group: prefix).
+        denied_tools: Optional additional tools to deny (supports group: prefix).
 
     Returns:
         SubAgentRequest instance with unique ID.
@@ -450,4 +454,6 @@ def create_subagent_request(
         session_key=session_key,
         timeout_minutes=timeout_minutes,
         notify=notify,
+        allowed_tools=allowed_tools,
+        denied_tools=denied_tools,
     )

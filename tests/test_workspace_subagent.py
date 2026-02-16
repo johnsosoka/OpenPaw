@@ -165,6 +165,7 @@ class TestSubAgentRunnerShutdown:
         runner._archive_active_conversations = AsyncMock()
         runner._session_manager = MagicMock()
         runner._get_browser_builtin = MagicMock(return_value=None)  # No browser loaded
+        runner._vector_store = None  # No vector store configured
 
         # Mock lifecycle manager
         mock_lifecycle = AsyncMock()

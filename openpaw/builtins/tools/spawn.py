@@ -35,6 +35,21 @@ class SpawnAgentInput(BaseModel):
     notify: bool = Field(
         default=True, description="Whether to send notification when done"
     )
+    allowed_tools: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional whitelist of tool names the sub-agent may use. Supports 'group:' prefix "
+            "(e.g., 'group:web'). If specified, only listed tools are available "
+            "(plus always-excluded tools are still removed)."
+        ),
+    )
+    denied_tools: list[str] | None = Field(
+        default=None,
+        description=(
+            "Optional additional tools to deny the sub-agent. Supports 'group:' prefix. "
+            "Applied after allowed_tools filtering."
+        ),
+    )
 
 
 class GetSubagentResultInput(BaseModel):
@@ -121,7 +136,12 @@ class SpawnToolBuiltin(BaseBuiltinTool):
         """Create the spawn_agent tool."""
 
         def spawn_agent_sync(
-            task: str, label: str, timeout_minutes: int = 30, notify: bool = True
+            task: str,
+            label: str,
+            timeout_minutes: int = 30,
+            notify: bool = True,
+            allowed_tools: list[str] | None = None,
+            denied_tools: list[str] | None = None,
         ) -> str:
             """Sync wrapper for spawn_agent (for LangChain compatibility).
 
@@ -130,6 +150,8 @@ class SpawnToolBuiltin(BaseBuiltinTool):
                 label: Short human-readable label.
                 timeout_minutes: Maximum runtime in minutes (1-120).
                 notify: Whether to send notification when done.
+                allowed_tools: Optional whitelist of tool names.
+                denied_tools: Optional additional tools to deny.
 
             Returns:
                 Confirmation message with sub-agent ID or error.
@@ -151,6 +173,8 @@ class SpawnToolBuiltin(BaseBuiltinTool):
                 status=SubAgentStatus.PENDING,
                 timeout_minutes=timeout_minutes,
                 notify=notify,
+                allowed_tools=allowed_tools,
+                denied_tools=denied_tools,
             )
 
             # Persist request to store
@@ -185,7 +209,12 @@ class SpawnToolBuiltin(BaseBuiltinTool):
                 return f"[Error: Failed to spawn sub-agent: {e}]"
 
         async def spawn_agent_async(
-            task: str, label: str, timeout_minutes: int = 30, notify: bool = True
+            task: str,
+            label: str,
+            timeout_minutes: int = 30,
+            notify: bool = True,
+            allowed_tools: list[str] | None = None,
+            denied_tools: list[str] | None = None,
         ) -> str:
             """Spawn a new sub-agent to execute a task in the background.
 
@@ -194,6 +223,8 @@ class SpawnToolBuiltin(BaseBuiltinTool):
                 label: Short human-readable label.
                 timeout_minutes: Maximum runtime in minutes (1-120).
                 notify: Whether to send notification when done.
+                allowed_tools: Optional whitelist of tool names.
+                denied_tools: Optional additional tools to deny.
 
             Returns:
                 Confirmation message with sub-agent ID or error.
@@ -215,6 +246,8 @@ class SpawnToolBuiltin(BaseBuiltinTool):
                 status=SubAgentStatus.PENDING,
                 timeout_minutes=timeout_minutes,
                 notify=notify,
+                allowed_tools=allowed_tools,
+                denied_tools=denied_tools,
             )
 
             # Persist request to store

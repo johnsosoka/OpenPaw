@@ -100,17 +100,19 @@ class ConversationArchiver:
     - {conversation_id}.json — Machine-readable, includes tool_calls
     """
 
-    def __init__(self, workspace_path: Path, workspace_name: str, timezone: str = "UTC"):
+    def __init__(self, workspace_path: Path, workspace_name: str, timezone: str = "UTC", indexer: Any = None):
         """Initialize archiver.
 
         Args:
             workspace_path: Path to workspace root.
             workspace_name: Name of the workspace.
             timezone: IANA timezone identifier for display timestamps (default: "UTC").
+            indexer: Optional ConversationIndexer for vector search.
         """
         self._workspace_path = Path(workspace_path)
         self._workspace_name = workspace_name
         self._timezone = timezone
+        self._indexer = indexer
         self._archive_dir = self._workspace_path / "memory" / "conversations"
         self._archive_dir.mkdir(parents=True, exist_ok=True)
 
@@ -181,6 +183,14 @@ class ConversationArchiver:
             f"Archived conversation {conversation_id} ({len(messages)} messages) "
             f"to {archive.markdown_path.name}"
         )
+
+        # Index for vector search if indexer is set
+        if self._indexer:
+            try:
+                chunks_indexed = await self._indexer.index_archive(archive.json_path)
+                logger.info(f"Indexed {chunks_indexed} chunks for conversation {conversation_id}")
+            except Exception as e:
+                logger.warning(f"Failed to index conversation {conversation_id}: {e}")
 
         return archive
 
