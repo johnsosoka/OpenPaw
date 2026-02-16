@@ -148,6 +148,8 @@ class BuiltinsConfig(BaseModel):
     brave_search: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
     whisper: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
     elevenlabs: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
+    shell: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
+    ssh: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
     cron: CronBuiltinConfig = Field(default_factory=CronBuiltinConfig)
     send_file: SendFileBuiltinConfig = Field(default_factory=SendFileBuiltinConfig)
     docling: DoclingBuiltinConfig = Field(default_factory=DoclingBuiltinConfig)
@@ -171,6 +173,8 @@ class WorkspaceBuiltinsConfig(BaseModel):
     brave_search: BuiltinItemConfig | None = None
     whisper: BuiltinItemConfig | None = None
     elevenlabs: BuiltinItemConfig | None = None
+    shell: BuiltinItemConfig | None = None
+    ssh: BuiltinItemConfig | None = None
     cron: CronBuiltinConfig | None = None
     send_file: SendFileBuiltinConfig | None = None
     docling: DoclingBuiltinConfig | None = None

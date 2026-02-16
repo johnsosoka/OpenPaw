@@ -52,6 +52,22 @@ class BuiltinLoader:
         self.registry = BuiltinRegistry.get_instance()
         self._tool_instances: dict[str, Any] = {}  # Track loaded tool instances
 
+    @staticmethod
+    def _get_field(obj: Any, field: str, default: Any = None) -> Any:
+        """Get a field from a Pydantic model or dict.
+
+        Args:
+            obj: Object to extract field from (can be Pydantic model or dict).
+            field: Field name to extract.
+            default: Default value if field not found.
+
+        Returns:
+            Field value or default.
+        """
+        if isinstance(obj, dict):
+            return obj.get(field, default)
+        return getattr(obj, field, default)
+
     def _is_allowed(self, name: str, group: str | None) -> bool:
         """Check if a builtin is allowed based on allow/deny lists.
 
@@ -163,14 +179,16 @@ class BuiltinLoader:
         # Global config
         if self.global_config:
             global_cfg = getattr(self.global_config, name, None)
-            if global_cfg and hasattr(global_cfg, "config"):
-                config.update(global_cfg.config)
+            cfg_dict = self._get_field(global_cfg, "config")
+            if cfg_dict:
+                config.update(cfg_dict)
 
         # Workspace config (overrides)
         if self.workspace_config:
             workspace_cfg = getattr(self.workspace_config, name, None)
-            if workspace_cfg and hasattr(workspace_cfg, "config"):
-                config.update(workspace_cfg.config)
+            cfg_dict = self._get_field(workspace_cfg, "config")
+            if cfg_dict:
+                config.update(cfg_dict)
 
         return config
 
@@ -188,14 +206,18 @@ class BuiltinLoader:
         # Check workspace first
         if self.workspace_config:
             workspace_cfg = getattr(self.workspace_config, name, None)
-            if workspace_cfg is not None and hasattr(workspace_cfg, "enabled"):
-                return bool(workspace_cfg.enabled)
+            if workspace_cfg is not None:
+                enabled = self._get_field(workspace_cfg, "enabled")
+                if enabled is not None:
+                    return bool(enabled)
 
         # Check global
         if self.global_config:
             global_cfg = getattr(self.global_config, name, None)
-            if global_cfg is not None and hasattr(global_cfg, "enabled"):
-                return bool(global_cfg.enabled)
+            if global_cfg is not None:
+                enabled = self._get_field(global_cfg, "enabled")
+                if enabled is not None:
+                    return bool(enabled)
 
         return True  # Default enabled
 
