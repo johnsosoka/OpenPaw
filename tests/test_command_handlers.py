@@ -327,6 +327,9 @@ class TestStatusCommand:
             )
         )
 
+        # Add task_store to mock context
+        mock_context.task_store = task_store
+
         handler = StatusCommand()
         result = await handler.handle(mock_message, "", mock_context)
 

@@ -47,6 +47,7 @@ class CommandContext:
     conversation_archiver: Any = None  # ConversationArchiver, avoid circular import
     workspace_timezone: str = "UTC"  # IANA timezone string for day boundaries
     browser_builtin: Any = None  # BrowserToolBuiltin, for conversation rotation cleanup
+    task_store: Any = None  # TaskStore, avoid circular import
 
 
 @dataclass

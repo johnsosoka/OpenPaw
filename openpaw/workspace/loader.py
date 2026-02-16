@@ -29,7 +29,11 @@ class AgentWorkspace:
     config: "WorkspaceConfig | None" = None
     crons: "list[CronDefinition]" = field(default_factory=list)
 
-    def build_system_prompt(self, enabled_builtins: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self,
+        enabled_builtins: list[str] | None = None,
+        current_datetime: str | None = None,
+    ) -> str:
         """Stitch together workspace files into a system prompt.
 
         The prompt structure follows DeepAgents conventions with clear sections.
@@ -39,6 +43,9 @@ class AgentWorkspace:
             enabled_builtins: List of enabled builtin names. Used to conditionally
                 include framework capabilities (task_tracker, cron, followup, etc.).
                 If None (default), all capabilities are included for backward compat.
+            current_datetime: Current date/time string to inject into the prompt.
+                Ensures agents always know the actual current date, even when the
+                workspace markdown files are cached from startup.
 
         Returns:
             String containing workspace prompt sections and framework orientation.
@@ -58,6 +65,11 @@ class AgentWorkspace:
         framework_context = self._build_framework_context(enabled_builtins)
         if framework_context:
             sections.append(f"<framework>\n{framework_context}\n</framework>")
+
+        # Dynamic date injection — ensures agents know the actual current date
+        # even when workspace files are cached from startup
+        if current_datetime:
+            sections.append(f"<current_datetime>\n{current_datetime}\n</current_datetime>")
 
         if self.heartbeat_md:
             sections.append(f"<heartbeat>\n{self.heartbeat_md.strip()}\n</heartbeat>")

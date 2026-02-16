@@ -36,7 +36,7 @@ class ElevenLabsTTSTool(BaseBuiltinTool):
 
     Config options:
         voice_id: Default voice ID to use
-        model_id: ElevenLabs model (default: "eleven_monolingual_v1")
+        model_id: ElevenLabs model (default: "eleven_turbo_v2_5")
         output_format: Audio format (default: "mp3_44100_128")
     """
 
@@ -117,7 +117,7 @@ class ElevenLabsTTSTool(BaseBuiltinTool):
         client = AsyncElevenLabs(api_key=api_key)
 
         resolved_voice_id = voice_id or self.config.get("voice_id", "21m00Tcm4TlvDq8ikWAM")
-        model_id = self.config.get("model_id", "eleven_monolingual_v1")
+        model_id = self.config.get("model_id", "eleven_turbo_v2_5")
         output_format = self.config.get("output_format", "mp3_44100_128")
 
         logger.debug(f"Generating speech: voice={resolved_voice_id}, model={model_id}")

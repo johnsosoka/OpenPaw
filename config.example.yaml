@@ -25,13 +25,6 @@ lanes:
   subagent_concurrency: 8  # Delegated subagent tasks
   cron_concurrency: 2      # Scheduled jobs
 
-# Channel configurations
-channels:
-  telegram:
-    token: null  # Set via TELEGRAM_BOT_TOKEN env var or here
-    allowed_users: []   # Empty = allow all (list of user IDs)
-    allowed_groups: []  # Empty = allow all (list of group IDs)
-
 # Agent defaults
 agent:
   # Model format: provider:model_id
@@ -78,7 +71,7 @@ builtins:
     enabled: true
     config:
       voice_id: 21m00Tcm4TlvDq8ikWAM  # Default voice
-      model_id: eleven_monolingual_v1
+      model_id: eleven_turbo_v2_5
 
   # Browser - web automation with Playwright
   # Requires: playwright package (poetry add playwright)
@@ -91,11 +84,3 @@ builtins:
   #     blocked_domains: []               # Takes precedence over allowed
   #     timeout_seconds: 30               # Default timeout for operations
   #     persist_cookies: false            # Keep cookies across agent runs
-
-# Scheduled jobs (cron)
-cron_jobs: []
-  # - name: daily-summary
-  #   agent: assistant
-  #   schedule: "0 9 * * *"  # 9 AM daily
-  #   enabled: true
-  #   prompt: "Generate a daily summary"

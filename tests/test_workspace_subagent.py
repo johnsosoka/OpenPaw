@@ -156,6 +156,7 @@ class TestSubAgentRunnerShutdown:
         runner._subagent_runner = mock_subagent_runner
         runner._running = True
         runner._queue_processor_task = None
+        runner._cleanup_task = None  # Added for periodic cleanup task
         runner._channels = {}
         runner._db_conn = None
         runner._approval_manager = None

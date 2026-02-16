@@ -166,6 +166,7 @@ class TaskToolBuiltin(BaseBuiltinTool):
             self._create_create_task_tool(),
             self._create_update_task_tool(),
             self._create_get_task_tool(),
+            self._create_delete_task_tool(),
         ]
 
     def _create_list_tasks_tool(self) -> StructuredTool:
@@ -538,6 +539,55 @@ class TaskToolBuiltin(BaseBuiltinTool):
                 "Use list_tasks first to find task IDs."
             ),
             args_schema=GetTaskInput,
+        )
+
+    def _create_delete_task_tool(self) -> StructuredTool:
+        """Create the delete_task tool."""
+
+        def delete_task(task_id: str) -> str:
+            """Delete a completed task by ID.
+
+            Only tasks in terminal status (completed, failed, cancelled) can be deleted.
+            Use this to clean up old tasks after reviewing their results.
+
+            Args:
+                task_id: Unique task identifier.
+
+            Returns:
+                Confirmation message or error if task cannot be deleted.
+            """
+            # Check if task exists
+            task = self.store.get(task_id)
+            if not task:
+                return f"Task not found: {task_id}"
+
+            # Validate task is in terminal status
+            if task.status.value not in ["completed", "failed", "cancelled"]:
+                return (
+                    f"Cannot delete active task. Mark it as completed or cancelled first. "
+                    f"Current status: {task.status.value}"
+                )
+
+            # Delete the task
+            success = self.store.delete(task_id)
+            if not success:
+                return f"Failed to delete task: {task_id}"
+
+            # Return confirmation with truncated description
+            description_preview = task.description[:80] + ("..." if len(task.description) > 80 else "")
+            logger.info(f"Deleted task {task_id}: {description_preview}")
+            return f"Task deleted: {description_preview}"
+
+        return StructuredTool.from_function(
+            func=delete_task,
+            name="delete_task",
+            description=(
+                "Delete a completed task by ID. "
+                "Only tasks in terminal status (completed, failed, cancelled) can be deleted. "
+                "Use this to clean up old tasks after reviewing their results. "
+                "Active tasks must be marked as completed or cancelled before deletion."
+            ),
+            args_schema=GetTaskInput,  # Reuse GetTaskInput schema (just task_id)
         )
 
     def _format_duration(self, seconds: float) -> str:

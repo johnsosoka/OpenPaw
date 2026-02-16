@@ -302,40 +302,72 @@ class TaskStore:
         logger.warning(f"Task not found for deletion: {task_id}")
         return False
 
-    def cleanup_old_tasks(self, max_age_days: int = 7) -> int:
-        """Remove completed tasks older than specified age.
+    def cleanup_old_tasks(self, max_age_days: int = 3, stale_threshold_hours: int = 48) -> int:
+        """Remove completed tasks older than specified age and handle stale tasks.
+
+        This method performs two operations:
+        1. Auto-fails tasks stuck in pending/in_progress for longer than stale_threshold_hours
+        2. Removes terminal-status tasks (completed/failed/cancelled) older than max_age_days
 
         Args:
-            max_age_days: Maximum age in days for completed/failed tasks.
+            max_age_days: Maximum age in days for completed/failed/cancelled tasks.
+            stale_threshold_hours: Hours before pending/in_progress tasks are auto-failed.
 
         Returns:
-            Number of tasks removed.
+            Number of tasks removed (does not count stale tasks transitioned to failed).
         """
         with self._lock:
             data = self._load_unlocked()
-            cutoff = datetime.now(UTC).timestamp() - (max_age_days * 86400)
+            now = datetime.now(UTC)
+            stale_cutoff = now.timestamp() - (stale_threshold_hours * 3600)
+            age_cutoff = now.timestamp() - (max_age_days * 86400)
 
             initial_count = len(data["tasks"])
+            stale_count = 0
 
+            # First pass: detect and transition stale tasks to failed
+            for task_data in data["tasks"]:
+                status = task_data.get("status")
+                if status in ["pending", "in_progress"]:
+                    # Check task age using created_at
+                    created_at_str = task_data.get("created_at")
+                    if created_at_str:
+                        created_at = datetime.fromisoformat(created_at_str).timestamp()
+                        if created_at < stale_cutoff:
+                            # Mark as failed with auto-transition note
+                            task_data["status"] = "failed"
+                            task_data["completed_at"] = now.isoformat()
+                            notes = task_data.get("notes", "")
+                            auto_note = f"[auto] Marked failed: stale for >{stale_threshold_hours} hours"
+                            task_data["notes"] = f"{notes}\n{auto_note}".strip()
+                            stale_count += 1
+
+            if stale_count > 0:
+                logger.info(f"Auto-failed {stale_count} stale task(s) (older than {stale_threshold_hours} hours)")
+
+            # Second pass: remove old terminal-status tasks
             # Keep tasks that are:
-            # 1. Not completed/failed, OR
-            # 2. Completed/failed recently
+            # 1. Not completed/failed/cancelled, OR
+            # 2. Completed/failed/cancelled recently (within max_age_days)
             data["tasks"] = [
                 t for t in data["tasks"]
                 if (
                     t["status"] not in ["completed", "failed", "cancelled"]
                     or (
-                        t.get("completed_at")
-                        and datetime.fromisoformat(t["completed_at"]).timestamp() >= cutoff
+                        # Fall back to created_at if completed_at is missing
+                        (timestamp_str := t.get("completed_at") or t.get("created_at"))
+                        is not None
+                        and datetime.fromisoformat(timestamp_str).timestamp() >= age_cutoff
                     )
                 )
             ]
 
             removed = initial_count - len(data["tasks"])
 
-            if removed > 0:
+            if removed > 0 or stale_count > 0:
                 self._save_unlocked(data)
-                logger.info(f"Cleaned up {removed} old task(s) (older than {max_age_days} days)")
+                if removed > 0:
+                    logger.info(f"Cleaned up {removed} old task(s) (older than {max_age_days} days)")
 
         return removed
 

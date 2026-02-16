@@ -65,5 +65,9 @@ agent_workspaces/
 # Runtime logs
 logs/
 
+# Runtime directories
+tmp/
+uploads/
+
 # LLM memory/context (session-specific)
 llm_memory/

@@ -27,18 +27,6 @@ class LaneConfig(BaseModel):
     cron_concurrency: int = Field(default=2, description="Max concurrent runs in cron lane")
 
 
-class TelegramConfig(BaseModel):
-    """Configuration for Telegram channel."""
-
-    token: str | None = Field(default=None, description="Telegram bot token (or use TELEGRAM_BOT_TOKEN env)")
-    allowed_users: list[int] = Field(default_factory=list, description="Allowed user IDs (empty = all)")
-    allowed_groups: list[int] = Field(default_factory=list, description="Allowed group IDs (empty = all)")
-
-
-class ChannelsConfig(BaseModel):
-    """Configuration for all channels."""
-
-    telegram: TelegramConfig = Field(default_factory=TelegramConfig)
 
 
 class AgentConfig(BaseModel):
@@ -50,14 +38,6 @@ class AgentConfig(BaseModel):
     temperature: float = Field(default=0.7, description="Model temperature")
 
 
-class CronJobConfig(BaseModel):
-    """Configuration for a single cron job."""
-
-    name: str = Field(description="Job identifier")
-    agent: str = Field(description="Agent workspace name")
-    schedule: str = Field(description="Cron expression (e.g., '0 9 * * *')")
-    enabled: bool = Field(default=True, description="Whether the job is active")
-    prompt: str | None = Field(default=None, description="Optional prompt to inject")
 
 
 class WorkspaceModelConfig(BaseModel):
@@ -256,8 +236,6 @@ class ApprovalGatesConfig(BaseModel):
 class WorkspaceConfig(BaseModel):
     """Configuration for a workspace agent (loaded from agent.yaml)."""
 
-    name: str | None = Field(default=None, description="Agent name")
-    description: str | None = Field(default=None, description="Agent description")
     timezone: str = Field(default="UTC", description="Workspace timezone (e.g., 'America/Los_Angeles')")
     model: WorkspaceModelConfig = Field(default_factory=WorkspaceModelConfig, description="LLM configuration")
     channel: WorkspaceChannelConfig = Field(default_factory=WorkspaceChannelConfig, description="Channel binding")
@@ -311,10 +289,8 @@ class Config(BaseModel):
     logging: LoggingConfig = Field(default_factory=LoggingConfig, description="Logging configuration")
     queue: QueueConfig = Field(default_factory=QueueConfig)
     lanes: LaneConfig = Field(default_factory=LaneConfig)
-    channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     builtins: BuiltinsConfig = Field(default_factory=BuiltinsConfig, description="Builtin capabilities config")
-    cron_jobs: list[CronJobConfig] = Field(default_factory=list, description="Scheduled agent jobs")
     approval_gates: ApprovalGatesConfig = Field(
         default_factory=ApprovalGatesConfig,
         description="Default approval gates configuration",

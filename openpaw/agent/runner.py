@@ -14,6 +14,7 @@ from openpaw.agent.metrics import InvocationMetrics, extract_metrics_from_callba
 from openpaw.agent.middleware.llm_hooks import THINKING_TAG_PATTERN
 from openpaw.agent.middleware.queue_aware import InterruptSignalError
 from openpaw.agent.tools.filesystem import FilesystemTools
+from openpaw.core.timezone import workspace_now
 from openpaw.workspace.loader import AgentWorkspace
 
 logger = logging.getLogger(__name__)
@@ -277,8 +278,16 @@ class AgentRunner:
             logger.debug("Validating tool names for Bedrock compatibility")
             self._validate_tool_names(all_tools)
 
-        # 5. Get system prompt from workspace
-        system_prompt = self.workspace.build_system_prompt(enabled_builtins=self.enabled_builtins)
+        # 5. Get system prompt from workspace (with dynamic current date)
+        try:
+            timezone = getattr(self.workspace.config, "timezone", "UTC") if self.workspace.config else "UTC"
+            current_dt = workspace_now(timezone).strftime("%A, %Y-%m-%d %H:%M %Z")
+        except (TypeError, AttributeError):
+            current_dt = None
+        system_prompt = self.workspace.build_system_prompt(
+            enabled_builtins=self.enabled_builtins,
+            current_datetime=current_dt,
+        )
 
         # 6. Call create_agent (successor to create_react_agent)
         # Note: create_agent handles tool binding internally - do NOT pre-bind

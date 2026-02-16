@@ -246,6 +246,7 @@ class WorkspaceRunner:
         self._channels: dict[str, ChannelAdapter] = {}
         self._subagent_runner: SubAgentRunner | None = None
         self._queue_processor_task: asyncio.Task[None] | None = None
+        self._cleanup_task: asyncio.Task[None] | None = None
         self._running = False
 
     @property
@@ -325,7 +326,7 @@ class WorkspaceRunner:
     def _cleanup_old_tasks(self) -> None:
         """Clean up old completed tasks from TaskStore on startup."""
         try:
-            removed = self._task_store.cleanup_old_tasks(max_age_days=7)
+            removed = self._task_store.cleanup_old_tasks(max_age_days=3, stale_threshold_hours=48)
             if removed > 0:
                 self.logger.info(f"Cleaned up {removed} old task(s) from TaskStore")
 
@@ -364,6 +365,7 @@ class WorkspaceRunner:
             workspace_timezone=self._workspace_timezone,
             conversation_archiver=self._conversation_archiver,
             browser_builtin=self._get_browser_builtin(),
+            task_store=self._task_store,
         )
 
     async def _handle_inbound_message(self, message: Message) -> None:
@@ -416,6 +418,19 @@ class WorkspaceRunner:
 
         await self._lane_queue.process("main", handler)
 
+    async def _periodic_task_cleanup(self) -> None:
+        """Run task cleanup every 6 hours."""
+        while self._running:
+            await asyncio.sleep(6 * 3600)  # 6 hours
+            if not self._running:
+                break
+            try:
+                removed = self._task_store.cleanup_old_tasks(max_age_days=3, stale_threshold_hours=48)
+                if removed > 0:
+                    self.logger.info(f"Periodic cleanup: removed {removed} old/stale tasks")
+            except Exception as e:
+                self.logger.warning(f"Periodic task cleanup failed: {e}")
+
     async def start(self) -> None:
         """Start workspace runner."""
         self.logger.info(f"Starting workspace runner: {self.workspace_name}")
@@ -460,6 +475,7 @@ class WorkspaceRunner:
 
         self._running = True
         self._queue_processor_task = asyncio.create_task(self._queue_processor())
+        self._cleanup_task = asyncio.create_task(self._periodic_task_cleanup())
 
         self.logger.info(f"Workspace runner '{self.workspace_name}' is running")
 
@@ -558,6 +574,15 @@ class WorkspaceRunner:
             except asyncio.CancelledError:
                 pass
             self._queue_processor_task = None
+
+        # Stop periodic cleanup task
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+            self._cleanup_task = None
 
         # Stop schedulers
         await self._lifecycle_manager.stop_cron_scheduler()
