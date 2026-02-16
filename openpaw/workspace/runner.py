@@ -379,6 +379,12 @@ class WorkspaceRunner:
                     channel = self._channels.get(message.channel)
                     if channel:
                         await channel.send_message(message.session_key, command_result.response)
+
+                # Rebuild agent on conversation rotation (/new, /compact)
+                # so the agent picks up any workspace file changes (AGENT.md, etc.)
+                if command_result.new_thread_id:
+                    self._agent_runner.rebuild_agent()
+
                 return
 
         # Process through inbound processors

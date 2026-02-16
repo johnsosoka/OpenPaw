@@ -29,6 +29,26 @@ class AgentWorkspace:
     config: "WorkspaceConfig | None" = None
     crons: "list[CronDefinition]" = field(default_factory=list)
 
+    def reload_files(self) -> None:
+        """Re-read workspace markdown files from disk.
+
+        Call this when workspace files may have changed (e.g., agent modified
+        its own AGENT.md or HEARTBEAT.md) to ensure the next prompt build
+        uses current content.
+        """
+        self.agent_md = self._read_file(self.path / "AGENT.md")
+        self.user_md = self._read_file(self.path / "USER.md")
+        self.soul_md = self._read_file(self.path / "SOUL.md")
+        self.heartbeat_md = self._read_file(self.path / "HEARTBEAT.md")
+        logger.debug(f"Reloaded workspace files for: {self.name}")
+
+    @staticmethod
+    def _read_file(path: Path) -> str:
+        """Read file contents, returning empty string if file doesn't exist."""
+        if path.exists():
+            return path.read_text(encoding="utf-8")
+        return ""
+
     def build_system_prompt(
         self,
         enabled_builtins: list[str] | None = None,

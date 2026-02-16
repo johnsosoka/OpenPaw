@@ -152,6 +152,17 @@ class AgentRunner:
         self._agent = self._build_agent()
         logger.info(f"Updated checkpointer for workspace: {self.workspace.name}")
 
+    def rebuild_agent(self) -> None:
+        """Reload workspace files and rebuild the agent graph.
+
+        Call this after conversation rotation (/new, /compact) so the agent
+        picks up any changes the agent made to its own workspace files
+        (AGENT.md, HEARTBEAT.md, etc.) during the previous conversation.
+        """
+        self.workspace.reload_files()
+        self._agent = self._build_agent()
+        logger.info(f"Rebuilt agent with fresh workspace files: {self.workspace.name}")
+
     def _validate_tool_names(self, tools: list[Any]) -> None:
         """Validate tool names comply with Bedrock requirements.
 
