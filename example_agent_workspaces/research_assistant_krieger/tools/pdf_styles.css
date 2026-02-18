@@ -1,0 +1,8 @@
+/* Image sizing — constrain to page width */
+img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 16pt auto;
+    page-break-inside: avoid;
+}

@@ -2,81 +2,77 @@
 
 **A LangGraph-native framework for building autonomous AI personal assistants.**
 
+> **Note:** This is a hobby project, mostly built for personal use. It was developed collaboratively with a Claude Code AI engineering team. Contributions and ideas welcome, but expect rough edges.
+
 OpenPaw gives your AI agents real agency -- they can spawn sub-agents, browse the web, schedule their own follow-ups, process documents, manage persistent tasks, and ask for human approval before taking dangerous actions. Built on [LangGraph](https://langchain-ai.github.io/langgraph/) and [LangChain](https://www.langchain.com/), it plays natively with the `@tool` ecosystem you already know.
+
+## What is OpenPaw?
 
 Each agent runs in an isolated workspace with its own personality, communication channel, scheduled tasks, filesystem, and tool loadout. Run one assistant or a dozen -- they stay completely independent.
 
-## What Makes OpenPaw Different
+```mermaid
+graph TD
+    O[OpenPawOrchestrator] --> W1[WorkspaceRunner: agent1]
+    O --> W2[WorkspaceRunner: agent2]
+    O --> W3[WorkspaceRunner: agent3]
 
-- **Agents that act, not just respond.** Sub-agent spawning, self-scheduling, self-continuation, and persistent task tracking let your agents work autonomously across sessions. They pick up where they left off.
+    W1 --> C1[Channel<br/>Telegram]
+    W1 --> Q1[QueueManager<br/>Lane FIFO]
+    W1 --> A1[AgentRunner<br/>LangGraph ReAct]
+    W1 --> S1[Schedulers<br/>Cron + Heartbeat]
 
-- **Native `@tool` compatibility.** Drop any LangChain `@tool` function into a workspace `tools/` directory and it works at next startup. No wrappers, no adapters -- just standard LangChain tools. Dependencies auto-install from `requirements.txt`.
+    style O fill:#4a9eff,color:#fff
+    style W1 fill:#2d2d2d,color:#fff
+    style W2 fill:#2d2d2d,color:#fff
+    style W3 fill:#2d2d2d,color:#fff
+```
 
-- **Document intelligence built in.** [Docling](https://github.com/docling-project/docling) converts uploaded PDFs, DOCX, and PPTX to markdown with OCR. [Whisper](https://openai.com/index/whisper/) transcribes voice messages. Files are persisted with date partitioning and sibling output files -- your agent has a searchable filing cabinet.
+## Key Features
 
-- **Human-in-the-loop when it matters.** Approval gates pause execution and ask the user before the agent overwrites files, deletes tasks, or takes any action you configure. Timeout policies prevent agents from hanging indefinitely.
-
-- **Multi-provider, multi-model.** Anthropic, OpenAI, AWS Bedrock, or any OpenAI-compatible API endpoint. Switch models per workspace without changing agent code.
-
-## Features
-
-### Agent Autonomy
-- **Sub-agent spawning** — Agents spawn up to 8 concurrent background workers for parallel tasks
-- **Self-scheduling** — Agents create their own cron jobs (`schedule_at`, `schedule_every`) that persist across restarts
+### Autonomy
+- **Sub-agent spawning** — Agents spawn concurrent background workers for parallel tasks
+- **Self-scheduling** — Agents create their own cron jobs that persist across restarts
 - **Self-continuation** — Multi-step autonomous workflows via followup tool with depth limiting
-- **Task management** — Persistent TASKS.yaml for tracking long-running work across sessions and heartbeats
-- **Mid-execution messaging** — Agents send progress updates and files to users while working
+- **Task tracking** — Persistent TASKS.yaml for long-running work across sessions
 
-### Web and Browser
-- **Browser automation** — Playwright-based web interaction with accessibility tree navigation (11 tools: navigate, snapshot, click, type, select, scroll, screenshot, tabs, etc.)
+### Intelligence
+- **Browser automation** — Playwright-based web interaction with accessibility tree navigation
 - **Web search** — Brave Search API integration
-- **Domain security** — Per-workspace allowlists and blocklists with wildcard support
+- **Document processing** — Automatic PDF/DOCX/PPTX to markdown with OCR ([Docling](https://github.com/docling-project/docling))
+- **Voice transcription** — Audio message transcription via [Whisper](https://openai.com/index/whisper/)
 
-### Document Intelligence
-- **Docling processor** — Automatic PDF/DOCX/PPTX to markdown conversion with OCR (macOS native + EasyOCR)
-- **Whisper processor** — Voice and audio message transcription
-- **File persistence** — All uploads saved to `uploads/{YYYY-MM-DD}/` with sibling output convention (report.pdf → report.md)
+### Safety
+- **Approval gates** — Human-in-the-loop authorization for dangerous operations
+- **Sandboxed filesystem** — Path traversal protection, `.openpaw/` isolation
+- **Domain security** — Per-workspace allowlists/blocklists for web browsing
 
-### Framework
-- **Multi-workspace orchestration** — Run multiple isolated agents simultaneously
-- **Personality system** — Define agent identity via AGENT.md, USER.md, SOUL.md, HEARTBEAT.md
-- **Conversation persistence** — Durable conversations via AsyncSqliteSaver that survive restarts
-- **Conversation archiving** — Markdown + JSON exports on `/new`, `/compact`, and shutdown
-- **Lane-based queue** — FIFO queue with separate lanes for main, subagent, and cron traffic
-- **Queue-aware middleware** — Steer and interrupt modes redirect or abort agent runs when users send new messages
-- **Approval gates** — Human-in-the-loop authorization for configurable tool calls (Telegram inline keyboards)
-- **Heartbeat system** — Proactive agent check-ins with active hours, HEARTBEAT_OK suppression, and pre-flight skip
-- **Static cron scheduler** — YAML-defined scheduled tasks per workspace
-- **Token tracking** — Per-invocation JSONL metrics with today/session aggregation via `/status`
-- **Timezone awareness** — Per-workspace IANA timezone for scheduling, display, and file partitioning
-- **Slash commands** — `/new`, `/compact`, `/status`, `/queue`, `/help` (intercepted before the agent)
-- **Sandboxed filesystem** — read, write, edit, glob, grep, file_info with path traversal protection
-- **Custom workspace tools** — LangChain `@tool` functions per workspace with auto-dependency installation
-- **Per-workspace `.env`** — Automatic environment variable loading for workspace-specific secrets
-- **Dynamic framework prompt** — Agents automatically understand their capabilities based on loaded builtins
+### Operations
+- **Conversation persistence** — Durable conversations that survive restarts (AsyncSqliteSaver)
+- **Token tracking** — Per-invocation metrics with today/session aggregation
+- **Slash commands** — `/new`, `/compact`, `/status`, `/queue`, `/help`
+- **Timezone awareness** — Per-workspace IANA timezone for scheduling and display
+- **Multi-model support** — Anthropic, OpenAI, AWS Bedrock, or any OpenAI-compatible API
 
-### Builtins
+## Message Flow
 
-Tools and processors conditionally loaded based on available packages and API keys:
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant C as Channel
+    participant Q as Queue
+    participant M as Middleware
+    participant A as Agent
+    participant T as Tools
 
-| Builtin | Type | Requires | Description |
-|---------|------|----------|-------------|
-| `browser` | Tool | `playwright` (core dep) | Web automation via Playwright with accessibility tree |
-| `brave_search` | Tool | `BRAVE_API_KEY` | Web search via Brave API |
-| `spawn` | Tool | — | Sub-agent spawning for concurrent background tasks |
-| `cron` | Tool | — | Agent self-scheduling (one-time and recurring) |
-| `task_tracker` | Tool | — | Persistent task management via TASKS.yaml |
-| `send_message` | Tool | — | Mid-execution user messaging |
-| `send_file` | Tool | — | Send workspace files to users |
-| `followup` | Tool | — | Self-continuation for multi-step workflows |
-| `memory_search` | Tool | `sqlite-vec` | Semantic search over past conversations |
-| `shell` | Tool | — | Local shell command execution |
-| `ssh` | Tool | `asyncssh` | Remote SSH execution |
-| `elevenlabs` | Tool | `ELEVENLABS_API_KEY` | Text-to-speech voice responses |
-| `file_persistence` | Processor | — | Universal file upload handling with date partitions |
-| `docling` | Processor | `docling` (core dep) | PDF/DOCX/PPTX to markdown with OCR |
-| `whisper` | Processor | `OPENAI_API_KEY` | Audio/voice transcription |
-| `timestamp` | Processor | — | Message timestamp injection |
+    U->>C: Message
+    C->>Q: Enqueue
+    Q->>M: Dequeue + debounce
+    M->>A: Process
+    A->>T: Tool calls
+    T-->>A: Results
+    A-->>C: Response
+    C-->>U: Reply
+```
 
 ## Quick Start
 
@@ -123,28 +119,33 @@ cp config.example.yaml config.yaml
 export TELEGRAM_BOT_TOKEN="your-telegram-token"
 
 # Model provider (choose one or more)
-export ANTHROPIC_API_KEY="your-key"         # Anthropic Claude
-export OPENAI_API_KEY="your-openai-key"     # OpenAI GPT (also used by Whisper)
-# AWS Bedrock (Kimi K2, Claude, Mistral, Nova, etc.)
+export ANTHROPIC_API_KEY="your-key"
+export OPENAI_API_KEY="your-openai-key"  # Also used by Whisper
+# Or AWS Bedrock
 export AWS_ACCESS_KEY_ID="your-access-key"
 export AWS_SECRET_ACCESS_KEY="your-secret-key"
 export AWS_REGION="us-east-1"
 
 # Optional builtin API keys
-export BRAVE_API_KEY="your-brave-key"       # Brave Search
-export ELEVENLABS_API_KEY="your-key"        # Text-to-speech
+export BRAVE_API_KEY="your-brave-key"
+export ELEVENLABS_API_KEY="your-key"
 ```
 
-3. Edit `config.yaml` with your model, channel, and builtin preferences. See `config.example.yaml` for all options.
+3. Edit `config.yaml` with your preferences. See `config.example.yaml` for all options.
 
 ### Create Your First Workspace
 
-Each workspace requires four markdown files that define the agent's identity:
+Copy one of the example workspaces to get started:
 
 ```bash
-mkdir -p agent_workspaces/my-agent
-touch agent_workspaces/my-agent/{AGENT,USER,SOUL,HEARTBEAT}.md
+# Minimal assistant workspace
+cp -r example_agent_workspaces/assistant agent_workspaces/my-agent
+
+# Advanced research assistant with custom tools
+cp -r example_agent_workspaces/research_assistant_krieger agent_workspaces/my-researcher
 ```
+
+Each workspace requires four markdown files that define the agent's identity:
 
 | File | Purpose |
 |------|---------|
@@ -153,35 +154,7 @@ touch agent_workspaces/my-agent/{AGENT,USER,SOUL,HEARTBEAT}.md
 | `SOUL.md` | Core personality and values |
 | `HEARTBEAT.md` | Scratchpad for proactive check-ins (can start empty) |
 
-Optional workspace files:
-
-```
-agent_workspaces/my-agent/
-├── agent.yaml        # Per-workspace config overrides (model, channel, timezone)
-├── .env              # Workspace-specific environment variables
-├── tools/            # Custom LangChain @tool functions
-│   ├── calendar.py
-│   └── requirements.txt
-└── crons/            # Scheduled task definitions
-    └── daily-summary.yaml
-```
-
-### Custom Tools
-
-Drop any LangChain `@tool` into the `tools/` directory:
-
-```python
-# agent_workspaces/my-agent/tools/weather.py
-from langchain_core.tools import tool
-
-@tool
-def get_weather(city: str) -> str:
-    """Get current weather for a city."""
-    # Your implementation here
-    return fetch_weather(city)
-```
-
-Add tool-specific dependencies to `tools/requirements.txt` — they auto-install at startup.
+Optional workspace files include `agent.yaml` (per-workspace config), `.env` (secrets), `tools/` (custom LangChain tools), and `crons/` (scheduled tasks).
 
 ### Run
 
@@ -199,76 +172,57 @@ poetry run openpaw -c config.yaml --all
 poetry run openpaw -c config.yaml -w my-agent -v
 ```
 
-## Architecture
+## Example Workspaces
 
-```
-OpenPawOrchestrator
-  ├─ WorkspaceRunner["agent1"]
-  │   └─ Channel → QueueManager → LaneQueue → Middleware → AgentRunner → LangGraph Agent
-  ├─ WorkspaceRunner["agent2"]
-  │   └─ (fully isolated: own channel, queue, agent, cron, heartbeat)
-  └─ WorkspaceRunner["agent3"]
-      └─ (fully isolated: own channel, queue, agent, cron, heartbeat)
-```
+**`example_agent_workspaces/assistant/`** — Minimal workspace demonstrating the core personality system (AGENT.md, USER.md, SOUL.md, HEARTBEAT.md). Good starting point for building your own agent.
 
-Each workspace is fully isolated with its own channel adapter, queue manager, agent runner, cron scheduler, heartbeat scheduler, session manager, and conversation archiver. See [Architecture](docs/architecture.md) for the full component breakdown.
+**`example_agent_workspaces/research_assistant_krieger/`** — Advanced workspace showcasing custom tools integration:
+- GPT Researcher for web research reports
+- PDF generation for report output
+- Multi-model vision analysis
+- Workspace-specific `.env` and tool dependencies
 
-### Package Layout
+## Builtins
 
-```
-openpaw/
-├── domain/           # Pure business models (Message, Task, Session, etc.)
-├── core/             # Configuration, logging, timezone, queue
-├── agent/            # Agent execution, metrics, middleware, filesystem tools
-├── workspace/        # Workspace management, message processing, agent factory
-├── runtime/          # Orchestrator, scheduling, session management
-├── stores/           # Persistence (tasks, sub-agents, dynamic crons, approval state)
-├── channels/         # Channel adapters (Telegram) and slash command handlers
-├── builtins/         # Extensible tools and processors (browser, spawn, docling, etc.)
-├── subagent/         # Background agent coordination and lifecycle
-└── utils/            # Filename sanitization and shared utilities
-```
+Tools and processors conditionally loaded based on available packages and API keys:
 
-## Workspace Configuration
+| Builtin | Type | Description |
+|---------|------|-------------|
+| `browser` | Tool | Web automation via Playwright with accessibility tree |
+| `brave_search` | Tool | Web search via Brave API |
+| `spawn` | Tool | Sub-agent spawning for concurrent background tasks |
+| `cron` | Tool | Agent self-scheduling (one-time and recurring) |
+| `task_tracker` | Tool | Persistent task management via TASKS.yaml |
+| `send_message` | Tool | Mid-execution user messaging |
+| `send_file` | Tool | Send workspace files to users |
+| `followup` | Tool | Self-continuation for multi-step workflows |
+| `memory_search` | Tool | Semantic search over past conversations |
+| `shell` | Tool | Local shell command execution |
+| `ssh` | Tool | Remote SSH execution |
+| `elevenlabs` | Tool | Text-to-speech voice responses |
+| `file_persistence` | Processor | Universal file upload handling with date partitions |
+| `docling` | Processor | PDF/DOCX/PPTX to markdown with OCR |
+| `whisper` | Processor | Audio/voice transcription |
+| `timestamp` | Processor | Message timestamp injection |
 
-Place `agent.yaml` in the workspace root to customize behavior:
+See [Builtins Documentation](docs/builtins.md) for configuration details and adding custom builtins.
 
-```yaml
-name: My Assistant
-description: A helpful personal assistant
-timezone: America/Denver  # IANA timezone (default: UTC)
+## Custom Tools
 
-model:
-  provider: anthropic
-  model: claude-sonnet-4-20250514
-  api_key: ${ANTHROPIC_API_KEY}
-  temperature: 0.7
+Drop any LangChain `@tool` into the `tools/` directory:
 
-channel:
-  type: telegram
-  token: ${TELEGRAM_BOT_TOKEN}
-  allowed_users: []
+```python
+# agent_workspaces/my-agent/tools/weather.py
+from langchain_core.tools import tool
 
-heartbeat:
-  enabled: true
-  interval_minutes: 30
-  active_hours: "09:00-22:00"
-  suppress_ok: true
+@tool
+def get_weather(city: str) -> str:
+    """Get current weather for a city."""
+    # Your implementation here
+    return fetch_weather(city)
 ```
 
-Environment variables use `${VAR}` syntax. Workspace config deep-merges over global defaults. See [Configuration](docs/configuration.md) for the full reference including approval gates, browser domain policies, builtin overrides, and queue settings.
-
-## Slash Commands
-
-Commands are intercepted before reaching the agent and handled by the framework directly.
-
-| Command | Description |
-|---------|-------------|
-| `/new` | Archive current conversation and start fresh |
-| `/compact` | Summarize conversation, archive it, start new with summary |
-| `/status` | Show model, conversation stats, active tasks, token usage |
-| `/queue <mode>` | Change queue mode (collect, steer, followup, interrupt) |
-| `/help` | List available commands |
+Add tool-specific dependencies to `tools/requirements.txt` — they auto-install at startup. See [Workspaces Documentation](docs/workspaces.md) for details.
 
 ## Documentation
 
@@ -301,4 +255,4 @@ poetry run mypy openpaw/
 
 ## Credits
 
-OpenPaw draws architectural inspiration from [OpenClaw](https://github.com/openclaw)'s command queue and channel patterns. Built on [LangGraph](https://langchain-ai.github.io/langgraph/) and [LangChain](https://www.langchain.com/).
+OpenPaw draws architectural inspiration from [OpenClaw](https://github.com/openclaw)'s command queue and channel patterns. Built on [LangGraph](https://langchain-ai.github.io/langgraph/) and [LangChain](https://www.langchain.com/). Developed with [Claude Code](https://claude.ai/code).

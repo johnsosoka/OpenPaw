@@ -71,3 +71,6 @@ uploads/
 
 # LLM memory/context (session-specific)
 llm_memory/
+
+# Zip archives
+*.zip

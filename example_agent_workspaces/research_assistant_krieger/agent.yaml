@@ -1,0 +1,40 @@
+name: Research Assistant
+description: Deep research agent with GPT Researcher, PDF publishing, and multi-model vision
+timezone: America/Denver
+
+model:
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+  api_key: ${ANTHROPIC_API_KEY}
+  temperature: 0.7
+  max_turns: 150
+  timeout_seconds: 900
+
+# Alternative: Use OpenAI-compatible API (e.g., Moonshot Kimi K2.5)
+# model:
+#   provider: openai
+#   model: kimi-k2.5
+#   api_key: ${MOONSHOT_API_KEY}
+#   base_url: https://api.moonshot.ai/v1
+#   temperature: 0.6
+#   max_turns: 150
+#   timeout_seconds: 900
+
+channel:
+  type: telegram
+  token: ${TELEGRAM_BOT_TOKEN}
+  allowed_users:
+    - 123456789  # Replace with your Telegram user ID
+
+queue:
+  mode: steer
+  debounce_ms: 1500
+
+heartbeat:
+  enabled: true
+  interval_minutes: 30
+  active_hours: "08:00-22:00"
+  suppress_ok: true
+  output:
+    channel: telegram
+    chat_id: 123456789  # Replace with your Telegram chat ID

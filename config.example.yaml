@@ -1,86 +1,60 @@
-# OpenPaw Configuration Example
-# Copy to config.yaml and customize
+# OpenPaw Global Configuration
+# Copy to config.yaml and customize. Per-workspace overrides go in agent.yaml.
 
 # Path to agent workspaces directory
 workspaces_path: agent_workspaces
 
-# Logging configuration
+# Logging
 logging:
-  level: INFO              # DEBUG, INFO, WARNING, ERROR, CRITICAL
-  directory: logs          # Directory for log files
-  max_size_mb: 10          # Maximum log file size before rotation
-  backup_count: 5          # Number of backup files to keep
-  per_workspace: true      # Create separate log files per workspace
+  level: INFO
+  directory: logs
+  max_size_mb: 10
+  backup_count: 5
+  per_workspace: true
 
-# Command queue settings (inspired by OpenClaw)
+# Message queue defaults (can be overridden per workspace)
 queue:
-  mode: collect          # collect, steer, followup, interrupt
-  debounce_ms: 1000      # Wait before processing collected messages
-  cap: 20                # Max queued messages per session
-  drop_policy: summarize # old, new, summarize
+  mode: collect            # collect, steer, followup, interrupt
+  debounce_ms: 1000
+  cap: 20
+  drop_policy: summarize   # old, new, summarize
 
-# Lane concurrency limits
+# Lane concurrency
 lanes:
-  main_concurrency: 4      # Interactive message processing
-  subagent_concurrency: 8  # Delegated subagent tasks
-  cron_concurrency: 2      # Scheduled jobs
+  main_concurrency: 4
+  subagent_concurrency: 8
+  cron_concurrency: 2
 
-# Agent defaults
+# Default agent model
+# Format: provider:model_id
+# Examples:
+#   anthropic:claude-sonnet-4-20250514
+#   openai:gpt-4o
+#   bedrock_converse:moonshot.kimi-k2-thinking
 agent:
-  # Model format: provider:model_id
-  # Anthropic: anthropic:claude-sonnet-4-20250514
-  # OpenAI: openai:gpt-4o
-  # AWS Bedrock: bedrock_converse:moonshot.kimi-k2-thinking
-  #              bedrock_converse:anthropic.claude-3-sonnet-20240229-v1:0
   model: anthropic:claude-sonnet-4-20250514
   max_turns: 50
   temperature: 0.7
 
-# Per-workspace configuration is set in agent_workspaces/<name>/agent.yaml
-# Available workspace settings include:
-#   timezone: America/Denver  # IANA timezone for cron, heartbeat, display (default: UTC)
-
-# Builtin capabilities
-# Builtins are conditionally available based on API keys in environment
+# Builtins (tools and processors)
+# Conditionally loaded based on API keys and installed packages.
+# See docs/builtins.md for full reference.
 builtins:
-  # OpenClaw-style allow/deny lists
-  # Empty allow = allow all available builtins
-  # Use "group:web" or "group:voice" to allow/deny entire groups
-  allow: []
-  deny: []
-    # - group:voice  # Disable all voice builtins
+  allow: []    # Empty = allow all available
+  deny: []     # Use "group:voice" to deny entire groups
 
-  # Brave Search - web search capability
-  # Requires: BRAVE_API_KEY environment variable
-  brave_search:
-    enabled: true
-    config:
-      count: 5  # Number of search results
+  # Example: configure Brave Search
+  # brave_search:
+  #   enabled: true
+  #   config:
+  #     count: 5
 
-  # Whisper - audio transcription for voice messages
-  # Requires: OPENAI_API_KEY environment variable
-  whisper:
-    enabled: true
-    config:
-      model: whisper-1
-      # language: en  # Optional language hint (auto-detect if not set)
-
-  # ElevenLabs - text-to-speech for voice responses
-  # Requires: ELEVENLABS_API_KEY environment variable
-  elevenlabs:
-    enabled: true
-    config:
-      voice_id: 21m00Tcm4TlvDq8ikWAM  # Default voice
-      model_id: eleven_turbo_v2_5
-
-  # Browser - web automation with Playwright
-  # Requires: playwright package (poetry add playwright)
-  #           playwright install chromium
+  # Example: configure browser automation
   # browser:
   #   enabled: true
   #   config:
-  #     headless: true                    # Run browser without GUI
-  #     allowed_domains: []               # Empty = allow all domains
-  #     blocked_domains: []               # Takes precedence over allowed
-  #     timeout_seconds: 30               # Default timeout for operations
-  #     persist_cookies: false            # Keep cookies across agent runs
+  #     headless: true
+  #     allowed_domains: []
+  #     blocked_domains: []
+  #     timeout_seconds: 30
+  #     persist_cookies: false
