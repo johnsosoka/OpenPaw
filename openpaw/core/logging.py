@@ -55,6 +55,9 @@ def setup_logging(
     file_handler.setFormatter(file_formatter)
     root_logger.addHandler(file_handler)
 
+    # Suppress noisy third-party loggers
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
     logging.info(f"Logging initialized: level={level}, directory={log_dir}")
 
 
