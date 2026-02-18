@@ -1,12 +1,18 @@
 # Cron Scheduler
 
-OpenPaw supports scheduled tasks (cron jobs) per workspace. Cron jobs execute prompts at specified intervals and route output to configured channels.
+OpenPaw supports both static and dynamic scheduled tasks per workspace. Static tasks are defined via YAML files in the `crons/` directory, while dynamic tasks can be scheduled by agents at runtime using the CronTool builtin.
 
-## Overview
+## Architecture
 
-Each workspace can define scheduled tasks via YAML files in the `crons/` directory. The scheduler uses [APScheduler](https://apscheduler.readthedocs.io/) to execute jobs based on standard cron expressions.
+The scheduling system consists of three core components:
 
-## Cron File Format
+- **`openpaw/runtime/scheduling/cron.py`** - `CronScheduler` executes scheduled tasks using APScheduler
+- **`openpaw/runtime/scheduling/heartbeat.py`** - `HeartbeatScheduler` for proactive agent check-ins
+- **`openpaw/runtime/scheduling/dynamic_cron.py`** - `DynamicCronStore` for agent-scheduled tasks
+
+All cron schedules fire in the **workspace timezone** (IANA identifier from `agent.yaml`, default: UTC).
+
+## Static Cron Jobs
 
 Create YAML files in `agent_workspaces/<workspace>/crons/<job-name>.yaml`:
 
@@ -24,28 +30,13 @@ output:
   chat_id: 123456789  # Platform-specific routing
 ```
 
-## Configuration Fields
+### Configuration Fields
 
-### name
+**name** - Unique identifier for this cron job (must be unique within the workspace)
 
-Unique identifier for this cron job.
+**schedule** - Standard cron expression: `"minute hour day-of-month month day-of-week"`
 
-```yaml
-name: weekly-report
-```
-
-Used in logs and for job management. Must be unique within the workspace.
-
-### schedule
-
-Standard cron expression: `"minute hour day-of-month month day-of-week"`
-
-```yaml
-schedule: "0 9 * * *"  # Daily at 9:00 AM
-```
-
-#### Cron Expression Format
-
+Cron Expression Format:
 ```
  ┌───────────── minute (0 - 59)
  │ ┌───────────── hour (0 - 23)
@@ -56,100 +47,229 @@ schedule: "0 9 * * *"  # Daily at 9:00 AM
  * * * * *
 ```
 
-#### Common Schedules
+Common Schedules:
+- `"*/15 * * * *"` - Every 15 minutes
+- `"0 * * * *"` - Every hour
+- `"0 9 * * *"` - Daily at 9:00 AM (workspace timezone)
+- `"0 9 * * 1-5"` - Weekdays at 9:00 AM
+- `"0 8 * * 1"` - Weekly on Monday at 8:00 AM
+- `"0 0 1 * *"` - First day of month at midnight
+- `"0 0 * * 0"` - Every Sunday at midnight
 
-**Every 15 minutes:**
-```yaml
-schedule: "*/15 * * * *"
-```
+**enabled** - Enable or disable the cron job without deleting the file
 
-**Every hour:**
-```yaml
-schedule: "0 * * * *"
-```
+**prompt** - The prompt to send to the agent when the cron job executes
 
-**Daily at 9 AM:**
-```yaml
-schedule: "0 9 * * *"
-```
-
-**Weekdays at 9 AM:**
-```yaml
-schedule: "0 9 * * 1-5"
-```
-
-**Weekly on Monday at 8 AM:**
-```yaml
-schedule: "0 8 * * 1"
-```
-
-**First day of month at midnight:**
-```yaml
-schedule: "0 0 1 * *"
-```
-
-**Every Sunday at midnight:**
-```yaml
-schedule: "0 0 * * 0"
-```
-
-### enabled
-
-Enable or disable the cron job without deleting the file.
-
-```yaml
-enabled: true   # Job will run
-enabled: false  # Job is skipped
-```
-
-Useful for temporarily disabling jobs during maintenance or testing.
-
-### prompt
-
-The prompt to send to the agent when the cron job executes.
-
-```yaml
-prompt: |
-  Review the current state of all projects.
-  Generate a status report including:
-  - Active projects
-  - Completed tasks this week
-  - Pending items
-  - Any blockers
-```
-
-The prompt is injected into a fresh agent instance. The agent has access to:
-- All workspace markdown files (AGENT.md, USER.md, SOUL.md, HEARTBEAT.md)
-- Workspace filesystem (can read/write files)
-- All enabled builtins (search, TTS, etc.)
-
-### output
-
-Defines where the cron job's response is sent.
+**output** - Defines where the cron job's response is sent
 
 ```yaml
 output:
   channel: telegram
-  chat_id: 123456789  # Send to specific user/group
+  chat_id: 123456789  # Telegram user ID or group ID
 ```
-
-**channel** - Channel type (`telegram`, etc.)
-
-**chat_id** - Platform-specific identifier:
-- Telegram user ID (positive integer)
-- Telegram group ID (negative integer starting with -100)
 
 To get a Telegram chat ID:
 - User ID: Message [@userinfobot](https://t.me/userinfobot)
 - Group ID: Add [@RawDataBot](https://t.me/RawDataBot) to group
 
-## Example Cron Jobs
+### Timezone Behavior
+
+**Critical**: Cron schedules fire in the **workspace timezone**, not the system timezone.
+
+Configure workspace timezone in `agent.yaml`:
+
+```yaml
+timezone: America/Denver  # IANA timezone identifier
+
+# Cron schedules interpret times in this timezone
+# "0 9 * * *" = 9:00 AM Denver time
+```
+
+Default timezone is UTC if not specified.
+
+## Dynamic Scheduling (CronTool)
+
+Agents can schedule their own follow-up actions at runtime using the CronTool builtin. This enables autonomous workflows like "remind me in 20 minutes" or "check on this PR every hour".
+
+### Available Tools
+
+**schedule_at** - Schedule a one-time action at a specific timestamp
+
+```python
+# Agent usage example:
+schedule_at(
+    prompt="Check if the deploy has completed",
+    fire_at="2026-02-17T14:30:00",  # ISO format
+    label="deploy-check"
+)
+```
+
+**schedule_every** - Schedule a recurring action at fixed intervals
+
+```python
+# Agent usage example:
+schedule_every(
+    prompt="Check PR status and notify if merged",
+    interval_seconds=3600,  # Every hour
+    label="pr-monitor"
+)
+```
+
+**list_scheduled** - List all pending scheduled tasks
+
+**cancel_scheduled** - Cancel a scheduled task by ID
+
+### Storage and Lifecycle
+
+- Tasks persist to `{workspace}/dynamic_crons.json` and survive restarts
+- One-time tasks are automatically cleaned up after execution
+- Expired one-time tasks are cleaned up on workspace startup
+- Recurring tasks continue until explicitly cancelled
+
+### Routing
+
+Responses are sent back to the first allowed user in the workspace's channel config.
+
+### Configuration
+
+Optional configuration in `agent.yaml` or global config:
+
+```yaml
+builtins:
+  cron:
+    enabled: true
+    config:
+      min_interval_seconds: 300  # Minimum interval for recurring tasks (default: 5 min)
+      max_tasks: 50              # Maximum pending tasks per workspace
+```
+
+### Example Usage
+
+**User**: "Ping me in 10 minutes to check on the deploy"
+
+**Agent**: Calls `schedule_at` with timestamp 10 minutes from now
+
+**Result**: Task fires at scheduled time, agent sends reminder to user's chat
+
+## Heartbeat System
+
+The HeartbeatScheduler enables proactive agent check-ins on a configurable schedule. Agents can use this to monitor ongoing tasks, provide status updates, or maintain context without user prompts.
+
+### Configuration
+
+In `agent.yaml`:
+
+```yaml
+heartbeat:
+  enabled: true
+  interval_minutes: 30           # How often to check in
+  active_hours: "09:00-17:00"    # Only run during these hours (optional)
+  suppress_ok: true              # Don't send message if agent responds "HEARTBEAT_OK"
+  output:
+    channel: telegram
+    chat_id: 123456789
+```
+
+### HEARTBEAT_OK Protocol
+
+If the agent determines there's nothing to report, it can respond with exactly `"HEARTBEAT_OK"` and no message will be sent (when `suppress_ok: true`). This prevents noisy "all clear" messages.
+
+### Active Hours
+
+Heartbeats only fire within the specified window (workspace timezone). Outside active hours, heartbeats are silently skipped.
+
+**Important**: `active_hours` are interpreted in the workspace timezone. For example, `"09:00-17:00"` with `timezone: America/Denver` means 9:00 AM - 5:00 PM Denver time.
+
+### Pre-flight Skip
+
+Before invoking the LLM, the scheduler checks HEARTBEAT.md and TASKS.yaml:
+
+- If HEARTBEAT.md is empty or trivial
+- AND no active tasks exist
+- THEN skip the heartbeat entirely (saves API costs for idle workspaces)
+
+### Task Summary Injection
+
+When active tasks exist, a compact summary is automatically injected into the heartbeat prompt as `<active_tasks>` XML tags. This avoids an extra LLM tool call to `list_tasks()`.
+
+### Event Logging
+
+Every heartbeat event is logged to `{workspace}/heartbeat_log.jsonl` with:
+- Outcome (sent, suppressed, skipped)
+- Duration
+- Token metrics (input/output tokens)
+- Active task count
+
+### HEARTBEAT.md
+
+The `HEARTBEAT.md` file serves as a scratchpad for agent-maintained notes on what to check during heartbeats. The agent can update this file with reminders, ongoing work, or things to monitor.
+
+Example HEARTBEAT.md:
+
+```markdown
+# Current Focus
+
+- Monitoring PR #123 for merge conflicts
+- Waiting on deployment approval from ops team
+- Need to follow up on database migration at 3 PM
+
+# Recent Updates
+
+2026-02-17: Started monitoring the staging deploy
+2026-02-16: Completed code review for auth refactor
+```
+
+The heartbeat scheduler reads this file and includes it in the agent's context during each heartbeat execution.
+
+## Cron Execution Model
+
+### Fresh Agent Instance
+
+Each cron execution (static, dynamic, or heartbeat) creates a fresh agent instance:
+
+- **No conversation history** - Each run is independent
+- **No checkpointer** - State is not persisted between runs
+- **Clean context** - No accumulated conversation memory
+- **Stateless by design** - Ensures consistent, predictable execution
+
+This ensures cron jobs execute consistently without interference from previous runs or user conversations.
+
+### Filesystem Access
+
+Cron jobs have full filesystem access to the workspace directory:
+
+```yaml
+prompt: |
+  Read notes/daily-logs.md to see recent activity.
+  Append today's summary to the log file.
+  Send the summary via chat.
+```
+
+The agent can:
+- Read previous cron outputs
+- Update shared state files
+- Maintain persistent logs
+- Organize workspace directories
+
+### Builtin Access
+
+Cron jobs have access to all enabled builtins (brave_search, task_tracker, send_message, etc.), configured in the workspace's `agent.yaml` or global `config.yaml`.
+
+Example:
+
+```yaml
+prompt: |
+  Use brave_search to check for news about our key technologies.
+  Summarize any important updates and send via chat.
+```
+
+## Example Static Cron Jobs
 
 ### Daily Status Report
 
 ```yaml
 name: daily-status
-schedule: "0 9 * * 1-5"  # Weekdays at 9 AM
+schedule: "0 9 * * 1-5"  # Weekdays at 9 AM (workspace timezone)
 enabled: true
 
 prompt: |
@@ -170,7 +290,7 @@ output:
 
 ```yaml
 name: weekly-summary
-schedule: "0 9 * * 1"  # Monday at 9 AM
+schedule: "0 9 * * 1"  # Monday at 9 AM (workspace timezone)
 enabled: true
 
 prompt: |
@@ -208,7 +328,7 @@ output:
 
 ```yaml
 name: end-of-day
-schedule: "0 18 * * 1-5"  # Weekdays at 6 PM
+schedule: "0 18 * * 1-5"  # Weekdays at 6 PM (workspace timezone)
 enabled: true
 
 prompt: |
@@ -244,46 +364,25 @@ output:
   chat_id: 123456789
 ```
 
-## Cron Execution Model
+## Example Dynamic Scheduling Scenarios
 
-### Fresh Agent Instance
+### Time-Based Reminder
 
-Each cron execution creates a fresh agent instance:
-- **No conversation history** - Each run is independent
-- **No checkpointer** - State is not persisted between runs
-- **Clean context** - No accumulated conversation memory
+**User**: "Remind me to check the server logs in 30 minutes"
 
-This ensures cron jobs execute consistently without interference from previous runs.
+**Agent**: Calls `schedule_at(prompt="Reminder: check server logs", fire_at="2026-02-17T15:00:00", label="log-check")`
 
-### Filesystem Persistence
+### Recurring Monitoring
 
-Cron jobs can read and write workspace files:
+**User**: "Check on PR #456 every hour until it's merged"
 
-```yaml
-prompt: |
-  Read notes/daily-logs.md to see recent activity.
-  Append today's summary to the log file.
-  Send the summary via chat.
-```
+**Agent**: Calls `schedule_every(prompt="Check PR #456 status and notify if merged", interval_seconds=3600, label="pr-456-monitor")`
 
-The agent has full filesystem access to its workspace directory, enabling:
-- Reading previous cron outputs
-- Updating shared state files
-- Maintaining persistent logs
+**Later**: User says "Stop monitoring the PR"
 
-### Builtin Access
+**Agent**: Calls `list_scheduled()` to find the task ID, then `cancel_scheduled(task_id="...")`
 
-Cron jobs have access to all enabled builtins:
-
-```yaml
-prompt: |
-  Use brave_search to check for news about our key technologies.
-  Summarize any important updates and send via chat.
-```
-
-Builtins are configured in the workspace's `agent.yaml` or global `config.yaml`.
-
-## Cron Job Best Practices
+## Best Practices
 
 ### 1. Idempotent Prompts
 
@@ -327,19 +426,21 @@ prompt: |
 
 ### 4. Timezone Awareness
 
-Cron schedules run in the system timezone. Document the expected timezone:
+Always configure workspace timezone explicitly:
 
 ```yaml
-name: daily-report
-schedule: "0 9 * * *"  # 9 AM Pacific Time (server timezone)
-enabled: true
+# agent.yaml
+timezone: America/New_York
+
+# Cron schedules now interpret in Eastern Time
+# "0 9 * * *" = 9:00 AM Eastern
 ```
 
-Or specify timezone in the prompt:
+Document the expected timezone in prompts for clarity:
 
 ```yaml
 prompt: |
-  Generate a report for the Pacific Time (PT) business day.
+  Generate a report for the Eastern Time (ET) business day.
 ```
 
 ### 5. Error Handling
@@ -364,6 +465,24 @@ enabled: true
 ```
 
 Verify output, then adjust to production schedule.
+
+### 7. Use Heartbeats for Monitoring
+
+For ongoing task monitoring, prefer heartbeats over frequent crons:
+
+```yaml
+# Instead of:
+# crons/check-tasks.yaml with schedule: "*/5 * * * *"
+
+# Use:
+heartbeat:
+  enabled: true
+  interval_minutes: 5
+  active_hours: "09:00-17:00"
+  suppress_ok: true
+```
+
+Heartbeats have pre-flight skipping and task summary injection, making them more efficient for monitoring workloads.
 
 ## Managing Cron Jobs
 
@@ -401,7 +520,7 @@ workspace1/crons/report.yaml  → Runs in workspace1 context
 workspace2/crons/report.yaml  → Runs in workspace2 context (independent)
 ```
 
-Each workspace's crons run in isolation with that workspace's agent configuration.
+Each workspace's crons run in isolation with that workspace's agent configuration, timezone, and filesystem access.
 
 ## Monitoring Cron Jobs
 
@@ -418,21 +537,15 @@ Logs show:
 - Message delivery status
 - Errors or failures
 
-## Advanced Usage
+For heartbeats, check `heartbeat_log.jsonl` for detailed event history:
 
-### Dynamic Scheduling
-
-Cron jobs can update their own schedules by modifying workspace files:
-
-```yaml
-prompt: |
-  Review current workload in HEARTBEAT.md.
-
-  If workload is high, note that daily reports should pause.
-  Update crons/daily-report.yaml to set enabled: false.
+```json
+{"timestamp": "2026-02-17T14:30:00Z", "outcome": "sent", "duration_ms": 1234, "tokens_in": 500, "tokens_out": 150, "active_tasks": 3}
+{"timestamp": "2026-02-17T15:00:00Z", "outcome": "suppressed_ok", "duration_ms": 800, "tokens_in": 450, "tokens_out": 15, "active_tasks": 0}
+{"timestamp": "2026-02-17T15:30:00Z", "outcome": "skipped_preflight", "reason": "empty_heartbeat_no_tasks"}
 ```
 
-Requires careful design to avoid unintended behavior.
+## Advanced Usage
 
 ### Multi-Channel Output
 
@@ -466,29 +579,72 @@ prompt: |
   Read data/latest.md and generate analysis report
 ```
 
+### Dynamic Task Management
+
+Agents can manage their own scheduled tasks:
+
+**User**: "Schedule a daily standup reminder at 9 AM"
+
+**Agent**: Calls `schedule_every(prompt="Reminder: daily standup at 9 AM", interval_seconds=86400, label="standup")`
+
+**Later, User**: "Cancel the standup reminder"
+
+**Agent**: Calls `list_scheduled()`, finds the task, calls `cancel_scheduled(task_id="...")`
+
 ## Troubleshooting
 
-**Cron not executing:**
-- Verify `enabled: true`
-- Check cron expression syntax
+### Cron not executing
+
+**Check**:
+- Verify `enabled: true` in the YAML file
+- Check cron expression syntax (use [crontab.guru](https://crontab.guru))
 - Ensure workspace is running (`poetry run openpaw -w <workspace>`)
 - Check logs for scheduler errors
+- Verify timezone is configured correctly
 
-**Cron executes but no output:**
+### Cron executes but no output
+
+**Check**:
 - Verify `chat_id` is correct
 - Check channel configuration
 - Agent may have decided not to send a message (check prompt logic)
+- Look for errors in verbose logs
 
-**Cron output goes to wrong chat:**
+### Cron output goes to wrong chat
+
+**Check**:
 - Verify `chat_id` in cron YAML
 - Check for typos (positive vs. negative for groups)
+- Ensure output.channel matches workspace channel type
 
-**Timezone issues:**
-- Cron runs in system timezone
-- Check server timezone: `date` or `timedatectl`
-- Adjust schedule accordingly or set system timezone
+### Timezone issues
 
-**Filesystem errors:**
+**Check**:
+- Workspace timezone is set in `agent.yaml`
+- Cron schedules fire in workspace timezone, not system timezone
+- Use `workspace_now()` utility for debugging (check logs)
+- Verify IANA timezone identifier is valid
+
+### Heartbeats not firing
+
+**Check**:
+- `heartbeat.enabled: true` in agent.yaml
+- Current time is within `active_hours` window (workspace timezone)
+- HEARTBEAT.md has content or active tasks exist (otherwise pre-flight skip)
+- Check `heartbeat_log.jsonl` for skip reasons
+
+### Filesystem errors
+
+**Check**:
 - Cron jobs have sandboxed access to workspace directory only
 - Cannot access files outside workspace
-- Check file paths are relative to workspace root
+- Check file paths are relative to workspace root (not absolute)
+- `.openpaw/` directory is protected (framework internals)
+
+### Dynamic tasks not persisting
+
+**Check**:
+- `builtins.cron.enabled: true` in configuration
+- Tasks are saved to `dynamic_crons.json` in workspace root
+- File permissions allow writing
+- Check logs for persistence errors

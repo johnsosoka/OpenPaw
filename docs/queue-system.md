@@ -1,47 +1,52 @@
 # Queue System
 
-OpenPaw uses a lane-based FIFO queue system inspired by OpenClaw. The queue manages how messages are collected, prioritized, and processed by agents.
+OpenPaw implements a sophisticated lane-based queuing system that enables responsive, context-aware message handling for AI agents. The queue system supports multiple processing modes, per-session isolation, and middleware-driven responsiveness.
 
 ## Architecture
 
-```
-Channel → QueueManager → LaneQueue → AgentRunner
-                ├─ main_lane (user messages)
-                ├─ subagent_lane (delegated tasks)
-                └─ cron_lane (scheduled jobs)
-```
+The queue system is implemented in two core components:
 
-Each workspace has its own queue manager with three lanes. Lanes enable different concurrency limits and prioritization for different message types.
+- **`openpaw/core/queue/lane.py`** - `LaneQueue` provides lane-based FIFO queuing with configurable concurrency
+- **`openpaw/core/queue/manager.py`** - `QueueManager` coordinates message routing, debouncing, and queue mode behavior
+
+Each workspace maintains its own isolated queue system with three lanes:
+
+- **main** - User messages from the primary communication channel
+- **subagent** - Sub-agent completion notifications and results
+- **cron** - Scheduled tasks and heartbeat events
+
+## Session Key Format
+
+Session keys uniquely identify conversation participants using the format `"channel:id"`:
+
+- Telegram user: `"telegram:123456"`
+- Telegram group: `"telegram:-987654321"`
+
+Session keys are used for:
+- Queue isolation (each session has its own queue)
+- Conversation thread tracking
+- Channel message routing
 
 ## Queue Modes
 
-The `mode` setting controls how messages are queued and processed.
+OpenPaw supports four queue modes that control how messages are batched and how the agent responds to new messages during execution.
 
-### collect (default)
+### collect (Default)
 
-Gather messages briefly before processing. Useful for handling rapid message bursts.
+**Behavior**: Messages are gathered briefly before processing. The debounce timer (`debounce_ms`) allows rapid successive messages to be batched together.
 
-**Behavior:**
-1. Messages arrive and enter the queue
-2. System waits `debounce_ms` milliseconds
-3. If more messages arrive during wait, timer resets
-4. After debounce period, all collected messages are processed together
+**Middleware**: None. Messages queue normally and are processed after the current agent run completes.
 
-**Configuration:**
+**Use Case**: Batch rapid messages from users who send thoughts in multiple quick messages. Reduces redundant agent invocations.
 
+**Configuration**:
 ```yaml
 queue:
   mode: collect
-  debounce_ms: 1000  # Wait 1 second
+  debounce_ms: 1000  # Wait 1 second for additional messages
 ```
 
-**Use cases:**
-- User sends multiple messages in quick succession
-- Copy-pasted multi-line input split into separate messages
-- Voice messages followed by text clarifications
-
-**Example:**
-
+**Example**:
 ```
 00:00.000 - User: "Here's what I need"
 00:00.200 - User: "First, update the docs"
@@ -51,60 +56,81 @@ queue:
 
 ### steer
 
-Process immediately, cancel in-flight work on new message.
+**Behavior**: When pending messages are detected DURING tool execution, remaining tools are skipped and new messages are injected as the next agent input. The agent sees `[Skipped: user sent new message — redirecting]` for skipped tools and processes the new message context.
 
-**Behavior:**
-1. Message arrives, processing starts immediately
-2. If new message arrives while agent is working, cancel current work
-3. Start processing new message
+**Middleware**: `QueueAwareToolMiddleware` checks for pending messages before each tool execution. On first detection, calls `queue_manager.consume_pending()` and stores messages for post-run injection.
 
-**Configuration:**
+**Use Case**: Responsive conversations where users frequently change direction mid-task. The agent redirects at tool boundaries rather than completing the original workflow.
 
+**Important**: This is NOT "cancel current work" — it redirects at tool boundaries. Already-executed tools complete normally. Only remaining tools are skipped.
+
+**Configuration**:
 ```yaml
 queue:
   mode: steer
-  debounce_ms: 0  # Ignored in steer mode
 ```
 
-**Use cases:**
-- User changes their mind mid-request
-- Real-time conversation where latest input matters most
-- Rapid iteration on a task
+**Runtime Command**: Users can switch modes at runtime:
+```
+/queue steer
+```
 
-**Example:**
-
+**Example**:
 ```
 00:00.000 - User: "Write a function to parse JSON"
-00:00.500 - Agent starts working...
+00:00.500 - Agent starts working, calls file tools...
 00:02.000 - User: "Actually, make it parse YAML instead"
-00:02.001 - Agent cancels JSON work, starts YAML implementation
+00:02.001 - Agent skips remaining JSON tools, processes YAML request
+```
+
+### interrupt
+
+**Behavior**: When pending messages are detected, the current tool raises `InterruptSignalError`, the agent's response is discarded, and the new message is processed immediately. More aggressive than steer — aborts mid-run rather than redirecting.
+
+**Middleware**: `QueueAwareToolMiddleware` raises `InterruptSignalError` on first pending message detection.
+
+**Use Case**: Only the latest message matters. Conversations where users rapidly iterate and previous agent work becomes obsolete.
+
+**Configuration**:
+```yaml
+queue:
+  mode: interrupt
+```
+
+**Runtime Command**:
+```
+/queue interrupt
+```
+
+**Example**:
+```
+00:00.000 - User: "Show me sales data"
+00:00.500 - Agent starts query...
+00:01.000 - User: "Wait, show revenue instead"
+00:01.500 - User: "Actually, show profit margins"
+00:01.501 - Agent aborts, processes only "profit margins"
 ```
 
 ### followup
 
-Process messages sequentially without cancellation.
+**Behavior**: Sequential processing with no middleware behavior. Reserved for followup tool chaining (when agents use `request_followup` to continue multi-step workflows).
 
-**Behavior:**
-1. Message arrives and queues
-2. Agent processes messages in order
-3. New messages wait until current work completes
-4. No cancellation
+**Middleware**: None. Messages are processed in strict order.
 
-**Configuration:**
+**Use Case**: Multi-step autonomous workflows where the agent needs predictable sequential execution.
 
+**Configuration**:
 ```yaml
 queue:
   mode: followup
-  debounce_ms: 0  # Ignored in followup mode
 ```
 
-**Use cases:**
-- Step-by-step workflows
-- Multi-stage tasks where order matters
-- Support ticket processing
+**Runtime Command**:
+```
+/queue followup
+```
 
-**Example:**
-
+**Example**:
 ```
 00:00.000 - User: "Deploy to staging"
 00:00.500 - Agent starts deployment...
@@ -112,296 +138,281 @@ queue:
 00:03.000 - Deployment completes, agent starts smoke tests
 ```
 
-### interrupt
+## Queue Mode Comparison
 
-Cancel in-flight work on new message, process latest only.
+| Mode | Debounce | Middleware Behavior | Use Case |
+|------|----------|-------------------|----------|
+| collect | Yes | None | Batch rapid messages |
+| steer | No | Redirects at tool boundary | Responsive conversations |
+| followup | No | None | Sequential workflows |
+| interrupt | No | Aborts mid-run | Only latest message matters |
 
-**Behavior:**
-1. Message arrives, processing starts immediately
-2. If new message arrives, cancel current work and clear queue
-3. Only process the most recent message
+## Queue-Aware Tool Middleware
 
-**Configuration:**
+The `QueueAwareToolMiddleware` (`openpaw/agent/middleware/queue_aware.py`) enables responsive agent behavior by checking for pending user messages during tool execution.
 
-```yaml
-queue:
-  mode: interrupt
-  debounce_ms: 0  # Ignored in interrupt mode
+### How It Works
+
+1. **Before Each Tool**: Middleware calls `queue_manager.peek_pending(session_key)` to check for new messages
+2. **Check Scope**: `peek_pending()` checks BOTH the session's pre-debounce buffer AND the lane queue (steer-mode messages bypass the session buffer)
+3. **Steer Mode**: On first detection, triggers `queue_manager.consume_pending()` and stores messages for post-run injection
+4. **Interrupt Mode**: On detection, raises `InterruptSignalError` immediately
+
+### Post-Run Detection
+
+After the agent run completes, `_process_messages()` performs a final `peek_pending()` check to catch messages that arrived after the last tool call (or during tool-free runs). This ensures steer/interrupt responsiveness even when the middleware didn't fire.
+
+### Middleware Composition
+
+The middleware composes with approval middleware in agent creation:
+
+```python
+create_agent(middleware=[queue_middleware, approval_middleware])
 ```
 
-**Use cases:**
-- User rapidly changing requests
-- Real-time commands where only latest matters
-- Emergency override scenarios
+### Integration Points
 
-**Example:**
+**WorkspaceRunner**:
+- Captures steer state before middleware reset via local variables
+- Catches `InterruptSignalError` in `_process_messages()`
+- Re-enters processing loop with pending messages as new content
 
-```
-00:00.000 - User: "Show me sales data"
-00:00.500 - Agent starts query...
-00:01.000 - User: "Wait, show revenue instead"
-00:01.500 - User: "Actually, show profit margins"
-00:01.501 - Agent cancels everything, processes only "profit margins"
-```
-
-## Lanes
-
-Lanes separate different message types and enable independent concurrency control.
-
-### Lane Types
-
-**main_lane** - User messages from channels (Telegram, etc.)
-
-```yaml
-lanes:
-  main_concurrency: 4  # Process up to 4 user messages simultaneously
-```
-
-**subagent_lane** - Delegated tasks to subagents
-
-```yaml
-lanes:
-  subagent_concurrency: 8  # Higher limit for parallel subagent work
-```
-
-**cron_lane** - Scheduled jobs
-
-```yaml
-lanes:
-  cron_concurrency: 2  # Limit concurrent cron jobs
-```
-
-### Concurrency Limits
-
-Each lane has a concurrency limit controlling how many tasks can run in parallel.
-
-**Low concurrency (1-2):**
-- Sequential processing
-- Predictable resource usage
-- Suitable for resource-intensive tasks
-
-**Medium concurrency (4-8):**
-- Balanced parallelism
-- Good for typical agent workloads
-- Default for main lane
-
-**High concurrency (10+):**
-- Maximum parallelism
-- Higher resource usage
-- Suitable for lightweight tasks or subagent coordination
-
-**Example configuration:**
-
-```yaml
-lanes:
-  main_concurrency: 4      # Moderate for user interactions
-  subagent_concurrency: 12 # High for parallel research/analysis
-  cron_concurrency: 1      # Sequential for scheduled reports
-```
-
-## Queue Capacity and Drop Policies
-
-Prevent unbounded queue growth with capacity limits and drop policies.
-
-### Configuration
-
-```yaml
-queue:
-  cap: 20                # Max messages per session
-  drop_policy: summarize # old, new, summarize
-```
-
-### Drop Policies
-
-**old** - Drop oldest messages when cap is reached
-
-```yaml
-queue:
-  cap: 20
-  drop_policy: old
-```
-
-Behavior: New messages push out old ones (FIFO).
-
-**new** - Drop newest messages when cap is reached
-
-```yaml
-queue:
-  cap: 20
-  drop_policy: new
-```
-
-Behavior: Reject new messages if queue is full.
-
-**summarize** - Compress old messages into a summary
-
-```yaml
-queue:
-  cap: 20
-  drop_policy: summarize
-```
-
-Behavior: When cap is reached, compress oldest messages into a single summary message. Preserves context without unbounded growth.
+**AgentRunner**:
+- Propagates `ApprovalRequiredError` and `InterruptSignalError` without catching
+- Middleware has access to full agent execution context
 
 ## Per-Session Queuing
 
-Each conversation session has its own queue. Sessions are identified by:
+Each conversation session maintains its own isolated queue. This ensures:
 
-**Telegram:**
-- Direct messages: `telegram_{user_id}`
-- Group messages: `telegram_group_{group_id}`
+- Messages from different users don't interfere with each other
+- Each user experiences consistent queue mode behavior
+- Debouncing is per-session (one user's rapid messages don't delay another's)
 
-**Multiple users:**
+**Example**:
 ```
-User A (session: telegram_123456)  → Queue A → Agent
-User B (session: telegram_789012)  → Queue B → Agent
+User A (session: telegram:123456)  → Queue A → Agent
+User B (session: telegram:789012)  → Queue B → Agent
 ```
 
 Both users can interact with the same workspace simultaneously, each with their own queue and conversation context.
 
-## Queue Configuration Examples
+## Lane Concurrency
 
-### Responsive Support Bot
+Each lane has configurable concurrency limits:
 
 ```yaml
 queue:
-  mode: steer           # Cancel old work for new requests
-  debounce_ms: 0
-  cap: 10
-  drop_policy: old
+  lanes:
+    main:
+      concurrency: 1      # Process one user message at a time
+    subagent:
+      concurrency: 8      # Allow 8 concurrent sub-agent workers
+    cron:
+      concurrency: 3      # Allow 3 concurrent scheduled tasks
+```
 
-lanes:
-  main_concurrency: 8   # Handle many users simultaneously
+**Default Behavior**: Main lane uses strict serialization (concurrency: 1) to ensure conversation coherence. Sub-agent and cron lanes allow higher concurrency for parallel background work.
+
+## Changing Queue Mode at Runtime
+
+Users can change queue mode without restarting the workspace using the `/queue` command:
+
+```
+/queue collect
+/queue steer
+/queue interrupt
+/queue followup
+```
+
+The change takes effect immediately for the next message. Current agent runs continue with their original mode.
+
+## Configuration Examples
+
+### Basic Configuration (Global)
+
+```yaml
+queue:
+  mode: collect
+  debounce_ms: 1000
+  lanes:
+    main:
+      concurrency: 1
+    subagent:
+      concurrency: 8
+    cron:
+      concurrency: 3
+```
+
+### Workspace Override
+
+```yaml
+# agent_workspaces/assistant/agent.yaml
+name: Assistant
+description: Helpful assistant
+
+queue:
+  mode: steer  # Override to steer mode for this workspace
+```
+
+### Responsive Customer Service Agent
+
+```yaml
+# High responsiveness for customer service
+queue:
+  mode: steer
+  debounce_ms: 0  # No debounce in steer mode
+```
+
+### Research Agent
+
+```yaml
+# Deep work mode, less interruption
+queue:
+  mode: collect
+  debounce_ms: 3000  # Allow longer batching for multi-message research requests
 ```
 
 ### Sequential Task Processor
 
 ```yaml
 queue:
-  mode: followup        # Process in order
-  debounce_ms: 0
-  cap: 50
-  drop_policy: summarize
-
-lanes:
-  main_concurrency: 1   # One task at a time
+  mode: followup  # Process in order
+  lanes:
+    main:
+      concurrency: 1  # One task at a time
 ```
-
-### Conversational Assistant
-
-```yaml
-queue:
-  mode: collect         # Batch rapid messages
-  debounce_ms: 1500     # Wait 1.5s for user to finish
-  cap: 20
-  drop_policy: summarize
-
-lanes:
-  main_concurrency: 4   # Handle multiple conversations
-```
-
-### High-Throughput Analyzer
-
-```yaml
-queue:
-  mode: followup
-  debounce_ms: 0
-  cap: 100
-  drop_policy: old
-
-lanes:
-  main_concurrency: 2
-  subagent_concurrency: 20  # Lots of parallel analysis
-```
-
-## Queue Behavior per Mode
-
-| Mode      | Debounce | Cancellation | Queue Clearing | Use Case                    |
-|-----------|----------|--------------|----------------|-----------------------------|
-| collect   | Yes      | No           | No             | Batch rapid messages        |
-| steer     | No       | Yes          | No             | Responsive, cancellable     |
-| followup  | No       | No           | No             | Sequential, ordered         |
-| interrupt | No       | Yes          | Yes            | Only latest message matters |
-
-## Monitoring Queue Activity
-
-Enable verbose logging to monitor queue behavior:
-
-```bash
-poetry run openpaw -c config.yaml -w my-agent -v
-```
-
-Log output includes:
-- Messages entering queue
-- Debounce timer activity
-- Lane concurrency status
-- Message processing start/completion
-- Queue overflow and drop policy actions
-
-## Advanced: Per-Workspace Queue Configuration
-
-Override global queue settings per workspace:
-
-```yaml
-# workspace1/agent.yaml
-queue:
-  mode: steer           # Fast, responsive
-  cap: 10
-
-# workspace2/agent.yaml
-queue:
-  mode: followup        # Sequential processing
-  cap: 50
-```
-
-Each workspace can have different queue behavior based on its purpose.
 
 ## Best Practices
 
-1. **Match mode to use case:**
-   - `collect` for conversational agents
-   - `steer` for responsive, interactive tasks
-   - `followup` for ordered workflows
-   - `interrupt` for real-time commands
+### Choose the Right Mode
 
-2. **Set appropriate concurrency:**
-   - Lower for resource-intensive tasks
-   - Higher for lightweight operations
-   - Consider available system resources
+- **collect**: Default for most agents. Good balance of responsiveness and batching.
+- **steer**: Use for conversational agents where users frequently change topics.
+- **interrupt**: Use sparingly. Only for scenarios where agent work becomes immediately obsolete.
+- **followup**: Framework-managed. Don't set manually unless you understand the implications.
 
-3. **Configure reasonable caps:**
-   - Prevent memory issues from unbounded queues
-   - Use `summarize` to preserve context
-   - Monitor queue overflow in logs
+### Debounce Timing
 
-4. **Test with realistic load:**
-   - Send rapid messages to verify debounce behavior
-   - Test cancellation with mode `steer` or `interrupt`
-   - Verify concurrent session handling
+- **Short (500-1000ms)**: Responsive customer service, real-time assistance
+- **Medium (1000-2000ms)**: General-purpose agents, balanced batching
+- **Long (3000-5000ms)**: Research agents, long-form content, users who send many quick messages
 
-5. **Tune debounce timing:**
-   - Too short: Messages processed separately
-   - Too long: Perceived lag for users
-   - Sweet spot: 500-1500ms for most use cases
+### Lane Concurrency
+
+- **Main lane**: Almost always keep at 1 for conversation coherence
+- **Subagent lane**: Match your `builtins.spawn.config.max_concurrent` setting
+- **Cron lane**: Based on number of scheduled tasks and desired parallelism
+
+### Mode Switching
+
+Users can experiment with modes using `/queue <mode>`. Monitor token usage (via `/status`) to see if batching is reducing redundant invocations.
+
+## Integration with Other Systems
+
+### Approval Gates
+
+Approval gates work across all queue modes. When waiting for user approval:
+- New messages queue normally
+- On approval, agent resumes with original message
+- On denial, agent receives system notification and can process queued messages
+
+### Sub-Agent Notifications
+
+Sub-agent completion notifications are injected using `QueueMode.COLLECT`:
+- Notifications bypass the session pre-debounce buffer
+- Always trigger a new agent turn
+- Work consistently across all user-facing queue modes
+
+### Conversation Resets
+
+Commands like `/new` and `/compact` bypass the queue entirely to ensure immediate execution.
 
 ## Troubleshooting
 
-**Messages not processing:**
-- Check lane concurrency limits
-- Verify queue mode is appropriate
-- Enable verbose logging to inspect queue state
+### Agent Not Responding to New Messages
 
-**Agent ignoring new messages:**
-- May be at lane concurrency limit
-- Check if `followup` mode is backing up
-- Consider increasing concurrency or switching to `steer`
+**Symptom**: User sends new message while agent is working, but agent ignores it.
 
-**Responses feel sluggish:**
-- Reduce `debounce_ms` in `collect` mode
-- Switch to `steer` mode for immediate processing
-- Increase lane concurrency
+**Check**:
+1. Queue mode is set to `steer` or `interrupt` (not `collect`)
+2. Middleware is properly initialized in agent factory
+3. Post-run detection is active in message processor
 
-**Queue overflow errors:**
-- Increase `cap` limit
-- Switch to `summarize` drop policy
-- Optimize agent response time
+### Messages Processing Out of Order
+
+**Symptom**: Messages arrive in wrong order or get skipped.
+
+**Check**:
+1. Lane concurrency for main lane should be 1
+2. Session keys are consistent (not changing mid-conversation)
+3. Debounce timing is appropriate for use case
+
+### Too Many Agent Invocations
+
+**Symptom**: Agent triggers for every message in rapid succession.
+
+**Check**:
+1. Queue mode is `collect` (not `interrupt`)
+2. `debounce_ms` is set appropriately (1000-3000ms)
+3. Users understand batching behavior
+
+## Technical Details
+
+### Message Flow
+
+```
+Channel Message Arrival
+    ↓
+QueueManager.submit()
+    ↓
+Session Pre-Debounce Buffer (collect mode only)
+    ↓
+Debounce Timer Expires
+    ↓
+LaneQueue (main/subagent/cron)
+    ↓
+Lane Concurrency Semaphore
+    ↓
+WorkspaceRunner._process_messages()
+    ↓
+QueueAwareToolMiddleware (during agent run)
+    ↓
+peek_pending() → consume_pending() (steer mode)
+    ↓
+Post-Run Detection
+    ↓
+Message Processing Complete
+```
+
+### State Management
+
+**Steer State Capture**: `WorkspaceRunner` uses local variables to capture steer state before middleware reset:
+
+```python
+# Before middleware reset (in finally block)
+has_steered = self.queue_middleware.has_steered()
+pending = self.queue_middleware.get_pending_messages()
+
+# After middleware reset, state is restored from local vars
+```
+
+This ensures steer state survives the middleware cleanup that happens in the `finally` block.
+
+### peek_pending() Behavior
+
+`peek_pending()` checks two locations for pending messages:
+
+1. **Session pre-debounce buffer**: Messages waiting for debounce timer (collect mode)
+2. **Lane queue**: Messages already in the lane queue (steer messages bypass buffer)
+
+This dual-check ensures responsiveness across all queue modes and timing scenarios.
+
+## Future Enhancements
+
+Potential improvements under consideration:
+
+- **Priority lanes**: High-priority messages jump the queue
+- **Context-aware mode switching**: Agent automatically adjusts mode based on task
+- **Queue depth metrics**: Expose queue length and processing latency via `/status`
+- **Backpressure handling**: Graceful degradation under high message volume
