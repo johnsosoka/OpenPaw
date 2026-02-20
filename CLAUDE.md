@@ -672,6 +672,7 @@ OpenPaw provides optional built-in capabilities that are conditionally available
 - `task_tracker` - Task management via TASKS.yaml for persistent cross-session work tracking (no API key required)
 - `send_file` - Send workspace files to users (no API key required)
 - `spawn` - Sub-agent spawning for background tasks (no API key required, see "Sub-Agent Spawning" section)
+- `plan` - Session-scoped planning tool for multi-step work externalization (no API key required)
 - `browser` - Web automation via Playwright with accessibility tree navigation (requires `playwright` package, see "Web Browsing" section)
 
 **Processors** - Channel-layer message transformers:
@@ -695,7 +696,8 @@ builtins/
 │   ├── send_message.py  # Mid-execution messaging
 │   ├── send_file.py     # Send workspace files to users
 │   ├── followup.py      # Self-continuation with depth limiting
-│   └── task.py          # TASKS.yaml CRUD operations
+│   ├── task.py          # TASKS.yaml CRUD operations
+│   └── plan.py          # Session-scoped planning (write_plan, read_plan)
 └── processors/       # Message preprocessors
     ├── whisper.py     # Audio transcription
     └── docling.py     # Document → markdown conversion
@@ -774,10 +776,13 @@ Agents automatically receive a dynamic system prompt section (`<framework>`) exp
 - **Always**: Workspace persistence, self-organization encouragement, conversation memory
 - **Heartbeat System**: If HEARTBEAT.md has content — heartbeat protocol, HEARTBEAT_OK convention
 - **Task Management**: If `task_tracker` enabled — TASKS.yaml usage, cross-session continuity
-- **Self-Continuation**: If `followup` enabled — multi-step workflow chaining
-- **Progress Updates**: If `send_message` enabled — mid-execution user communication
+- **Self-Continuation**: If `followup` enabled — completion rule self-check, multi-step workflow chaining
+- **Progress Updates**: If `send_message` enabled — mid-execution user communication (not final answer)
 - **File Sharing**: If `send_file` enabled — sending workspace files to users
 - **Self-Scheduling**: If `cron` enabled — future action scheduling
+- **Operational Work Ethic**: If `shell` enabled — 5-step ops cycle (diagnose, plan, execute, verify, report)
+- **Planning**: If `plan` enabled — session-scoped task planning for multi-step work
+- **Autonomous Planning**: If 2+ key capabilities enabled — full task lifecycle, "do not stop after diagnosis"
 
 This explains HOW the agent exists in the framework (philosophy), not WHAT tools are available (LangChain handles that).
 

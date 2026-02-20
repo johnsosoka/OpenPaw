@@ -119,6 +119,13 @@ class BuiltinRegistry:
             logger.debug(f"Spawn tool not available: {e}")
 
         try:
+            from openpaw.builtins.tools.plan import PlanToolBuiltin
+
+            self.register_tool(PlanToolBuiltin)
+        except ImportError as e:
+            logger.debug(f"Plan tool not available: {e}")
+
+        try:
             from openpaw.builtins.tools.browser import BrowserToolBuiltin
 
             self.register_tool(BrowserToolBuiltin)

@@ -69,9 +69,9 @@ class TestFollowupProactiveGuidance:
         prompt = mock_workspace.build_system_prompt(enabled_builtins=["followup"])
 
         assert "## Self-Continuation" in prompt
-        assert "proactively use self-continuation" in prompt
-        assert "multiple sequential steps" in prompt
-        assert "rather than asking the user to prompt you again" in prompt
+        assert "Completion rule" in prompt
+        assert "diagnosed a problem but not yet applied the fix" in prompt
+        assert "Is the user's request fully addressed?" in prompt
 
     def test_followup_section_preserves_original_content(
         self, mock_workspace: AgentWorkspace
@@ -80,7 +80,7 @@ class TestFollowupProactiveGuidance:
         prompt = mock_workspace.build_system_prompt(enabled_builtins=["followup"])
 
         # Original content should still be present
-        assert "multi-step workflows" in prompt
+        assert "multi-step workflow" in prompt
         assert "delayed followups" in prompt
 
 
@@ -122,13 +122,19 @@ class TestAutonomousPlanningSection:
         )
 
         assert "## Autonomous Planning" in prompt
-        assert "take a moment to plan your approach" in prompt
+        assert "plan the FULL scope" in prompt
 
-        # Verify all decision criteria questions
+        # Verify lifecycle steps
+        assert "Diagnose" in prompt
+        assert "Execute" in prompt
+        assert "Verify" in prompt
+        assert "Report" in prompt
+        assert "Do not stop after diagnosis" in prompt
+
+        # Verify decision criteria questions
         assert "Can parts of this work happen in parallel?" in prompt
         assert "Will this span multiple turns?" in prompt
         assert "Should the user know what is happening?" in prompt
-        assert "Will I need to follow up on results?" in prompt
 
         # Verify proactive action guidance
         assert "Prefer proactive action over asking the user for permission" in prompt
@@ -231,10 +237,10 @@ class TestPromptTone:
         # Check for proactive language patterns
         proactive_keywords = [
             "should consider",
-            "proactively",
             "Prefer proactive action",
             "When starting work",
-            "When you realize",
+            "Do not stop after diagnosis",
+            "Completion rule",
         ]
 
         for keyword in proactive_keywords:
@@ -392,3 +398,86 @@ class TestShellHygieneSection:
         assert "Break complex operations into small, sequential commands" in prompt
         # Check for guidance on avoiding chained operations
         assert "rather than chaining" in prompt.lower() or "chaining" in prompt.lower()
+
+
+class TestCompletionRule:
+    """Test completion rule presence in self-continuation section."""
+
+    def test_completion_rule_present(self, mock_workspace: AgentWorkspace) -> None:
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=["followup"])
+        assert "Completion rule" in prompt
+        assert "Is the user's request fully addressed?" in prompt
+
+    def test_completion_rule_includes_triggers(self, mock_workspace: AgentWorkspace) -> None:
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=["followup"])
+        assert "diagnosed a problem but not yet applied the fix" in prompt
+        assert "partway through a multi-step workflow" in prompt
+        assert "verify that your changes worked" in prompt
+
+
+class TestDiagnoseFixVerifyCycle:
+    """Test diagnose-fix-verify-report cycle in autonomous planning."""
+
+    def test_lifecycle_steps_present(self, mock_workspace: AgentWorkspace) -> None:
+        prompt = mock_workspace.build_system_prompt(
+            enabled_builtins=["spawn", "followup", "task_tracker", "send_message"]
+        )
+        assert "Diagnose" in prompt
+        assert "Execute" in prompt
+        assert "Verify" in prompt
+        assert "Report" in prompt
+        assert "Do not stop after diagnosis" in prompt
+
+
+class TestShellDiagnosticFollowThrough:
+    """Test shell hygiene includes diagnostic follow-through."""
+
+    def test_diagnostic_follow_through_present(self, mock_workspace: AgentWorkspace) -> None:
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=["shell"])
+        assert "Diagnosing a problem is not the same as fixing it" in prompt
+
+
+class TestProgressUpdatesNotFinal:
+    """Test progress updates section clarifies updates are mid-task."""
+
+    def test_not_final_answer_present(self, mock_workspace: AgentWorkspace) -> None:
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=["send_message"])
+        assert "not your final answer" in prompt
+        assert "continue working" in prompt
+
+
+class TestWorkEthicSection:
+    """Test operational work ethic section."""
+
+    def test_work_ethic_present_when_shell_enabled(self, mock_workspace: AgentWorkspace) -> None:
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=["shell"])
+        assert "## Operational Work Ethic" in prompt
+        assert "Diagnose" in prompt
+        assert "Verify" in prompt
+        assert "Do not end your turn between steps 1 and 5" in prompt
+
+    def test_work_ethic_absent_when_shell_not_enabled(self, mock_workspace: AgentWorkspace) -> None:
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=["brave_search"])
+        assert "## Operational Work Ethic" not in prompt
+
+    def test_work_ethic_present_when_all_builtins(self, mock_workspace: AgentWorkspace) -> None:
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=None)
+        assert "## Operational Work Ethic" in prompt
+
+
+class TestPlanningSection:
+    """Test planning tool guidance section."""
+
+    def test_planning_section_present_when_plan_enabled(self, mock_workspace: AgentWorkspace) -> None:
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=["plan"])
+        assert "## Planning" in prompt
+        assert "write_plan" in prompt
+        assert "session-scoped" in prompt.lower() or "session" in prompt.lower()
+
+    def test_planning_section_absent_when_plan_not_enabled(self, mock_workspace: AgentWorkspace) -> None:
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=["brave_search"])
+        assert "## Planning" not in prompt
+
+    def test_planning_section_present_when_all_builtins(self, mock_workspace: AgentWorkspace) -> None:
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=None)
+        assert "## Planning" in prompt

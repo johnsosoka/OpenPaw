@@ -15,6 +15,7 @@ from openpaw.prompts.framework import (
     SECTION_FILE_UPLOADS,
     SECTION_HEARTBEAT,
     SECTION_MEMORY_SEARCH,
+    SECTION_PLANNING,
     SECTION_PROGRESS_UPDATES,
     SECTION_SELF_CONTINUATION,
     SECTION_SELF_SCHEDULING,
@@ -22,6 +23,7 @@ from openpaw.prompts.framework import (
     SECTION_SUB_AGENT_SPAWNING,
     SECTION_TASK_MANAGEMENT,
     SECTION_WEB_BROWSING,
+    SECTION_WORK_ETHIC,
     build_capability_summary,
 )
 
@@ -175,6 +177,14 @@ class AgentWorkspace:
         # Shell hygiene - include if shell tool is enabled
         if enabled_builtins is None or "shell" in enabled_builtins:
             sections.append(SECTION_SHELL_HYGIENE)
+
+        # Operational work ethic - include for shell-enabled agents
+        if enabled_builtins is None or "shell" in enabled_builtins:
+            sections.append(SECTION_WORK_ETHIC)
+
+        # Planning guidance - include when plan tool is enabled
+        if enabled_builtins is None or "plan" in enabled_builtins:
+            sections.append(SECTION_PLANNING)
 
         # Autonomous Planning - include when multiple capabilities are available
         # This teaches capability composition for complex requests
