@@ -12,6 +12,12 @@ from openpaw.agent.metrics import TokenUsageLogger
 from openpaw.builtins.registry import BuiltinRegistry
 from openpaw.channels.base import ChannelAdapter
 from openpaw.domain.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
+from openpaw.prompts.system_events import (
+    SUBAGENT_COMPLETED_SHORT_TEMPLATE,
+    SUBAGENT_COMPLETED_TEMPLATE,
+    SUBAGENT_FAILED_TEMPLATE,
+    SUBAGENT_TIMED_OUT_TEMPLATE,
+)
 from openpaw.stores.subagent import SubAgentStore
 
 logger = logging.getLogger(__name__)
@@ -484,24 +490,30 @@ class SubAgentRunner:
         if result.error:
             # Check if it's a timeout error
             if "timed out" in result.error.lower():
-                return (
-                    f"[SYSTEM] Sub-agent '{request.label}' timed out "
-                    f"after {request.timeout_minutes} minutes."
+                return SUBAGENT_TIMED_OUT_TEMPLATE.format(
+                    label=request.label,
+                    timeout_minutes=request.timeout_minutes,
                 )
             else:
-                return f"[SYSTEM] Sub-agent '{request.label}' failed.\nError: {result.error}"
+                return SUBAGENT_FAILED_TEMPLATE.format(
+                    label=request.label,
+                    error=result.error,
+                )
         else:
             # Success case - truncate output if too long
             output = result.output
             if len(output) > 500:
                 output = output[:500]
-                return (
-                    f"[SYSTEM] Sub-agent '{request.label}' completed.\n\n"
-                    f"{output}\n\n"
-                    f"Use get_subagent_result(id=\"{request.id}\") to read the full output."
+                return SUBAGENT_COMPLETED_TEMPLATE.format(
+                    label=request.label,
+                    output=output,
+                    request_id=request.id,
                 )
             else:
-                return f"[SYSTEM] Sub-agent '{request.label}' completed.\n\n{output}"
+                return SUBAGENT_COMPLETED_SHORT_TEMPLATE.format(
+                    label=request.label,
+                    output=output,
+                )
 
     async def _send_notification(self, request: SubAgentRequest, result: SubAgentResult) -> None:
         """Send completion notification to the requesting session.

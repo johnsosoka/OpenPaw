@@ -14,6 +14,7 @@ from openpaw.agent.metrics import TokenUsageLogger
 from openpaw.agent.middleware import (
     ApprovalToolMiddleware,
     QueueAwareToolMiddleware,
+    ToolTimeoutMiddleware,
 )
 from openpaw.builtins.base import BaseBuiltinProcessor
 from openpaw.builtins.loader import BuiltinLoader
@@ -23,6 +24,7 @@ from openpaw.channels.commands.handlers import get_framework_commands
 from openpaw.channels.commands.router import CommandRouter
 from openpaw.core.config import Config, merge_configs
 from openpaw.core.config.approval import ApprovalGatesConfig
+from openpaw.core.config.models import ToolTimeoutsConfig
 from openpaw.core.logging import setup_workspace_logger
 from openpaw.core.queue.lane import LaneQueue, QueueItem, QueueMode
 from openpaw.core.queue.manager import QueueManager
@@ -231,8 +233,15 @@ class WorkspaceRunner:
         if extra_model_kwargs:
             self.logger.info(f"Passing extra model kwargs: {list(extra_model_kwargs.keys())}")
 
-        # Build middleware list
-        middlewares = [self._queue_middleware.get_middleware()]
+        # Create tool timeout middleware
+        tool_timeouts_config = self._get_tool_timeouts_config()
+        self._tool_timeout_middleware = ToolTimeoutMiddleware(tool_timeouts_config)
+
+        # Build middleware list (order matters: timeout → queue → approval)
+        middlewares = [
+            self._tool_timeout_middleware.get_middleware(),
+            self._queue_middleware.get_middleware(),
+        ]
         if self._approval_manager:
             middlewares.append(self._approval_middleware.get_middleware())
 
@@ -353,6 +362,16 @@ class WorkspaceRunner:
             if self.config.approval_gates.enabled:
                 return self.config.approval_gates
         return None
+
+    def _get_tool_timeouts_config(self) -> ToolTimeoutsConfig:
+        """Get tool timeouts config from workspace or global.
+
+        Returns:
+            ToolTimeoutsConfig (always returns a valid config, uses defaults if not configured).
+        """
+        if self._workspace.config:
+            return self._workspace.config.tool_timeouts
+        return self.config.tool_timeouts
 
     async def _handle_approval_resolution(
         self, approval_id: str, approved: bool

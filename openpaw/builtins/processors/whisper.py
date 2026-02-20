@@ -15,6 +15,10 @@ from openpaw.builtins.base import (
     ProcessorResult,
 )
 from openpaw.channels.base import Attachment, Message
+from openpaw.prompts.processors import (
+    VOICE_MESSAGE_ERROR_TEMPLATE,
+    VOICE_MESSAGE_TEMPLATE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +126,7 @@ class WhisperProcessor(BaseBuiltinProcessor):
         if not transcriptions:
             # All transcriptions failed - pass error to agent for troubleshooting
             error_detail = "; ".join(errors) if errors else "Unknown error"
-            new_content = f"[Voice message: Unable to transcribe audio - {error_detail}]"
+            new_content = VOICE_MESSAGE_ERROR_TEMPLATE.format(error=error_detail)
             if message.content:
                 new_content = f"{message.content}\n\n{new_content}"
         else:
@@ -130,9 +134,9 @@ class WhisperProcessor(BaseBuiltinProcessor):
             transcribed_text = "\n".join(transcriptions)
 
             if message.content:
-                new_content = f"{message.content}\n\n[Voice message]: {transcribed_text}"
+                new_content = f"{message.content}\n\n{VOICE_MESSAGE_TEMPLATE.format(text=transcribed_text)}"
             else:
-                new_content = f"[Voice message]: {transcribed_text}"
+                new_content = VOICE_MESSAGE_TEMPLATE.format(text=transcribed_text)
 
             # Add note about partial failures
             if errors:

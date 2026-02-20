@@ -15,12 +15,22 @@ from openpaw.agent.middleware.llm_hooks import THINKING_TAG_PATTERN, ThinkingTok
 from openpaw.agent.middleware.queue_aware import InterruptSignalError
 from openpaw.agent.tools.filesystem import FilesystemTools
 from openpaw.core.timezone import workspace_now
+from openpaw.prompts.system_events import (
+    TIMEOUT_NOTIFICATION_GENERIC,
+    TIMEOUT_NOTIFICATION_TEMPLATE,
+)
 from openpaw.workspace.loader import AgentWorkspace
 
 logger = logging.getLogger(__name__)
 
 # Models known to produce thinking tokens
-THINKING_MODELS = ["moonshot.kimi-k2-thinking", "moonshotai.kimi-k2.5", "kimi-k2-thinking", "kimi-thinking", "kimi-k2.5"]
+THINKING_MODELS = [
+    "moonshot.kimi-k2-thinking",
+    "moonshotai.kimi-k2.5",
+    "kimi-k2-thinking",
+    "kimi-thinking",
+    "kimi-k2.5",
+]
 
 # Bedrock tool name validation pattern (AWS requirement)
 BEDROCK_TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -127,6 +137,7 @@ class AgentRunner:
         # Per-invocation tracking (populated after each run)
         self._last_metrics: InvocationMetrics | None = None
         self._last_tools_used: list[str] = []
+        self._current_tool_name: str | None = None
 
         # Auto-enable thinking stripping for known thinking models
         if not self.strip_thinking and any(
@@ -377,6 +388,7 @@ class AgentRunner:
         # Reset per-invocation tracking
         self._last_metrics = None
         self._last_tools_used = []
+        self._current_tool_name = None
 
         # Set recursion_limit for multi-turn execution (2 supersteps per turn)
         config: dict[str, Any] = {"recursion_limit": self.max_turns * 2}
@@ -415,9 +427,14 @@ class AgentRunner:
                             if tool_calls:
                                 tool_names = [tc.get("name", "?") for tc in tool_calls]
                                 logger.debug(f"Model called tools: {tool_names}")
+                                # Track last tool called for timeout reporting
+                                self._current_tool_name = tool_calls[-1].get("name")
                             for tc in tool_calls:
                                 if name := tc.get("name"):
                                     self._last_tools_used.append(name)
+                    # Clear current tool tracking when we see tool results
+                    if "tools" in update:
+                        self._current_tool_name = None
         except InterruptSignalError:
             # Re-raise for WorkspaceRunner to handle
             raise
@@ -433,11 +450,17 @@ class AgentRunner:
                 f"Agent timed out after {self.timeout_seconds}s "
                 f"(workspace: {self.workspace.name})"
             )
-            return (
-                f"I ran out of time processing your request "
-                f"(timeout: {int(self.timeout_seconds)}s). "
-                f"Please try again with a simpler request."
-            )
+
+            # Use rich notification if we know what tool was executing
+            if self._current_tool_name:
+                return TIMEOUT_NOTIFICATION_TEMPLATE.format(
+                    timeout=int(self.timeout_seconds),
+                    tool_name=self._current_tool_name,
+                )
+            else:
+                return TIMEOUT_NOTIFICATION_GENERIC.format(
+                    timeout=int(self.timeout_seconds),
+                )
         except Exception as e:
             # Re-raise ApprovalRequiredError for WorkspaceRunner to handle
             if type(e).__name__ == "ApprovalRequiredError":

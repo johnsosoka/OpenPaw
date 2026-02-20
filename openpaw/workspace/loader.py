@@ -7,6 +7,24 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from openpaw.prompts.framework import (
+    FRAMEWORK_ORIENTATION,
+    SECTION_AUTONOMOUS_PLANNING,
+    SECTION_CONVERSATION_MEMORY,
+    SECTION_FILE_SHARING,
+    SECTION_FILE_UPLOADS,
+    SECTION_HEARTBEAT,
+    SECTION_MEMORY_SEARCH,
+    SECTION_PROGRESS_UPDATES,
+    SECTION_SELF_CONTINUATION,
+    SECTION_SELF_SCHEDULING,
+    SECTION_SHELL_HYGIENE,
+    SECTION_SUB_AGENT_SPAWNING,
+    SECTION_TASK_MANAGEMENT,
+    SECTION_WEB_BROWSING,
+    build_capability_summary,
+)
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -111,140 +129,52 @@ class AgentWorkspace:
         sections = []
 
         # ALWAYS include framework orientation
-        sections.append(
-            "You are a persistent autonomous agent running in the OpenPaw framework. "
-            "Your workspace directory is your long-term memory—files you write today will "
-            "be there tomorrow. You are encouraged to organize your workspace: create "
-            "subdirectories, maintain notes, keep state files. You can freely read, write, "
-            "and edit files in your workspace. This is YOUR space—use it to stay organized "
-            "and maintain continuity across conversations."
-        )
+        sections.append(FRAMEWORK_ORIENTATION)
 
         # Framework Capabilities summary - always included, lists available infrastructure
-        capabilities = self._build_capability_summary(enabled_builtins)
+        capabilities = build_capability_summary(enabled_builtins)
         if capabilities:
             sections.append(capabilities)
 
         # Heartbeat system - include if heartbeat content exists (non-empty, non-trivial)
         has_heartbeat = bool(self.heartbeat_md and len(self.heartbeat_md.strip()) > 20)
         if has_heartbeat:
-            sections.append(
-                "\n\n## Heartbeat System\n\n"
-                "You receive periodic wake-up calls to check on ongoing work. Use these "
-                "heartbeats to review tasks, monitor long-running operations, and send "
-                "proactive updates. HEARTBEAT.md is your scratchpad for things to check "
-                "on next time you wake up. If there's nothing requiring attention, respond "
-                "with exactly 'HEARTBEAT_OK' to avoid sending unnecessary messages."
-            )
+            sections.append(SECTION_HEARTBEAT)
 
         # Task management - include if task_tracker is enabled
         if enabled_builtins is None or "task_tracker" in enabled_builtins:
-            sections.append(
-                "\n\n## Task Management\n\n"
-                "You have a task tracking system (TASKS.yaml) for managing work across "
-                "sessions. Tasks persist—use them to remember what you're working on. "
-                "Future heartbeats will see your tasks and can continue where you left off.\n\n"
-                "When starting work that may not complete in a single conversation turn, "
-                "create a task to maintain continuity across heartbeats and conversations. "
-                "Update tasks as you progress, and clean up when complete."
-            )
+            sections.append(SECTION_TASK_MANAGEMENT)
 
         # Self-continuation - include if followup is enabled
         if enabled_builtins is None or "followup" in enabled_builtins:
-            sections.append(
-                "\n\n## Self-Continuation\n\n"
-                "You can request to be re-invoked after your current response completes. "
-                "Use this for multi-step workflows that don't need user input between steps. "
-                "You can also schedule delayed followups for time-dependent checks (e.g., "
-                "'check this again in 5 minutes').\n\n"
-                "When you realize a task requires multiple sequential steps (file analysis "
-                "followed by synthesis, or iterative refinement), proactively use "
-                "self-continuation rather than asking the user to prompt you again."
-            )
+            sections.append(SECTION_SELF_CONTINUATION)
 
         # Sub-agent spawning - include if spawn is enabled
         if enabled_builtins is None or "spawn" in enabled_builtins:
-            sections.append(
-                "\n\n## Sub-Agent Spawning\n\n"
-                "You can spawn background sub-agents to work on tasks concurrently while "
-                "you continue interacting with the user. Sub-agents are independent workers "
-                "that share your workspace filesystem but run in isolated contexts.\n\n"
-                "**Proactive delegation:** You should consider spawning sub-agents on your own "
-                "initiative when you recognize any of these patterns:\n\n"
-                "- The user's request has multiple independent components that can be "
-                "researched or processed in parallel (e.g., \"compare X and Y\" or "
-                "\"analyze these three datasets\")\n"
-                "- A task would take significant time and you can work on something "
-                "else concurrently\n"
-                "- You need to gather information from multiple sources before synthesizing "
-                "a response\n\n"
-                "When you spawn sub-agents proactively, always tell the user what you are "
-                "delegating and why. Do not silently spawn background work.\n\n"
-                "Sub-agents will notify you when they complete. Use list_subagents to check "
-                "status and get_subagent_result to retrieve their output."
-            )
+            sections.append(SECTION_SUB_AGENT_SPAWNING)
 
         # Web browsing - include if browser is enabled
         if enabled_builtins is None or "browser" in enabled_builtins:
-            sections.append(
-                "\n\n## Web Browsing\n\n"
-                "You have browser automation tools for web interaction. The primary workflow is: "
-                "navigate → snapshot → interact → re-snapshot.\n\n"
-                "**browser_snapshot is your primary page understanding tool.** It returns the page "
-                "content as a structured accessibility tree with text, headings, links, and "
-                "interactive elements — each tagged with numbered refs for interaction. This is "
-                "how you READ and UNDERSTAND web pages. Describe what you find in the snapshot "
-                "to the user.\n\n"
-                "**Do NOT send screenshots to users unless they specifically ask for a visual.** "
-                "Screenshots are expensive and don't help you navigate. Use browser_snapshot to "
-                "extract semantic content, then summarize it in text.\n\n"
-                "**Workflow:**\n"
-                "1. Navigate to a URL with browser_navigate\n"
-                "2. Read the page content with browser_snapshot (accessibility tree with refs)\n"
-                "3. Interact with elements using their ref numbers (browser_click, browser_type)\n"
-                "4. Re-snapshot after actions that change the page (refs are ephemeral)\n"
-                "5. Close the browser with browser_close when finished to free resources\n\n"
-                "Domain restrictions may apply based on workspace configuration. The browser "
-                "persists across tool calls until explicitly closed or conversation rotation."
-            )
+            sections.append(SECTION_WEB_BROWSING)
 
         # Progress updates - include if send_message is enabled
         if enabled_builtins is None or "send_message" in enabled_builtins:
-            sections.append(
-                "\n\n## Progress Updates\n\n"
-                "You can send messages to the user while you continue working. Don't make "
-                "the user wait in silence during long operations—send progress updates to "
-                "keep them informed about what you're doing."
-            )
+            sections.append(SECTION_PROGRESS_UPDATES)
 
         # File sharing - include if send_file is enabled
         if enabled_builtins is None or "send_file" in enabled_builtins:
-            sections.append(
-                "\n\n## File Sharing\n\n"
-                "You can send files from your workspace to the user using the send_file tool. "
-                "Write or generate files in your workspace, then use send_file to deliver them. "
-                "Supported: PDFs, images, documents, text files, and more."
-            )
+            sections.append(SECTION_FILE_SHARING)
 
         # File uploads - always available (processor-based, no prerequisites)
-        sections.append(
-            "\n\n## File Uploads\n\n"
-            "When users send you files (documents, images, audio, etc.), they are "
-            "automatically saved to your uploads/ directory, organized by date. "
-            "You'll see a notification in the message like [Saved to: uploads/...]. "
-            "You can read, reference, and process these files using your filesystem tools. "
-            "Supported document types (PDF, DOCX, etc.) are also automatically converted "
-            "to markdown for easier reading."
-        )
+        sections.append(SECTION_FILE_UPLOADS)
 
         # Self-scheduling - include if cron tools are enabled
         if enabled_builtins is None or "cron" in enabled_builtins:
-            sections.append(
-                "\n\n## Self-Scheduling\n\n"
-                "You can schedule future actions—one-time or recurring. Use this for "
-                "reminders, periodic checks, or deferred work. Schedule tasks that should "
-                "happen at a specific time or on a regular interval."
-            )
+            sections.append(SECTION_SELF_SCHEDULING)
+
+        # Shell hygiene - include if shell tool is enabled
+        if enabled_builtins is None or "shell" in enabled_builtins:
+            sections.append(SECTION_SHELL_HYGIENE)
 
         # Autonomous Planning - include when multiple capabilities are available
         # This teaches capability composition for complex requests
@@ -254,92 +184,17 @@ class AgentWorkspace:
             or sum(1 for cap in key_capabilities if cap in enabled_builtins) >= 2
         )
         if has_multiple_capabilities:
-            sections.append(
-                "\n\n## Autonomous Planning\n\n"
-                "When you receive a request that involves multiple steps, significant time, "
-                "or complex coordination, take a moment to plan your approach. Consider:\n\n"
-                "- Can parts of this work happen in parallel? (sub-agents)\n"
-                "- Will this span multiple turns? (task tracking, self-continuation)\n"
-                "- Should the user know what is happening? (progress updates)\n"
-                "- Will I need to follow up on results? (self-continuation)\n\n"
-                "Prefer proactive action over asking the user for permission to use your "
-                "capabilities. Explain what you are doing and why, but do not wait for "
-                "approval to use tools you have been given."
-            )
+            sections.append(SECTION_AUTONOMOUS_PLANNING)
 
         # Memory search - include if memory_search is enabled
         if enabled_builtins is None or "memory_search" in enabled_builtins:
-            sections.append(
-                "\n\n## Memory Search\n\n"
-                "You have semantic search over your past conversations. Use `search_conversations` "
-                "to find relevant context from previous interactions. This is useful when:\n\n"
-                "- The user references something discussed in a prior conversation\n"
-                "- You need context from past decisions, instructions, or findings\n"
-                "- You want to avoid asking the user to repeat information\n\n"
-                "Search results include conversation snippets with timestamps and IDs. "
-                "You can then read the full archived conversation file if you need more detail."
-            )
+            sections.append(SECTION_MEMORY_SEARCH)
 
         # Conversation memory is always available (core feature, not a builtin)
-        sections.append(
-            "\n\n## Conversation Memory\n\n"
-            "Your conversations are automatically saved to disk and persist across restarts. "
-            "When you or the user starts a new conversation (via /new), the previous conversation "
-            "is archived in memory/conversations/ as both markdown and JSON files.\n\n"
-            "You can read these archives with your filesystem tools to reference past interactions. "
-            "Use /new to start a fresh conversation when the current topic is complete."
-        )
+        sections.append(SECTION_CONVERSATION_MEMORY)
 
         return "".join(sections)
 
-    def _build_capability_summary(self, enabled_builtins: list[str] | None) -> str:
-        """Build a concise summary of available framework capabilities.
-
-        Lists enabled capabilities as bullet points so agents can quickly
-        understand what infrastructure is available to them.
-
-        Args:
-            enabled_builtins: List of enabled builtin names, or None for all.
-
-        Returns:
-            Formatted capability summary section, or empty string if minimal.
-        """
-        def _is_enabled(name: str) -> bool:
-            return enabled_builtins is None or name in enabled_builtins
-
-        capabilities = [
-            "- **Filesystem**: Read, write, edit, search, and organize files in your workspace",
-            "- **Conversation Archives**: Past conversations stored as markdown and JSON in memory/conversations/",
-        ]
-
-        if _is_enabled("task_tracker"):
-            capabilities.append("- **Task Tracking**: Persistent TASKS.yaml for cross-session work management")
-        if _is_enabled("spawn"):
-            capabilities.append("- **Sub-Agent Spawning**: Spawn background workers for concurrent tasks")
-        if _is_enabled("browser"):
-            capabilities.append(
-                "- **Web Browsing**: Playwright-based browser automation with accessibility tree navigation"
-            )
-        if _is_enabled("brave_search"):
-            capabilities.append("- **Web Search**: Brave-powered internet search")
-        if _is_enabled("cron"):
-            capabilities.append("- **Self-Scheduling**: Schedule one-time or recurring future actions")
-        if _is_enabled("followup"):
-            capabilities.append("- **Self-Continuation**: Request re-invocation for multi-step workflows")
-        if _is_enabled("send_message"):
-            capabilities.append("- **Progress Updates**: Send messages to users during long operations")
-        if _is_enabled("send_file"):
-            capabilities.append("- **File Sharing**: Send workspace files to users")
-        if _is_enabled("memory_search"):
-            capabilities.append("- **Memory Search**: Semantic search over past conversations")
-        if _is_enabled("elevenlabs"):
-            capabilities.append("- **Text-to-Speech**: Voice response generation")
-
-        return (
-            "\n\n## Framework Capabilities\n\n"
-            "The following infrastructure is available to you:\n\n"
-            + "\n".join(capabilities)
-        )
 
 
 class WorkspaceLoader:

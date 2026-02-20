@@ -4,22 +4,13 @@ import logging
 from typing import TYPE_CHECKING
 
 from openpaw.channels.commands.base import CommandDefinition, CommandHandler, CommandResult
+from openpaw.prompts.commands import COMPACTED_TEMPLATE, SUMMARIZE_PROMPT
 
 if TYPE_CHECKING:
     from openpaw.channels.base import Message
     from openpaw.channels.commands.base import CommandContext
 
 logger = logging.getLogger(__name__)
-
-SUMMARIZE_PROMPT = """Summarize the conversation so far in a concise paragraph (3-5 sentences).
-Focus on:
-- The main topics discussed
-- Key decisions or conclusions reached
-- Any ongoing tasks or commitments
-- Important context that should be preserved
-
-Write the summary as a factual overview, not as a message to the user.
-Do NOT include greetings, sign-offs, or meta-commentary about the summary itself."""
 
 
 class CompactCommand(CommandHandler):
@@ -108,12 +99,7 @@ class CompactCommand(CommandHandler):
         # Step 5: Inject summary into new thread as first message
         if summary:
             try:
-                injection_prompt = (
-                    "[CONVERSATION COMPACTED]\n\n"
-                    "Previous conversation summary:\n"
-                    f"{summary}\n\n"
-                    "The full conversation has been archived. Continue from this context."
-                )
+                injection_prompt = COMPACTED_TEMPLATE.format(summary=summary)
                 await context.agent_runner.run(
                     message=injection_prompt,
                     thread_id=new_thread_id,

@@ -49,6 +49,9 @@ def mock_config():
     config.agent.max_turns = 10
     config.agent.temperature = 0.7
     config.builtins = MagicMock()
+    config.tool_timeouts = MagicMock()
+    config.tool_timeouts.default_seconds = 120
+    config.tool_timeouts.overrides = {}
     return config
 
 

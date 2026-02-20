@@ -985,14 +985,14 @@ class TestHeartbeatPromptTemplate:
 
     def test_prompt_template_has_timestamp_placeholder(self, tmp_workspace) -> None:
         """Test prompt template includes timestamp placeholder."""
-        assert "{timestamp}" in HEARTBEAT_PROMPT
+        assert "{timestamp}" in HEARTBEAT_PROMPT.template
 
     def test_prompt_template_has_key_instructions(self, tmp_workspace) -> None:
         """Test prompt template includes key instructions."""
-        assert "HEARTBEAT.md" in HEARTBEAT_PROMPT
-        assert "HEARTBEAT_OK" in HEARTBEAT_PROMPT
-        assert "Time-sensitive" in HEARTBEAT_PROMPT
-        assert "pending" in HEARTBEAT_PROMPT
+        assert "HEARTBEAT.md" in HEARTBEAT_PROMPT.template
+        assert "HEARTBEAT_OK" in HEARTBEAT_PROMPT.template
+        assert "Time-sensitive" in HEARTBEAT_PROMPT.template
+        assert "pending" in HEARTBEAT_PROMPT.template
 
     def test_prompt_template_can_be_formatted(self, tmp_workspace) -> None:
         """Test prompt template can be formatted with timestamp."""

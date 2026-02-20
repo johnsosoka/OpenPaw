@@ -9,6 +9,7 @@ from langchain_core.messages import ToolMessage
 
 from openpaw.core.queue.lane import QueueMode
 from openpaw.core.queue.manager import QueueManager
+from openpaw.prompts.system_events import STEER_SKIP_MESSAGE
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +149,7 @@ class QueueAwareToolMiddleware:
 
             # Return a ToolMessage indicating the tool was skipped
             return ToolMessage(
-                content="[Skipped: user sent new message — redirecting]",
+                content=STEER_SKIP_MESSAGE,
                 tool_call_id=request.tool_call["id"],
             )
 

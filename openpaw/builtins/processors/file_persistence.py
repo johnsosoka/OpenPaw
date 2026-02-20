@@ -14,6 +14,7 @@ from openpaw.builtins.base import (
 )
 from openpaw.channels.base import Attachment, Message
 from openpaw.core.timezone import workspace_now
+from openpaw.prompts.processors import FILE_RECEIVED_TEMPLATE
 from openpaw.utils.filename import deduplicate_path, sanitize_filename
 
 logger = logging.getLogger(__name__)
@@ -229,9 +230,11 @@ class FilePersistenceProcessor(BaseBuiltinProcessor):
         # Build enrichment text
         size_str = _format_size(file_size)
         mime_str = attachment.mime_type or "unknown type"
-        enrichment = (
-            f"[File received: {target_path.name} ({size_str}, {mime_str})]\n"
-            f"[Saved to: {relative_path}]"
+        enrichment = FILE_RECEIVED_TEMPLATE.format(
+            filename=target_path.name,
+            size=size_str,
+            mime_type=mime_str,
+            saved_path=relative_path,
         )
 
         # Build metadata

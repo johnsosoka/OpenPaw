@@ -12,6 +12,11 @@ from openpaw.builtins.loader import BuiltinLoader
 from openpaw.channels.base import ChannelAdapter, Message
 from openpaw.core.queue.lane import QueueMode
 from openpaw.core.queue.manager import QueueManager
+from openpaw.prompts.system_events import (
+    FOLLOWUP_TEMPLATE,
+    INTERRUPT_NOTIFICATION,
+    TOOL_DENIED_TEMPLATE,
+)
 from openpaw.runtime.session.manager import SessionManager
 from openpaw.stores.approval import ApprovalGateManager
 
@@ -193,10 +198,7 @@ class MessageProcessor:
                             f"Tool '{e.tool_name}' was denied. "
                             f"The agent will be informed.",
                         )
-                        combined_content = (
-                            f"[SYSTEM] The tool '{e.tool_name}' was denied by "
-                            f"the user. Do not retry this action."
-                        )
+                        combined_content = TOOL_DENIED_TEMPLATE.format(tool_name=e.tool_name)
                         continue  # Re-enter with denial message
 
                 # No channel available, deny by default
@@ -214,7 +216,7 @@ class MessageProcessor:
 
                 # Notify user that run was interrupted
                 if channel:
-                    await channel.send_message(session_key, "[Run interrupted — processing new message]")
+                    await channel.send_message(session_key, INTERRUPT_NOTIFICATION)
 
                 # Use the pending messages as the new input
                 pending_msgs = e.pending_messages
@@ -271,7 +273,9 @@ class MessageProcessor:
                         f"Processing immediate followup (depth={followup_depth}): "
                         f"{followup.prompt[:100]}"
                     )
-                    combined_content = f"[SYSTEM FOLLOWUP - depth {followup_depth}]\n{followup.prompt}"
+                    combined_content = FOLLOWUP_TEMPLATE.format(
+                        depth=followup_depth, prompt=followup.prompt
+                    )
                     continue
                 elif followup and followup.delay_seconds > 0:
                     self._logger.info(

@@ -353,3 +353,42 @@ class TestMemorySearchSection:
         )
         assert "references something discussed in a prior conversation" in prompt
         assert "past decisions, instructions, or findings" in prompt
+
+
+class TestShellHygieneSection:
+    """Test the Shell Hygiene prompt section."""
+
+    def test_shell_hygiene_section_present_when_enabled(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """Shell hygiene section appears when shell builtin is enabled."""
+        prompt = mock_workspace.build_system_prompt(
+            enabled_builtins=["shell", "send_message"]
+        )
+        assert "## Shell Commands" in prompt
+        assert "Break complex operations" in prompt
+
+    def test_shell_hygiene_section_present_when_all_builtins(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """Shell hygiene section appears when enabled_builtins is None."""
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=None)
+        assert "## Shell Commands" in prompt
+
+    def test_shell_hygiene_section_absent_when_not_enabled(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """Shell hygiene section absent when shell builtin is not enabled."""
+        prompt = mock_workspace.build_system_prompt(
+            enabled_builtins=["brave_search", "task_tracker"]
+        )
+        assert "## Shell Commands" not in prompt
+
+    def test_shell_hygiene_includes_best_practices(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """Shell hygiene section includes command best practices."""
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=["shell"])
+        assert "Break complex operations into small, sequential commands" in prompt
+        # Check for guidance on avoiding chained operations
+        assert "rather than chaining" in prompt.lower() or "chaining" in prompt.lower()

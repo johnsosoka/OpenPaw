@@ -266,6 +266,19 @@ class MemoryConfig(BaseModel):
     )
 
 
+class ToolTimeoutsConfig(BaseModel):
+    """Configuration for per-tool-call timeouts."""
+
+    default_seconds: int = Field(
+        default=120,
+        description="Default timeout for tool calls in seconds",
+    )
+    overrides: dict[str, int] = Field(
+        default_factory=dict,
+        description="Per-tool timeout overrides (tool_name -> timeout_seconds)",
+    )
+
+
 class WorkspaceConfig(BaseModel):
     """Configuration for a workspace agent (loaded from agent.yaml)."""
 
@@ -285,6 +298,10 @@ class WorkspaceConfig(BaseModel):
     approval_gates: ApprovalGatesConfig = Field(
         default_factory=ApprovalGatesConfig,
         description="Approval gates configuration",
+    )
+    tool_timeouts: ToolTimeoutsConfig = Field(
+        default_factory=ToolTimeoutsConfig,
+        description="Per-tool-call timeout configuration",
     )
     memory: MemoryConfig = Field(
         default_factory=MemoryConfig,
@@ -331,6 +348,10 @@ class Config(BaseModel):
     approval_gates: ApprovalGatesConfig = Field(
         default_factory=ApprovalGatesConfig,
         description="Default approval gates configuration",
+    )
+    tool_timeouts: ToolTimeoutsConfig = Field(
+        default_factory=ToolTimeoutsConfig,
+        description="Default tool timeout configuration",
     )
 
     model_config = {"extra": "allow"}

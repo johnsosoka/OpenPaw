@@ -1,6 +1,7 @@
 """Agent middleware for tool execution interception.
 
 Provides middleware components for:
+- Per-tool timeouts (budget protection)
 - Queue awareness (steer/interrupt modes)
 - Approval gates (human-in-the-loop)
 - LLM hooks (thinking token stripping, reasoning sanitization)
@@ -14,6 +15,7 @@ from openpaw.agent.middleware.llm_hooks import (
     build_pre_model_hook,
 )
 from openpaw.agent.middleware.queue_aware import InterruptSignalError, QueueAwareToolMiddleware
+from openpaw.agent.middleware.tool_timeout import ToolTimeoutMiddleware
 
 __all__ = [
     "ApprovalRequiredError",
@@ -22,6 +24,7 @@ __all__ = [
     "QueueAwareToolMiddleware",
     "THINKING_TAG_PATTERN",
     "ThinkingTokenMiddleware",
+    "ToolTimeoutMiddleware",
     "build_post_model_hook",
     "build_pre_model_hook",
 ]
