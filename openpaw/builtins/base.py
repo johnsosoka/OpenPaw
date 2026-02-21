@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from openpaw.channels.base import Message
+from openpaw.model.message import Message
 
 
 class BuiltinType(Enum):

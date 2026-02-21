@@ -6,8 +6,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from openpaw.channels.base import ChannelAdapter, Message, MessageDirection
+from openpaw.channels.base import ChannelAdapter
 from openpaw.channels.telegram import TelegramChannel
+from openpaw.model.message import Message, MessageDirection
 
 
 class DummyChannel(ChannelAdapter):

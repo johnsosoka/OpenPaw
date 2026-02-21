@@ -1,7 +1,8 @@
 """Channel adapters for different messaging platforms."""
 
-from openpaw.channels.base import ChannelAdapter, Message, MessageDirection
+from openpaw.channels.base import ChannelAdapter
 from openpaw.channels.telegram import TelegramChannel
+from openpaw.model.message import Message, MessageDirection
 
 __all__ = [
     "ChannelAdapter",

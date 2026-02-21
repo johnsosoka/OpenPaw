@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from openpaw.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus, SubAgentStore
-from openpaw.subagent.store import create_subagent_request
+from openpaw.stores.subagent import SubAgentStore, create_subagent_request
+from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
 
 
 def test_create_subagent_request(tmp_path: Path):

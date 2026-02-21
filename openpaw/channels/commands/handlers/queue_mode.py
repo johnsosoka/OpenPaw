@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from openpaw.channels.commands.base import CommandDefinition, CommandHandler, CommandResult
 
 # Import directly from module to avoid circular dependency through runtime.__init__
-from openpaw.core.queue.lane import QueueMode
+from openpaw.runtime.queue.lane import QueueMode
 
 if TYPE_CHECKING:
     from openpaw.channels.base import Message

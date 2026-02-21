@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from openpaw.core.config.approval import ApprovalGatesConfig, ToolApprovalConfig
+from openpaw.core.config.models import ApprovalGatesConfig, ToolApprovalConfig
 
 logger = logging.getLogger(__name__)
 

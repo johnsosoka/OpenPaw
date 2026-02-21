@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from openpaw.core.config.approval import ApprovalGatesConfig, ToolApprovalConfig
+from openpaw.core.config.models import ApprovalGatesConfig, ToolApprovalConfig
 from openpaw.stores.approval import ApprovalGateManager
 from openpaw.agent.middleware.approval import ApprovalRequiredError, ApprovalToolMiddleware
 

@@ -1,4 +1,7 @@
-"""Filename sanitization and deduplication utilities."""
+"""Shared utility modules for OpenPaw.
+
+Filename sanitization and deduplication utilities.
+"""
 
 import re
 from pathlib import Path

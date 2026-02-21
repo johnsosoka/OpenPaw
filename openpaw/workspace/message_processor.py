@@ -9,14 +9,15 @@ from openpaw.agent.middleware import (
     InterruptSignalError,
 )
 from openpaw.builtins.loader import BuiltinLoader
-from openpaw.channels.base import ChannelAdapter, Message
-from openpaw.core.queue.lane import QueueMode
-from openpaw.core.queue.manager import QueueManager
-from openpaw.prompts.system_events import (
+from openpaw.channels.base import ChannelAdapter
+from openpaw.model.message import Message
+from openpaw.core.prompts.system_events import (
     FOLLOWUP_TEMPLATE,
     INTERRUPT_NOTIFICATION,
     TOOL_DENIED_TEMPLATE,
 )
+from openpaw.runtime.queue.lane import QueueMode
+from openpaw.runtime.queue.manager import QueueManager
 from openpaw.runtime.session.manager import SessionManager
 from openpaw.stores.approval import ApprovalGateManager
 

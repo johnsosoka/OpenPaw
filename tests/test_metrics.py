@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from openpaw.core.metrics import (
+from openpaw.agent.metrics import (
     InvocationMetrics,
     TokenUsageLogger,
     TokenUsageReader,

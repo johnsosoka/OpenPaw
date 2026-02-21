@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from openpaw.builtins.processors.docling import DoclingProcessor
-from openpaw.channels.base import Attachment, Message, MessageDirection
+from openpaw.model.message import Attachment, Message, MessageDirection
 
 
 @pytest.fixture

@@ -4,8 +4,8 @@ import pytest
 from unittest.mock import Mock, AsyncMock, MagicMock
 from pathlib import Path
 
-from openpaw.core.agent import AgentRunner
-from openpaw.core.metrics import InvocationMetrics
+from openpaw.agent.runner import AgentRunner
+from openpaw.agent.metrics import InvocationMetrics
 from openpaw.workspace.loader import AgentWorkspace
 
 

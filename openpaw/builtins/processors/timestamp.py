@@ -11,7 +11,7 @@ from openpaw.builtins.base import (
     BuiltinType,
     ProcessorResult,
 )
-from openpaw.channels.base import Message
+from openpaw.model.message import Message
 
 logger = logging.getLogger(__name__)
 

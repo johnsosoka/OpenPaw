@@ -7,10 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 
 from openpaw.channels.base import ChannelAdapter
-from openpaw.core.agent import AgentRunner
-from openpaw.core.metrics import InvocationMetrics, TokenUsageLogger
-from openpaw.subagent.runner import SUBAGENT_EXCLUDED_TOOLS, SubAgentRunner
-from openpaw.subagent.store import SubAgentRequest, SubAgentResult, SubAgentStatus, SubAgentStore
+from openpaw.agent.runner import AgentRunner
+from openpaw.agent.metrics import InvocationMetrics, TokenUsageLogger
+from openpaw.runtime.subagent.runner import SUBAGENT_EXCLUDED_TOOLS, SubAgentRunner
+from openpaw.stores.subagent import SubAgentStore, create_subagent_request
+from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
 
 
 @pytest.fixture

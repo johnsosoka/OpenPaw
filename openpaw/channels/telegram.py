@@ -9,7 +9,8 @@ from typing import Any
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
-from openpaw.channels.base import Attachment, ChannelAdapter, Message, MessageDirection
+from openpaw.channels.base import ChannelAdapter
+from openpaw.model.message import Attachment, Message, MessageDirection
 
 logger = logging.getLogger(__name__)
 

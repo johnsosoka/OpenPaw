@@ -15,7 +15,7 @@ from openpaw.agent.middleware.llm_hooks import THINKING_TAG_PATTERN, ThinkingTok
 from openpaw.agent.middleware.queue_aware import InterruptSignalError
 from openpaw.agent.tools.filesystem import FilesystemTools
 from openpaw.core.timezone import workspace_now
-from openpaw.prompts.system_events import (
+from openpaw.core.prompts.system_events import (
     TIMEOUT_NOTIFICATION_GENERIC,
     TIMEOUT_NOTIFICATION_TEMPLATE,
 )

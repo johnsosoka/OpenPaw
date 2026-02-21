@@ -13,7 +13,7 @@ from typing import Any
 
 import yaml
 
-from openpaw.domain.task import Task, TaskPriority, TaskStatus
+from openpaw.model.task import Task, TaskPriority, TaskStatus
 
 logger = logging.getLogger(__name__)
 

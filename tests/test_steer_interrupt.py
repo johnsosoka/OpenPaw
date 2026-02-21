@@ -9,7 +9,7 @@ import pytest
 
 from openpaw.agent import AgentRunner
 from openpaw.agent.middleware import InterruptSignalError, QueueAwareToolMiddleware
-from openpaw.core.queue.lane import QueueMode
+from openpaw.runtime.queue.lane import QueueMode
 from openpaw.workspace.loader import AgentWorkspace
 
 

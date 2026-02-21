@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from openpaw.agent import AgentRunner
     from openpaw.channels.base import ChannelAdapter, Message
-    from openpaw.core.queue.manager import QueueManager
+    from openpaw.runtime.queue.manager import QueueManager
     from openpaw.runtime.session.manager import SessionManager
 
 

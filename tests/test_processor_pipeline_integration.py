@@ -14,7 +14,7 @@ from openpaw.builtins.processors.docling import DoclingProcessor
 from openpaw.builtins.processors.file_persistence import FilePersistenceProcessor
 from openpaw.builtins.processors.timestamp import TimestampProcessor
 from openpaw.builtins.processors.whisper import WhisperProcessor
-from openpaw.channels.base import Attachment, Message, MessageDirection
+from openpaw.model.message import Attachment, Message, MessageDirection
 
 
 async def _run_pipeline(processors: list, message: Message) -> Message:

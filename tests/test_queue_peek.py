@@ -5,8 +5,8 @@ from collections import deque
 
 import pytest
 
-from openpaw.core.queue.lane import LaneQueue, QueueMode
-from openpaw.core.queue.manager import QueueManager, SessionQueue
+from openpaw.runtime.queue.lane import LaneQueue, QueueMode
+from openpaw.runtime.queue.manager import QueueManager, SessionQueue
 
 
 @pytest.fixture

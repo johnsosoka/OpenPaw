@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from openpaw.core.metrics import InvocationMetrics, TokenUsageLogger, TokenUsageReader
+from openpaw.agent.metrics import InvocationMetrics, TokenUsageLogger, TokenUsageReader
 
 
 @pytest.fixture

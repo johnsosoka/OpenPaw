@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from openpaw.prompts.framework import (
+from openpaw.core.prompts.framework import (
     FRAMEWORK_ORIENTATION,
     SECTION_AUTONOMOUS_PLANNING,
     SECTION_CONVERSATION_MEMORY,
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from openpaw.core.config import WorkspaceConfig
-    from openpaw.runtime.scheduling.loader import CronDefinition
+    from openpaw.model.cron import CronDefinition
 
 
 @dataclass
@@ -328,7 +328,7 @@ class WorkspaceLoader:
 
         # Import at runtime to avoid circular import
         from openpaw.core.config import expand_env_vars_recursive
-        from openpaw.runtime.scheduling.loader import CronDefinition
+        from openpaw.model.cron import CronDefinition
 
         cron_definitions = []
         for cron_file in sorted(crons_dir.glob("*.yaml")):

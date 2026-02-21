@@ -1,37 +1,12 @@
 """Cron definition loader for OpenPaw workspaces."""
 
-import warnings
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from openpaw.core.config import expand_env_vars_recursive
-
-# Import domain models (deprecated location)
-from openpaw.domain.cron import (
-    CronDefinition as _CronDefinition,
-)
-from openpaw.domain.cron import (
-    CronOutputConfig as _CronOutputConfig,
-)
-
-# Re-export for backward compatibility
-CronDefinition = _CronDefinition
-CronOutputConfig = _CronOutputConfig
-
-
-def __getattr__(name: str) -> Any:
-    """Provide deprecation warnings for imports from this module."""
-    if name in ("CronDefinition", "CronOutputConfig"):
-        warnings.warn(
-            f"Importing {name} from openpaw.runtime.scheduling.loader is deprecated. "
-            "Use openpaw.domain.cron instead.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        return globals()[name]
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+from openpaw.model.cron import CronDefinition
 
 
 class CronLoader:

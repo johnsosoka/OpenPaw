@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from openpaw.runtime.scheduling.loader import CronDefinition, CronOutputConfig
+from openpaw.model.cron import CronDefinition, CronOutputConfig
 from openpaw.runtime.scheduling.cron import CronScheduler
 
 

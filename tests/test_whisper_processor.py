@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from openpaw.builtins.processors.whisper import WhisperProcessor
-from openpaw.channels.base import Attachment, Message, MessageDirection
+from openpaw.model.message import Attachment, Message, MessageDirection
 
 
 @pytest.fixture

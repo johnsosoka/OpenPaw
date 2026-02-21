@@ -938,7 +938,7 @@ from openpaw.builtins.base import (
     BuiltinPrerequisite,
     ProcessorResult,
 )
-from openpaw.channels.base import Message
+from openpaw.domain.message import Message
 
 
 class MyCustomProcessor(BaseBuiltinProcessor):

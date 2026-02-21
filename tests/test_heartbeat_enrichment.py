@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from openpaw.core.config import HeartbeatConfig
-from openpaw.core.metrics import InvocationMetrics
+from openpaw.agent.metrics import InvocationMetrics
 from openpaw.runtime.scheduling.heartbeat import HeartbeatScheduler
 
 

@@ -14,8 +14,8 @@ from openpaw.builtins.base import (
     BuiltinType,
     ProcessorResult,
 )
-from openpaw.channels.base import Attachment, Message
-from openpaw.prompts.processors import (
+from openpaw.model.message import Attachment, Message
+from openpaw.core.prompts.processors import (
     VOICE_MESSAGE_ERROR_TEMPLATE,
     VOICE_MESSAGE_TEMPLATE,
 )

@@ -59,19 +59,27 @@ OpenPaw follows a layered architecture with clear separation of concerns:
 
 ```
 openpaw/
-├── domain/           # Pure business models (stable foundation)
+├── cli.py            # CLI entry point
+├── model/            # Pure business models (stable foundation)
 │   ├── message.py    # Message, MessageAttachment
 │   ├── task.py       # Task, TaskStatus
 │   ├── session.py    # SessionState
 │   ├── subagent.py   # SubAgentRequest, SubAgentStatus
 │   └── cron.py       # CronJobDefinition, DynamicCronTask
-├── core/             # Configuration, logging, timezone
+├── core/             # Configuration, logging, timezone, utilities
 │   ├── config/       # Pydantic config models and loaders
 │   │   ├── models.py         # WorkspaceConfig, GlobalConfig
 │   │   ├── loader.py         # Config loading and merging
 │   │   └── env_expansion.py  # ${VAR} substitution
+│   ├── prompts/      # Centralized prompt text
+│   │   ├── commands.py       # Command response templates
+│   │   ├── framework.py      # Framework orientation sections
+│   │   ├── heartbeat.py      # Heartbeat prompt template
+│   │   ├── processors.py     # Processor notification text
+│   │   └── system_events.py  # System event messages
 │   ├── logging.py    # Structured logging
-│   └── timezone.py   # Workspace timezone utilities
+│   ├── timezone.py   # Workspace timezone utilities
+│   └── utils.py      # Generic utilities (sanitization, deduplication)
 ├── agent/            # Agent execution
 │   ├── runner.py     # AgentRunner (LangGraph wrapper)
 │   ├── metrics.py    # Token usage tracking
@@ -88,37 +96,36 @@ openpaw/
 │   └── tool_loader.py        # Custom tool loading
 ├── runtime/          # Runtime services
 │   ├── orchestrator.py       # OpenPawOrchestrator
+│   ├── queue/        # Message queueing
+│   │   ├── lane.py           # LaneQueue
+│   │   └── manager.py        # QueueManager
 │   ├── scheduling/   # Cron and heartbeat schedulers
 │   │   ├── cron.py           # CronScheduler
 │   │   ├── heartbeat.py      # HeartbeatScheduler
 │   │   └── dynamic_cron.py   # DynamicCronStore
-│   ├── queue/        # Message queueing
-│   │   ├── lane.py           # LaneQueue
-│   │   └── manager.py        # QueueManager
-│   └── session/      # Session management and archiving
-│       ├── manager.py        # SessionManager
-│       └── archiver.py       # ConversationArchiver
+│   ├── session/      # Session management and archiving
+│   │   ├── manager.py        # SessionManager
+│   │   └── archiver.py       # ConversationArchiver
+│   └── subagent/     # Background agent coordination
+│       └── runner.py         # SubAgentRunner
 ├── stores/           # Persistence layer
 │   ├── task.py       # TaskStore (TASKS.yaml)
 │   ├── subagent.py   # SubAgentStore (subagents.yaml)
 │   ├── cron.py       # DynamicCronStore (dynamic_crons.json)
-│   └── approval.py   # ApprovalGateManager (in-memory)
+│   ├── approval.py   # ApprovalGateManager (in-memory)
+│   └── vector/       # Semantic search infrastructure
 ├── channels/         # External communication
 │   ├── factory.py    # Channel factory
 │   ├── telegram.py   # Telegram adapter
 │   └── commands/     # Slash command handlers
 │       ├── router.py         # CommandRouter
 │       └── handlers/         # Built-in commands (/new, /status, etc.)
-├── builtins/         # Extensible capabilities
-│   ├── tools/        # Brave search, cron, spawn, browser, etc.
-│   └── processors/   # Whisper, docling, file persistence
-├── subagent/         # Background agent coordination
-│   └── runner.py     # SubAgentRunner
-└── utils/            # Generic utilities
-    └── filename.py   # Sanitization and deduplication
+└── builtins/         # Extensible capabilities
+    ├── tools/        # Brave search, cron, spawn, browser, etc.
+    └── processors/   # Whisper, docling, file persistence
 ```
 
-**Stability Contract**: Code moves down the stack (agent → workspace → runtime → domain), never up. Domain models are pure data, free of framework dependencies.
+**Stability Contract**: Code moves down the stack (agent → workspace → runtime → model), never up. Model classes are pure data, free of framework dependencies.
 
 ### Key Components
 
@@ -154,7 +161,7 @@ openpaw/
 
 **`openpaw/stores/subagent.py`** - `SubAgentStore` for YAML-based persistence of sub-agent requests and results at `.openpaw/subagents.yaml`. Thread-safe with status lifecycle tracking (pending → running → completed/failed/cancelled/timed_out).
 
-**`openpaw/subagent/runner.py`** - `SubAgentRunner` manages spawned background agents with concurrency control (default: 8 concurrent). Creates fresh AgentRunner instances with filtered tools (no recursion, no unsolicited messaging).
+**`openpaw/runtime/subagent/runner.py`** - `SubAgentRunner` manages spawned background agents with concurrency control (default: 8 concurrent). Creates fresh AgentRunner instances with filtered tools (no recursion, no unsolicited messaging).
 
 **`openpaw/builtins/tools/spawn.py`** - `SpawnToolBuiltin` provides `spawn_agent`, `list_subagents`, `get_subagent_result`, `cancel_subagent` tools for concurrent task execution.
 
@@ -192,7 +199,7 @@ openpaw/
 
 **`openpaw/agent/tools/sandbox.py`** - Standalone `resolve_sandboxed_path()` utility. Validates paths within workspace root, rejecting absolute paths, `~`, `..`, and `.openpaw/` access. Shared by `FilesystemTools`, `SendFileTool`, and inbound processors (DoclingProcessor, WhisperProcessor).
 
-**`openpaw/utils/filename.py`** - Filename sanitization and deduplication utilities. `sanitize_filename()` removes special characters, normalizes spaces, and lowercases. `deduplicate_path()` appends counters (1), (2), etc. for uniqueness.
+**`openpaw/core/utils.py`** - Generic utilities. `sanitize_filename()` removes special characters, normalizes spaces, and lowercases. `deduplicate_path()` appends counters (1), (2), etc. for uniqueness.
 
 **`openpaw/builtins/processors/file_persistence.py`** - `FilePersistenceProcessor` saves all uploaded files to `uploads/{YYYY-MM-DD}/` with date partitioning. Sets `attachment.saved_path` for downstream processors.
 
@@ -203,6 +210,8 @@ openpaw/
 **`openpaw/runtime/scheduling/dynamic_cron.py`** - `DynamicCronStore` for persisting agent-scheduled tasks to workspace-local JSON. Includes `DynamicCronTask` dataclass and factory functions.
 
 **`openpaw/runtime/scheduling/heartbeat.py`** - `HeartbeatScheduler` for proactive agent check-ins. Supports active hours, HEARTBEAT_OK suppression, configurable intervals, pre-flight skip (avoids LLM call when HEARTBEAT.md is empty and no active tasks), task summary injection into heartbeat prompt, and JSONL event logging with token metrics.
+
+**`openpaw/core/prompts/`** - Centralized prompt text modules. Separates presentation layer from business logic. Includes `framework.py` (dynamic framework orientation sections), `heartbeat.py` (heartbeat prompt template), `processors.py` (file processor notification text), `commands.py` (command response templates), and `system_events.py` (system event messages).
 
 ### Agent Workspace Structure
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from openpaw.utils.filename import deduplicate_path, sanitize_filename
+from openpaw.core.utils import deduplicate_path, sanitize_filename
 
 
 class TestSanitizeFilename:

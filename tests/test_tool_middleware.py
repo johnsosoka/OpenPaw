@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.messages import ToolMessage
 
-from openpaw.core.tool_middleware import InterruptSignalError, QueueAwareToolMiddleware
-from openpaw.core.queue.lane import QueueMode
+from openpaw.agent.middleware.queue_aware import InterruptSignalError, QueueAwareToolMiddleware
+from openpaw.runtime.queue.lane import QueueMode
 
 
 @pytest.fixture

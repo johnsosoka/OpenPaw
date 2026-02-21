@@ -7,7 +7,7 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any
 
-from openpaw.core.queue.lane import LaneQueue, QueueItem, QueueMode
+from openpaw.runtime.queue.lane import LaneQueue, QueueItem, QueueMode
 
 logger = logging.getLogger(__name__)
 

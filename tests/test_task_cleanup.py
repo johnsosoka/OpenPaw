@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from openpaw.domain.task import Task, TaskStatus
+from openpaw.model.task import Task, TaskStatus
 from openpaw.stores.task import TaskStore
 
 

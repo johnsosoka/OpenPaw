@@ -14,8 +14,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from openpaw.agent.metrics import TokenUsageLogger
 from openpaw.channels.base import ChannelAdapter
-from openpaw.domain.cron import DynamicCronTask
-from openpaw.runtime.scheduling.loader import CronDefinition, CronLoader
+from openpaw.model.cron import CronDefinition, DynamicCronTask
+from openpaw.runtime.scheduling.loader import CronLoader
 from openpaw.stores.cron import DynamicCronStore
 
 logger = logging.getLogger(__name__)

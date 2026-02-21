@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from openpaw.channels.base import MessageDirection
 from openpaw.channels.telegram import TelegramChannel
+from openpaw.model.message import MessageDirection
 
 
 @pytest.mark.asyncio

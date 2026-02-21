@@ -1,37 +1,9 @@
 """Base channel adapter interface."""
 
-import warnings
 from abc import ABC, abstractmethod
 from typing import Any
 
-# Import domain models (deprecated location)
-from openpaw.domain.message import (
-    Attachment as _Attachment,
-)
-from openpaw.domain.message import (
-    Message as _Message,
-)
-from openpaw.domain.message import (
-    MessageDirection as _MessageDirection,
-)
-
-# Re-export for backward compatibility
-Attachment = _Attachment
-Message = _Message
-MessageDirection = _MessageDirection
-
-
-def __getattr__(name: str) -> Any:
-    """Provide deprecation warnings for imports from this module."""
-    if name in ("Message", "Attachment", "MessageDirection"):
-        warnings.warn(
-            f"Importing {name} from openpaw.channels.base is deprecated. "
-            "Use openpaw.domain.message instead.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        return globals()[name]
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+from openpaw.model.message import Message
 
 
 class ChannelAdapter(ABC):

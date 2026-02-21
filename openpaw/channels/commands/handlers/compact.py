@@ -4,7 +4,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from openpaw.channels.commands.base import CommandDefinition, CommandHandler, CommandResult
-from openpaw.prompts.commands import COMPACTED_TEMPLATE, SUMMARIZE_PROMPT
+from openpaw.core.prompts.commands import COMPACTED_TEMPLATE, SUMMARIZE_PROMPT
 
 if TYPE_CHECKING:
     from openpaw.channels.base import Message

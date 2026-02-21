@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from openpaw.prompts import (
+from openpaw.core.prompts import (
     COMPACTED_TEMPLATE,
     FOLLOWUP_TEMPLATE,
     HEARTBEAT_PROMPT,
@@ -22,7 +22,7 @@ from openpaw.prompts import (
     build_capability_summary,
     build_task_summary,
 )
-from openpaw.prompts.framework import (
+from openpaw.core.prompts.framework import (
     FRAMEWORK_ORIENTATION,
     SECTION_AUTONOMOUS_PLANNING,
     SECTION_CONVERSATION_MEMORY,
@@ -38,7 +38,7 @@ from openpaw.prompts.framework import (
     SECTION_TASK_MANAGEMENT,
     SECTION_WEB_BROWSING,
 )
-from openpaw.prompts.processors import (
+from openpaw.core.prompts.processors import (
     FILE_RECEIVED_TEMPLATE,
     VOICE_MESSAGE_ERROR_TEMPLATE,
     VOICE_MESSAGE_TEMPLATE,
@@ -360,14 +360,14 @@ class TestSystemPromptIdentity:
 
 
 class TestImportPaths:
-    """Test that all prompt items are importable from openpaw.prompts."""
+    """Test that all prompt items are importable from openpaw.core.prompts."""
 
     def test_all_exports_are_importable(self) -> None:
-        """All items in __all__ can be imported from openpaw.prompts."""
-        from openpaw.prompts import __all__
+        """All items in __all__ can be imported from openpaw.core.prompts."""
+        from openpaw.core.prompts import __all__
 
         # Verify we can import everything
-        import openpaw.prompts
+        import openpaw.core.prompts
 
         for name in __all__:
-            assert hasattr(openpaw.prompts, name), f"{name} not exported from openpaw.prompts"
+            assert hasattr(openpaw.core.prompts, name), f"{name} not exported from openpaw.core.prompts"

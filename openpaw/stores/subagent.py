@@ -13,7 +13,7 @@ from typing import Any
 
 import yaml
 
-from openpaw.domain.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
+from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
 
 logger = logging.getLogger(__name__)
 

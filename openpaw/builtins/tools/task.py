@@ -15,7 +15,7 @@ from openpaw.builtins.base import (
     BuiltinType,
 )
 from openpaw.core.timezone import format_for_display
-from openpaw.domain.task import TaskPriority, TaskStatus
+from openpaw.model.task import TaskPriority, TaskStatus
 from openpaw.stores.task import TaskStore, create_task
 
 logger = logging.getLogger(__name__)

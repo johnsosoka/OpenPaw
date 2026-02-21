@@ -7,9 +7,9 @@ from typing import Any
 from langchain.agents.middleware import wrap_tool_call
 from langchain_core.messages import ToolMessage
 
-from openpaw.core.queue.lane import QueueMode
-from openpaw.core.queue.manager import QueueManager
-from openpaw.prompts.system_events import STEER_SKIP_MESSAGE
+from openpaw.runtime.queue.lane import QueueMode
+from openpaw.runtime.queue.manager import QueueManager
+from openpaw.core.prompts.system_events import STEER_SKIP_MESSAGE
 
 logger = logging.getLogger(__name__)
 

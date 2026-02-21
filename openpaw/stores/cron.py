@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 
-from openpaw.domain.cron import DynamicCronTask
+from openpaw.model.cron import DynamicCronTask
 
 logger = logging.getLogger(__name__)
 

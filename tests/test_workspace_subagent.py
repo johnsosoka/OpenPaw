@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from openpaw.subagent.store import SubAgentStore
+from openpaw.stores.subagent import SubAgentStore
 from openpaw.workspace.loader import AgentWorkspace, WorkspaceLoader
 
 
@@ -257,9 +257,9 @@ class TestQueueInjection:
     @pytest.mark.asyncio
     async def test_inject_system_event_creates_message(self) -> None:
         """_inject_system_event creates a Message and submits to queue."""
-        from openpaw.channels.base import Message, MessageDirection
+        from openpaw.model.message import Message, MessageDirection
+        from openpaw.runtime.queue.lane import QueueMode
         from openpaw.workspace.runner import WorkspaceRunner
-        from openpaw.core.queue.lane import QueueMode
 
         # Create a minimal workspace runner and mock the queue manager
         runner = MagicMock(spec=WorkspaceRunner)

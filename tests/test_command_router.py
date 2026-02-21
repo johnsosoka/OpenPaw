@@ -2,7 +2,6 @@
 
 import pytest
 
-from openpaw.channels.base import Message, MessageDirection
 from openpaw.channels.commands.base import (
     CommandContext,
     CommandDefinition,
@@ -11,6 +10,7 @@ from openpaw.channels.commands.base import (
     CommandScope,
 )
 from openpaw.channels.commands.router import CommandRouter
+from openpaw.model.message import Message, MessageDirection
 
 
 class MockCommandHandler(CommandHandler):

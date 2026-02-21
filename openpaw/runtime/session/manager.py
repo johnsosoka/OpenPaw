@@ -7,32 +7,13 @@ restarts.
 
 import json
 import logging
-import warnings
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
-from typing import Any
 
-# Import domain models (deprecated location)
-from openpaw.domain.session import SessionState as _SessionState
+from openpaw.model.session import SessionState
 
 logger = logging.getLogger(__name__)
-
-# Re-export for backward compatibility
-SessionState = _SessionState
-
-
-def __getattr__(name: str) -> Any:
-    """Provide deprecation warnings for imports from this module."""
-    if name == "SessionState":
-        warnings.warn(
-            "Importing SessionState from openpaw.session.manager is deprecated. "
-            "Use openpaw.domain.session instead.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        return SessionState
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class SessionManager:

@@ -13,7 +13,7 @@ from openpaw.builtins.base import (
     BuiltinType,
     ProcessorResult,
 )
-from openpaw.channels.base import Attachment, Message
+from openpaw.model.message import Attachment, Message
 
 logger = logging.getLogger(__name__)
 

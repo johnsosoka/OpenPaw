@@ -7,17 +7,17 @@ logic, making them the foundation of the codebase.
 
 # Message domain
 # Cron domain
-from openpaw.domain.cron import CronDefinition, CronOutputConfig, DynamicCronTask
-from openpaw.domain.message import Attachment, Message, MessageDirection
+from openpaw.model.cron import CronDefinition, CronOutputConfig, DynamicCronTask
+from openpaw.model.message import Attachment, Message, MessageDirection
 
 # Session domain
-from openpaw.domain.session import SessionState
+from openpaw.model.session import SessionState
 
 # Sub-agent domain
-from openpaw.domain.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
+from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
 
 # Task domain
-from openpaw.domain.task import Task, TaskPriority, TaskStatus, TaskType
+from openpaw.model.task import Task, TaskPriority, TaskStatus, TaskType
 
 __all__ = [
     # Message

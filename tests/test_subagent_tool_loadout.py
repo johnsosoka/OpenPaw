@@ -5,8 +5,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from openpaw.domain.subagent import SubAgentRequest, SubAgentStatus
-from openpaw.subagent.runner import filter_subagent_tools
+from openpaw.model.subagent import SubAgentRequest, SubAgentStatus
+from openpaw.runtime.subagent.runner import filter_subagent_tools
 
 
 # Mock tool class for testing

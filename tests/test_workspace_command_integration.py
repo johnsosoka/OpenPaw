@@ -149,7 +149,7 @@ async def test_workspace_runner_registers_framework_commands(mock_config, mock_w
 @pytest.mark.asyncio
 async def test_workspace_runner_build_command_context(mock_config, mock_workspace):
     """Test that _build_command_context creates valid CommandContext."""
-    from openpaw.channels.base import Message, MessageDirection
+    from openpaw.model.message import Message, MessageDirection
     from openpaw.workspace.runner import WorkspaceRunner
 
     with (
@@ -221,7 +221,7 @@ async def test_workspace_runner_build_command_context_missing_channel_raises(
     mock_config, mock_workspace
 ):
     """Test that _build_command_context raises error when channel not found."""
-    from openpaw.channels.base import Message, MessageDirection
+    from openpaw.model.message import Message, MessageDirection
     from openpaw.workspace.runner import WorkspaceRunner
 
     with (

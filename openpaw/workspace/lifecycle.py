@@ -7,7 +7,7 @@ from openpaw.builtins.loader import BuiltinLoader
 from openpaw.channels.base import ChannelAdapter
 from openpaw.channels.factory import create_channel
 from openpaw.core.config import Config
-from openpaw.core.queue.manager import QueueManager
+from openpaw.runtime.queue.manager import QueueManager
 from openpaw.runtime.scheduling.heartbeat import HeartbeatScheduler
 from openpaw.runtime.session.manager import SessionManager
 

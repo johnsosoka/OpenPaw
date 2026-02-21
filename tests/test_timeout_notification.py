@@ -1,6 +1,6 @@
 """Tests for timeout notification enhancements."""
 
-from openpaw.prompts.system_events import (
+from openpaw.core.prompts.system_events import (
     TIMEOUT_NOTIFICATION_GENERIC,
     TIMEOUT_NOTIFICATION_TEMPLATE,
 )

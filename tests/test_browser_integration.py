@@ -115,5 +115,5 @@ class TestBrowserCleanupIntegration:
 
     def test_workspace_runner_has_get_browser_builtin(self):
         """WorkspaceRunner should have _get_browser_builtin method."""
-        from openpaw.main import WorkspaceRunner
+        from openpaw.workspace.runner import WorkspaceRunner
         assert hasattr(WorkspaceRunner, "_get_browser_builtin")

@@ -9,8 +9,9 @@ import pytest
 
 from openpaw.builtins.registry import BuiltinRegistry
 from openpaw.builtins.tools.spawn import SpawnToolBuiltin
-from openpaw.subagent.runner import SubAgentRunner
-from openpaw.subagent.store import SubAgentRequest, SubAgentResult, SubAgentStatus, SubAgentStore
+from openpaw.runtime.subagent import SubAgentRunner
+from openpaw.stores.subagent import SubAgentStore
+from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
 
 
 @pytest.fixture

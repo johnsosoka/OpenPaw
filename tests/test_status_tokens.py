@@ -68,7 +68,7 @@ async def test_status_with_tokens_today(
 ):
     """Test /status displays tokens used today."""
     # Log some token usage for today
-    from openpaw.core.metrics import InvocationMetrics
+    from openpaw.agent.metrics import InvocationMetrics
 
     metrics = InvocationMetrics(
         input_tokens=1000,
@@ -119,7 +119,7 @@ async def test_status_session_tokens_only(
     command_context: CommandContext,
 ):
     """Test /status shows correct session-specific token count."""
-    from openpaw.core.metrics import InvocationMetrics
+    from openpaw.agent.metrics import InvocationMetrics
 
     # Log tokens for session A
     token_logger.log(
@@ -216,7 +216,7 @@ async def test_status_number_formatting(
     command_context: CommandContext,
 ):
     """Test /status formats large numbers with commas."""
-    from openpaw.core.metrics import InvocationMetrics
+    from openpaw.agent.metrics import InvocationMetrics
 
     # Log a large token count
     token_logger.log(
@@ -248,7 +248,7 @@ async def test_status_uses_workspace_timezone(
     workspace_path: Path,
 ):
     """Test /status command uses workspace timezone for token aggregation."""
-    from openpaw.core.metrics import InvocationMetrics
+    from openpaw.agent.metrics import InvocationMetrics
 
     # Create a context with Mountain Time timezone
     mock_agent_runner = Mock()

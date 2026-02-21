@@ -4,18 +4,18 @@ All framework prompt text — system prompt sections, runtime injection
 templates, processor output formats, and command prompts — lives here.
 """
 
-from openpaw.prompts.commands import COMPACTED_TEMPLATE, SUMMARIZE_PROMPT
-from openpaw.prompts.framework import (
+from openpaw.core.prompts.commands import COMPACTED_TEMPLATE, SUMMARIZE_PROMPT
+from openpaw.core.prompts.framework import (
     FRAMEWORK_ORIENTATION,
     SECTION_SHELL_HYGIENE,
     build_capability_summary,
 )
-from openpaw.prompts.heartbeat import (
+from openpaw.core.prompts.heartbeat import (
     ACTIVE_TASKS_TEMPLATE,
     HEARTBEAT_PROMPT,
     build_task_summary,
 )
-from openpaw.prompts.system_events import (
+from openpaw.core.prompts.system_events import (
     FOLLOWUP_TEMPLATE,
     INTERRUPT_NOTIFICATION,
     STEER_SKIP_MESSAGE,

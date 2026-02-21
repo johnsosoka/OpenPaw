@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from openpaw.builtins.processors.file_persistence import FilePersistenceProcessor
-from openpaw.channels.base import Attachment, Message, MessageDirection
+from openpaw.model.message import Attachment, Message, MessageDirection
 
 
 @pytest.fixture
