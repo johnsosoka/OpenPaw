@@ -94,6 +94,7 @@ class QueueManager:
         channel_name: str,
         message: Any,
         mode: QueueMode | None = None,
+        steer_eligible: bool = True,
     ) -> None:
         """Submit a message for processing.
 
@@ -102,7 +103,20 @@ class QueueManager:
             channel_name: Which channel this came from.
             message: The message payload.
             mode: Override queue mode for this message.
+            steer_eligible: Whether this message can trigger steer/interrupt.
+                System events should pass False to avoid disrupting active runs.
         """
+        # Non-steer-eligible items bypass session buffer and debounce
+        if not steer_eligible:
+            item = QueueItem(
+                session_key=session_key,
+                payload=(channel_name, [message]),
+                mode=QueueMode.COLLECT,
+                steer_eligible=False,
+            )
+            await self.lane_queue.enqueue(item, lane_name="main")
+            return
+
         session = await self._get_or_create_session(session_key)
         effective_mode = mode or session.mode
 

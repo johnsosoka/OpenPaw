@@ -40,6 +40,34 @@ class StatusCommand(CommandHandler):
         lines = [f"Workspace: {context.workspace_name}"]
         lines.append(f"Model: {context.agent_runner.model_id}")
 
+        # Model override indicator
+        try:
+            factory = context.agent_factory
+            if factory and hasattr(factory, 'active_model') and hasattr(factory, 'configured_model'):
+                if factory.active_model != factory.configured_model:
+                    lines.append(f"Configured: {factory.configured_model} (overridden)")
+        except (AttributeError, TypeError):
+            # Agent factory might not support model tracking, skip
+            pass
+
+        # Context utilization
+        try:
+            state = context.session_manager.get_state(message.session_key)
+            if state and state.conversation_id:
+                thread_id = f"{message.session_key}:{state.conversation_id}"
+                context_info = await context.agent_runner.get_context_info(thread_id)
+
+                max_tokens = context_info.get("max_input_tokens", 200000)
+                approx_tokens = context_info.get("approximate_tokens", 0)
+                utilization = context_info.get("utilization", 0.0)
+
+                lines.append(
+                    f"Context: {utilization:.0%} (~{approx_tokens:,} / {max_tokens:,} tokens)"
+                )
+        except (AttributeError, TypeError):
+            # Context info might not be available, skip
+            pass
+
         # Session info
         state = context.session_manager.get_state(message.session_key)
         if state:
@@ -55,9 +83,26 @@ class StatusCommand(CommandHandler):
                     in_progress = sum(1 for t in tasks if t.status == "in_progress")
                     completed = sum(1 for t in tasks if t.status == "completed")
                     lines.append(f"Tasks: {pending} pending, {in_progress} in progress, {completed} completed")
-            except Exception:
+
+                    # Show in-progress task detail (max 3)
+                    in_progress_tasks = [t for t in tasks if t.status == "in_progress"]
+                    for task in in_progress_tasks[:3]:
+                        lines.append(f"  - {task.description}")
+            except (AttributeError, TypeError):
                 # Task system might not be available, skip
                 pass
+
+        # Active subagents
+        try:
+            if context.subagent_store:
+                active_subagents = context.subagent_store.list_active()
+                if active_subagents:
+                    labels = [req.label for req in active_subagents[:5]]
+                    label_str = ", ".join(labels)
+                    lines.append(f"Subagents: {len(active_subagents)} active ({label_str})")
+        except (AttributeError, TypeError):
+            # Subagent store might not be available, skip
+            pass
 
         # Token usage info
         try:
@@ -75,7 +120,7 @@ class StatusCommand(CommandHandler):
                 )
             if session.total_tokens > 0:
                 lines.append(f"Tokens this session: {session.total_tokens:,}")
-        except Exception:
+        except (AttributeError, TypeError):
             # Token tracking might not be available, skip
             pass
 

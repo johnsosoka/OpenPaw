@@ -38,6 +38,9 @@ class MessageProcessor:
         workspace_name: str,
         token_logger: Any,
         logger: logging.Logger,
+        conversation_archiver: Any = None,
+        auto_compact_config: Any = None,
+        user_aliases: dict[int, str] | None = None,
     ):
         """Initialize message processor.
 
@@ -52,6 +55,9 @@ class MessageProcessor:
             workspace_name: Name of the workspace.
             token_logger: Token usage logger.
             logger: Logger instance.
+            conversation_archiver: ConversationArchiver instance.
+            auto_compact_config: AutoCompactConfig instance.
+            user_aliases: Optional mapping of user IDs to display names.
         """
         self._agent_runner = agent_runner
         self._session_manager = session_manager
@@ -63,6 +69,86 @@ class MessageProcessor:
         self._workspace_name = workspace_name
         self._token_logger = token_logger
         self._logger = logger
+        self._conversation_archiver = conversation_archiver
+        self._auto_compact_config = auto_compact_config
+        self._user_aliases = user_aliases or {}
+
+    def _resolve_user_name(self, message: Message) -> str | None:
+        """Resolve display name for a message's user.
+
+        Args:
+            message: The message to resolve user name for.
+
+        Returns:
+            Display name if available, None otherwise.
+        """
+        # Opt-in: only resolve if aliases configured
+        if not self._user_aliases:
+            return None
+
+        # Skip system messages
+        if message.user_id == "system":
+            return None
+
+        # Try alias lookup (with numeric conversion fallback)
+        try:
+            name = self._user_aliases.get(int(message.user_id))
+            if name:
+                return name
+        except ValueError:
+            pass  # user_id not numeric, skip alias lookup
+
+        # Fall through to metadata
+        first_name = message.metadata.get("first_name")
+        if first_name:
+            return str(first_name)
+
+        username = message.metadata.get("username")
+        if username:
+            return str(username)
+
+        return None
+
+    def _build_combined_content(self, messages: list[Message]) -> str:
+        """Build combined content from messages with optional user name prefixes.
+
+        Args:
+            messages: List of messages to combine.
+
+        Returns:
+            Combined message content with optional [Name] prefixes.
+        """
+        lines = []
+        for msg in messages:
+            name = self._resolve_user_name(msg)
+            if name:
+                lines.append(f"[{name}]: {msg.content}")
+            else:
+                lines.append(msg.content)
+        return "\n".join(lines)
+
+    def _build_combined_content_from_tuples(self, tuples: list[tuple[str, Any]]) -> str:
+        """Build combined content from (channel_name, msg) tuples.
+
+        Args:
+            tuples: List of (channel_name, msg) tuples where msg is Message or str.
+
+        Returns:
+            Combined message content with optional [Name] prefixes.
+        """
+        lines = []
+        for _channel_name, msg in tuples:
+            if hasattr(msg, 'content'):
+                # It's a Message object
+                name = self._resolve_user_name(msg)
+                if name:
+                    lines.append(f"[{name}]: {msg.content}")
+                else:
+                    lines.append(msg.content)
+            else:
+                # Raw string
+                lines.append(str(msg))
+        return "\n".join(lines)
 
     async def process_messages(
         self,
@@ -77,10 +163,15 @@ class MessageProcessor:
             messages: List of messages to process.
             channel: Channel adapter for sending responses.
         """
-        combined_content = "\n".join(m.content for m in messages)
+        combined_content = self._build_combined_content(messages)
         thread_id = self._session_manager.get_thread_id(session_key)
         followup_depth = 0
         max_followup_depth = 5
+
+        # Check if auto-compact should trigger
+        new_thread_id = await self._check_auto_compact(session_key, thread_id, channel)
+        if new_thread_id:
+            thread_id = new_thread_id
 
         while True:
             # Capture steer state before finally block resets it
@@ -247,13 +338,7 @@ class MessageProcessor:
                 # Use the pending messages as the new input
                 pending_msgs = e.pending_messages
                 if pending_msgs:
-                    new_contents = []
-                    for _channel_name, msg in pending_msgs:
-                        if hasattr(msg, 'content'):
-                            new_contents.append(msg.content)
-                        else:
-                            new_contents.append(str(msg))
-                    combined_content = "\n".join(new_contents)
+                    combined_content = self._build_combined_content_from_tuples(pending_msgs)
 
                 followup_depth = 0  # Reset followup depth on interrupt
                 continue  # Re-enter loop with new message
@@ -272,13 +357,7 @@ class MessageProcessor:
 
             # Check steer (captured before reset)
             if steered and steer_messages:
-                new_contents = []
-                for _channel_name, msg in steer_messages:
-                    if hasattr(msg, 'content'):
-                        new_contents.append(msg.content)
-                    else:
-                        new_contents.append(str(msg))
-                combined_content = "\n".join(new_contents)
+                combined_content = self._build_combined_content_from_tuples(steer_messages)
                 followup_depth = 0  # Reset followup depth on steer
                 self._logger.info(f"Steer redirect: processing {len(steer_messages)} new message(s)")
                 continue
@@ -316,6 +395,90 @@ class MessageProcessor:
         followup_tool = self._builtin_loader.get_tool_instance("followup")
         if followup_tool:
             followup_tool.reset()
+
+    async def _check_auto_compact(
+        self,
+        session_key: str,
+        thread_id: str,
+        channel: ChannelAdapter | None,
+    ) -> str | None:
+        """Check if auto-compact should trigger and perform it if needed.
+
+        Returns:
+            New thread_id if compaction occurred, None otherwise.
+        """
+        if not self._auto_compact_config or not self._auto_compact_config.enabled:
+            return None
+        if not self._conversation_archiver:
+            return None
+
+        try:
+            context_info = await self._agent_runner.get_context_info(thread_id)
+            utilization = context_info.get("utilization", 0.0)
+
+            if utilization < self._auto_compact_config.trigger:
+                return None
+
+            self._logger.info(
+                f"Auto-compact triggered: {utilization:.1%} utilization "
+                f"(threshold: {self._auto_compact_config.trigger:.0%}) "
+                f"for session {session_key}"
+            )
+
+            # Parse conversation_id from thread_id (format: "{session_key}:{conversation_id}")
+            # session_key contains one colon (e.g., "telegram:123"), so split from the right
+            parts = thread_id.rsplit(":", 1)
+            conversation_id = parts[-1] if len(parts) == 2 else thread_id
+
+            # Archive the current conversation
+            await self._conversation_archiver.archive(
+                checkpointer=self._agent_runner.checkpointer,
+                thread_id=thread_id,
+                session_key=session_key,
+                conversation_id=conversation_id,
+                tags=["auto-compact"],
+            )
+
+            # Generate summary using agent
+            from openpaw.core.prompts.commands import SUMMARIZE_PROMPT
+            summary = await self._agent_runner.run(
+                message=SUMMARIZE_PROMPT,
+                thread_id=thread_id,
+            )
+
+            # Rotate to new conversation
+            new_conversation_id = self._session_manager.new_conversation(session_key)
+            new_thread_id = f"{session_key}:{new_conversation_id}"
+
+            # Inject summary into new thread
+            from openpaw.core.prompts.commands import AUTO_COMPACT_TEMPLATE
+            summary_message = AUTO_COMPACT_TEMPLATE.format(summary=summary)
+            await self._agent_runner.run(
+                message=summary_message,
+                thread_id=new_thread_id,
+            )
+
+            # Notify user if configured
+            if channel:
+                msg_count = context_info.get("message_count", 0)
+                approx_tokens = context_info.get("approximate_tokens", 0)
+                await channel.send_message(
+                    session_key,
+                    f"Conversation auto-compacted ({msg_count} messages, ~{approx_tokens:,} tokens). "
+                    f"Summary preserved in new conversation."
+                )
+
+            self._logger.info(
+                f"Auto-compact complete: {conversation_id} -> {new_conversation_id} "
+                f"({context_info.get('message_count', 0)} messages, "
+                f"~{context_info.get('approximate_tokens', 0):,} tokens)"
+            )
+
+            return new_thread_id
+
+        except Exception as e:
+            self._logger.error(f"Auto-compact failed for {session_key}: {e}", exc_info=True)
+            return None
 
     async def _send_pending_audio(self, channel: ChannelAdapter, session_key: str) -> None:
         """Check for and send any pending TTS audio."""

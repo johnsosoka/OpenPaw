@@ -278,6 +278,9 @@ class WorkspaceRunner:
             workspace_name=self.workspace_name,
             token_logger=self._token_logger,
             logger=self.logger,
+            conversation_archiver=self._conversation_archiver,
+            auto_compact_config=self._workspace.config.auto_compact if self._workspace.config else None,
+            user_aliases=workspace_channel_config.get("user_aliases", {}),
         )
 
         # Create lifecycle manager
@@ -431,6 +434,8 @@ class WorkspaceRunner:
             conversation_archiver=self._conversation_archiver,
             browser_builtin=self._get_browser_builtin(),
             task_store=self._task_store,
+            subagent_store=self._subagent_store,
+            agent_factory=self._agent_factory,
         )
 
     async def _handle_inbound_message(self, message: Message) -> None:
@@ -453,6 +458,10 @@ class WorkspaceRunner:
                     await self._inject_new_session_prompt(message.session_key)
 
                 return
+
+        # Notify user if slow processing is expected (Docling OCR, Whisper transcription)
+        if self._processors and message.attachments:
+            await self._notify_processing_start(message)
 
         # Process through inbound processors
         processed_message = message
@@ -562,6 +571,11 @@ class WorkspaceRunner:
 
         self.logger.info(f"Workspace runner '{self.workspace_name}' is running")
 
+        # Lifecycle notification: startup
+        lifecycle = self._workspace.config.lifecycle if self._workspace.config else None
+        if lifecycle and lifecycle.notify_startup:
+            await self._notify_lifecycle("Started")
+
     def _connect_spawn_tool_to_runner(self) -> None:
         """Connect SpawnTool builtin to the live SubAgentRunner."""
         try:
@@ -618,6 +632,7 @@ class WorkspaceRunner:
                 channel_name=channel_name,
                 message=msg,
                 mode=QueueMode.COLLECT,
+                steer_eligible=False,
             )
 
             self.logger.info(f"Injected system event into queue for session: {session_key}")
@@ -628,9 +643,67 @@ class WorkspaceRunner:
                 exc_info=True,
             )
 
+    async def _notify_processing_start(self, message: Message) -> None:
+        """Notify user that file processing is starting (Docling, Whisper, etc.).
+
+        Only sends if attachments match processor-supported types. Best-effort.
+        """
+        from pathlib import Path
+
+        doc_extensions = {".pdf", ".docx", ".pptx", ".xlsx"}
+        audio_types = {"audio", "voice"}
+
+        has_documents = False
+        has_audio = False
+        for att in message.attachments:
+            if att.type in audio_types:
+                has_audio = True
+            elif att.filename:
+                ext = Path(att.filename).suffix.lower()
+                if ext in doc_extensions:
+                    has_documents = True
+
+        if not has_documents and not has_audio:
+            return
+
+        parts = []
+        if has_documents:
+            parts.append("Converting document")
+        if has_audio:
+            parts.append("Transcribing audio")
+        notice = f"{' and '.join(parts)}... this may take a moment."
+
+        channel = self._channels.get(message.channel)
+        if channel:
+            try:
+                await channel.send_message(message.session_key, notice)
+            except Exception as e:
+                self.logger.debug(f"Failed to send processing notification: {e}")
+
     def _get_browser_builtin(self) -> Any | None:
         """Get the browser builtin instance if loaded."""
         return self._builtin_loader.get_tool_instance("browser")
+
+    async def _notify_lifecycle(self, event: str, detail: str | None = None) -> None:
+        """Send a lifecycle notification to all channels.
+
+        Args:
+            event: Event name (startup, shutdown, auto_compact).
+            detail: Optional detail message.
+        """
+        message = f"[{self.workspace_name}] {event}"
+        if detail:
+            message += f": {detail}"
+
+        for channel in self._channels.values():
+            try:
+                # Send to first allowed user in each channel
+                allowed_users = getattr(channel, '_allowed_users', [])
+                if allowed_users:
+                    session_key = f"{channel.name}:{allowed_users[0]}"
+                    await channel.send_message(session_key, message)
+            except Exception as e:
+                self.logger.debug(f"Failed to send lifecycle notification via {channel}: {e}")
 
     async def _archive_active_conversations(self) -> None:
         """Archive all active conversations on shutdown."""
@@ -668,6 +741,11 @@ class WorkspaceRunner:
         """Stop workspace runner gracefully."""
         self.logger.info(f"Stopping workspace runner: {self.workspace_name}")
         self._running = False
+
+        # Lifecycle notification: shutdown
+        lifecycle = self._workspace.config.lifecycle if self._workspace.config else None
+        if lifecycle and lifecycle.notify_shutdown:
+            await self._notify_lifecycle("Shutting down")
 
         # Cancel queue processor
         if self._queue_processor_task:

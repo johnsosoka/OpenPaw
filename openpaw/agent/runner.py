@@ -37,6 +37,86 @@ BEDROCK_TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 MAX_TOOL_NAME_LENGTH = 64
 
 
+def create_chat_model(
+    model_str: str,
+    api_key: str | None,
+    temperature: float,
+    region: str | None = None,
+    extra_kwargs: dict[str, Any] | None = None,
+) -> BaseChatModel:
+    """Create a chat model from a provider:model string.
+
+    Standalone function usable by both AgentRunner and model validation.
+
+    Args:
+        model_str: Model identifier in "provider:model" format.
+        api_key: API key for the model provider (not used for Bedrock).
+        temperature: Model temperature setting.
+        region: AWS region for Bedrock models (e.g., us-east-1).
+        extra_kwargs: Additional kwargs to pass to the model constructor
+            (e.g., base_url for OpenAI-compatible APIs).
+
+    Returns:
+        Configured BaseChatModel instance.
+
+    Raises:
+        ValueError: If provider is not supported.
+    """
+    # Parse provider from model_str (format: "provider:model_name")
+    if ":" in model_str:
+        provider, model_name = model_str.split(":", 1)
+    else:
+        provider = "openai"
+        model_name = model_str
+
+    # Build kwargs common to all providers
+    kwargs: dict[str, Any] = {
+        "model": model_name,
+        "temperature": temperature,
+    }
+
+    # Merge extra kwargs from config (base_url, model_kwargs, extra_body, etc.)
+    if extra_kwargs:
+        kwargs.update(extra_kwargs)
+
+    # Flatten model_kwargs into direct constructor args so that params like
+    # extra_body reach the provider class directly instead of being silently dropped
+    nested_model_kwargs = kwargs.pop("model_kwargs", None)
+    if nested_model_kwargs and isinstance(nested_model_kwargs, dict):
+        kwargs.update(nested_model_kwargs)
+
+    if provider == "openai":
+        from langchain_openai import ChatOpenAI
+
+        if api_key:
+            kwargs["api_key"] = api_key
+        logger.info(f"Creating ChatOpenAI: model={model_name}, kwargs={list(kwargs.keys())}")
+        return ChatOpenAI(**kwargs)
+
+    if provider == "anthropic":
+        from langchain_anthropic import ChatAnthropic
+
+        if api_key:
+            kwargs["api_key"] = api_key
+        logger.info(f"Creating ChatAnthropic: model={model_name}")
+        return ChatAnthropic(**kwargs)
+
+    if provider in ("bedrock_converse", "bedrock"):
+        from langchain_aws import ChatBedrockConverse
+
+        if region:
+            kwargs["region_name"] = region
+        # Bedrock uses AWS credentials, not api_key
+        kwargs.pop("api_key", None)
+        logger.info(f"Creating ChatBedrockConverse: model={model_name}, kwargs_keys={list(kwargs.keys())}")
+        return ChatBedrockConverse(**kwargs)
+
+    raise ValueError(
+        f"Unsupported model provider: '{provider}'. "
+        f"Supported: openai, anthropic, bedrock_converse"
+    )
+
+
 class AgentRunner:
     """Runs LangGraph agent with OpenPaw workspace configuration.
 
@@ -169,6 +249,15 @@ class AgentRunner:
         """
         return self._last_tools_used
 
+    @property
+    def model_instance(self) -> BaseChatModel | None:
+        """Get the current model instance for profile access.
+
+        Returns:
+            The currently configured BaseChatModel instance, or None if not yet built.
+        """
+        return getattr(self, '_model_instance', None)
+
     def update_checkpointer(self, checkpointer: Any) -> None:
         """Update the checkpointer and rebuild the agent graph.
 
@@ -181,6 +270,36 @@ class AgentRunner:
         self._agent = self._build_agent()
         logger.info(f"Updated checkpointer for workspace: {self.workspace.name}")
 
+    def update_model(
+        self,
+        model: str,
+        api_key: str | None = None,
+        temperature: float | None = None,
+    ) -> None:
+        """Update model configuration and rebuild the agent graph.
+
+        Conversation state is preserved (checkpointer is model-independent).
+
+        Args:
+            model: New model identifier (provider:model format).
+            api_key: Optional new API key for the model provider.
+            temperature: Optional new temperature setting.
+        """
+        self.model_id = model
+        if api_key is not None:
+            self.api_key = api_key
+        if temperature is not None:
+            self.temperature = temperature
+
+        # Re-check thinking model status
+        self.strip_thinking = any(
+            thinking_model in self.model_id.lower()
+            for thinking_model in THINKING_MODELS
+        )
+
+        self._agent = self._build_agent()
+        logger.info(f"Model updated to {model} for workspace: {self.workspace.name}")
+
     def rebuild_agent(self) -> None:
         """Reload workspace files and rebuild the agent graph.
 
@@ -191,6 +310,48 @@ class AgentRunner:
         self.workspace.reload_files()
         self._agent = self._build_agent()
         logger.info(f"Rebuilt agent with fresh workspace files: {self.workspace.name}")
+
+    async def get_context_info(self, thread_id: str) -> dict[str, Any]:
+        """Get context window utilization for a conversation thread.
+
+        Args:
+            thread_id: The conversation thread ID to analyze.
+
+        Returns:
+            dict with:
+                - max_input_tokens: Model's maximum input context window
+                - approximate_tokens: Estimated token count in conversation
+                - utilization: Float 0-1 representing context usage
+                - message_count: Number of messages in the thread
+        """
+        from langchain_core.messages.utils import count_tokens_approximately
+
+        config = {"configurable": {"thread_id": thread_id}}
+        state = await self._agent.aget_state(config)
+
+        if not state or not state.values:
+            return {
+                "max_input_tokens": 0,
+                "approximate_tokens": 0,
+                "utilization": 0.0,
+                "message_count": 0,
+            }
+
+        messages = state.values.get("messages", [])
+        approx_tokens = count_tokens_approximately(
+            messages, use_usage_metadata_scaling=True
+        )
+
+        max_input = 200000  # fallback
+        if self._model_instance and hasattr(self._model_instance, 'profile') and self._model_instance.profile:
+            max_input = self._model_instance.profile.get("max_input_tokens", 200000)
+
+        return {
+            "max_input_tokens": max_input,
+            "approximate_tokens": approx_tokens,
+            "utilization": approx_tokens / max_input if max_input > 0 else 0.0,
+            "message_count": len(messages),
+        }
 
     def _validate_tool_names(self, tools: list[Any]) -> None:
         """Validate tool names comply with Bedrock requirements.
@@ -227,10 +388,7 @@ class AgentRunner:
     def _create_model(self) -> BaseChatModel:
         """Create the appropriate chat model based on provider.
 
-        Directly instantiates provider-specific classes instead of using
-        init_chat_model, which silently drops kwargs like extra_body.
-
-        Supported providers: openai, anthropic, bedrock_converse.
+        Delegates to create_chat_model() module-level function.
 
         Returns:
             Configured BaseChatModel instance.
@@ -238,57 +396,12 @@ class AgentRunner:
         Raises:
             ValueError: If provider is not supported.
         """
-        # Parse provider from model_id (format: "provider:model_name")
-        if ":" in self.model_id:
-            provider, model_name = self.model_id.split(":", 1)
-        else:
-            provider = "openai"
-            model_name = self.model_id
-
-        # Build kwargs common to all providers
-        kwargs: dict[str, Any] = {
-            "model": model_name,
-            "temperature": self.temperature,
-        }
-
-        # Merge extra kwargs from config (base_url, model_kwargs, extra_body, etc.)
-        kwargs.update(self.extra_model_kwargs)
-
-        # Flatten model_kwargs into direct constructor args so that params like
-        # extra_body reach the provider class directly instead of being silently dropped
-        nested_model_kwargs = kwargs.pop("model_kwargs", None)
-        if nested_model_kwargs and isinstance(nested_model_kwargs, dict):
-            kwargs.update(nested_model_kwargs)
-
-        if provider == "openai":
-            from langchain_openai import ChatOpenAI
-
-            if self.api_key:
-                kwargs["api_key"] = self.api_key
-            logger.info(f"Creating ChatOpenAI: model={model_name}, kwargs={list(kwargs.keys())}")
-            return ChatOpenAI(**kwargs)
-
-        if provider == "anthropic":
-            from langchain_anthropic import ChatAnthropic
-
-            if self.api_key:
-                kwargs["api_key"] = self.api_key
-            logger.info(f"Creating ChatAnthropic: model={model_name}")
-            return ChatAnthropic(**kwargs)
-
-        if provider in ("bedrock_converse", "bedrock"):
-            from langchain_aws import ChatBedrockConverse
-
-            if self.region:
-                kwargs["region_name"] = self.region
-            # Bedrock uses AWS credentials, not api_key
-            kwargs.pop("api_key", None)
-            logger.info(f"Creating ChatBedrockConverse: model={model_name}, kwargs_keys={list(kwargs.keys())}")
-            return ChatBedrockConverse(**kwargs)
-
-        raise ValueError(
-            f"Unsupported model provider: '{provider}'. "
-            f"Supported: openai, anthropic, bedrock_converse"
+        return create_chat_model(
+            model_str=self.model_id,
+            api_key=self.api_key,
+            temperature=self.temperature,
+            region=self.region,
+            extra_kwargs=self.extra_model_kwargs,
         )
 
     def _build_agent(self) -> Any:
@@ -304,6 +417,7 @@ class AgentRunner:
         """
         # 1. Initialize model directly via provider class
         model = self._create_model()
+        self._model_instance = model
 
         # 2. Create FilesystemTools for workspace
         workspace_root = self.workspace.path.resolve()

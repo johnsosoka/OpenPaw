@@ -3,6 +3,7 @@
 from openpaw.channels.commands.base import CommandHandler
 from openpaw.channels.commands.handlers.compact import CompactCommand
 from openpaw.channels.commands.handlers.help import HelpCommand
+from openpaw.channels.commands.handlers.model import ModelCommand
 from openpaw.channels.commands.handlers.new import NewCommand
 from openpaw.channels.commands.handlers.queue_mode import QueueModeCommand
 from openpaw.channels.commands.handlers.start import StartCommand
@@ -22,6 +23,7 @@ def get_framework_commands() -> list[CommandHandler]:
         HelpCommand(),
         QueueModeCommand(),
         StatusCommand(),
+        ModelCommand(),
     ]
 
 
@@ -29,6 +31,7 @@ __all__ = [
     "CompactCommand",
     "get_framework_commands",
     "HelpCommand",
+    "ModelCommand",
     "NewCommand",
     "QueueModeCommand",
     "StartCommand",

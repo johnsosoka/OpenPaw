@@ -22,7 +22,8 @@ dependencies = [
     "python-dotenv (>=1.2.1,<2.0.0)",
     "docling (>=2.72.0,<3.0.0)",
     "playwright (>=1.58.0,<2.0.0)",
-    "easyocr (>=1.7.2,<2.0.0)"
+    "easyocr (>=1.7.2,<2.0.0)",
+    "opencv-python-headless (>=4.13.0.92,<5.0.0.0)"
 ]
 
 [project.optional-dependencies]

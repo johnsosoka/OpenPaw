@@ -61,6 +61,10 @@ class WorkspaceChannelConfig(BaseModel):
     allowed_users: list[int] = Field(default_factory=list, description="Allowed user IDs")
     allowed_groups: list[int] = Field(default_factory=list, description="Allowed group IDs")
     allow_all: bool = Field(default=False, description="Allow all users (insecure, use with caution)")
+    user_aliases: dict[int, str] = Field(
+        default_factory=dict,
+        description="Map user IDs to display names for message attribution",
+    )
 
     model_config = {"extra": "allow"}
 
@@ -315,6 +319,32 @@ class ToolTimeoutsConfig(BaseModel):
     )
 
 
+class AutoCompactConfig(BaseModel):
+    """Configuration for automatic context compaction."""
+
+    enabled: bool = Field(default=False, description="Enable automatic compaction when context window fills")
+    trigger: float = Field(default=0.8, description="Context utilization fraction to trigger compaction (0.0-1.0)")
+    summary_model: str | None = Field(
+        default=None, description="Model for summary generation (null = use workspace model)"
+    )
+
+    @field_validator("trigger")
+    @classmethod
+    def validate_trigger(cls, v: float) -> float:
+        """Validate trigger is a fraction between 0.0 and 1.0."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("trigger must be between 0.0 and 1.0")
+        return v
+
+
+class LifecycleConfig(BaseModel):
+    """Configuration for lifecycle event notifications."""
+
+    notify_startup: bool = Field(default=False, description="Send notification when workspace starts")
+    notify_shutdown: bool = Field(default=True, description="Send notification when workspace stops")
+    notify_auto_compact: bool = Field(default=True, description="Send notification on auto-compact")
+
+
 class WorkspaceConfig(BaseModel):
     """Configuration for a workspace agent (loaded from agent.yaml)."""
 
@@ -342,6 +372,14 @@ class WorkspaceConfig(BaseModel):
     memory: MemoryConfig = Field(
         default_factory=MemoryConfig,
         description="Conversation memory and vector search configuration",
+    )
+    auto_compact: AutoCompactConfig = Field(
+        default_factory=AutoCompactConfig,
+        description="Auto-compact configuration",
+    )
+    lifecycle: LifecycleConfig = Field(
+        default_factory=LifecycleConfig,
+        description="Lifecycle notification configuration",
     )
 
     @field_validator("timezone")

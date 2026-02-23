@@ -2,14 +2,30 @@
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from openpaw.agent import AgentRunner
 from openpaw.core.config import WorkspaceToolsConfig
 
 
+@dataclass
+class RuntimeModelOverride:
+    """Runtime override for model parameters. Ephemeral (lost on restart)."""
+    model: str | None = None
+    temperature: float | None = None
+
+
 class AgentFactory:
     """Factory for creating configured AgentRunner instances."""
+
+    # Provider to environment variable mapping for API keys
+    _PROVIDER_KEY_ENV_VARS = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "bedrock_converse": None,
+        "bedrock": None,
+    }
 
     def __init__(
         self,
@@ -45,7 +61,7 @@ class AgentFactory:
             logger: Logger instance.
         """
         self._workspace = workspace
-        self._model = model
+        self._configured_model = model
         self._api_key = api_key
         self._max_turns = max_turns
         self._temperature = temperature
@@ -57,6 +73,68 @@ class AgentFactory:
         self._extra_model_kwargs = extra_model_kwargs
         self._middleware = middleware
         self._logger = logger
+        self._runtime_override: RuntimeModelOverride | None = None
+
+    @property
+    def active_model(self) -> str:
+        """Return currently active model (runtime override or configured)."""
+        if self._runtime_override and self._runtime_override.model:
+            return self._runtime_override.model
+        return self._configured_model
+
+    @property
+    def configured_model(self) -> str:
+        """Return statically configured model (ignoring overrides)."""
+        return self._configured_model
+
+    def set_runtime_override(self, override: RuntimeModelOverride) -> None:
+        """Apply a runtime model override for the main agent."""
+        self._runtime_override = override
+
+    def clear_runtime_override(self) -> None:
+        """Clear runtime override, reverting to configured model."""
+        self._runtime_override = None
+
+    def _resolve_api_key(self, model_str: str) -> str | None:
+        """Resolve API key for the given model's provider."""
+        import os
+
+        provider = model_str.split(":")[0] if ":" in model_str else "openai"
+        configured_provider = self._configured_model.split(":")[0] if ":" in self._configured_model else "openai"
+
+        if provider == configured_provider:
+            return self._api_key
+        if provider in ("bedrock_converse", "bedrock"):
+            return None
+
+        env_var = self._PROVIDER_KEY_ENV_VARS.get(provider)
+        if env_var:
+            return os.environ.get(env_var)
+        return None
+
+    def validate_model(self, model_str: str) -> tuple[bool, str]:
+        """Validate a model string by attempting instantiation."""
+        from openpaw.agent.runner import create_chat_model
+
+        if ":" in model_str:
+            provider, _model_name = model_str.split(":", 1)
+        else:
+            provider = "openai"
+
+        supported = {"openai", "anthropic", "bedrock_converse", "bedrock"}
+        if provider not in supported:
+            return False, f"Unsupported provider: '{provider}'. Supported: {', '.join(sorted(supported))}"
+
+        api_key = self._resolve_api_key(model_str)
+        if provider not in ("bedrock_converse", "bedrock") and not api_key:
+            env_var = self._PROVIDER_KEY_ENV_VARS.get(provider, f"{provider.upper()}_API_KEY")
+            return False, f"No API key for provider '{provider}'. Set {env_var} in environment."
+
+        try:
+            create_chat_model(model_str, api_key, self._temperature, self._region)
+            return True, f"Model validated: {model_str}"
+        except Exception as e:
+            return False, f"Invalid model '{model_str}': {e}"
 
     def create_agent(self, checkpointer: Any | None = None) -> AgentRunner:
         """Create a configured AgentRunner instance.
@@ -69,12 +147,18 @@ class AgentFactory:
         """
         all_tools = list(self._builtin_tools) + list(self._workspace_tools)
 
+        model = self.active_model
+        api_key = self._resolve_api_key(model) if self._runtime_override else self._api_key
+        temperature = self._temperature
+        if self._runtime_override and self._runtime_override.temperature is not None:
+            temperature = self._runtime_override.temperature
+
         return AgentRunner(
             workspace=self._workspace,
-            model=self._model,
-            api_key=self._api_key,
+            model=model,
+            api_key=api_key,
             max_turns=self._max_turns,
-            temperature=self._temperature,
+            temperature=temperature,
             checkpointer=checkpointer,
             tools=all_tools if all_tools else None,
             region=self._region,
@@ -87,6 +171,8 @@ class AgentFactory:
     def create_stateless_agent(self) -> AgentRunner:
         """Create a stateless agent for scheduled tasks (no checkpointer).
 
+        Always uses configured model, ignoring runtime overrides.
+
         Returns:
             AgentRunner without conversation state.
         """
@@ -94,7 +180,7 @@ class AgentFactory:
 
         return AgentRunner(
             workspace=self._workspace,
-            model=self._model,
+            model=self._configured_model,
             api_key=self._api_key,
             max_turns=self._max_turns,
             temperature=self._temperature,

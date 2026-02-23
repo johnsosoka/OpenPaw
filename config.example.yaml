@@ -58,3 +58,25 @@ builtins:
   #     blocked_domains: []
   #     timeout_seconds: 30
   #     persist_cookies: false
+
+# Per-workspace settings (also configurable in agent.yaml)
+# auto_compact:
+#   enabled: false          # Auto-compact when context window fills
+#   trigger: 0.8            # Fraction of context window to trigger (0.0-1.0)
+#   summary_model: null     # Model for summaries (null = use workspace model)
+
+# lifecycle:
+#   notify_startup: false   # Notify users when workspace starts
+#   notify_shutdown: true   # Notify users when workspace stops
+#   notify_auto_compact: true  # Notify users on auto-compact
+
+# Per-workspace channel settings (in agent.yaml, not here)
+# channel:
+#   type: telegram
+#   token: ${TELEGRAM_BOT_TOKEN}
+#   allowed_users:
+#     - 123456789
+#     - 987654321
+#   user_aliases:             # Map user IDs to display names
+#     123456789: "John"
+#     987654321: "Sarah"

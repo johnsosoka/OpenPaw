@@ -3,7 +3,7 @@
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -288,3 +288,216 @@ async def test_status_uses_workspace_timezone(
     # Should show tokens (timezone-aware day boundary)
     assert "Tokens" in result.response
     assert "1,500" in result.response
+
+
+@pytest.mark.asyncio
+async def test_status_shows_model_override(workspace_path: Path):
+    """Test /status shows configured model when overridden."""
+    from openpaw.workspace.agent_factory import AgentFactory, RuntimeModelOverride
+
+    # Create a mock factory with an override
+    mock_workspace = Mock()
+    mock_workspace.name = "test"
+    mock_workspace.path = workspace_path
+
+    with patch("openpaw.agent.runner.AgentRunner.__init__", return_value=None):
+        factory = AgentFactory(
+            workspace=mock_workspace,
+            model="anthropic:claude-test",
+            api_key="test-key",
+            max_turns=50,
+            temperature=0.7,
+            region=None,
+            timeout_seconds=300.0,
+            builtin_tools=[],
+            workspace_tools=[],
+            enabled_builtin_names=[],
+            extra_model_kwargs={},
+            middleware=[],
+            logger=Mock(),
+        )
+
+    # Set an override
+    override = RuntimeModelOverride(model="openai:gpt-4")
+    factory.set_runtime_override(override)
+
+    # Create context with factory
+    mock_agent_runner = Mock()
+    mock_agent_runner.model_id = "openai:gpt-4"
+    session_manager = SessionManager(workspace_path)
+
+    context = CommandContext(
+        channel=Mock(),
+        session_manager=session_manager,
+        checkpointer=Mock(),
+        agent_runner=mock_agent_runner,
+        workspace_name="test_workspace",
+        workspace_path=workspace_path,
+        queue_manager=Mock(),
+        workspace_timezone="UTC",
+        agent_factory=factory,
+    )
+
+    command = StatusCommand()
+    message = Mock()
+    message.session_key = "telegram:12345"
+
+    result = await command.handle(message, "", context)
+
+    # Should show configured model with override indicator
+    assert "Configured: anthropic:claude-test (overridden)" in result.response
+
+
+@pytest.mark.asyncio
+async def test_status_shows_context_utilization(workspace_path: Path):
+    """Test /status shows context utilization when available."""
+    mock_agent_runner = Mock()
+    mock_agent_runner.model_id = "test-model"
+
+    # Mock get_context_info
+    async def mock_get_context_info(thread_id):
+        return {
+            "max_input_tokens": 128000,
+            "approximate_tokens": 64000,
+            "utilization": 0.5,
+            "message_count": 10,
+        }
+
+    mock_agent_runner.get_context_info = mock_get_context_info
+
+    session_manager = SessionManager(workspace_path)
+    # Create a session state by getting thread_id (auto-creates)
+    session_manager.get_thread_id("telegram:12345")
+
+    context = CommandContext(
+        channel=Mock(),
+        session_manager=session_manager,
+        checkpointer=Mock(),
+        agent_runner=mock_agent_runner,
+        workspace_name="test_workspace",
+        workspace_path=workspace_path,
+        queue_manager=Mock(),
+        workspace_timezone="UTC",
+    )
+
+    command = StatusCommand()
+    message = Mock()
+    message.session_key = "telegram:12345"
+
+    result = await command.handle(message, "", context)
+
+    # Should show context utilization
+    assert "Context: 50%" in result.response
+    assert "64,000" in result.response
+    assert "128,000" in result.response
+
+
+@pytest.mark.asyncio
+async def test_status_shows_active_subagents(workspace_path: Path):
+    """Test /status shows active subagents when available."""
+    from openpaw.model.subagent import SubAgentRequest, SubAgentStatus
+
+    mock_agent_runner = Mock()
+    mock_agent_runner.model_id = "test-model"
+    session_manager = SessionManager(workspace_path)
+
+    # Create mock subagent store with active requests
+    request1 = SubAgentRequest(
+        id="req1",
+        task="Task 1",
+        label="research-task",
+        status=SubAgentStatus.RUNNING,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+    )
+    request2 = SubAgentRequest(
+        id="req2",
+        task="Task 2",
+        label="analysis-task",
+        status=SubAgentStatus.RUNNING,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+    )
+    subagent_store = Mock()
+    subagent_store.list_active = Mock(return_value=[request1, request2])
+
+    context = CommandContext(
+        channel=Mock(),
+        session_manager=session_manager,
+        checkpointer=Mock(),
+        agent_runner=mock_agent_runner,
+        workspace_name="test_workspace",
+        workspace_path=workspace_path,
+        queue_manager=Mock(),
+        workspace_timezone="UTC",
+        subagent_store=subagent_store,
+    )
+
+    command = StatusCommand()
+    message = Mock()
+    message.session_key = "telegram:12345"
+
+    result = await command.handle(message, "", context)
+
+    # Should show active subagents
+    assert "Subagents: 2 active" in result.response
+    assert "research-task" in result.response
+    assert "analysis-task" in result.response
+
+
+@pytest.mark.asyncio
+async def test_status_shows_in_progress_tasks(workspace_path: Path):
+    """Test /status shows in-progress task titles."""
+    from openpaw.model.task import Task, TaskStatus
+    from openpaw.stores.task import TaskStore
+
+    mock_agent_runner = Mock()
+    mock_agent_runner.model_id = "test-model"
+    session_manager = SessionManager(workspace_path)
+
+    # Create task store with in-progress tasks
+    task_store = TaskStore(workspace_path)
+    task1 = Task(
+        id="task1",
+        type="deployment",
+        description="Deploy production server",
+        status=TaskStatus.IN_PROGRESS,
+    )
+    task2 = Task(
+        id="task2",
+        type="research",
+        description="Update documentation",
+        status=TaskStatus.IN_PROGRESS,
+    )
+    task3 = Task(
+        id="task3",
+        type="custom",
+        description="Fix bug #123",
+        status=TaskStatus.PENDING,
+    )
+    task_store.create(task1)
+    task_store.create(task2)
+    task_store.create(task3)
+
+    context = CommandContext(
+        channel=Mock(),
+        session_manager=session_manager,
+        checkpointer=Mock(),
+        agent_runner=mock_agent_runner,
+        workspace_name="test_workspace",
+        workspace_path=workspace_path,
+        queue_manager=Mock(),
+        workspace_timezone="UTC",
+        task_store=task_store,
+    )
+
+    command = StatusCommand()
+    message = Mock()
+    message.session_key = "telegram:12345"
+
+    result = await command.handle(message, "", context)
+
+    # Should show task summary and in-progress descriptions
+    assert "Tasks: 1 pending, 2 in progress, 0 completed" in result.response
+    assert "Deploy production server" in result.response
+    assert "Update documentation" in result.response

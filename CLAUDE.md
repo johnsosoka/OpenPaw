@@ -136,9 +136,9 @@ openpaw/
 
 **`openpaw/workspace/runner.py`** - `WorkspaceRunner` manages a single workspace: loads workspace config, merges with global config, initializes queue system, sets up channels via factory, manages `AsyncSqliteSaver` lifecycle, wires command routing, schedules crons, and runs the message loop.
 
-**`openpaw/workspace/message_processor.py`** - Core message processing loop. Handles queue modes (collect, steer, interrupt), invokes agent, manages approval gates, and processes system events.
+**`openpaw/workspace/message_processor.py`** - Core message processing loop. Handles queue modes (collect, steer, interrupt), invokes agent, manages approval gates, processes system events, and performs pre-run auto-compact checks.
 
-**`openpaw/workspace/agent_factory.py`** - Agent creation with middleware wiring. Composes queue-aware and approval middleware, configures builtins, and initializes checkpointer.
+**`openpaw/workspace/agent_factory.py`** - Agent creation with middleware wiring. Composes queue-aware and approval middleware, configures builtins, initializes checkpointer, and supports runtime model overrides via `RuntimeModelOverride`.
 
 **`openpaw/workspace/lifecycle.py`** - Startup and shutdown hooks. Handles AsyncSqliteSaver initialization, tool requirements, cron/heartbeat scheduling, and graceful cleanup.
 
@@ -178,7 +178,7 @@ openpaw/
 
 **`openpaw/channels/commands/router.py`** - Framework command system. `CommandHandler` ABC + `CommandRouter` registry + `CommandContext` for runtime dependencies. Commands are routed BEFORE inbound processors to avoid content modification breaking `is_command` detection.
 
-**`openpaw/channels/commands/handlers/`** - Built-in command handlers: `/start`, `/new`, `/compact`, `/help`, `/queue`, `/status`. See "Command System" section.
+**`openpaw/channels/commands/handlers/`** - Built-in command handlers: `/start`, `/new`, `/compact`, `/help`, `/queue`, `/status`, `/model`. See "Command System" section.
 
 **`openpaw/runtime/session/archiver.py`** - `ConversationArchiver` for exporting conversations from the LangGraph checkpointer. Produces dual-format output: markdown (human-readable) + JSON sidecar (machine-readable) at `{workspace}/memory/conversations/`.
 
@@ -279,6 +279,9 @@ channel:
   token: ${TELEGRAM_BOT_TOKEN}
   allowed_users: []
   allowed_groups: []
+  user_aliases:             # Map user IDs to display names (optional)
+    123456789: "John"
+    987654321: "Sarah"
 
 queue:
   mode: collect
@@ -288,6 +291,8 @@ queue:
 **Environment Variables**: Use `${VAR_NAME}` syntax for secrets and dynamic values. OpenPaw expands these from environment at load time.
 
 **Config Merging**: Workspace settings deep-merge over global config. Missing fields inherit from global, present fields override.
+
+**User Identity**: When `user_aliases` is configured, messages from multiple users are prefixed with `[Name]: ` so the agent can distinguish speakers. Falls back to Telegram `first_name` → `username` if a user is not in the aliases map. System messages and single-user workspaces without aliases are unaffected.
 
 #### AWS Bedrock Configuration
 
@@ -352,6 +357,62 @@ Every agent invocation (user messages, cron jobs, heartbeats) logs token counts 
 **Components**: `InvocationMetrics` (dataclass), `TokenUsageLogger` (thread-safe JSONL writer), `TokenUsageReader` (aggregation). All in `openpaw/agent/metrics.py`.
 
 **Integration**: `AgentRunner.run()` creates a `UsageMetadataCallbackHandler` per invocation. After completion, metrics are extracted via `extract_metrics_from_callback()` and exposed via `agent_runner.last_metrics`. `WorkspaceRunner` (message processor), `CronScheduler`, and `HeartbeatScheduler` pass the logger to record each invocation.
+
+### Runtime Model Switching
+
+The `/model` command enables live model switching without restarting the workspace or losing conversation history.
+
+**Architecture**: `AgentFactory` manages a `RuntimeModelOverride` that takes precedence over the configured model. Overrides are ephemeral — lost on workspace restart. Stateless agents (cron, heartbeat, subagent) always use the configured model, ignoring any runtime override.
+
+**Components**:
+- `RuntimeModelOverride` dataclass (`model`, `temperature` fields) in `openpaw/workspace/agent_factory.py`
+- `AgentFactory.validate_model()` — tests instantiation via `create_chat_model()` before mutating state
+- `AgentFactory._resolve_api_key()` — maps provider to environment variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.)
+- `AgentRunner.update_model()` — rebuilds the LangGraph agent with a new model while preserving checkpointer state
+- `create_chat_model()` — standalone module-level function extracted from `AgentRunner._create_model()` for reuse
+
+**Command Usage**:
+- `/model` — Show active model (and configured model if overridden)
+- `/model provider:model` — Validate and switch to a new model (e.g., `/model openai:gpt-4o`)
+- `/model reset` — Revert to the configured model from agent.yaml
+
+**API Key Resolution**: When switching providers at runtime, the factory resolves API keys from environment variables. Supported mappings: `anthropic` → `ANTHROPIC_API_KEY`, `openai` → `OPENAI_API_KEY`, `bedrock_converse` → no key required (uses AWS credentials).
+
+### Auto-Compact
+
+Automatic conversation compaction when context window utilization exceeds a threshold. Fires as a pre-run check before each agent invocation — not middleware.
+
+**Configuration** (in `agent.yaml` or global config):
+
+```yaml
+auto_compact:
+  enabled: false          # Default off
+  trigger: 0.8            # Fraction of context window (0.0-1.0)
+  summary_model: null     # Model for summaries (null = use workspace model)
+```
+
+**Flow**: Before each agent run, `MessageProcessor._check_auto_compact()` calls `AgentRunner.get_context_info()` to check utilization. If over threshold: archive full transcript → generate summary via agent → rotate to new conversation → inject summary into new thread → notify user via channel.
+
+**Context Info**: `AgentRunner.get_context_info(thread_id)` returns `max_input_tokens` (from `model.profile` or 200K fallback), `approximate_tokens` (via `count_tokens_approximately()`), `utilization` (float 0-1), and `message_count`. Uses LangGraph checkpoint state introspection.
+
+**Graceful Degradation**: If auto-compact fails for any reason (checkpointer unavailable, archiver error), the error is logged and the agent run proceeds with the original thread.
+
+### Lifecycle Notifications
+
+Best-effort notifications to users on workspace lifecycle events.
+
+**Configuration** (in `agent.yaml` or global config):
+
+```yaml
+lifecycle:
+  notify_startup: false     # Default off
+  notify_shutdown: true     # Default on
+  notify_auto_compact: true # Default on
+```
+
+**Implementation**: `WorkspaceRunner._notify_lifecycle(event, detail)` sends to the first allowed user in each channel. Notifications are best-effort — failures are logged at debug level and do not affect workspace operation.
+
+**Events**: Startup (after setup complete), shutdown (before channel teardown), auto-compact (when context rotation occurs).
 
 ### Timezone Handling
 
@@ -849,7 +910,8 @@ Framework commands are handled by `CommandRouter` before messages reach the agen
 - `/compact` - Summarize current conversation, archive it, start new with summary injected (bypasses queue)
 - `/help` - List available commands with descriptions
 - `/queue <mode>` - Change queue mode (`collect`, `steer`, `followup`, `interrupt`)
-- `/status` - Show workspace info: model, conversation stats, active tasks, token usage (today + session)
+- `/status` - Show workspace info: model, context utilization, conversation stats, active tasks/subagents, token usage (today + session)
+- `/model [provider:model | reset]` - Show or switch the active LLM model at runtime (ephemeral, lost on restart)
 
 **Adding Commands**: Extend `CommandHandler` ABC, implement `definition` property and `handle()` method, register in `get_framework_commands()`.
 
