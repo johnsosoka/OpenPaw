@@ -1,8 +1,10 @@
 """Lifecycle management for WorkspaceRunner components."""
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
+from openpaw.agent.session_logger import SessionLogger
 from openpaw.builtins.loader import BuiltinLoader
 from openpaw.channels.base import ChannelAdapter
 from openpaw.channels.factory import create_channel
@@ -30,6 +32,7 @@ class LifecycleManager:
         session_manager: SessionManager,
         approval_handler: Any,
         logger: logging.Logger,
+        result_callback: Callable[[str, str], Awaitable[None]] | None = None,
     ):
         """Initialize lifecycle manager.
 
@@ -47,6 +50,7 @@ class LifecycleManager:
             session_manager: Session management.
             approval_handler: Approval resolution callback.
             logger: Logger instance.
+            result_callback: Optional callback for queue injection of scheduled results.
         """
         self._workspace_name = workspace_name
         self._workspace_path = workspace_path
@@ -61,6 +65,7 @@ class LifecycleManager:
         self._session_manager = session_manager
         self._approval_handler = approval_handler
         self._logger = logger
+        self._result_callback = result_callback
 
         self._channels: dict[str, ChannelAdapter] = {}
         self._cron_scheduler: Any = None
@@ -145,6 +150,7 @@ class LifecycleManager:
         try:
             from openpaw.runtime.scheduling.cron import CronScheduler
 
+            session_logger = SessionLogger(self._workspace_path, session_type="cron")
             self._cron_scheduler = CronScheduler(
                 workspace_path=self._workspace_path,
                 agent_factory=agent_factory,
@@ -152,6 +158,8 @@ class LifecycleManager:
                 token_logger=token_logger,
                 workspace_name=self._workspace_name,
                 timezone=self._workspace_timezone,
+                result_callback=self._result_callback,
+                session_logger=session_logger,
             )
 
             await self._cron_scheduler.start()
@@ -191,6 +199,7 @@ class LifecycleManager:
             return
 
         try:
+            session_logger = SessionLogger(self._workspace_path, session_type="heartbeat")
             self._heartbeat_scheduler = HeartbeatScheduler(
                 workspace_name=self._workspace_name,
                 workspace_path=self._workspace_path,
@@ -199,6 +208,8 @@ class LifecycleManager:
                 config=heartbeat_config,
                 timezone=self._workspace_timezone,
                 token_logger=token_logger,
+                result_callback=self._result_callback,
+                session_logger=session_logger,
             )
 
             await self._heartbeat_scheduler.start()

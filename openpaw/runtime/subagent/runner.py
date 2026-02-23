@@ -9,15 +9,16 @@ from typing import Any
 
 from openpaw.agent import AgentRunner
 from openpaw.agent.metrics import TokenUsageLogger
+from openpaw.agent.session_logger import SessionLogger
 from openpaw.builtins.registry import BuiltinRegistry
 from openpaw.channels.base import ChannelAdapter
-from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
 from openpaw.core.prompts.system_events import (
     SUBAGENT_COMPLETED_SHORT_TEMPLATE,
     SUBAGENT_COMPLETED_TEMPLATE,
     SUBAGENT_FAILED_TEMPLATE,
     SUBAGENT_TIMED_OUT_TEMPLATE,
 )
+from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
 from openpaw.stores.subagent import SubAgentStore
 
 logger = logging.getLogger(__name__)
@@ -158,6 +159,7 @@ class SubAgentRunner:
         workspace_name: str = "unknown",
         max_concurrent: int = 8,
         result_callback: Callable[[str, str], Awaitable[None]] | None = None,
+        session_logger: SessionLogger | None = None,
     ):
         """Initialize the sub-agent runner.
 
@@ -170,6 +172,7 @@ class SubAgentRunner:
             max_concurrent: Maximum simultaneous sub-agents (default: 8).
             result_callback: Optional callback for queue injection of results.
                 If provided, called with (session_key, content) instead of direct channel send.
+            session_logger: Optional SessionLogger for writing session logs.
         """
         self._agent_factory = agent_factory
         self._store = store
@@ -178,6 +181,7 @@ class SubAgentRunner:
         self._workspace_name = workspace_name
         self._max_concurrent = max_concurrent
         self._result_callback = result_callback
+        self._session_logger = session_logger
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._active_tasks: dict[str, asyncio.Task] = {}
 
@@ -393,6 +397,20 @@ class SubAgentRunner:
                     )
                     self._store.save_result(result)
 
+                    # Write session log even on timeout
+                    if self._session_logger:
+                        try:
+                            self._session_logger.write_session(
+                                name=f"subagent_{request.label}",
+                                prompt=request.task,
+                                response="(timed out)",
+                                tools_used=[],
+                                metrics=None,
+                                duration_ms=duration_ms,
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to write timeout session log for sub-agent {request.id}: {e}")
+
                     logger.warning(f"Sub-agent {request.id} timed out")
 
                     # Send timeout notification if requested
@@ -416,6 +434,20 @@ class SubAgentRunner:
                     duration_ms=duration_ms,
                 )
                 self._store.save_result(result)
+
+                # Write session log
+                if self._session_logger:
+                    try:
+                        self._session_logger.write_session(
+                            name=f"subagent_{request.label}",
+                            prompt=request.task,
+                            response=response,
+                            tools_used=runner.last_tools_used or [],
+                            metrics=runner.last_metrics,
+                            duration_ms=duration_ms,
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to write session log for sub-agent {request.id}: {e}")
 
                 # Update status to COMPLETED
                 self._store.update_status(

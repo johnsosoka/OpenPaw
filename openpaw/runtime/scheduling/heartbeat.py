@@ -2,7 +2,7 @@
 
 import json
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime, time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -11,14 +11,20 @@ import yaml
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
+from openpaw.agent.session_logger import SessionLogger
 from openpaw.channels.base import ChannelAdapter
 from openpaw.core.config import HeartbeatConfig
-from openpaw.core.timezone import workspace_now
 from openpaw.core.prompts.heartbeat import (
     ACTIVE_TASKS_TEMPLATE,
     HEARTBEAT_PROMPT,
     build_task_summary,
 )
+from openpaw.core.prompts.system_events import (
+    HEARTBEAT_RESULT_TEMPLATE,
+    HEARTBEAT_RESULT_TRUNCATED_TEMPLATE,
+    INJECTION_TRUNCATION_LIMIT,
+)
+from openpaw.core.timezone import workspace_now
 
 if TYPE_CHECKING:
     pass
@@ -45,6 +51,8 @@ class HeartbeatScheduler:
         config: HeartbeatConfig,
         timezone: str = "UTC",
         token_logger: Any | None = None,
+        result_callback: Callable[[str, str], Awaitable[None]] | None = None,
+        session_logger: SessionLogger | None = None,
     ):
         """Initialize the heartbeat scheduler.
 
@@ -56,6 +64,8 @@ class HeartbeatScheduler:
             config: Heartbeat configuration settings.
             timezone: IANA timezone identifier for workspace timezone (default: "UTC").
             token_logger: Optional TokenUsageLogger for logging token metrics.
+            result_callback: Optional callback for queue injection of results.
+            session_logger: Optional SessionLogger for writing session logs.
         """
         self.workspace_name = workspace_name
         self.workspace_path = workspace_path
@@ -64,6 +74,8 @@ class HeartbeatScheduler:
         self.config = config
         self._timezone = timezone
         self._token_logger = token_logger
+        self._result_callback = result_callback
+        self._session_logger = session_logger
         self._scheduler: AsyncIOScheduler | None = None
         self._job: Any = None
 
@@ -332,6 +344,21 @@ class HeartbeatScheduler:
             llm_calls = metrics.llm_calls if metrics else None
             tools_used = agent_runner.last_tools_used or None
 
+            # Write session log (for all outcomes - audit trail)
+            session_path: str | None = None
+            if self._session_logger:
+                try:
+                    session_path = self._session_logger.write_session(
+                        name="heartbeat",
+                        prompt=heartbeat_prompt,
+                        response=response,
+                        tools_used=agent_runner.last_tools_used or [],
+                        metrics=agent_runner.last_metrics,
+                        duration_ms=duration_ms,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to write heartbeat session log: {e}")
+
             if self.config.suppress_ok and self._is_heartbeat_ok(response):
                 logger.debug(f"Heartbeat OK for workspace: {self.workspace_name} (suppressed)")
                 self._record_heartbeat_event(
@@ -387,8 +414,34 @@ class HeartbeatScheduler:
 
             if self.config.target_channel == "telegram" and self.config.target_chat_id:
                 session_key = channel.build_session_key(self.config.target_chat_id)
-                await channel.send_message(session_key=session_key, content=response)
-                logger.info(f"Heartbeat notification sent to {self.config.target_channel}/{session_key}")
+
+                # Delivery routing
+                delivery = self.config.delivery
+
+                # Channel delivery
+                if delivery in ("channel", "both"):
+                    await channel.send_message(session_key=session_key, content=response)
+                    logger.info(f"Heartbeat notification sent to {self.config.target_channel}/{session_key}")
+
+                # Agent queue injection
+                if delivery in ("agent", "both") and self._result_callback and session_path:
+                    try:
+                        # Build injection content with truncation
+                        output = response
+                        if len(output) > INJECTION_TRUNCATION_LIMIT:
+                            output = output[:INJECTION_TRUNCATION_LIMIT]
+                            injection_content = HEARTBEAT_RESULT_TRUNCATED_TEMPLATE.format(
+                                output=output, session_path=session_path,
+                            )
+                        else:
+                            injection_content = HEARTBEAT_RESULT_TEMPLATE.format(
+                                output=output, session_path=session_path,
+                            )
+                        await self._result_callback(session_key, injection_content)
+                        logger.info(f"Heartbeat result injected into agent queue for {session_key}")
+                    except Exception as e:
+                        logger.warning(f"Failed to inject heartbeat result: {e}")
+
                 self._record_heartbeat_event(
                     "ran",
                     duration_ms=duration_ms,
@@ -410,10 +463,19 @@ class HeartbeatScheduler:
                         session_key=session_key,
                     )
             else:
-                logger.warning(
-                    f"Heartbeat response generated but no routing configured "
-                    f"(workspace: {self.workspace_name}, response length: {len(response)})"
-                )
+                # No routing configured (no chat_id or unsupported channel)
+                delivery = self.config.delivery
+                if delivery in ("agent", "both") and self._result_callback:
+                    logger.warning(
+                        f"Heartbeat delivery configured for agent injection but no session_key available "
+                        f"(workspace: {self.workspace_name}, delivery: {delivery})"
+                    )
+                else:
+                    logger.warning(
+                        f"Heartbeat response generated but no routing configured "
+                        f"(workspace: {self.workspace_name}, response length: {len(response)})"
+                    )
+
                 self._record_heartbeat_event(
                     "ran",
                     reason="no routing configured",

@@ -14,11 +14,11 @@ from openpaw.agent.metrics import InvocationMetrics, extract_metrics_from_callba
 from openpaw.agent.middleware.llm_hooks import THINKING_TAG_PATTERN, ThinkingTokenMiddleware
 from openpaw.agent.middleware.queue_aware import InterruptSignalError
 from openpaw.agent.tools.filesystem import FilesystemTools
-from openpaw.core.timezone import workspace_now
 from openpaw.core.prompts.system_events import (
     TIMEOUT_NOTIFICATION_GENERIC,
     TIMEOUT_NOTIFICATION_TEMPLATE,
 )
+from openpaw.core.timezone import workspace_now
 from openpaw.workspace.loader import AgentWorkspace
 
 logger = logging.getLogger(__name__)

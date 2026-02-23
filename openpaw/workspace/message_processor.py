@@ -10,12 +10,12 @@ from openpaw.agent.middleware import (
 )
 from openpaw.builtins.loader import BuiltinLoader
 from openpaw.channels.base import ChannelAdapter
-from openpaw.model.message import Message
 from openpaw.core.prompts.system_events import (
     FOLLOWUP_TEMPLATE,
     INTERRUPT_NOTIFICATION,
     TOOL_DENIED_TEMPLATE,
 )
+from openpaw.model.message import Message
 from openpaw.runtime.queue.lane import QueueMode
 from openpaw.runtime.queue.manager import QueueManager
 from openpaw.runtime.session.manager import SessionManager

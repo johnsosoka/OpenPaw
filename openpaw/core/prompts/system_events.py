@@ -76,3 +76,53 @@ TIMEOUT_NOTIFICATION_GENERIC = PromptTemplate(
     ),
     input_variables=["timeout"],
 )
+
+# --- Scheduled agent result injection templates ---
+
+# Maximum characters of output to include in queue injection messages.
+# Full output is always available via the session log file.
+INJECTION_TRUNCATION_LIMIT = 2000
+
+# Heartbeat result (fits within truncation limit)
+HEARTBEAT_RESULT_TEMPLATE = PromptTemplate(
+    template=(
+        "[SYSTEM] Heartbeat completed.\n\n"
+        "{output}\n\n"
+        "Full session log: {session_path}\n"
+        "Review and take action if needed."
+    ),
+    input_variables=["output", "session_path"],
+)
+
+# Heartbeat result (output was truncated)
+HEARTBEAT_RESULT_TRUNCATED_TEMPLATE = PromptTemplate(
+    template=(
+        "[SYSTEM] Heartbeat completed (truncated).\n\n"
+        "{output}\n\n"
+        "Full session log: {session_path}\n"
+        'Use read_file("{session_path}") for full context.'
+    ),
+    input_variables=["output", "session_path"],
+)
+
+# Cron result (fits within truncation limit)
+CRON_RESULT_TEMPLATE = PromptTemplate(
+    template=(
+        "[SYSTEM] Scheduled task '{cron_name}' completed.\n\n"
+        "{output}\n\n"
+        "Full session log: {session_path}\n"
+        "Review and take action if needed."
+    ),
+    input_variables=["cron_name", "output", "session_path"],
+)
+
+# Cron result (output was truncated)
+CRON_RESULT_TRUNCATED_TEMPLATE = PromptTemplate(
+    template=(
+        "[SYSTEM] Scheduled task '{cron_name}' completed (truncated).\n\n"
+        "{output}\n\n"
+        "Full session log: {session_path}\n"
+        'Use read_file("{session_path}") for full context.'
+    ),
+    input_variables=["cron_name", "output", "session_path"],
+)

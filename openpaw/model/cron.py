@@ -15,6 +15,19 @@ class CronOutputConfig(BaseModel):
     chat_id: int | None = Field(default=None, description="Telegram chat ID")
     guild_id: int | None = Field(default=None, description="Discord guild ID")
     channel_id: int | None = Field(default=None, description="Discord channel ID")
+    delivery: str = Field(
+        default="channel",
+        description="Delivery mode: channel, agent, or both",
+    )
+
+    @field_validator("delivery")
+    @classmethod
+    def validate_delivery(cls, v: str) -> str:
+        """Validate delivery mode is one of the allowed values."""
+        allowed = {"channel", "agent", "both"}
+        if v not in allowed:
+            raise ValueError(f"Invalid delivery mode '{v}'. Must be one of: {allowed}")
+        return v
 
 
 class CronDefinition(BaseModel):

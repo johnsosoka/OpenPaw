@@ -16,24 +16,25 @@ from openpaw.agent.middleware import (
     QueueAwareToolMiddleware,
     ToolTimeoutMiddleware,
 )
+from openpaw.agent.session_logger import SessionLogger
 from openpaw.builtins.base import BaseBuiltinProcessor
 from openpaw.builtins.loader import BuiltinLoader
 from openpaw.channels.base import ChannelAdapter
 from openpaw.channels.commands.base import CommandContext
 from openpaw.channels.commands.handlers import get_framework_commands
 from openpaw.channels.commands.router import CommandRouter
-from openpaw.model.message import Message, MessageDirection
 from openpaw.core.config import Config, merge_configs
 from openpaw.core.config.models import ApprovalGatesConfig, ToolTimeoutsConfig
 from openpaw.core.logging import setup_workspace_logger
+from openpaw.model.message import Message, MessageDirection
 from openpaw.runtime.queue.lane import LaneQueue, QueueItem, QueueMode
 from openpaw.runtime.queue.manager import QueueManager
 from openpaw.runtime.session.archiver import ConversationArchiver
 from openpaw.runtime.session.manager import SessionManager
+from openpaw.runtime.subagent import SubAgentRunner
 from openpaw.stores.approval import ApprovalGateManager
 from openpaw.stores.subagent import SubAgentStore
 from openpaw.stores.task import TaskStore
-from openpaw.runtime.subagent import SubAgentRunner
 from openpaw.workspace.agent_factory import AgentFactory, filter_workspace_tools
 from openpaw.workspace.lifecycle import LifecycleManager
 from openpaw.workspace.loader import WorkspaceLoader
@@ -294,6 +295,7 @@ class WorkspaceRunner:
             session_manager=self._session_manager,
             approval_handler=self._handle_approval_resolution,
             logger=self.logger,
+            result_callback=self._inject_system_event,
         )
 
         self._channels: dict[str, ChannelAdapter] = {}
@@ -539,6 +541,7 @@ class WorkspaceRunner:
         )
 
         # Start sub-agent runner
+        subagent_session_logger = SessionLogger(self._workspace.path, session_type="subagent")
         self._subagent_runner = SubAgentRunner(
             agent_factory=self._agent_factory.get_agent_factory_closure(),
             store=self._subagent_store,
@@ -547,6 +550,7 @@ class WorkspaceRunner:
             workspace_name=self.workspace_name,
             max_concurrent=8,
             result_callback=self._inject_system_event,
+            session_logger=subagent_session_logger,
         )
         self._connect_spawn_tool_to_runner()
 

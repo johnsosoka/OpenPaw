@@ -34,7 +34,9 @@ class CronLoader:
 
         cron_definitions: list[CronDefinition] = []
 
-        for cron_file in self.crons_path.glob("*.yaml"):
+        for cron_file in sorted(
+            list(self.crons_path.glob("*.yaml")) + list(self.crons_path.glob("*.yml"))
+        ):
             try:
                 with cron_file.open() as f:
                     raw_data: dict[str, Any] = yaml.safe_load(f) or {}
@@ -52,7 +54,7 @@ class CronLoader:
         """Load a specific cron definition by name.
 
         Args:
-            name: The cron job name (filename without .yaml extension).
+            name: The cron job name (filename without .yaml/.yml extension).
 
         Returns:
             CronDefinition object.
@@ -61,9 +63,10 @@ class CronLoader:
             FileNotFoundError: If the cron definition doesn't exist.
         """
         cron_file = self.crons_path / f"{name}.yaml"
-
         if not cron_file.exists():
-            raise FileNotFoundError(f"Cron definition not found: {cron_file}")
+            cron_file = self.crons_path / f"{name}.yml"
+        if not cron_file.exists():
+            raise FileNotFoundError(f"Cron definition not found: {name} (checked .yaml and .yml)")
 
         with cron_file.open() as f:
             raw_data: dict[str, Any] = yaml.safe_load(f) or {}

@@ -83,6 +83,7 @@ openpaw/
 ├── agent/            # Agent execution
 │   ├── runner.py     # AgentRunner (LangGraph wrapper)
 │   ├── metrics.py    # Token usage tracking
+│   ├── session_logger.py  # Session logging for scheduled runs
 │   ├── middleware/   # Tool middleware (queue-aware, approval, llm hooks)
 │   └── tools/        # Filesystem tools and sandbox
 │       ├── filesystem.py  # Sandboxed file operations
@@ -238,11 +239,15 @@ agent_workspaces/<name>/
 ├── screenshots/  # Browser screenshots (from browser_screenshot)
 ├── heartbeat_log.jsonl   # Heartbeat event log (outcomes, metrics, task counts)
 ├── memory/
-│   └── conversations/    # Archived conversation exports
-│       ├── conv_*.md     # Markdown archives (human-readable)
-│       └── conv_*.json   # JSON sidecars (machine-readable)
+│   ├── conversations/    # Archived conversation exports
+│   │   ├── conv_*.md     # Markdown archives (human-readable)
+│   │   └── conv_*.json   # JSON sidecars (machine-readable)
+│   └── sessions/         # Scheduled agent session logs
+│       ├── heartbeat/    # Heartbeat session JSONL files
+│       ├── cron/         # Cron session JSONL files
+│       └── subagent/     # Sub-agent session JSONL files
 ├── crons/        # Scheduled task definitions
-│   └── *.yaml    # Individual cron job configurations
+│   └── *.yaml / *.yml    # Individual cron job configurations
 ├── skills/       # LangChain skill directories (SKILL.md format)
 └── tools/        # LangChain tools (Python files with @tool decorated functions)
 ```
@@ -377,7 +382,7 @@ OpenPaw uses a "store in UTC, display in workspace timezone" pattern. The `timez
 
 Workspaces can define scheduled tasks via YAML files in `crons/` directory.
 
-**Cron File Format (`crons/<name>.yaml`)**:
+**Cron File Format (`crons/<name>.yaml` or `crons/<name>.yml`)**:
 
 ```yaml
 name: daily-summary
@@ -391,6 +396,7 @@ prompt: |
 output:
   channel: telegram
   chat_id: 123456789  # Channel-specific routing
+  delivery: channel   # Where to deliver: channel, agent, or both (default: channel)
 ```
 
 **Schedule Format**: Standard cron expression `"minute hour day-of-month month day-of-week"`
@@ -400,9 +406,18 @@ output:
 
 **Note:** Cron schedule expressions fire in the workspace timezone.
 
-**Execution**: CronScheduler builds a fresh agent instance (no checkpointer), injects the prompt, routes output to specified channel.
+**Execution**: CronScheduler builds a fresh agent instance (no checkpointer), injects the prompt, routes output based on delivery mode, and writes session logs to `memory/sessions/cron/`.
 
 **Enable/Disable**: Set `enabled: false` to disable a cron without deleting the file.
+
+**Delivery Modes**: The `delivery` field in `output` controls where cron results go:
+- `channel` (default) — Send directly to the configured channel (existing behavior)
+- `agent` — Inject into the main agent's message queue via `[SYSTEM]` event. The main agent receives the output with a reference to the full session log file.
+- `both` — Send to channel AND inject into agent queue
+
+**Session Logging**: Every cron execution writes a JSONL session log to `memory/sessions/cron/`. Each log contains the prompt, response, tools used, and token metrics. These files are readable by the main agent via `read_file()`.
+
+**File Extensions**: Both `.yaml` and `.yml` extensions are supported for cron definition files.
 
 ### Dynamic Scheduling (CronTool)
 
@@ -511,6 +526,8 @@ Agents can spawn background workers for concurrent task execution using the `spa
 
 **Notifications**: When `notify: true` (default), sub-agent completion results are injected into the message queue via `WorkspaceRunner._inject_system_event()` using `QueueMode.COLLECT`. This triggers a new agent turn where the main agent processes the `[SYSTEM]` notification and responds naturally. Notifications are truncated (500 chars) with a prompt to use `get_subagent_result` for full output. If no `result_callback` is configured, falls back to direct channel messaging.
 
+**Session Logging**: Every sub-agent execution writes a JSONL session log to `memory/sessions/subagent/`, including prompt, response, tools used, and metrics. Logs are written for all outcomes (success, timeout, failure).
+
 **Configuration** (optional, in `agent.yaml` or global config):
 
 ```yaml
@@ -593,6 +610,7 @@ heartbeat:
   interval_minutes: 30           # How often to check in
   active_hours: "09:00-17:00"    # Only run during these hours (optional)
   suppress_ok: true              # Don't send message if agent responds "HEARTBEAT_OK"
+  delivery: channel              # Where to deliver: channel, agent, or both (default: channel)
   output:
     channel: telegram
     chat_id: 123456789
@@ -608,7 +626,33 @@ heartbeat:
 
 **Event Logging**: Every heartbeat event is logged to `{workspace}/heartbeat_log.jsonl` with outcome, duration, token metrics, and active task count.
 
+**Delivery Modes**: The `delivery` field controls where heartbeat results go:
+- `channel` (default) — Send directly to the configured channel (existing behavior)
+- `agent` — Inject into the main agent's message queue as a `[SYSTEM]` event with a reference to the full session log
+- `both` — Send to channel AND inject into agent queue
+
+HEARTBEAT_OK responses are always suppressed from both channel delivery and agent injection, regardless of delivery mode.
+
+**Session Logging**: Every heartbeat execution (including HEARTBEAT_OK and errors) writes a JSONL session log to `memory/sessions/heartbeat/`. These serve as an audit trail and are readable by the main agent via `read_file()`.
+
 **Prompt Template**: The heartbeat prompt is built dynamically from a structured template. `HEARTBEAT.md` serves as a scratchpad for agent-maintained notes on what to check during heartbeats.
+
+### Session Logging
+
+Scheduled agent runs (heartbeat, cron, sub-agent) write JSONL session logs to `{workspace}/memory/sessions/{type}/`. Each run produces a file with three records: prompt, response, and metadata (tools used, token metrics, duration).
+
+**File Format** (`memory/sessions/{type}/{name}_{timestamp}.jsonl`):
+```jsonl
+{"type": "prompt", "content": "Check Hacker News for AI stories...", "timestamp": "2026-02-22T08:15:00+00:00"}
+{"type": "response", "content": "Here are today's top stories...", "timestamp": "2026-02-22T08:15:45+00:00"}
+{"type": "metadata", "tools_used": ["brave_search"], "metrics": {"input_tokens": 1234, "output_tokens": 567, "total_tokens": 1801, "llm_calls": 3}, "duration_ms": 4500.0, "timestamp": "2026-02-22T08:15:45+00:00"}
+```
+
+**Storage**: `memory/sessions/heartbeat/`, `memory/sessions/cron/`, `memory/sessions/subagent/` — inside the workspace root where the main agent can `read_file()` them.
+
+**Integration with Delivery Routing**: When `delivery` is set to `"agent"` or `"both"`, the injected `[SYSTEM]` message includes the session log path so the main agent can use `read_file()` to access the full session context. Output is truncated at 2000 characters in the injection message.
+
+**Implementation**: `SessionLogger` in `openpaw/agent/session_logger.py`. Each scheduler creates its own instance (no shared state, no locking needed).
 
 ### Filesystem Access
 

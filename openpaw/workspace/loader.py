@@ -331,7 +331,9 @@ class WorkspaceLoader:
         from openpaw.model.cron import CronDefinition
 
         cron_definitions = []
-        for cron_file in sorted(crons_dir.glob("*.yaml")):
+        for cron_file in sorted(
+            list(crons_dir.glob("*.yaml")) + list(crons_dir.glob("*.yml"))
+        ):
             try:
                 with cron_file.open() as f:
                     data = yaml.safe_load(f) or {}

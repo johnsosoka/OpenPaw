@@ -5,7 +5,7 @@ For loading and merging logic, see loader.py.
 """
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -201,6 +201,10 @@ class HeartbeatConfig(BaseModel):
     suppress_ok: bool = Field(default=True, description="Suppress HEARTBEAT_OK responses from channel")
     target_channel: str = Field(default="telegram", description="Channel to route heartbeat responses")
     target_chat_id: int | None = Field(default=None, description="Default chat ID for heartbeat output")
+    delivery: Literal["channel", "agent", "both"] = Field(
+        default="channel",
+        description="Where to deliver results: channel (direct), agent (queue injection), both",
+    )
 
 
 class ToolApprovalConfig(BaseModel):

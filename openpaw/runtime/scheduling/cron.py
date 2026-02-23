@@ -1,7 +1,8 @@
 """APScheduler-based cron execution for OpenPaw."""
 
 import logging
-from collections.abc import Callable, Mapping
+import time as time_module
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,13 @@ from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from openpaw.agent.metrics import TokenUsageLogger
+from openpaw.agent.session_logger import SessionLogger
 from openpaw.channels.base import ChannelAdapter
+from openpaw.core.prompts.system_events import (
+    CRON_RESULT_TEMPLATE,
+    CRON_RESULT_TRUNCATED_TEMPLATE,
+    INJECTION_TRUNCATION_LIMIT,
+)
 from openpaw.model.cron import CronDefinition, DynamicCronTask
 from openpaw.runtime.scheduling.loader import CronLoader
 from openpaw.stores.cron import DynamicCronStore
@@ -38,6 +45,8 @@ class CronScheduler:
         token_logger: TokenUsageLogger | None = None,
         workspace_name: str = "unknown",
         timezone: str = "UTC",
+        result_callback: Callable[[str, str], Awaitable[None]] | None = None,
+        session_logger: SessionLogger | None = None,
     ):
         """Initialize the cron scheduler.
 
@@ -48,6 +57,8 @@ class CronScheduler:
             token_logger: Optional token usage logger for tracking cron invocations.
             workspace_name: Name of the workspace (for logging and token tracking).
             timezone: IANA timezone string for cron schedules (e.g., "America/New_York").
+            result_callback: Optional callback for queue injection of results.
+            session_logger: Optional SessionLogger for writing session logs.
         """
         self.workspace_path = Path(workspace_path)
         self.agent_factory = agent_factory
@@ -56,6 +67,8 @@ class CronScheduler:
         self._workspace_name = workspace_name
         self._timezone = timezone
         self._tz = ZoneInfo(timezone)
+        self._result_callback = result_callback
+        self._session_logger = session_logger
         self._scheduler: AsyncIOScheduler | None = None
         self._jobs: dict[str, Any] = {}
         self._dynamic_store = DynamicCronStore(workspace_path)
@@ -101,7 +114,58 @@ class CronScheduler:
         try:
             agent_runner = self.agent_factory()
 
+            start_time = time_module.monotonic()
             response = await agent_runner.run(message=cron.prompt)
+            duration_ms = (time_module.monotonic() - start_time) * 1000
+
+            # Write session log
+            session_path: str | None = None
+            if self._session_logger:
+                try:
+                    session_path = self._session_logger.write_session(
+                        name=cron.name,
+                        prompt=cron.prompt,
+                        response=response,
+                        tools_used=agent_runner.last_tools_used or [],
+                        metrics=agent_runner.last_metrics,
+                        duration_ms=duration_ms,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to write cron session log for {cron.name}: {e}")
+
+            delivery = cron.output.delivery
+
+            # Channel delivery
+            if delivery in ("channel", "both"):
+                channel = self.channels.get(cron.output.channel)
+                if not channel:
+                    logger.error(f"Channel not found for cron {cron.name}: {cron.output.channel}")
+                elif cron.output.channel == "telegram" and cron.output.chat_id:
+                    session_key = channel.build_session_key(cron.output.chat_id)
+                    await channel.send_message(session_key=session_key, content=response)
+                else:
+                    logger.warning(f"Unsupported output config for cron {cron.name}: {cron.output}")
+
+            # Agent queue injection
+            if delivery in ("agent", "both") and self._result_callback and session_path:
+                try:
+                    channel = self.channels.get(cron.output.channel)
+                    if channel and cron.output.chat_id:
+                        session_key = channel.build_session_key(cron.output.chat_id)
+                        output = response
+                        if len(output) > INJECTION_TRUNCATION_LIMIT:
+                            output = output[:INJECTION_TRUNCATION_LIMIT]
+                            injection_content = CRON_RESULT_TRUNCATED_TEMPLATE.format(
+                                cron_name=cron.name, output=output, session_path=session_path,
+                            )
+                        else:
+                            injection_content = CRON_RESULT_TEMPLATE.format(
+                                cron_name=cron.name, output=output, session_path=session_path,
+                            )
+                        await self._result_callback(session_key, injection_content)
+                        logger.info(f"Cron {cron.name} result injected into agent queue")
+                except Exception as e:
+                    logger.warning(f"Failed to inject cron result for {cron.name}: {e}")
 
             # Log token usage for cron invocation
             if self._token_logger and self._workspace_name and agent_runner.last_metrics:
@@ -111,20 +175,6 @@ class CronScheduler:
                     invocation_type="cron",
                     session_key=None,
                 )
-
-            channel = self.channels.get(cron.output.channel)
-            if not channel:
-                logger.error(f"Channel not found for cron {cron.name}: {cron.output.channel}")
-                return
-
-            if cron.output.channel == "telegram" and cron.output.chat_id:
-                session_key = channel.build_session_key(cron.output.chat_id)
-                await channel.send_message(
-                    session_key=session_key,
-                    content=response,
-                )
-            else:
-                logger.warning(f"Unsupported output config for cron {cron.name}: {cron.output}")
 
             logger.info(f"Cron job {cron.name} completed successfully")
 
@@ -232,7 +282,23 @@ class CronScheduler:
 
         try:
             agent_runner = self.agent_factory()
+            start_time = time_module.monotonic()
             response = await agent_runner.run(message=task.prompt)
+            duration_ms = (time_module.monotonic() - start_time) * 1000
+
+            # Write session log (audit only, no delivery routing for dynamic tasks)
+            if self._session_logger:
+                try:
+                    self._session_logger.write_session(
+                        name=f"dynamic_{task.id}",
+                        prompt=task.prompt,
+                        response=response,
+                        tools_used=agent_runner.last_tools_used or [],
+                        metrics=agent_runner.last_metrics,
+                        duration_ms=duration_ms,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to write session log for dynamic task {task.id}: {e}")
 
             # Log token usage for dynamic cron invocation
             if self._token_logger and self._workspace_name and agent_runner.last_metrics:
