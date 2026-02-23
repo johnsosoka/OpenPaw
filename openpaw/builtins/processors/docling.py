@@ -92,6 +92,7 @@ class DoclingProcessor(BaseBuiltinProcessor):
         builtin_type=BuiltinType.PROCESSOR,
         group="document",
         prerequisites=BuiltinPrerequisite(),  # No API key needed (local processing)
+        priority=40,
     )
 
     def __init__(self, config: dict[str, Any] | None = None):

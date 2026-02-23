@@ -70,13 +70,6 @@ class BuiltinRegistry:
             logger.debug(f"Shell tool not available: {e}")
 
         try:
-            from openpaw.builtins.tools.ssh import SSHTool
-
-            self.register_tool(SSHTool)
-        except ImportError as e:
-            logger.debug(f"SSH tool not available: {e}")
-
-        try:
             from openpaw.builtins.tools.cron import CronToolBuiltin
 
             self.register_tool(CronToolBuiltin)
@@ -139,7 +132,7 @@ class BuiltinRegistry:
         except ImportError as e:
             logger.debug(f"Memory search tool not available: {e}")
 
-        # Processors (ORDER MATTERS: file_persistence must run first in pipeline)
+        # Processors (sorted by metadata.priority in BuiltinLoader.load_processors)
         try:
             from openpaw.builtins.processors.file_persistence import FilePersistenceProcessor
 

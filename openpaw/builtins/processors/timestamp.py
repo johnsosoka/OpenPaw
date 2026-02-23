@@ -41,6 +41,7 @@ class TimestampProcessor(BaseBuiltinProcessor):
         builtin_type=BuiltinType.PROCESSOR,
         group="context",
         prerequisites=BuiltinPrerequisite(),
+        priority=30,
     )
 
     async def process_inbound(self, message: Message) -> ProcessorResult:

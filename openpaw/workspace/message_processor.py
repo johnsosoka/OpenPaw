@@ -1,6 +1,7 @@
 """Message processing logic for WorkspaceRunner."""
 
 import logging
+import time
 from typing import Any
 
 from openpaw.agent import AgentRunner
@@ -112,6 +113,13 @@ class MessageProcessor:
                 if followup_tool:
                     followup_tool.set_chain_depth(followup_depth)
 
+                content_preview = combined_content[:100].replace("\n", " ")
+                self._logger.info(
+                    f"Processing message for {session_key} "
+                    f"(depth={followup_depth}): {content_preview}..."
+                )
+                run_start = time.monotonic()
+
                 response = await self._agent_runner.run(
                     message=combined_content,
                     thread_id=thread_id,
@@ -142,18 +150,35 @@ class MessageProcessor:
                                 steered = True
                                 steer_messages = pending
 
-                # Log token usage
-                if self._agent_runner.last_metrics:
+                # Log token usage and processing summary
+                run_duration_ms = (time.monotonic() - run_start) * 1000
+                metrics = self._agent_runner.last_metrics
+                if metrics:
                     self._token_logger.log(
-                        metrics=self._agent_runner.last_metrics,
+                        metrics=metrics,
                         workspace=self._workspace_name,
                         invocation_type="user",
                         session_key=session_key,
+                    )
+                    tools_used = self._agent_runner.last_tools_used
+                    tools_summary = f", tools: {tools_used}" if tools_used else ""
+                    self._logger.info(
+                        f"Agent run complete in {run_duration_ms:.0f}ms — "
+                        f"tokens: {metrics.input_tokens}in/{metrics.output_tokens}out "
+                        f"({metrics.llm_calls} LLM calls{tools_summary})"
+                    )
+                else:
+                    self._logger.info(
+                        f"Agent run complete in {run_duration_ms:.0f}ms (no metrics)"
                     )
 
                 # Send response if not steered
                 if not steered and channel:
                     if response and response.strip():
+                        resp_preview = response[:120].replace("\n", " ")
+                        self._logger.info(
+                            f"Sending response ({len(response)} chars): {resp_preview}..."
+                        )
                         await channel.send_message(session_key, response)
                         self._session_manager.increment_message_count(session_key)
                         await self._send_pending_audio(channel, session_key)
@@ -298,14 +323,15 @@ class MessageProcessor:
             return
 
         try:
-            from openpaw.builtins.tools.elevenlabs_tts import ElevenLabsTTSTool
+            from openpaw.builtins.tools._audio_context import clear_pending_audio, get_pending_audio
 
-            audio_data = ElevenLabsTTSTool.get_any_pending_audio()
+            audio_data = get_pending_audio()
             if audio_data:
                 await channel.send_audio(session_key, audio_data, filename="response.mp3")
+                clear_pending_audio()
                 self._logger.info(f"Sent TTS audio to {session_key}")
         except ImportError:
-            pass  # ElevenLabs not available
+            pass  # Audio context not available
         except Exception as e:
             self._logger.error(f"Failed to send TTS audio: {e}")
 

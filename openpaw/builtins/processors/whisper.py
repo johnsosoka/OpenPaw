@@ -43,6 +43,7 @@ class WhisperProcessor(BaseBuiltinProcessor):
         builtin_type=BuiltinType.PROCESSOR,
         group="voice",
         prerequisites=BuiltinPrerequisite(env_vars=["OPENAI_API_KEY"]),
+        priority=20,
     )
 
     def __init__(self, config: dict[str, Any] | None = None):

@@ -21,17 +21,39 @@ class BuiltinPrerequisite:
 
     Attributes:
         env_vars: Environment variables that must be set.
-        packages: Python packages that must be installed (future use).
+        packages: Python packages that must be installed.
     """
 
     env_vars: list[str] = field(default_factory=list)
     packages: list[str] = field(default_factory=list)
 
+    @staticmethod
+    def _is_package_available(package: str) -> bool:
+        """Check if a package is available for import.
+
+        Args:
+            package: Package name to check.
+
+        Returns:
+            True if package can be imported, False otherwise.
+        """
+        import importlib.util
+
+        try:
+            return importlib.util.find_spec(package) is not None
+        except (ValueError, ModuleNotFoundError, AttributeError):
+            # ValueError: __spec__ not set (some packages)
+            # ModuleNotFoundError: package doesn't exist
+            # AttributeError: malformed package structure
+            return False
+
     def is_satisfied(self) -> bool:
         """Check if all prerequisites are met."""
         import os
 
-        return all(os.environ.get(var) for var in self.env_vars)
+        env_ok = all(os.environ.get(var) for var in self.env_vars)
+        pkg_ok = all(self._is_package_available(pkg) for pkg in self.packages)
+        return env_ok and pkg_ok
 
     def missing(self) -> list[str]:
         """Return list of missing prerequisites."""
@@ -41,6 +63,9 @@ class BuiltinPrerequisite:
         for var in self.env_vars:
             if not os.environ.get(var):
                 missing.append(f"env:{var}")
+        for pkg in self.packages:
+            if not self._is_package_available(pkg):
+                missing.append(f"package:{pkg}")
         return missing
 
 
@@ -55,6 +80,7 @@ class BuiltinMetadata:
         builtin_type: Whether this is a tool or processor.
         group: Optional group for allow/deny (e.g., "web", "voice").
         prerequisites: What's needed to use this builtin.
+        priority: Pipeline ordering (lower = runs first). Default 100.
     """
 
     name: str
@@ -63,6 +89,7 @@ class BuiltinMetadata:
     builtin_type: BuiltinType
     group: str | None = None
     prerequisites: BuiltinPrerequisite = field(default_factory=BuiltinPrerequisite)
+    priority: int = 100
 
 
 class BaseBuiltinTool(ABC):

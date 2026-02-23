@@ -12,6 +12,7 @@ from openpaw.builtins.base import (
     BuiltinPrerequisite,
     BuiltinType,
 )
+from openpaw.builtins.tools._audio_context import set_pending_audio
 
 logger = logging.getLogger(__name__)
 
@@ -49,13 +50,6 @@ class ElevenLabsTTSTool(BaseBuiltinTool):
         prerequisites=BuiltinPrerequisite(env_vars=["ELEVENLABS_API_KEY"]),
     )
 
-    # Class-level storage for pending audio (allows retrieval after agent run)
-    _pending_audio: dict[str, bytes] = {}
-
-    def __init__(self, config: dict[str, Any] | None = None):
-        super().__init__(config)
-        self._instance_id = id(self)
-
     def get_langchain_tool(self) -> Any:
         """Return configured TTS tool as a LangChain StructuredTool."""
         try:
@@ -79,7 +73,7 @@ class ElevenLabsTTSTool(BaseBuiltinTool):
             try:
                 audio_bytes = await self._generate_audio(text, voice_id)
                 # Store audio for later retrieval
-                ElevenLabsTTSTool._pending_audio[str(self._instance_id)] = audio_bytes
+                set_pending_audio(audio_bytes)
                 return f"[Audio generated: {len(audio_bytes):,} bytes, ready to send]"
             except Exception as e:
                 logger.error(f"Failed to generate speech: {e}")
@@ -135,29 +129,3 @@ class ElevenLabsTTSTool(BaseBuiltinTool):
             chunks.append(chunk)
 
         return b"".join(chunks)
-
-    def get_pending_audio(self) -> bytes | None:
-        """Retrieve and clear pending audio data.
-
-        Returns:
-            Audio bytes if available, None otherwise.
-        """
-        return ElevenLabsTTSTool._pending_audio.pop(str(self._instance_id), None)
-
-    @classmethod
-    def get_any_pending_audio(cls) -> bytes | None:
-        """Retrieve any pending audio (for simpler single-agent scenarios).
-
-        Returns:
-            Audio bytes if available, None otherwise.
-        """
-        if cls._pending_audio:
-            # Return first available
-            key = next(iter(cls._pending_audio))
-            return cls._pending_audio.pop(key)
-        return None
-
-    @classmethod
-    def clear_pending_audio(cls) -> None:
-        """Clear all pending audio data."""
-        cls._pending_audio.clear()

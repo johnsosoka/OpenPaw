@@ -169,32 +169,11 @@ def test_workspace_enabled_overrides_global_enabled(workspace_path: Path) -> Non
     assert loader._is_enabled("shell") is False
 
 
-def test_ssh_typed_field_config(workspace_path: Path) -> None:
-    """Test SSH builtin config with typed field."""
-    workspace_config = WorkspaceBuiltinsConfig(
-        ssh=BuiltinItemConfig(
-            enabled=True,
-            config={"default_host": "example.com", "default_user": "admin"},
-        )
-    )
-
-    loader = BuiltinLoader(
-        workspace_config=workspace_config,
-        workspace_path=workspace_path,
-    )
-
-    config = loader._get_builtin_config("ssh")
-
-    assert config["default_host"] == "example.com"
-    assert config["default_user"] == "admin"
-
-
 def test_default_enabled_is_true(workspace_path: Path) -> None:
     """Test that builtins are enabled by default when not configured."""
     loader = BuiltinLoader(workspace_path=workspace_path)
 
     assert loader._is_enabled("shell") is True
-    assert loader._is_enabled("ssh") is True
     assert loader._is_enabled("browser") is True
 
 
@@ -239,3 +218,91 @@ def test_workspace_dict_overrides_global_dict(workspace_path: Path) -> None:
 
     config = loader._get_builtin_config("browser")
     assert config["headless"] is True
+
+
+def test_browser_typed_field_config(workspace_path: Path) -> None:
+    """Test browser builtin config with typed field."""
+    from openpaw.core.config.models import BrowserBuiltinConfig
+
+    workspace_config = WorkspaceBuiltinsConfig(
+        browser=BrowserBuiltinConfig(
+            enabled=True,
+            headless=False,
+            allowed_domains=["example.com", "*.google.com"],
+            timeout_seconds=60,
+        )
+    )
+
+    loader = BuiltinLoader(
+        workspace_config=workspace_config,
+        workspace_path=workspace_path,
+    )
+
+    config = loader._get_builtin_config("browser")
+    assert config["headless"] is False
+    assert config["allowed_domains"] == ["example.com", "*.google.com"]
+    assert config["timeout_seconds"] == 60
+
+
+def test_spawn_typed_field_config(workspace_path: Path) -> None:
+    """Test spawn builtin config with typed field."""
+    from openpaw.core.config.models import SpawnBuiltinConfig
+
+    workspace_config = WorkspaceBuiltinsConfig(
+        spawn=SpawnBuiltinConfig(
+            enabled=True,
+            max_concurrent=4,
+        )
+    )
+
+    loader = BuiltinLoader(
+        workspace_config=workspace_config,
+        workspace_path=workspace_path,
+    )
+
+    config = loader._get_builtin_config("spawn")
+    assert config["max_concurrent"] == 4
+
+
+def test_file_persistence_typed_field_config(workspace_path: Path) -> None:
+    """Test file_persistence builtin config with typed field."""
+    from openpaw.core.config.models import FilePersistenceBuiltinConfig
+
+    workspace_config = WorkspaceBuiltinsConfig(
+        file_persistence=FilePersistenceBuiltinConfig(
+            enabled=True,
+            max_file_size=10 * 1024 * 1024,
+            clear_data_after_save=True,
+        )
+    )
+
+    loader = BuiltinLoader(
+        workspace_config=workspace_config,
+        workspace_path=workspace_path,
+    )
+
+    config = loader._get_builtin_config("file_persistence")
+    assert config["max_file_size"] == 10 * 1024 * 1024
+    assert config["clear_data_after_save"] is True
+
+
+def test_browser_workspace_overrides_global(workspace_path: Path) -> None:
+    """Test browser workspace config overrides global."""
+    from openpaw.core.config.models import BrowserBuiltinConfig
+
+    global_config = BuiltinsConfig(
+        browser=BrowserBuiltinConfig(headless=True, timeout_seconds=30)
+    )
+    workspace_config = WorkspaceBuiltinsConfig(
+        browser=BrowserBuiltinConfig(headless=False, timeout_seconds=60)
+    )
+
+    loader = BuiltinLoader(
+        global_config=global_config,
+        workspace_config=workspace_config,
+        workspace_path=workspace_path,
+    )
+
+    config = loader._get_builtin_config("browser")
+    assert config["headless"] is False
+    assert config["timeout_seconds"] == 60

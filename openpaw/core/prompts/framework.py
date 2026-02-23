@@ -99,7 +99,12 @@ SECTION_PROGRESS_UPDATES = (
     "keep them informed about what you're doing.\n\n"
     "**Progress updates are not your final answer.** The pattern is:\n"
     "send_message('Found X, now doing Y...') -> continue working -> final response.\n\n"
-    "Use progress updates between steps, not as a substitute for completing the work."
+    "Use progress updates between steps, not as a substitute for completing the work.\n\n"
+    "**IMPORTANT: Never duplicate content.** If you already sent your answer via "
+    "send_message, do NOT repeat the same content as your final response. Your final "
+    "response is always delivered to the user too—sending the same thing twice creates "
+    "duplicate messages. If you've already communicated everything via send_message, "
+    "keep your final response brief (e.g., a short summary or next-steps question)."
 )
 
 # File sharing - conditional on send_file builtin
@@ -175,7 +180,7 @@ SECTION_CONVERSATION_MEMORY = (
 # Shell hygiene - conditional on shell tool
 SECTION_SHELL_HYGIENE = (
     "\n\n## Shell Commands\n\n"
-    "When executing shell commands, especially remote commands via SSH:\n\n"
+    "When executing shell commands:\n\n"
     "- **Break complex operations into small, sequential commands** rather than "
     "chaining many operations into a single command. If one step hangs, you lose "
     "visibility into all subsequent steps.\n"

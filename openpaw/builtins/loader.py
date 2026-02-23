@@ -176,6 +176,57 @@ class BuiltinLoader:
                         if hasattr(workspace_cfg, field):
                             config[field] = getattr(workspace_cfg, field)
 
+        # Extract typed fields from BrowserBuiltinConfig
+        if name == "browser":
+            _browser_fields = [
+                "headless", "allowed_domains", "blocked_domains",
+                "timeout_seconds", "persist_cookies", "downloads_dir", "screenshots_dir",
+            ]
+            if self.global_config:
+                global_cfg = getattr(self.global_config, name, None)
+                if global_cfg:
+                    for fld in _browser_fields:
+                        if hasattr(global_cfg, fld):
+                            config[fld] = getattr(global_cfg, fld)
+            if self.workspace_config:
+                workspace_cfg = getattr(self.workspace_config, name, None)
+                if workspace_cfg:
+                    for fld in _browser_fields:
+                        if hasattr(workspace_cfg, fld):
+                            config[fld] = getattr(workspace_cfg, fld)
+
+        # Extract typed fields from SpawnBuiltinConfig
+        if name == "spawn":
+            _spawn_fields = ["max_concurrent"]
+            if self.global_config:
+                global_cfg = getattr(self.global_config, name, None)
+                if global_cfg:
+                    for fld in _spawn_fields:
+                        if hasattr(global_cfg, fld):
+                            config[fld] = getattr(global_cfg, fld)
+            if self.workspace_config:
+                workspace_cfg = getattr(self.workspace_config, name, None)
+                if workspace_cfg:
+                    for fld in _spawn_fields:
+                        if hasattr(workspace_cfg, fld):
+                            config[fld] = getattr(workspace_cfg, fld)
+
+        # Extract typed fields from FilePersistenceBuiltinConfig
+        if name == "file_persistence":
+            _fp_fields = ["max_file_size", "clear_data_after_save"]
+            if self.global_config:
+                global_cfg = getattr(self.global_config, name, None)
+                if global_cfg:
+                    for fld in _fp_fields:
+                        if hasattr(global_cfg, fld):
+                            config[fld] = getattr(global_cfg, fld)
+            if self.workspace_config:
+                workspace_cfg = getattr(self.workspace_config, name, None)
+                if workspace_cfg:
+                    for fld in _fp_fields:
+                        if hasattr(workspace_cfg, fld):
+                            config[fld] = getattr(workspace_cfg, fld)
+
         # Global config
         if self.global_config:
             global_cfg = getattr(self.global_config, name, None)
@@ -332,5 +383,8 @@ class BuiltinLoader:
                     logger.info(f"Loaded processor builtin: {name}")
                 except Exception as e:
                     logger.warning(f"Failed to load processor '{name}': {e}")
+
+        # Sort by priority (lower = runs first in pipeline)
+        processors.sort(key=lambda p: p.metadata.priority)
 
         return processors

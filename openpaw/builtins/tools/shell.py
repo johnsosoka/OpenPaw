@@ -38,9 +38,8 @@ class ShellToolBuiltin(BaseBuiltinTool):
     Provides async shell command execution with configurable command filtering for safety.
     This tool provides direct system access and should be used with caution.
 
-    IMPORTANT: This tool is disabled by default and should only be enabled in
-    trusted environments. The filtering mechanisms are safety nets, not security
-    boundaries.
+    IMPORTANT: This tool is available by default — deny it explicitly for untrusted
+    workspaces. The filtering mechanisms are safety nets, not security boundaries.
 
     Config options:
         allowed_commands: Optional list of allowed command prefixes.

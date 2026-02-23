@@ -128,6 +128,34 @@ class DoclingBuiltinConfig(BuiltinItemConfig):
     do_table_structure: bool = Field(default=True, description="Enable table structure detection")
 
 
+class BrowserBuiltinConfig(BuiltinItemConfig):
+    """Configuration for the browser automation tool."""
+
+    headless: bool = Field(default=True, description="Run browser without GUI")
+    allowed_domains: list[str] = Field(default_factory=list, description="Domain allowlist (empty = allow all)")
+    blocked_domains: list[str] = Field(default_factory=list, description="Domain blocklist (takes precedence)")
+    timeout_seconds: int = Field(default=30, description="Default timeout for browser operations")
+    persist_cookies: bool = Field(default=False, description="Persist cookies across agent runs")
+    downloads_dir: str = Field(default="downloads", description="Directory for downloaded files")
+    screenshots_dir: str = Field(default="screenshots", description="Directory for screenshots")
+
+
+class SpawnBuiltinConfig(BuiltinItemConfig):
+    """Configuration for the sub-agent spawn tool."""
+
+    max_concurrent: int = Field(default=8, description="Maximum simultaneous sub-agents")
+
+
+class FilePersistenceBuiltinConfig(BuiltinItemConfig):
+    """Configuration for the file persistence processor."""
+
+    max_file_size: int = Field(
+        default=50 * 1024 * 1024,
+        description="Maximum file size in bytes (default 50MB)",
+    )
+    clear_data_after_save: bool = Field(default=False, description="Free memory after saving")
+
+
 class BuiltinsConfig(BaseModel):
     """Global builtins configuration.
 
@@ -149,10 +177,12 @@ class BuiltinsConfig(BaseModel):
     whisper: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
     elevenlabs: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
     shell: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
-    ssh: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
     cron: CronBuiltinConfig = Field(default_factory=CronBuiltinConfig)
     send_file: SendFileBuiltinConfig = Field(default_factory=SendFileBuiltinConfig)
     docling: DoclingBuiltinConfig = Field(default_factory=DoclingBuiltinConfig)
+    browser: BrowserBuiltinConfig = Field(default_factory=BrowserBuiltinConfig)
+    spawn: SpawnBuiltinConfig = Field(default_factory=SpawnBuiltinConfig)
+    file_persistence: FilePersistenceBuiltinConfig = Field(default_factory=FilePersistenceBuiltinConfig)
 
     model_config = {"extra": "allow"}
 
@@ -174,10 +204,12 @@ class WorkspaceBuiltinsConfig(BaseModel):
     whisper: BuiltinItemConfig | None = None
     elevenlabs: BuiltinItemConfig | None = None
     shell: BuiltinItemConfig | None = None
-    ssh: BuiltinItemConfig | None = None
     cron: CronBuiltinConfig | None = None
     send_file: SendFileBuiltinConfig | None = None
     docling: DoclingBuiltinConfig | None = None
+    browser: BrowserBuiltinConfig | None = None
+    spawn: SpawnBuiltinConfig | None = None
+    file_persistence: FilePersistenceBuiltinConfig | None = None
 
     model_config = {"extra": "allow"}
 

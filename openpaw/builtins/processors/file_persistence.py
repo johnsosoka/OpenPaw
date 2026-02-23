@@ -87,6 +87,7 @@ class FilePersistenceProcessor(BaseBuiltinProcessor):
         builtin_type=BuiltinType.PROCESSOR,
         group="file",
         prerequisites=BuiltinPrerequisite(),  # Always available, no API key
+        priority=10,
     )
 
     def __init__(self, config: dict[str, Any] | None = None):
