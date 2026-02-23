@@ -13,12 +13,12 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from openpaw.channels.base import ChannelAdapter
 from openpaw.core.config import HeartbeatConfig
-from openpaw.core.timezone import workspace_now
 from openpaw.core.prompts.heartbeat import (
     ACTIVE_TASKS_TEMPLATE,
     HEARTBEAT_PROMPT,
     build_task_summary,
 )
+from openpaw.core.timezone import workspace_now
 
 if TYPE_CHECKING:
     pass

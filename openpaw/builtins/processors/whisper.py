@@ -14,11 +14,11 @@ from openpaw.builtins.base import (
     BuiltinType,
     ProcessorResult,
 )
-from openpaw.model.message import Attachment, Message
 from openpaw.core.prompts.processors import (
     VOICE_MESSAGE_ERROR_TEMPLATE,
     VOICE_MESSAGE_TEMPLATE,
 )
+from openpaw.model.message import Attachment, Message
 
 logger = logging.getLogger(__name__)
 

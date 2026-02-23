@@ -12,10 +12,10 @@ from openpaw.builtins.base import (
     BuiltinType,
     ProcessorResult,
 )
+from openpaw.core.prompts.processors import FILE_RECEIVED_TEMPLATE
 from openpaw.core.timezone import workspace_now
 from openpaw.core.utils import deduplicate_path, sanitize_filename
 from openpaw.model.message import Attachment, Message
-from openpaw.core.prompts.processors import FILE_RECEIVED_TEMPLATE
 
 logger = logging.getLogger(__name__)
 

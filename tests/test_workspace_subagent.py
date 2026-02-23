@@ -166,6 +166,8 @@ class TestSubAgentRunnerShutdown:
         runner._session_manager = MagicMock()
         runner._get_browser_builtin = MagicMock(return_value=None)  # No browser loaded
         runner._vector_store = None  # No vector store configured
+        runner._workspace = MagicMock()
+        runner._workspace.config = None  # No config = skip lifecycle notifications
 
         # Mock lifecycle manager
         mock_lifecycle = AsyncMock()

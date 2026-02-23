@@ -48,6 +48,8 @@ class CommandContext:
     workspace_timezone: str = "UTC"  # IANA timezone string for day boundaries
     browser_builtin: Any = None  # BrowserToolBuiltin, for conversation rotation cleanup
     task_store: Any = None  # TaskStore, avoid circular import
+    subagent_store: Any = None  # SubAgentStore, for /status subagent info
+    agent_factory: Any = None  # AgentFactory, for /model command
 
 
 @dataclass

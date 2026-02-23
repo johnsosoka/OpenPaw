@@ -24,3 +24,16 @@ COMPACTED_TEMPLATE = PromptTemplate(
     ),
     input_variables=["summary"],
 )
+
+# Auto-compact injection template for automatic context rotation
+AUTO_COMPACT_TEMPLATE = PromptTemplate(
+    template=(
+        "[AUTO-COMPACTED]\n\n"
+        "The conversation was automatically compacted because context utilization "
+        "reached the configured threshold.\n\n"
+        "Previous conversation summary:\n"
+        "{summary}\n\n"
+        "The full conversation has been archived. Continue from this context."
+    ),
+    input_variables=["summary"],
+)

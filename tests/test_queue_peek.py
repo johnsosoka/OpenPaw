@@ -131,3 +131,90 @@ async def test_peek_and_consume_workflow(queue_manager):
 
     # No longer pending
     assert await queue_manager.peek_pending(session_key) is False
+
+
+@pytest.mark.asyncio
+async def test_peek_pending_ignores_non_steer_eligible(queue_manager):
+    """peek_pending returns False when only non-steer-eligible items are in lane queue."""
+    session_key = "test_session"
+
+    # Submit a system event (steer_eligible=False)
+    await queue_manager.submit(
+        session_key=session_key,
+        channel_name="telegram",
+        message="system event",
+        steer_eligible=False,
+    )
+
+    # peek_pending should return False (system event not steer-eligible)
+    result = await queue_manager.peek_pending(session_key)
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_peek_pending_detects_steer_eligible_alongside_non_eligible(queue_manager):
+    """peek_pending returns True when steer-eligible items exist alongside non-eligible."""
+    session_key = "test_session"
+
+    # Submit a system event (non-steer-eligible, bypasses buffer)
+    await queue_manager.submit(
+        session_key=session_key,
+        channel_name="telegram",
+        message="system event",
+        steer_eligible=False,
+    )
+
+    # Submit a user message to session buffer (steer-eligible by default)
+    session = await queue_manager._get_or_create_session(session_key)
+    session.messages.append(("telegram", "user message"))
+
+    # peek_pending should return True (user message in buffer)
+    result = await queue_manager.peek_pending(session_key)
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_non_steer_eligible_bypasses_session_buffer(queue_manager):
+    """Non-steer-eligible items go directly to lane queue, skipping session buffer."""
+    session_key = "test_session"
+
+    # Submit with steer_eligible=False
+    await queue_manager.submit(
+        session_key=session_key,
+        channel_name="telegram",
+        message="system event",
+        steer_eligible=False,
+    )
+
+    # Session buffer should be empty (item bypassed it)
+    async with queue_manager._lock:
+        if session_key in queue_manager._sessions:
+            assert len(queue_manager._sessions[session_key].messages) == 0
+
+    # But the lane queue should have the item
+    lane = queue_manager.lane_queue.get_lane("main")
+    async with lane._lock:
+        assert len(lane.queue) == 1
+        assert lane.queue[0].steer_eligible is False
+
+
+@pytest.mark.asyncio
+async def test_consume_pending_drains_all_regardless_of_steer_eligible(queue_manager):
+    """consume_pending returns all items including non-steer-eligible ones."""
+    session_key = "test_session"
+
+    # Submit a system event (non-steer-eligible)
+    await queue_manager.submit(
+        session_key=session_key,
+        channel_name="telegram",
+        message="system event",
+        steer_eligible=False,
+    )
+
+    # Also add a user message to session buffer
+    session = await queue_manager._get_or_create_session(session_key)
+    session.messages.append(("telegram", "user message"))
+
+    # Consume should return both
+    messages = await queue_manager.consume_pending(session_key)
+    assert len(messages) == 2

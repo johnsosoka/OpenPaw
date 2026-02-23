@@ -54,7 +54,7 @@ class TestSubAgentProactiveGuidance:
         prompt = mock_workspace.build_system_prompt(enabled_builtins=["spawn"])
 
         # Original content should still be present
-        assert "Sub-agents will notify you when they complete" in prompt
+        assert "sub-agent completes" in prompt
         assert "list_subagents" in prompt
         assert "get_subagent_result" in prompt
 

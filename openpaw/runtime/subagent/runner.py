@@ -11,13 +11,13 @@ from openpaw.agent import AgentRunner
 from openpaw.agent.metrics import TokenUsageLogger
 from openpaw.builtins.registry import BuiltinRegistry
 from openpaw.channels.base import ChannelAdapter
-from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
 from openpaw.core.prompts.system_events import (
     SUBAGENT_COMPLETED_SHORT_TEMPLATE,
     SUBAGENT_COMPLETED_TEMPLATE,
     SUBAGENT_FAILED_TEMPLATE,
     SUBAGENT_TIMED_OUT_TEMPLATE,
 )
+from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
 from openpaw.stores.subagent import SubAgentStore
 
 logger = logging.getLogger(__name__)
