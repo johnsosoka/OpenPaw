@@ -96,11 +96,12 @@ class TelegramChannel(ChannelAdapter):
         """Send a message to a Telegram chat.
 
         Automatically splits messages that exceed Telegram's 4096-char limit,
-        breaking at paragraph boundaries when possible.
+        breaking at paragraph boundaries when possible. Converts markdown to
+        Telegram HTML unless parse_mode is explicitly provided.
 
         Args:
             session_key: Session key in format 'telegram:chat_id'.
-            content: Message text.
+            content: Message text (supports markdown formatting).
             **kwargs: Additional telegram.Bot.send_message kwargs.
 
         Returns:
@@ -112,10 +113,16 @@ class TelegramChannel(ChannelAdapter):
         parts = session_key.split(":")
         chat_id = int(parts[1])
 
-        chunks = self._split_message(content)
-        sent = None
-        for chunk in chunks:
-            sent = await self._app.bot.send_message(chat_id=chat_id, text=chunk, **kwargs)
+        # Convert markdown to HTML unless caller specifies parse_mode
+        if "parse_mode" not in kwargs:
+            from openpaw.channels.formatting import markdown_to_telegram_html
+            html_content = markdown_to_telegram_html(content)
+            sent = await self._send_with_html_fallback(chat_id, content, html_content, **kwargs)
+        else:
+            chunks = self._split_message(content)
+            sent = None
+            for chunk in chunks:
+                sent = await self._app.bot.send_message(chat_id=chat_id, text=chunk, **kwargs)
 
         if not sent:
             raise RuntimeError("Failed to send message: no chunks were sent")
@@ -129,6 +136,64 @@ class TelegramChannel(ChannelAdapter):
             direction=MessageDirection.OUTBOUND,
             timestamp=datetime.now(),
         )
+
+    async def _send_with_html_fallback(
+        self,
+        chat_id: int,
+        original: str,
+        html_content: str,
+        **kwargs: Any
+    ) -> Any:
+        """Send HTML-formatted message with per-chunk plain text fallback.
+
+        Attempts to send HTML-formatted content. If Telegram rejects the HTML
+        for a specific chunk (e.g., unclosed tags from message splitting),
+        falls back to sending the plain text version of that chunk.
+
+        When chunk counts between HTML and plain versions differ (due to HTML
+        tags changing text length), falls back to all-plain-text as a safety valve.
+
+        Args:
+            chat_id: Telegram chat ID.
+            original: Original markdown content.
+            html_content: HTML-converted content.
+            **kwargs: Additional telegram.Bot.send_message kwargs.
+
+        Returns:
+            The last sent telegram.Message object.
+        """
+        from telegram.error import BadRequest
+
+        html_chunks = self._split_message(html_content)
+        plain_chunks = self._split_message(original)
+
+        # If chunk counts differ (HTML tags changed split boundaries),
+        # send all as plain text to avoid positional mismatch
+        if len(html_chunks) != len(plain_chunks):
+            logger.debug("HTML/plain chunk count mismatch, sending all as plain text")
+            sent = None
+            for chunk in plain_chunks:
+                sent = await self._app.bot.send_message(  # type: ignore[union-attr]
+                    chat_id=chat_id, text=chunk, **kwargs
+                )
+            return sent
+
+        # Try HTML for each chunk, fall back to plain on parse error
+        sent = None
+        for html_chunk, plain_chunk in zip(html_chunks, plain_chunks):
+            try:
+                sent = await self._app.bot.send_message(  # type: ignore[union-attr]
+                    chat_id=chat_id, text=html_chunk, parse_mode="HTML", **kwargs
+                )
+            except BadRequest as e:
+                if "can't parse" in str(e).lower():
+                    logger.warning(f"HTML parse failed for chunk, using plain text: {e}")
+                    sent = await self._app.bot.send_message(  # type: ignore[union-attr]
+                        chat_id=chat_id, text=plain_chunk, **kwargs
+                    )
+                else:
+                    raise
+        return sent
 
     def _split_message(self, text: str) -> list[str]:
         """Split text into chunks that fit Telegram's message limit.
