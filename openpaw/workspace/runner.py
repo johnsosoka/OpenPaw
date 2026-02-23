@@ -449,6 +449,8 @@ class WorkspaceRunner:
                 # so the agent picks up any workspace file changes (AGENT.md, etc.)
                 if command_result.new_thread_id:
                     self._agent_runner.rebuild_agent()
+                    # Prime the new session with orientation message
+                    await self._inject_new_session_prompt(message.session_key)
 
                 return
 
@@ -585,6 +587,12 @@ class WorkspaceRunner:
                 self.logger.debug("MemorySearchTool not loaded for this workspace")
         except Exception as e:
             self.logger.warning(f"Failed to connect MemorySearchTool: {e}")
+
+    async def _inject_new_session_prompt(self, session_key: str) -> None:
+        """Inject a new-session orientation message so the agent greets the user."""
+        from openpaw.core.prompts.system_events import NEW_SESSION_TEMPLATE
+
+        await self._inject_system_event(session_key, NEW_SESSION_TEMPLATE)
 
     async def _inject_system_event(self, session_key: str, content: str) -> None:
         """Inject a system event into the queue for agent processing."""

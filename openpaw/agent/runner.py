@@ -426,7 +426,7 @@ class AgentRunner:
                             tool_calls = getattr(msg, "tool_calls", [])
                             if tool_calls:
                                 tool_names = [tc.get("name", "?") for tc in tool_calls]
-                                logger.debug(f"Model called tools: {tool_names}")
+                                logger.info(f"[{self.workspace.name}] Tool calls: {tool_names}")
                                 # Track last tool called for timeout reporting
                                 self._current_tool_name = tool_calls[-1].get("name")
                             for tc in tool_calls:
