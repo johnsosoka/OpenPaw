@@ -176,6 +176,7 @@ class WorkspaceRunner:
             workspace_builtins_config = self._workspace.config.builtins
 
         workspace_channel_config = self._merged_config.get("channel", {})
+        self._user_aliases: dict[int, str] = workspace_channel_config.get("user_aliases", {})
 
         self._builtin_loader = BuiltinLoader(
             global_config=config.builtins,
@@ -455,7 +456,10 @@ class WorkspaceRunner:
                 if command_result.new_thread_id:
                     self._agent_runner.rebuild_agent()
                     # Prime the new session with orientation message
-                    await self._inject_new_session_prompt(message.session_key)
+                    user_name = self._resolve_user_name(message)
+                    await self._inject_new_session_prompt(
+                        message.session_key, user_name=user_name
+                    )
 
                 return
 
@@ -602,11 +606,41 @@ class WorkspaceRunner:
         except Exception as e:
             self.logger.warning(f"Failed to connect MemorySearchTool: {e}")
 
-    async def _inject_new_session_prompt(self, session_key: str) -> None:
-        """Inject a new-session orientation message so the agent greets the user."""
+    def _resolve_user_name(self, message: Message) -> str:
+        """Resolve display name for a message's user from aliases or metadata."""
+        if self._user_aliases:
+            try:
+                name = self._user_aliases.get(int(message.user_id))
+                if name:
+                    return name
+            except (ValueError, TypeError):
+                pass
+
+        first_name = message.metadata.get("first_name")
+        if first_name:
+            return str(first_name)
+
+        return "Unknown"
+
+    async def _inject_new_session_prompt(
+        self, session_key: str, user_name: str = "Unknown"
+    ) -> None:
+        """Inject a new-session orientation message with USER.md re-injection.
+
+        Re-surfaces user context as a user-turn message, giving the model
+        a second attention pass over the user identity (double prompting).
+
+        Args:
+            session_key: The session to inject into.
+            user_name: Display name of the user who started the session.
+        """
         from openpaw.core.prompts.system_events import NEW_SESSION_TEMPLATE
 
-        await self._inject_system_event(session_key, NEW_SESSION_TEMPLATE)
+        user_context = self._workspace.user_md or "No user context available."
+        content = NEW_SESSION_TEMPLATE.format(
+            user_context=user_context, user_name=user_name
+        )
+        await self._inject_system_event(session_key, content)
 
     async def _inject_system_event(self, session_key: str, content: str) -> None:
         """Inject a system event into the queue for agent processing."""

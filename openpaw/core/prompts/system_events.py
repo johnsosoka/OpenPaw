@@ -79,18 +79,15 @@ TIMEOUT_NOTIFICATION_GENERIC = PromptTemplate(
 
 # --- New session initialization ---
 
-NEW_SESSION_TEMPLATE = (
-    "[SYSTEM] A new conversation session has started.\n\n"
-    "Before greeting the user, take a moment to orient yourself:\n"
-    "- Your previous conversations are archived in memory/conversations/. "
-    "You can read recent archives to recall context.\n"
-    "- If available, use search_conversations to find relevant past discussions.\n\n"
-    "Session reminders:\n"
-    "- Bias towards using send_message generously throughout your work.\n"
-    "- Acknowledge the user before acting — state your plan.\n"
-    "- Provide updates as you work.\n"
-    "- Don't leave the user hanging in silence.\n\n"
-    "Process these instructions internally, then greet the user naturally."
+NEW_SESSION_TEMPLATE = PromptTemplate(
+    template=(
+        "[SYSTEM] A new conversation session has started. "
+        "The user who started this session is: {user_name}.\n\n"
+        "<user_context>\n{user_context}\n</user_context>\n\n"
+        "Start with a brief, friendly hello — then ask what they need. "
+        "Respond directly. Do NOT use send_message for this greeting."
+    ),
+    input_variables=["user_context", "user_name"],
 )
 
 # --- Scheduled agent result injection templates ---
