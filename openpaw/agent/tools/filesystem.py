@@ -25,18 +25,29 @@ class FilesystemTools:
     to prevent path traversal attacks and access outside the sandbox.
     """
 
-    def __init__(self, workspace_root: Path, max_file_size_mb: int = 10, timezone: str = "UTC"):
+    def __init__(
+        self,
+        workspace_root: Path,
+        max_file_size_mb: int = 10,
+        timezone: str = "UTC",
+        workspace_name: str = "",
+    ):
         """Initialize filesystem tools with workspace sandbox.
 
         Args:
             workspace_root: Root directory for all file operations
             max_file_size_mb: Maximum file size in MB for operations like grep
             timezone: IANA timezone identifier for timestamp display (default: UTC)
+            workspace_name: Human-readable workspace name for output enrichment.
+                When set, ls output, write success messages, and error hints include
+                the workspace name to help agents maintain spatial orientation.
+                Empty string (default) disables enrichment for backward compatibility.
         """
         self.root = workspace_root.resolve()
         self.max_file_size_bytes = max_file_size_mb * 1024 * 1024
         self._max_read_output_chars: int = 100_000  # Character safety valve for read_file output
         self._timezone = timezone
+        self._workspace_name = workspace_name
 
     def _resolve_path(self, path: str) -> Path:
         """Resolve a path relative to workspace root with security checks."""
@@ -91,10 +102,18 @@ class FilesystemTools:
             try:
                 dir_path = self._resolve_path(path)
             except ValueError as e:
-                return f"Error: {e}"
+                error_msg = f"Error: {e}"
+                if self._workspace_name:
+                    error_msg += (
+                        f"\nHint: Use paths relative to your '{self._workspace_name}' workspace "
+                        f"(e.g., 'notes.md', 'research/report.txt')"
+                    )
+                return error_msg
 
             if not dir_path.exists():
-                return f"Error: Directory '{path}' does not exist"
+                not_found_msg = f"Error: Directory '{path}' does not exist"
+                not_found_msg += "\nUse ls('.') to see available files in your workspace."
+                return not_found_msg
 
             if not dir_path.is_dir():
                 return f"Error: '{path}' is not a directory"
@@ -148,7 +167,13 @@ class FilesystemTools:
                 if not results:
                     return f"Directory '{path}' is empty"
 
-                return "\n".join(self._format_file_listing(r) for r in results)
+                listing = "\n".join(self._format_file_listing(r) for r in results)
+
+                # Prefix with workspace header when workspace name is set
+                if self._workspace_name:
+                    listing = f"[Workspace: {self._workspace_name}] Contents of {path}/:\n{listing}"
+
+                return listing
 
             except (OSError, PermissionError) as e:
                 return f"Error listing directory: {e}"
@@ -168,10 +193,19 @@ class FilesystemTools:
             try:
                 resolved_path = self._resolve_path(file_path)
             except ValueError as e:
-                return f"Error: {e}"
+                error_msg = f"Error: {e}"
+                if self._workspace_name:
+                    error_msg += (
+                        f"\nHint: Use paths relative to your '{self._workspace_name}' workspace "
+                        f"(e.g., 'notes.md', 'research/report.txt')"
+                    )
+                return error_msg
 
             if not resolved_path.exists():
-                return f"Error: File '{file_path}' not found"
+                return (
+                    f"Error: File '{file_path}' not found"
+                    "\nUse ls('.') to see available files in your workspace."
+                )
 
             if not resolved_path.is_file():
                 return f"Error: '{file_path}' is not a file"
@@ -231,7 +265,13 @@ class FilesystemTools:
             try:
                 resolved_path = self._resolve_path(file_path)
             except ValueError as e:
-                return f"Error: {e}"
+                error_msg = f"Error: {e}"
+                if self._workspace_name:
+                    error_msg += (
+                        f"\nHint: Use paths relative to your '{self._workspace_name}' workspace "
+                        f"(e.g., 'notes.md', 'research/report.txt')"
+                    )
+                return error_msg
 
             if resolved_path.exists():
                 return f"Error: File '{file_path}' already exists. Use edit_file to modify existing files."
@@ -249,7 +289,10 @@ class FilesystemTools:
                     f.write(content)
 
                 lines = len(content.splitlines())
-                return f"Successfully wrote {lines} lines to '{file_path}'"
+                success_msg = f"Successfully wrote {lines} lines to '{file_path}'"
+                if self._workspace_name:
+                    success_msg += f" (workspace: {self._workspace_name})"
+                return success_msg
 
             except OSError as e:
                 return f"Error writing file '{file_path}': {e}"
@@ -272,7 +315,13 @@ class FilesystemTools:
             try:
                 resolved_path = self._resolve_path(file_path)
             except ValueError as e:
-                return f"Error: {e}"
+                error_msg = f"Error: {e}"
+                if self._workspace_name:
+                    error_msg += (
+                        f"\nHint: Use paths relative to your '{self._workspace_name}' workspace "
+                        f"(e.g., 'notes.md', 'research/report.txt')"
+                    )
+                return error_msg
 
             try:
                 resolved_path.parent.mkdir(parents=True, exist_ok=True)
@@ -285,7 +334,10 @@ class FilesystemTools:
                     f.write(content)
 
                 lines = len(content.splitlines())
-                return f"Successfully wrote {lines} lines to '{file_path}'"
+                success_msg = f"Successfully wrote {lines} lines to '{file_path}'"
+                if self._workspace_name:
+                    success_msg += f" (workspace: {self._workspace_name})"
+                return success_msg
 
             except OSError as e:
                 return f"Error writing file '{file_path}': {e}"
@@ -306,10 +358,19 @@ class FilesystemTools:
             try:
                 resolved_path = self._resolve_path(file_path)
             except ValueError as e:
-                return f"Error: {e}"
+                error_msg = f"Error: {e}"
+                if self._workspace_name:
+                    error_msg += (
+                        f"\nHint: Use paths relative to your '{self._workspace_name}' workspace "
+                        f"(e.g., 'notes.md', 'research/report.txt')"
+                    )
+                return error_msg
 
             if not resolved_path.exists():
-                return f"Error: File '{file_path}' not found"
+                return (
+                    f"Error: File '{file_path}' not found"
+                    "\nUse ls('.') to see available files in your workspace."
+                )
 
             if not resolved_path.is_file():
                 return f"Error: '{file_path}' is not a file"
@@ -364,10 +425,18 @@ class FilesystemTools:
             try:
                 search_path = self._resolve_path(path)
             except ValueError as e:
-                return f"Error: {e}"
+                error_msg = f"Error: {e}"
+                if self._workspace_name:
+                    error_msg += (
+                        f"\nHint: Use paths relative to your '{self._workspace_name}' workspace "
+                        f"(e.g., 'notes.md', 'research/report.txt')"
+                    )
+                return error_msg
 
             if not search_path.exists():
-                return f"Error: Directory '{path}' does not exist"
+                not_found_msg = f"Error: Directory '{path}' does not exist"
+                not_found_msg += "\nUse ls('.') to see available files in your workspace."
+                return not_found_msg
 
             if not search_path.is_dir():
                 return f"Error: '{path}' is not a directory"
@@ -432,10 +501,19 @@ class FilesystemTools:
             try:
                 search_path = self._resolve_path(path)
             except ValueError as e:
-                return f"Error: {e}"
+                error_msg = f"Error: {e}"
+                if self._workspace_name:
+                    error_msg += (
+                        f"\nHint: Use paths relative to your '{self._workspace_name}' workspace "
+                        f"(e.g., 'notes.md', 'research/report.txt')"
+                    )
+                return error_msg
 
             if not search_path.exists():
-                return f"Error: Path '{path}' does not exist"
+                return (
+                    f"Error: Path '{path}' does not exist"
+                    "\nUse ls('.') to see available files in your workspace."
+                )
 
             # Try ripgrep first
             result = self._ripgrep_search(
@@ -490,7 +568,11 @@ class FilesystemTools:
                 return json.dumps({"path": path, "exists": False, "error": str(e)})
 
             if not resolved_path.exists():
-                return json.dumps({"path": path, "exists": False, "error": "File not found"})
+                return json.dumps({
+                    "path": path,
+                    "exists": False,
+                    "error": "File not found. Use ls('.') to see available files in your workspace.",
+                })
 
             if resolved_path.is_dir():
                 return json.dumps({
@@ -587,7 +669,16 @@ class FilesystemTools:
                     "error": f"Permission or I/O error: {e}"
                 })
 
-        return [ls, read_file, write_file, overwrite_file, edit_file, glob_files, grep_files, file_info]
+        tools = [ls, read_file, write_file, overwrite_file, edit_file, glob_files, grep_files, file_info]
+
+        # Prefix all tool descriptions with workspace name to reinforce spatial orientation
+        if self._workspace_name:
+            for tool_instance in tools:
+                tool_instance.description = (
+                    f"[{self._workspace_name} workspace] {tool_instance.description}"
+                )
+
+        return tools
 
     def _ripgrep_search(
         self,
