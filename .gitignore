@@ -56,8 +56,8 @@ config.yaml
 .DS_Store
 Thumbs.db
 
-# Poetry
-poetry.lock
+# MkDocs build output
+site/
 
 # Agent workspaces (contain tokens and personal config)
 agent_workspaces/

@@ -63,7 +63,7 @@ OpenPaw is organized into eight top-level packages:
 
 **Branching**
 
-Branch from `main` using one of these prefixes:
+Branch from `develop` using one of these prefixes:
 
 ```
 feature/short-description
@@ -71,6 +71,8 @@ bugfix/short-description
 docs/short-description
 chore/short-description
 ```
+
+Feature and bugfix branches are merged into `develop` via pull request. The `develop` branch is merged into `main` for releases.
 
 **Before submitting**
 
@@ -134,10 +136,10 @@ poetry run pytest -k "test_approval"
 
 ## Pull Request Process
 
-1. Fork the repository and create a branch from `main`.
+1. Fork the repository and create a branch from `develop`.
 2. Implement your change with tests.
 3. Run lint, type check, and tests locally — all must pass.
-4. Open a pull request against `main`. Reference any related issue in the PR description.
+4. Open a pull request against `develop`. Reference any related issue in the PR description.
 5. Keep PRs focused: one feature or fix per PR. If your change is large, consider breaking it into a series of smaller PRs.
 
 PRs that introduce unnecessary complexity, skip tests, or deviate from the architectural conventions described above will be asked to revise before merge.
