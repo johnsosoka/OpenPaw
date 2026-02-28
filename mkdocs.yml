@@ -1,0 +1,64 @@
+site_name: OpenPaw Documentation
+site_description: Multi-Channel AI Agent Framework with LangGraph
+site_author: John Sosoka
+
+repo_url: https://github.com/johnsosoka/OpenPaw
+repo_name: OpenPaw
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Architecture: architecture.md
+  - Configuration: configuration.md
+  - Workspaces: workspaces.md
+  - Channels: channels.md
+  - Queue System: queue-system.md
+  - Cron Scheduler: cron-scheduler.md
+  - Built-ins: builtins.md
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/johnsosoka/OpenPaw
+
+copyright: Copyright &copy; 2025 John Sosoka
