@@ -449,44 +449,40 @@ Agents can read archived conversations to maintain long-term memory across conve
 
 ## Creating a New Workspace
 
-1. **Create directory structure:**
+The fastest way to create a workspace is with the `init` command:
 
 ```bash
-mkdir -p agent_workspaces/my-agent/tools agent_workspaces/my-agent/crons
+# Basic scaffold with TODO markers
+poetry run openpaw init my_agent
+
+# Pre-configure model and channel
+poetry run openpaw init my_agent --model anthropic:claude-sonnet-4-20250514 --channel telegram
+
+# Scaffold in a custom directory
+poetry run openpaw init my_agent --path /path/to/workspaces
 ```
 
-2. **Create required markdown files:**
+This creates the workspace directory with all required files (AGENT.md, USER.md, SOUL.md, HEARTBEAT.md, agent.yaml, .env) pre-populated with templates and TODO markers.
+
+**After scaffolding:**
+
+1. Edit `agent.yaml` with your model and channel settings
+2. Add API keys to `.env`
+3. Customize AGENT.md, USER.md, and SOUL.md to define personality
+4. Optionally add custom tools in `tools/` and cron jobs in `crons/`
+5. Run the workspace:
 
 ```bash
-cd agent_workspaces/my-agent
-touch AGENT.md USER.md SOUL.md HEARTBEAT.md
+poetry run openpaw -c config.yaml -w my_agent
 ```
 
-3. **Define personality:**
-
-Edit each markdown file to define the agent's capabilities, user context, values, and initial state.
-
-4. **Add configuration (optional):**
-
-Create `agent.yaml` if you need to override global settings.
-
-5. **Add custom tools (optional):**
-
-Create Python files in `tools/` with `@tool` decorated functions and a `requirements.txt` for dependencies.
-
-6. **Add cron jobs (optional):**
-
-Create YAML files in `crons/` for scheduled tasks.
-
-7. **Add workspace environment variables (optional):**
-
-Create `.env` for workspace-specific API keys and configuration.
-
-8. **Run the workspace:**
+**List available workspaces:**
 
 ```bash
-poetry run openpaw -c config.yaml -w my-agent
+poetry run openpaw list
 ```
+
+**Name requirements:** Workspace names must be 2-64 characters, start with a lowercase letter, and contain only lowercase letters, digits, hyphens, and underscores (e.g., `my_agent`, `test-bot`, `gilfoyle`).
 
 ## Example Workspaces
 

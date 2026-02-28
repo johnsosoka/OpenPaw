@@ -106,6 +106,13 @@ async def main() -> None:
 
 def run() -> None:
     """Entry point for poetry scripts."""
+    # Early dispatch for init/list commands — no async or heavy imports needed.
+    if len(sys.argv) >= 2 and sys.argv[1] in ("init", "list"):
+        from openpaw.cli_init import dispatch_command
+
+        dispatch_command(sys.argv[1], sys.argv[2:])
+        return
+
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
