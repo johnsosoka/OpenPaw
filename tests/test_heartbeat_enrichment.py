@@ -386,7 +386,6 @@ class TestHeartbeatJSONLEnrichment:
         mock_token_logger: Mock,
     ):
         """Test that heartbeats outside active hours don't generate metrics."""
-        # Set active hours that will never match (future time window)
         heartbeat_config.active_hours = "23:00-23:30"
 
         scheduler = HeartbeatScheduler(
@@ -399,6 +398,9 @@ class TestHeartbeatJSONLEnrichment:
         )
 
         workspace_path.mkdir(parents=True, exist_ok=True)
+
+        # Mock active hours check to guarantee outside-hours behavior
+        scheduler._is_within_active_hours = Mock(return_value=False)  # type: ignore[method-assign]
 
         # Run heartbeat
         await scheduler._run_heartbeat()
