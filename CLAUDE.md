@@ -337,6 +337,27 @@ aws configure
 
 **Region Availability** (Kimi K2): `us-east-1`, `us-east-2`, `us-west-2`, `ap-northeast-1`, `ap-south-1`, `sa-east-1`
 
+#### xAI (Grok) Configuration
+
+OpenPaw supports xAI Grok models via the dedicated `langchain-xai` package (`ChatXAI`).
+
+**Per-workspace (`agent.yaml`)**:
+
+```yaml
+model:
+  provider: xai
+  model: grok-3-mini
+  api_key: ${XAI_API_KEY}
+  temperature: 0.7
+```
+
+**Available xAI Models**:
+- `grok-3` - Grok 3 (full reasoning)
+- `grok-3-mini` - Grok 3 Mini (lightweight, fast)
+- `grok-2-1212` - Grok 2
+
+**Credentials**: Set `XAI_API_KEY` in environment or workspace `.env`.
+
 #### OpenAI-Compatible APIs
 
 Any OpenAI-compatible provider can be used by specifying `base_url` in the workspace model config. Extra kwargs beyond the standard set (`provider`, `model`, `api_key`, `temperature`, `max_turns`, `timeout_seconds`, `region`) are passed through to `init_chat_model()`.
@@ -376,7 +397,7 @@ The `/model` command enables live model switching without restarting the workspa
 - `/model provider:model` — Validate and switch to a new model (e.g., `/model openai:gpt-4o`)
 - `/model reset` — Revert to the configured model from agent.yaml
 
-**API Key Resolution**: When switching providers at runtime, the factory resolves API keys from environment variables. Supported mappings: `anthropic` → `ANTHROPIC_API_KEY`, `openai` → `OPENAI_API_KEY`, `bedrock_converse` → no key required (uses AWS credentials).
+**API Key Resolution**: When switching providers at runtime, the factory resolves API keys from environment variables. Supported mappings: `anthropic` → `ANTHROPIC_API_KEY`, `openai` → `OPENAI_API_KEY`, `xai` → `XAI_API_KEY`, `bedrock_converse` → no key required (uses AWS credentials).
 
 ### Auto-Compact
 
