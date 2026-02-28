@@ -111,9 +111,17 @@ def create_chat_model(
         logger.info(f"Creating ChatBedrockConverse: model={model_name}, kwargs_keys={list(kwargs.keys())}")
         return ChatBedrockConverse(**kwargs)
 
+    if provider == "xai":
+        from langchain_xai import ChatXAI
+
+        if api_key:
+            kwargs["xai_api_key"] = api_key
+        logger.info(f"Creating ChatXAI: model={model_name}")
+        return ChatXAI(**kwargs)
+
     raise ValueError(
         f"Unsupported model provider: '{provider}'. "
-        f"Supported: openai, anthropic, bedrock_converse"
+        f"Supported: openai, anthropic, bedrock_converse, xai"
     )
 
 

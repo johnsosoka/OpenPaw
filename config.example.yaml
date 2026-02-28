@@ -30,6 +30,7 @@ lanes:
 # Examples:
 #   anthropic:claude-sonnet-4-20250514
 #   openai:gpt-4o
+#   xai:grok-3-mini
 #   bedrock_converse:moonshot.kimi-k2-thinking
 agent:
   model: anthropic:claude-sonnet-4-20250514
