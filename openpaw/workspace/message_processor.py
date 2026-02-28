@@ -307,9 +307,25 @@ class MessageProcessor:
 
                     if approved:
                         self._logger.info(f"Tool {e.tool_name} approved, resuming")
+                        # Fix orphaned tool_calls before re-running
+                        try:
+                            await self._agent_runner.resolve_orphaned_tool_calls(
+                                thread_id,
+                                responses={e.tool_call_id: f"Tool '{e.tool_name}' was approved. Please call it again."},
+                            )
+                        except Exception as resolve_err:
+                            self._logger.error(f"Failed to resolve orphaned tool calls: {resolve_err}", exc_info=True)
                         continue  # Re-enter loop with same message
                     else:
                         self._logger.info(f"Tool {e.tool_name} denied")
+                        # Fix orphaned tool_calls before re-running
+                        try:
+                            await self._agent_runner.resolve_orphaned_tool_calls(
+                                thread_id,
+                                responses={e.tool_call_id: f"Tool '{e.tool_name}' was denied by user."},
+                            )
+                        except Exception as resolve_err:
+                            self._logger.error(f"Failed to resolve orphaned tool calls: {resolve_err}", exc_info=True)
                         await channel.send_message(
                             session_key,
                             f"Tool '{e.tool_name}' was denied. "

@@ -717,12 +717,14 @@ class TelegramChannel(ChannelAdapter):
         approved = action == "approve"
 
         # Update the button message to show result
-        result_text = "✅ Approved" if approved else "❌ Denied"
+        result_text = "Approved" if approved else "Denied"
         if query.message and query.message.text:
-            await query.edit_message_text(
-                text=f"{query.message.text}\n\n**Result: {result_text}**",
-                parse_mode="Markdown",
-            )
+            try:
+                await query.edit_message_text(
+                    text=f"{query.message.text}\n\nResult: {result_text}",
+                )
+            except Exception:
+                logger.debug("Failed to update approval message", exc_info=True)
 
         # Invoke the callback
         if self._approval_callback:
