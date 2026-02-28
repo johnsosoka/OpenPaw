@@ -32,7 +32,7 @@ This decouples `WorkspaceRunner` from concrete channel types, enabling extensibi
 
 ## Unified Message Format
 
-All channels convert platform-specific messages to OpenPaw's unified format defined in `openpaw/domain/message.py`:
+All channels convert platform-specific messages to OpenPaw's unified format defined in `openpaw/model/message.py`:
 
 ```python
 @dataclass
@@ -436,7 +436,7 @@ Create `openpaw/channels/<platform>.py` extending `ChannelAdapter`:
 
 ```python
 from openpaw.channels.base import ChannelAdapter
-from openpaw.domain.message import Message, Attachment, MessageDirection
+from openpaw.model.message import Message, Attachment, MessageDirection
 from openpaw.channels.commands.router import CommandRouter, CommandContext, CommandResult
 from typing import Callable, Awaitable
 import discord  # Platform SDK

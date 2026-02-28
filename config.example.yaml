@@ -12,20 +12,20 @@ logging:
   backup_count: 5
   per_workspace: true
 
-# Message queue defaults (can be overridden per workspace)
+# Message queue defaults (can be overridden per workspace via agent.yaml)
 queue:
   mode: collect            # collect, steer, followup, interrupt
-  debounce_ms: 1000
-  cap: 20
-  drop_policy: summarize   # old, new, summarize
+  debounce_ms: 1000        # Wait this long after last message before processing
+  cap: 20                  # Max queued messages per session before drop policy fires
+  drop_policy: summarize   # overflow policy: old (drop oldest), new (drop newest), summarize
 
-# Lane concurrency
+# Lane concurrency (controls how many agent runs happen simultaneously per lane)
 lanes:
-  main_concurrency: 4
-  subagent_concurrency: 8
-  cron_concurrency: 2
+  main_concurrency: 4      # User-facing message lanes
+  subagent_concurrency: 8  # Background sub-agent workers
+  cron_concurrency: 2      # Scheduled job runners
 
-# Default agent model
+# Default agent model — applies to all workspaces unless overridden in agent.yaml
 # Format: provider:model_id
 # Examples:
 #   anthropic:claude-sonnet-4-20250514
@@ -37,65 +37,184 @@ agent:
   max_turns: 50
   temperature: 0.7
 
-# Builtins (tools and processors)
-# Conditionally loaded based on API keys and installed packages.
-# See docs/builtins.md for full reference.
+# ──────────────────────────────────────────────────────────────────────────────
+# Builtins — tools and processors conditionally loaded based on API key
+# availability and installed packages. All sections below are commented out;
+# uncomment only what you need.
+# ──────────────────────────────────────────────────────────────────────────────
 builtins:
-  allow: []    # Empty = allow all available
-  deny: []     # Use "group:voice" to deny entire groups
+  allow: []    # Empty = allow all available builtins
+  deny: []     # Deny specific builtins or groups: e.g., ["group:voice", "browser"]
 
-  # Example: configure Brave Search
+  # Web search via Brave API (requires BRAVE_API_KEY)
   # brave_search:
   #   enabled: true
   #   config:
-  #     count: 5
+  #     count: 5              # Number of search results to return
 
-  # Example: configure browser automation
+  # Audio transcription for voice messages (requires OPENAI_API_KEY)
+  # whisper:
+  #   enabled: true
+  #   config:
+  #     model: whisper-1
+
+  # Text-to-speech for voice responses (requires ELEVENLABS_API_KEY)
+  # elevenlabs:
+  #   enabled: true
+  #   config:
+  #     voice_id: 21m00Tcm4TlvDq8ikWAM
+
+  # Async shell command execution (no API key required)
+  # shell:
+  #   enabled: true
+
+  # Agent self-scheduling — lets agents schedule their own follow-up tasks
+  # (no API key required; see "Dynamic Scheduling" in CLAUDE.md)
+  # cron:
+  #   enabled: true
+  #   config:
+  #     min_interval_seconds: 300   # Minimum recurring task interval (5 min default)
+  #     max_tasks: 50               # Maximum pending scheduled tasks per workspace
+
+  # Sub-agent spawning — agents can launch background workers for concurrent tasks
+  # (no API key required; see "Sub-Agent Spawning" in CLAUDE.md)
+  # spawn:
+  #   enabled: true
+  #   config:
+  #     max_concurrent: 8           # Maximum simultaneous sub-agents
+
+  # Browser automation via Playwright with accessibility tree navigation
+  # (requires: poetry add playwright && poetry run playwright install chromium)
   # browser:
   #   enabled: true
   #   config:
   #     headless: true
-  #     allowed_domains: []
-  #     blocked_domains: []
+  #     allowed_domains: []         # Empty = allow all; e.g., ["calendly.com", "*.google.com"]
+  #     blocked_domains: []         # Always denied, even if in allowed_domains
   #     timeout_seconds: 30
-  #     persist_cookies: false
+  #     persist_cookies: false      # Persist auth state across agent runs within a session
+  #     downloads_dir: downloads    # Relative to workspace root
+  #     screenshots_dir: screenshots
 
-# Per-workspace settings (also configurable in agent.yaml)
+  # Save all uploaded files to uploads/{YYYY-MM-DD}/ (no API key required)
+  file_persistence:
+    enabled: true
+    config:
+      max_file_size: 52428800     # 50 MB in bytes
+      clear_data_after_save: false
+
+  # PDF/DOCX/PPTX → markdown conversion (core dependency, no API key required)
+  docling:
+    enabled: true
+    config:
+      max_file_size: 52428800     # 50 MB in bytes
+      ocr_backend: auto           # auto, mac, easyocr, tesseract, rapidocr
+      ocr_languages: [en]
+      force_full_page_ocr: true   # Recommended for scanned documents
+      do_table_structure: true
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Approval gates — pause execution and require user confirmation before
+# running specified tools. Disabled by default. Per-workspace override in agent.yaml.
+# ──────────────────────────────────────────────────────────────────────────────
+# approval_gates:
+#   enabled: false
+#   timeout_seconds: 120          # Seconds to wait before applying default_action
+#   default_action: deny          # Action on timeout: "deny" or "approve"
+#   tools:
+#     overwrite_file:
+#       require_approval: true
+#       show_args: true           # Show tool arguments in the approval prompt
+#     shell_run:
+#       require_approval: true
+#       show_args: true
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tool timeouts — cap how long any individual tool call can run.
+# Defaults apply globally; per-tool overrides take precedence.
+# Per-workspace override in agent.yaml.
+# ──────────────────────────────────────────────────────────────────────────────
+# tool_timeouts:
+#   default_seconds: 120          # Applied to any tool without a specific override
+#   overrides:
+#     shell_run: 300              # Shell commands often need more time
+#     browser_navigate: 60
+#     brave_search: 30
+
+# ──────────────────────────────────────────────────────────────────────────────
+# The sections below are workspace-level settings. They can be placed here as
+# global defaults, but are typically configured per-workspace in agent.yaml.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Auto-compact — rotate to a fresh conversation when context window fills
 # auto_compact:
-#   enabled: false          # Auto-compact when context window fills
-#   trigger: 0.8            # Fraction of context window to trigger (0.0-1.0)
-#   summary_model: null     # Model for summaries (null = use workspace model)
+#   enabled: false
+#   trigger: 0.8                  # Trigger at 80% context window utilization
+#   summary_model: null           # Model for summary generation (null = workspace model)
 
+# Lifecycle notifications — best-effort channel messages on workspace events
 # lifecycle:
-#   notify_startup: false   # Notify users when workspace starts
-#   notify_shutdown: true   # Notify users when workspace stops
-#   notify_auto_compact: true  # Notify users on auto-compact
+#   notify_startup: false         # Notify users when workspace starts
+#   notify_shutdown: true         # Notify users when workspace stops
+#   notify_auto_compact: true     # Notify users when auto-compact fires
 
-# Conversation memory (vector search)
-# Disabled by default — requires embedding API key
+# Heartbeat — periodic proactive agent check-ins (workspace-level only, in agent.yaml)
+# heartbeat:
+#   enabled: false
+#   interval_minutes: 30          # How often the agent checks in
+#   active_hours: "09:00-17:00"   # Only run during this window (workspace timezone)
+#   suppress_ok: true             # Suppress messages when agent responds HEARTBEAT_OK
+#   delivery: channel             # channel, agent, or both
+#   target_channel: telegram
+#   target_chat_id: 123456789     # Telegram chat ID to deliver heartbeat responses
+
+# Conversation memory (vector search) — requires embedding API key
 # memory:
-#   enabled: true
+#   enabled: false
 #   embedding:
 #     provider: openai
 #     model: text-embedding-3-small
 #     api_key: ${OPENAI_API_KEY}
 
-# Per-workspace model config (in agent.yaml, not here)
+# ──────────────────────────────────────────────────────────────────────────────
+# Per-workspace model config (typically in agent.yaml, not here)
 # Two equivalent formats:
-#   Combined: model: "anthropic:claude-sonnet-4-20250514"
+#   Combined:  model: "anthropic:claude-sonnet-4-20250514"
 #   Explicit:
 #     model:
 #       provider: anthropic
 #       model: claude-sonnet-4-20250514
 #       temperature: 0.5
+#       max_turns: 50
+#
+# AWS Bedrock:
+#   model:
+#     provider: bedrock_converse
+#     model: moonshot.kimi-k2-thinking
+#     region: us-east-1
+#
+# OpenAI-compatible (custom base_url):
+#   model:
+#     provider: openai
+#     model: kimi-k2.5
+#     api_key: ${MOONSHOT_API_KEY}
+#     base_url: https://api.moonshot.ai/v1
+# ──────────────────────────────────────────────────────────────────────────────
 
-# Per-workspace channel settings (in agent.yaml, not here)
+# Per-workspace channel settings (typically in agent.yaml, not here)
 # channel:
 #   type: telegram
 #   token: ${TELEGRAM_BOT_TOKEN}
 #   allowed_users:
 #     - 123456789
 #     - 987654321
-#   user_aliases:             # Map user IDs to display names
+#   allowed_groups: []
+#   allow_all: false              # Insecure — allow any user; use only for testing
+#   user_aliases:                 # Map user IDs to display names for multi-user workspaces
 #     123456789: "John"
 #     987654321: "Sarah"
+
+# Per-workspace tool allow/deny (typically in agent.yaml, not here)
+# workspace_tools:
+#   allow: []                     # Empty = allow all tools in tools/ directory
+#   deny: []                      # Tool function names to exclude

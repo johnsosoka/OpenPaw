@@ -6,8 +6,8 @@ OpenPaw implements a sophisticated lane-based queuing system that enables respon
 
 The queue system is implemented in two core components:
 
-- **`openpaw/core/queue/lane.py`** - `LaneQueue` provides lane-based FIFO queuing with configurable concurrency
-- **`openpaw/core/queue/manager.py`** - `QueueManager` coordinates message routing, debouncing, and queue mode behavior
+- **`openpaw/runtime/queue/lane.py`** - `LaneQueue` provides lane-based FIFO queuing with configurable concurrency
+- **`openpaw/runtime/queue/manager.py`** - `QueueManager` coordinates message routing, debouncing, and queue mode behavior
 
 Each workspace maintains its own isolated queue system with three lanes:
 
