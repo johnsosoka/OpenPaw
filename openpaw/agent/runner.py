@@ -510,7 +510,11 @@ class AgentRunner:
         # Get timezone from workspace config, defaulting to UTC
         timezone = self.workspace.config.timezone if self.workspace.config else "UTC"
 
-        fs_tools_manager = FilesystemTools(workspace_root=workspace_root, timezone=timezone)
+        fs_tools_manager = FilesystemTools(
+            workspace_root=workspace_root,
+            timezone=timezone,
+            workspace_name=self.workspace.name,
+        )
         filesystem_tools = fs_tools_manager.get_tools()
 
         # 3. Combine all tools (filesystem + additional tools)

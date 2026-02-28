@@ -37,6 +37,8 @@ from openpaw.core.prompts.framework import (
     SECTION_SUB_AGENT_SPAWNING,
     SECTION_TASK_MANAGEMENT,
     SECTION_WEB_BROWSING,
+    SECTION_WORKSPACE_FILESYSTEM,
+    build_framework_orientation,
 )
 from openpaw.core.prompts.processors import (
     FILE_RECEIVED_TEMPLATE,
@@ -185,10 +187,35 @@ class TestFrameworkSections:
     """Test framework section constants."""
 
     def test_framework_orientation_is_complete(self) -> None:
-        """FRAMEWORK_ORIENTATION has expected content."""
+        """FRAMEWORK_ORIENTATION has expected content (unchanged for backward compat)."""
         assert "persistent autonomous agent" in FRAMEWORK_ORIENTATION
         assert "OpenPaw framework" in FRAMEWORK_ORIENTATION
         assert "workspace directory" in FRAMEWORK_ORIENTATION
+
+    def test_build_framework_orientation_injects_workspace_name(self) -> None:
+        """build_framework_orientation() embeds workspace name into the orientation text."""
+        result = build_framework_orientation("gilfoyle")
+
+        assert "gilfoyle" in result
+        assert "Your workspace name is 'gilfoyle'" in result
+        assert "OpenPaw framework" in result
+        assert "workspace directory" in result
+        assert "persistent autonomous agent" in result
+
+    def test_build_framework_orientation_empty_name(self) -> None:
+        """build_framework_orientation() handles empty string without crashing."""
+        result = build_framework_orientation("")
+
+        # Empty name yields an empty placeholder but the surrounding text is intact
+        assert "Your workspace name is ''" in result
+        assert "OpenPaw framework" in result
+
+    def test_section_workspace_filesystem_content(self) -> None:
+        """SECTION_WORKSPACE_FILESYSTEM has expected content."""
+        assert "## Workspace Filesystem" in SECTION_WORKSPACE_FILESYSTEM
+        assert "relative to your workspace root" in SECTION_WORKSPACE_FILESYSTEM
+        assert "ls('.')" in SECTION_WORKSPACE_FILESYSTEM
+        assert "NOT a code repository" in SECTION_WORKSPACE_FILESYSTEM
 
     def test_shell_hygiene_section_exists(self) -> None:
         """SECTION_SHELL_HYGIENE is defined with expected content."""
@@ -298,7 +325,7 @@ class TestSystemPromptIdentity:
         return loader.load("test_workspace")
 
     def test_system_prompt_with_all_builtins(self, mock_workspace: AgentWorkspace) -> None:
-        """System prompt output is identical with all builtins enabled."""
+        """System prompt output is correct with all builtins enabled."""
         prompt = mock_workspace.build_system_prompt(enabled_builtins=None)
 
         # Verify key sections are present
@@ -322,6 +349,11 @@ class TestSystemPromptIdentity:
         assert "## Autonomous Planning" in prompt
         assert "## Memory Search" in prompt
         assert "## Conversation Memory" in prompt
+
+        # Verify workspace context section is present with workspace name and contents
+        assert "<workspace_context>" in prompt
+        assert "Workspace: test_workspace" in prompt
+        assert "AGENT.md" in prompt
 
     def test_system_prompt_with_subset_builtins(self, mock_workspace: AgentWorkspace) -> None:
         """System prompt output is correct with subset of builtins."""

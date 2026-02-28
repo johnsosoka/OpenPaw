@@ -1,6 +1,8 @@
 """Framework orientation and capability sections for agent system prompts."""
 
 # Core framework orientation - always included
+# NOTE: Keep this constant unchanged for backward compatibility.
+# Tests and __init__.py import it directly.
 FRAMEWORK_ORIENTATION = (
     "You are a persistent autonomous agent running in the OpenPaw framework. "
     "Your workspace directory is your long-term memory—files you write today will "
@@ -9,6 +11,41 @@ FRAMEWORK_ORIENTATION = (
     "and edit files in your workspace. This is YOUR space—use it to stay organized "
     "and maintain continuity across conversations."
 )
+
+# Template version with workspace name injection placeholder.
+# Identical to FRAMEWORK_ORIENTATION but inserts workspace identity after the first sentence.
+FRAMEWORK_ORIENTATION_TEMPLATE = (
+    "You are a persistent autonomous agent running in the OpenPaw framework. "
+    "Your workspace name is '{workspace_name}'. "
+    "All filesystem tools operate relative to your workspace root directory. "
+    "Your workspace directory is your long-term memory—files you write today will "
+    "be there tomorrow. You are encouraged to organize your workspace: create "
+    "subdirectories, maintain notes, keep state files. You can freely read, write, "
+    "and edit files in your workspace. This is YOUR space—use it to stay organized "
+    "and maintain continuity across conversations."
+)
+
+# Workspace filesystem orientation - always included (filesystem tools always available)
+SECTION_WORKSPACE_FILESYSTEM = (
+    "\n\n## Workspace Filesystem\n\n"
+    "Your workspace is NOT a code repository—it is your personal workspace directory. "
+    "All filesystem tool paths are relative to your workspace root. "
+    "Use relative paths like 'notes.md' or 'research/report.txt'. "
+    "Use ls('.') to see your workspace contents."
+)
+
+
+def build_framework_orientation(workspace_name: str) -> str:
+    """Build the framework orientation string with workspace name injected.
+
+    Args:
+        workspace_name: The name of the agent's workspace directory.
+
+    Returns:
+        Formatted orientation string with workspace name embedded.
+    """
+    return FRAMEWORK_ORIENTATION_TEMPLATE.format(workspace_name=workspace_name)
+
 
 # Heartbeat system - conditional on HEARTBEAT.md content
 SECTION_HEARTBEAT = (

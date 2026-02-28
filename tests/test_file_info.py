@@ -129,7 +129,7 @@ def test_file_info_file_not_found(fs_tools, workspace):
 
     assert data["path"] == "nonexistent.txt"
     assert data["exists"] is False
-    assert data["error"] == "File not found"
+    assert data["error"].startswith("File not found")
 
 
 def test_file_info_directory(fs_tools, workspace):

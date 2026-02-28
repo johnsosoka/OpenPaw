@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 import yaml
 
 from openpaw.core.prompts.framework import (
-    FRAMEWORK_ORIENTATION,
     SECTION_AUTONOMOUS_PLANNING,
     SECTION_CONVERSATION_MEMORY,
     SECTION_FILE_SHARING,
@@ -24,7 +23,9 @@ from openpaw.core.prompts.framework import (
     SECTION_TASK_MANAGEMENT,
     SECTION_WEB_BROWSING,
     SECTION_WORK_ETHIC,
+    SECTION_WORKSPACE_FILESYSTEM,
     build_capability_summary,
+    build_framework_orientation,
 )
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,10 @@ class AgentWorkspace:
         if framework_context:
             sections.append(f"<framework>\n{framework_context}\n</framework>")
 
+        # Workspace context — tells the agent its workspace name and top-level contents
+        workspace_context = self._build_workspace_context()
+        sections.append(f"<workspace_context>\n{workspace_context}\n</workspace_context>")
+
         # Dynamic date injection — ensures agents know the actual current date
         # even when workspace files are cached from startup
         if current_datetime:
@@ -115,6 +120,35 @@ class AgentWorkspace:
             sections.append(f"<heartbeat>\n{self.heartbeat_md.strip()}\n</heartbeat>")
 
         return "\n\n".join(sections)
+
+    def _build_workspace_context(self) -> str:
+        """Build a workspace context block showing the workspace name and top-level contents.
+
+        Lists only top-level directory entries (no recursion). Hidden files are skipped
+        except for .env (which agents may need to know about). Directories are marked
+        with a trailing '/'.
+
+        Returns:
+            Formatted workspace context string.
+        """
+        lines = [f"Workspace: {self.name}", "Contents:"]
+
+        try:
+            entries = sorted(self.path.iterdir(), key=lambda p: p.name)
+            for entry in entries:
+                name = entry.name
+                # Skip hidden files/dirs except .env
+                # (.openpaw/ is excluded by this rule — must remain invisible to agents)
+                if name.startswith(".") and name != ".env":
+                    continue
+                if entry.is_dir():
+                    lines.append(f"  {name}/")
+                else:
+                    lines.append(f"  {name}")
+        except OSError:
+            lines.append("  (unable to list contents)")
+
+        return "\n".join(lines)
 
     def _build_framework_context(self, enabled_builtins: list[str] | None) -> str:
         """Build the framework orientation section for the system prompt.
@@ -130,8 +164,11 @@ class AgentWorkspace:
         """
         sections = []
 
-        # ALWAYS include framework orientation
-        sections.append(FRAMEWORK_ORIENTATION)
+        # ALWAYS include framework orientation with workspace identity
+        sections.append(build_framework_orientation(self.name))
+
+        # Workspace filesystem orientation - always included
+        sections.append(SECTION_WORKSPACE_FILESYSTEM)
 
         # Framework Capabilities summary - always included, lists available infrastructure
         capabilities = build_capability_summary(enabled_builtins)
@@ -204,7 +241,6 @@ class AgentWorkspace:
         sections.append(SECTION_CONVERSATION_MEMORY)
 
         return "".join(sections)
-
 
 
 class WorkspaceLoader:

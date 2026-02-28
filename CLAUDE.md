@@ -196,7 +196,7 @@ openpaw/
 
 **`openpaw/stores/task.py`** - `TaskStore` for YAML-based task persistence. Thread-safe with `_load_unlocked`/`_save_unlocked` pattern for atomic compound operations.
 
-**`openpaw/agent/tools/filesystem.py`** - `FilesystemTools` providing sandboxed file operations: `ls`, `read_file`, `write_file`, `overwrite_file`, `edit_file`, `glob_files`, `grep_files`, `file_info`. Path traversal protection via `resolve_sandboxed_path()`. `read_file` has a 100K character safety valve. `grep_files` supports `context_lines` for surrounding context.
+**`openpaw/agent/tools/filesystem.py`** - `FilesystemTools` providing sandboxed file operations: `ls`, `read_file`, `write_file`, `overwrite_file`, `edit_file`, `glob_files`, `grep_files`, `file_info`. Path traversal protection via `resolve_sandboxed_path()`. `read_file` has a 100K character safety valve. `grep_files` supports `context_lines` for surrounding context. Accepts optional `workspace_name` parameter to enrich tool descriptions, output headers, success messages, and error hints with workspace identity for agent spatial orientation.
 
 **`openpaw/agent/tools/sandbox.py`** - Standalone `resolve_sandboxed_path()` utility. Validates paths within workspace root, rejecting absolute paths, `~`, `..`, and `.openpaw/` access. Shared by `FilesystemTools`, `SendFileTool`, and inbound processors (DoclingProcessor, WhisperProcessor).
 
@@ -726,6 +726,13 @@ Agents have sandboxed filesystem access to their workspace directory via `Filesy
 
 Access is restricted to the workspace root — agents cannot read/write outside their directory. The `.openpaw/` directory is additionally protected; agents cannot read or write framework internals (checkpoint DB, session state, token logs). Agents are encouraged to organize their workspace (subdirectories, notes, state files) for continuity across conversations.
 
+**Workspace Identity**: `FilesystemTools` accepts a `workspace_name` parameter (passed automatically by `AgentRunner`). When set, it enriches all tool interactions with workspace context:
+- `ls` output is prefixed with `[Workspace: {name}] Contents of {path}/:`
+- Tool descriptions are prefixed with `[{name} workspace]` so the LLM schema includes identity
+- Write/overwrite success messages include `(workspace: {name})`
+- Sandbox errors include hints with workspace name and example relative paths
+- "Not found" errors suggest `ls('.')` to discover available files
+
 ### Workspace Tools
 
 Workspaces can define custom LangChain tools in a `tools/` directory. These are Python files containing `@tool` decorated functions that are automatically loaded and made available to the agent.
@@ -887,8 +894,10 @@ builtins:
 
 ### Framework Orientation Prompt
 
-Agents automatically receive a dynamic system prompt section (`<framework>`) explaining the OpenPaw framework philosophy. Sections are conditionally included based on enabled builtins:
-- **Always**: Workspace persistence, self-organization encouragement, conversation memory
+Agents automatically receive a dynamic system prompt section (`<framework>`) explaining the OpenPaw framework philosophy, followed by a `<workspace_context>` block providing spatial orientation. Sections are conditionally included based on enabled builtins:
+- **Always**: Workspace identity (name injected via `build_framework_orientation()`), workspace filesystem guidance, conversation memory
+- **Always**: `<workspace_context>` block with workspace name and live top-level directory listing
+- **Workspace Filesystem**: Always included — explains sandbox model, relative paths, `ls('.')` discovery
 - **Heartbeat System**: If HEARTBEAT.md has content — heartbeat protocol, HEARTBEAT_OK convention
 - **Task Management**: If `task_tracker` enabled — TASKS.yaml usage, cross-session continuity
 - **Self-Continuation**: If `followup` enabled — completion rule self-check, multi-step workflow chaining
