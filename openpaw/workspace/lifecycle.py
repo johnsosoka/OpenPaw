@@ -2,16 +2,21 @@
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from openpaw.agent.session_logger import SessionLogger
 from openpaw.builtins.loader import BuiltinLoader
 from openpaw.channels.base import ChannelAdapter
 from openpaw.channels.factory import create_channel
 from openpaw.core.config import Config
+from openpaw.model.message import Message
 from openpaw.runtime.queue.manager import QueueManager
 from openpaw.runtime.scheduling.heartbeat import HeartbeatScheduler
 from openpaw.runtime.session.manager import SessionManager
+
+if TYPE_CHECKING:
+    from openpaw.core.config.models import WorkspaceConfig
 
 
 class LifecycleManager:
@@ -20,17 +25,17 @@ class LifecycleManager:
     def __init__(
         self,
         workspace_name: str,
-        workspace_path: Any,
-        workspace_config: Any,
+        workspace_path: Path,
+        workspace_config: "WorkspaceConfig | None",
         merged_config: dict[str, Any],
         config: Config,
         queue_manager: QueueManager,
-        message_handler: Any,
-        queue_handler: Any,
+        message_handler: Callable[[Message], Awaitable[None]],
+        queue_handler: Callable[[str, list[Message]], Awaitable[None]],
         builtin_loader: BuiltinLoader,
         workspace_timezone: str,
         session_manager: SessionManager,
-        approval_handler: Any,
+        approval_handler: Callable[[str, bool], Awaitable[None]],
         logger: logging.Logger,
         result_callback: Callable[[str, str], Awaitable[None]] | None = None,
     ):

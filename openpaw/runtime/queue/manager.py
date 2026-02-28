@@ -190,6 +190,31 @@ class QueueManager:
             )
             await self.lane_queue.enqueue(item, lane_name="main")
 
+    def get_handler(
+        self, channel_name: str
+    ) -> Callable[[str, list[Any]], Coroutine[Any, Any, Any]] | None:
+        """Get the registered handler for a channel.
+
+        Args:
+            channel_name: Channel identifier.
+
+        Returns:
+            Handler function or None if not registered.
+        """
+        return self._handlers.get(channel_name)
+
+    async def get_session_mode(self, session_key: str) -> QueueMode:
+        """Get the current queue mode for a session.
+
+        Args:
+            session_key: The session identifier.
+
+        Returns:
+            Current QueueMode for the session.
+        """
+        session = await self._get_or_create_session(session_key)
+        return session.mode
+
     async def set_session_mode(self, session_key: str, mode: QueueMode) -> None:
         """Update queue mode for a session."""
         session = await self._get_or_create_session(session_key)

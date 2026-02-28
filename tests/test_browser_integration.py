@@ -32,7 +32,7 @@ class TestBrowserFrameworkPrompt:
     def test_browser_prompt_appears_when_enabled(self):
         """Browser framework prompt should appear when 'browser' is in enabled_builtins."""
         from pathlib import Path
-        from openpaw.workspace.loader import AgentWorkspace
+        from openpaw.core.workspace import AgentWorkspace
 
         workspace = AgentWorkspace(
             name="test",
@@ -54,7 +54,7 @@ class TestBrowserFrameworkPrompt:
     def test_browser_prompt_absent_when_not_enabled(self):
         """Browser framework prompt should be absent when 'browser' not in enabled_builtins."""
         from pathlib import Path
-        from openpaw.workspace.loader import AgentWorkspace
+        from openpaw.core.workspace import AgentWorkspace
 
         workspace = AgentWorkspace(
             name="test",
@@ -74,7 +74,7 @@ class TestBrowserFrameworkPrompt:
     def test_browser_prompt_key_concepts(self):
         """Browser prompt should mention key concepts."""
         from pathlib import Path
-        from openpaw.workspace.loader import AgentWorkspace
+        from openpaw.core.workspace import AgentWorkspace
 
         workspace = AgentWorkspace(
             name="test",

@@ -4,51 +4,6 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
-from apscheduler.triggers.cron import CronTrigger
-from pydantic import BaseModel, Field, field_validator
-
-
-class CronOutputConfig(BaseModel):
-    """Output routing configuration for a cron job."""
-
-    channel: str = Field(description="Channel type (telegram, discord, etc.)")
-    chat_id: int | None = Field(default=None, description="Telegram chat ID")
-    guild_id: int | None = Field(default=None, description="Discord guild ID")
-    channel_id: int | None = Field(default=None, description="Discord channel ID")
-    delivery: str = Field(
-        default="channel",
-        description="Delivery mode: channel, agent, or both",
-    )
-
-    @field_validator("delivery")
-    @classmethod
-    def validate_delivery(cls, v: str) -> str:
-        """Validate delivery mode is one of the allowed values."""
-        allowed = {"channel", "agent", "both"}
-        if v not in allowed:
-            raise ValueError(f"Invalid delivery mode '{v}'. Must be one of: {allowed}")
-        return v
-
-
-class CronDefinition(BaseModel):
-    """Definition of a single cron job from workspace crons/ directory."""
-
-    name: str = Field(description="Unique job identifier")
-    schedule: str = Field(description="Cron expression (e.g., '0 9 * * *')")
-    enabled: bool = Field(default=True, description="Whether the job is active")
-    prompt: str = Field(description="User prompt to inject when cron triggers")
-    output: CronOutputConfig = Field(description="Where to send the response")
-
-    @field_validator("schedule")
-    @classmethod
-    def validate_cron_expression(cls, v: str) -> str:
-        """Validate cron expression is parseable at config load time."""
-        try:
-            CronTrigger.from_crontab(v)
-        except (ValueError, KeyError) as e:
-            raise ValueError(f"Invalid cron expression '{v}': {e}") from e
-        return v
-
 
 @dataclass
 class DynamicCronTask:

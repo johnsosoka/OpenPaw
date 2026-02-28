@@ -11,6 +11,7 @@ from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.language_models import BaseChatModel
 
 from openpaw.agent.metrics import InvocationMetrics, extract_metrics_from_callback
+from openpaw.agent.middleware.approval import ApprovalRequiredError
 from openpaw.agent.middleware.llm_hooks import THINKING_TAG_PATTERN, ThinkingTokenMiddleware
 from openpaw.agent.middleware.queue_aware import InterruptSignalError
 from openpaw.agent.tools.filesystem import FilesystemTools
@@ -19,7 +20,7 @@ from openpaw.core.prompts.system_events import (
     TIMEOUT_NOTIFICATION_TEMPLATE,
 )
 from openpaw.core.timezone import workspace_now
-from openpaw.workspace.loader import AgentWorkspace
+from openpaw.core.workspace import AgentWorkspace
 
 logger = logging.getLogger(__name__)
 
@@ -666,11 +667,9 @@ class AgentRunner:
                 return TIMEOUT_NOTIFICATION_GENERIC.format(
                     timeout=int(self.timeout_seconds),
                 )
-        except Exception as e:
-            # Re-raise ApprovalRequiredError for WorkspaceRunner to handle
-            if type(e).__name__ == "ApprovalRequiredError":
-                raise
-            # Re-raise any other exception
+        except ApprovalRequiredError:
+            raise
+        except Exception:
             raise
 
         # Extract metrics after successful invocation

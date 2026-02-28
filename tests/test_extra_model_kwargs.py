@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from openpaw.agent.runner import AgentRunner
-from openpaw.workspace.loader import AgentWorkspace
+from openpaw.core.workspace import AgentWorkspace
 
 # Common patches for isolating AgentRunner from real dependencies
 _PATCH_FS = "openpaw.agent.runner.FilesystemTools"

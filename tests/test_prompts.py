@@ -45,7 +45,8 @@ from openpaw.core.prompts.processors import (
     VOICE_MESSAGE_ERROR_TEMPLATE,
     VOICE_MESSAGE_TEMPLATE,
 )
-from openpaw.workspace.loader import AgentWorkspace, WorkspaceLoader
+from openpaw.core.workspace import AgentWorkspace
+from openpaw.workspace.loader import WorkspaceLoader
 
 
 class TestTemplateRendering:

@@ -1,5 +1,6 @@
 """Agent workspace management."""
 
-from openpaw.workspace.loader import AgentWorkspace, WorkspaceLoader
+from openpaw.core.workspace import AgentWorkspace
+from openpaw.workspace.loader import WorkspaceLoader
 
 __all__ = ["WorkspaceLoader", "AgentWorkspace"]

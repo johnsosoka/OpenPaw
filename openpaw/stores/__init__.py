@@ -7,7 +7,7 @@ This package contains store classes for managing persistent state:
 - ApprovalGateManager: Human-in-the-loop approval state
 """
 
-from openpaw.stores.approval import ApprovalGateManager, PendingApproval
+from openpaw.runtime.approval import ApprovalGateManager, PendingApproval
 from openpaw.stores.cron import DynamicCronStore, create_interval_task, create_once_task
 from openpaw.stores.subagent import SubAgentStore, create_subagent_request
 from openpaw.stores.task import TaskStore, create_task

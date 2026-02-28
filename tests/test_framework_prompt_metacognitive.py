@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from openpaw.workspace.loader import AgentWorkspace, WorkspaceLoader
+from openpaw.core.workspace import AgentWorkspace
+from openpaw.workspace.loader import WorkspaceLoader
 
 
 @pytest.fixture
