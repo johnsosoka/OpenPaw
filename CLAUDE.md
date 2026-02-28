@@ -131,13 +131,13 @@ openpaw/
 
 ### Key Components
 
-**`openpaw/cli.py`** - CLI entry point. Parses arguments, supports single workspace (`-w name`), multiple workspaces (`-w name1,name2`), or all workspaces (`--all` or `-w "*"`).
+**`openpaw/cli.py`** - CLI entry point. Parses arguments, supports single workspace (`-w name`), multiple workspaces (`-w name1,name2`), or all workspaces (`--all` or `-w "*"`). Wraps startup with structured error handling: `FileNotFoundError`, `yaml.YAMLError`, `ValueError` (config/env validation), and generic exceptions produce clean stderr messages instead of tracebacks.
 
 **`openpaw/runtime/orchestrator.py`** - `OpenPawOrchestrator` manages multiple `WorkspaceRunner` instances. Handles concurrent startup/shutdown and workspace discovery.
 
 **`openpaw/workspace/runner.py`** - `WorkspaceRunner` manages a single workspace: loads workspace config, merges with global config, initializes queue system, sets up channels via factory, manages `AsyncSqliteSaver` lifecycle, wires command routing, schedules crons, and runs the message loop.
 
-**`openpaw/workspace/message_processor.py`** - Core message processing loop. Handles queue modes (collect, steer, interrupt), invokes agent, manages approval gates, processes system events, and performs pre-run auto-compact checks.
+**`openpaw/workspace/message_processor.py`** - Core message processing loop. Handles queue modes (collect, steer, interrupt), invokes agent, manages approval gates, processes system events, and performs pre-run auto-compact checks. Agent errors are sanitized via `sanitize_error_for_user()` before sending to users — internal details never leak to channels.
 
 **`openpaw/workspace/agent_factory.py`** - Agent creation with middleware wiring. Composes queue-aware and approval middleware, configures builtins, initializes checkpointer, and supports runtime model overrides via `RuntimeModelOverride`.
 
@@ -203,7 +203,7 @@ openpaw/
 
 **`openpaw/agent/tools/sandbox.py`** - Standalone `resolve_sandboxed_path()` utility. Validates paths within workspace root, rejecting absolute paths, `~`, `..`, and `.openpaw/` access. Shared by `FilesystemTools`, `SendFileTool`, and inbound processors (DoclingProcessor, WhisperProcessor).
 
-**`openpaw/core/utils.py`** - Generic utilities. `sanitize_filename()` removes special characters, normalizes spaces, and lowercases. `deduplicate_path()` appends counters (1), (2), etc. for uniqueness. `resolve_user_name()` maps user IDs to display names via aliases/metadata.
+**`openpaw/core/utils.py`** - Generic utilities. `sanitize_filename()` removes special characters, normalizes spaces, and lowercases. `deduplicate_path()` appends counters (1), (2), etc. for uniqueness. `resolve_user_name()` maps user IDs to display names via aliases/metadata. `sanitize_error_for_user()` maps exceptions to user-friendly messages (prevents internal details leaking to channels).
 
 **`openpaw/builtins/processors/file_persistence.py`** - `FilePersistenceProcessor` saves all uploaded files to `uploads/{YYYY-MM-DD}/` with date partitioning. Sets `attachment.saved_path` for downstream processors.
 
@@ -277,6 +277,9 @@ model:
   temperature: 0.5
   max_turns: 50
 
+# Shorthand format also accepted (auto-split on first colon):
+# model: "anthropic:claude-sonnet-4-20250514"
+
 channel:
   type: telegram
   token: ${TELEGRAM_BOT_TOKEN}
@@ -291,7 +294,7 @@ queue:
   debounce_ms: 1000
 ```
 
-**Environment Variables**: Use `${VAR_NAME}` syntax for secrets and dynamic values. OpenPaw expands these from environment at load time.
+**Environment Variables**: Use `${VAR_NAME}` syntax for secrets and dynamic values. OpenPaw expands these from environment at load time. Unresolved `${VAR}` patterns cause a startup error naming the missing variable(s) and source file — set the variable or remove the reference.
 
 **Config Merging**: Workspace settings deep-merge over global config. Missing fields inherit from global, present fields override.
 

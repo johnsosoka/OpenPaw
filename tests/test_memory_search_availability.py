@@ -5,7 +5,7 @@ the vector store only initialized when memory.enabled=True. Agents saw a broken
 tool when the vector store was not available.
 
 Changes tested:
-- MemoryConfig.enabled defaults to True
+- MemoryConfig.enabled defaults to False
 - AgentFactory.remove_builtin_tools() filters tools by LangChain name
 - AgentFactory.remove_enabled_builtin() removes name from enabled list
 - WorkspaceRunner._connect_memory_search_tool() removes broken tool when
@@ -72,10 +72,10 @@ def _make_agent_factory(
 class TestMemoryConfigDefaults:
     """MemoryConfig default value tests."""
 
-    def test_enabled_defaults_to_true(self):
-        """MemoryConfig with no args should have enabled=True."""
+    def test_enabled_defaults_to_false(self):
+        """MemoryConfig with no args should have enabled=False."""
         config = MemoryConfig()
-        assert config.enabled is True
+        assert config.enabled is False
 
     def test_enabled_can_be_set_to_false(self):
         """MemoryConfig(enabled=False) should work."""

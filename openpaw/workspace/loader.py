@@ -114,10 +114,11 @@ class WorkspaceLoader:
             data = yaml.safe_load(f) or {}
 
         # Import expand_env_vars_recursive at runtime to avoid circular imports
-        from openpaw.core.config import WorkspaceConfig, expand_env_vars_recursive
+        from openpaw.core.config import WorkspaceConfig, check_unexpanded_vars, expand_env_vars_recursive
 
         # Apply environment variable substitution
         data = expand_env_vars_recursive(data)
+        check_unexpanded_vars(data, source=f"{workspace_path.name}/agent.yaml")
 
         return WorkspaceConfig(**data)
 
@@ -135,7 +136,7 @@ class WorkspaceLoader:
             return []
 
         # Import at runtime to avoid circular import
-        from openpaw.core.config import expand_env_vars_recursive
+        from openpaw.core.config import check_unexpanded_vars, expand_env_vars_recursive
         from openpaw.core.config.models import CronDefinition
 
         cron_definitions = []
@@ -148,6 +149,7 @@ class WorkspaceLoader:
 
                 # Apply environment variable substitution
                 data = expand_env_vars_recursive(data)
+                check_unexpanded_vars(data, source=f"{workspace_path.name}/crons/{cron_file.name}")
 
                 cron_definitions.append(CronDefinition(**data))
             except Exception as e:

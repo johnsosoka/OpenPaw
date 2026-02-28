@@ -1,7 +1,7 @@
 """Domain models for messaging."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -49,7 +49,7 @@ class Message:
     user_id: str
     content: str
     direction: MessageDirection = MessageDirection.INBOUND
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     reply_to_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     attachments: list[Attachment] = field(default_factory=list)

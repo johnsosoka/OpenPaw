@@ -16,7 +16,7 @@ from openpaw.core.prompts.system_events import (
     INTERRUPT_NOTIFICATION,
     TOOL_DENIED_TEMPLATE,
 )
-from openpaw.core.utils import resolve_user_name
+from openpaw.core.utils import resolve_user_name, sanitize_error_for_user
 from openpaw.model.message import Message
 from openpaw.runtime.approval import ApprovalGateManager
 from openpaw.runtime.queue.lane import QueueMode
@@ -341,7 +341,7 @@ class MessageProcessor:
             except Exception as e:
                 self._logger.error(f"Error processing messages for {session_key}: {e}", exc_info=True)
                 if channel:
-                    await channel.send_message(session_key, f"Error: {e}")
+                    await channel.send_message(session_key, sanitize_error_for_user(e))
                 break  # Don't continue followup chain on error
 
             finally:

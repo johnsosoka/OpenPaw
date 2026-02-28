@@ -3,7 +3,7 @@
 import logging
 import os
 from collections.abc import Callable, Coroutine
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -134,7 +134,7 @@ class TelegramChannel(ChannelAdapter):
             user_id=str(self._app.bot.id),
             content=content,
             direction=MessageDirection.OUTBOUND,
-            timestamp=datetime.now(),
+            timestamp=datetime.now(UTC),
         )
 
     async def _send_with_html_fallback(
@@ -272,7 +272,7 @@ class TelegramChannel(ChannelAdapter):
             user_id=str(self._app.bot.id),
             content=f"[Audio: {filename}]",
             direction=MessageDirection.OUTBOUND,
-            timestamp=datetime.now(),
+            timestamp=datetime.now(UTC),
         )
 
     # Telegram file size limit
@@ -381,7 +381,7 @@ class TelegramChannel(ChannelAdapter):
             user_id=str(update.effective_user.id),
             content=update.message.text or "",
             direction=MessageDirection.INBOUND,
-            timestamp=update.message.date or datetime.now(),
+            timestamp=update.message.date or datetime.now(UTC),
             reply_to_id=str(update.message.reply_to_message.message_id) if update.message.reply_to_message else None,
             metadata={
                 "chat_type": update.effective_chat.type,
@@ -513,7 +513,7 @@ class TelegramChannel(ChannelAdapter):
             user_id=str(update.effective_user.id),
             content=update.message.caption or "",
             direction=MessageDirection.INBOUND,
-            timestamp=update.message.date or datetime.now(),
+            timestamp=update.message.date or datetime.now(UTC),
             reply_to_id=str(update.message.reply_to_message.message_id) if update.message.reply_to_message else None,
             metadata={
                 "chat_type": update.effective_chat.type,
@@ -577,7 +577,7 @@ class TelegramChannel(ChannelAdapter):
             user_id=str(update.effective_user.id),
             content=update.message.caption or "",
             direction=MessageDirection.INBOUND,
-            timestamp=update.message.date or datetime.now(),
+            timestamp=update.message.date or datetime.now(UTC),
             reply_to_id=str(update.message.reply_to_message.message_id) if update.message.reply_to_message else None,
             metadata={
                 "chat_type": update.effective_chat.type,
@@ -641,7 +641,7 @@ class TelegramChannel(ChannelAdapter):
             user_id=str(update.effective_user.id),
             content="",  # Will be filled by Whisper processor
             direction=MessageDirection.INBOUND,
-            timestamp=update.message.date or datetime.now(),
+            timestamp=update.message.date or datetime.now(UTC),
             reply_to_id=str(update.message.reply_to_message.message_id) if update.message.reply_to_message else None,
             metadata={
                 "chat_type": update.effective_chat.type,
