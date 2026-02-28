@@ -122,120 +122,77 @@ See [configuration.md](configuration.md) for detailed reference.
 
 ## Creating Your First Workspace
 
-Each workspace represents an isolated agent with its own personality, tools, and conversation state.
+Each workspace represents an isolated agent with its own personality, tools, and conversation state. The fastest way to create one is with `openpaw init`:
 
-### 1. Create Workspace Directory
+### 1. Scaffold a Workspace
 
 ```bash
-mkdir -p agent_workspaces/my-agent
-cd agent_workspaces/my-agent
+# Basic scaffold
+poetry run openpaw init my_agent
+
+# With model and channel pre-configured
+poetry run openpaw init my_agent --model anthropic:claude-sonnet-4-20250514 --channel telegram
 ```
 
-### 2. Create Required Markdown Files
+This creates `agent_workspaces/my_agent/` with all required files:
 
-Every workspace needs four markdown files:
+| File | Purpose |
+|------|---------|
+| `AGENT.md` | Capabilities, behavior guidelines |
+| `USER.md` | User context and preferences |
+| `SOUL.md` | Core personality and values |
+| `HEARTBEAT.md` | Session state scratchpad |
+| `agent.yaml` | Model, channel, and queue config |
+| `.env` | API key placeholders |
 
-**AGENT.md** - Capabilities and behavior guidelines
+Each file includes TODO markers to guide customization.
 
-```markdown
-# Agent Profile
+### 2. Configure Your Workspace
 
-You are a helpful AI assistant with the following capabilities:
-- Answering questions and providing information
-- Managing tasks via the TASKS.yaml system
-- Processing uploaded documents (PDF, DOCX, PPTX)
-- Browsing the web when needed
-- Scheduling your own follow-up actions
-
-## Communication Style
-
-Be concise and friendly. Use clear, straightforward language.
-When working on complex tasks, use send_message to keep the user informed of progress.
-```
-
-**USER.md** - User context and preferences
-
-```markdown
-# User Profile
-
-## Name
-John
-
-## Preferences
-- Prefers brief, actionable responses
-- Works in Pacific Time (America/Los_Angeles)
-- Values transparency and proactive updates
-
-## Context
-Primary use cases include research, document analysis, and task management.
-```
-
-**SOUL.md** - Core personality and values
-
-```markdown
-# Core Values
-
-Be helpful, honest, and respectful.
-Prioritize clarity over cleverness.
-When uncertain, ask for clarification rather than making assumptions.
-
-## Operating Principles
-
-- Break complex tasks into manageable steps
-- Maintain organized workspace files for continuity
-- Use HEARTBEAT.md to track session state and ongoing work
-```
-
-**HEARTBEAT.md** - Current state and session notes
-
-This file is the agent's scratchpad for maintaining context across sessions and heartbeats. It can start empty or with minimal content:
-
-```markdown
-# Current State
-
-No active tasks.
-```
-
-**Note:** The agent can modify HEARTBEAT.md during conversations to track state. This file is also used by the heartbeat system (if enabled) to determine what to check during proactive check-ins.
-
-### 3. Optional: Per-Workspace Configuration
-
-Create `agent.yaml` to override global defaults:
+Edit `agent.yaml` with your model and channel settings. If you used `--model` and `--channel` flags, the relevant sections are already populated:
 
 ```yaml
-name: My Agent
-description: A helpful personal assistant
-timezone: America/Los_Angeles  # IANA timezone identifier (default: UTC)
+name: my_agent
+description: ""
 
 model:
   provider: anthropic
   model: claude-sonnet-4-20250514
   api_key: ${ANTHROPIC_API_KEY}
-  temperature: 0.5
-  max_turns: 50
+  temperature: 0.7
 
 channel:
   type: telegram
   token: ${TELEGRAM_BOT_TOKEN}
-  allowed_users: [123456789]  # Your Telegram user ID (optional, empty = allow all)
-  allowed_groups: []
+  allowed_users: []
 
 queue:
   mode: collect
   debounce_ms: 1000
-
-heartbeat:
-  enabled: false  # Set to true for proactive check-ins
-  interval_minutes: 30
-  active_hours: "09:00-17:00"
-  suppress_ok: true
 ```
 
-**Timezone:** The `timezone` field uses IANA identifiers (e.g., `America/New_York`, `Europe/London`, `Asia/Tokyo`). This controls:
-- Cron schedule timing
-- Heartbeat active hours
-- File upload date partitions
-- Display timestamps in `/status` and conversation archives
+Add your API keys to `.env`:
+
+```bash
+ANTHROPIC_API_KEY=your-key-here
+TELEGRAM_BOT_TOKEN=your-bot-token
+```
+
+**Timezone:** Add a `timezone` field (IANA identifier, e.g., `America/New_York`) to control cron timing, heartbeat hours, and display timestamps. Defaults to UTC.
+
+### 3. Customize Personality
+
+Edit the markdown files to define your agent's identity:
+
+- **AGENT.md** — What the agent can do and how it should behave
+- **USER.md** — Context about the user(s) who will interact with it
+- **SOUL.md** — Core personality, values, and communication style
+- **HEARTBEAT.md** — Can start empty; the agent updates it to track session state
+
+See [workspaces.md](workspaces.md) for detailed examples of each file.
+
+!!! tip "List existing workspaces"
+    Use `poetry run openpaw list` to see all valid workspaces in `agent_workspaces/`.
 
 ### 4. Optional: Custom Tools
 

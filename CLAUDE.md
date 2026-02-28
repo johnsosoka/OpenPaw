@@ -8,6 +8,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Install dependencies
 poetry install
 
+# Scaffold a new workspace
+poetry run openpaw init <workspace_name>
+poetry run openpaw init my_agent --model anthropic:claude-sonnet-4-20250514 --channel telegram
+
+# List available workspaces
+poetry run openpaw list
+poetry run openpaw list --path /custom/workspaces/dir
+
 # Run single workspace
 poetry run openpaw -c config.yaml -w <workspace_name>
 poetry run openpaw -c config.yaml -w gilfoyle -v  # verbose
