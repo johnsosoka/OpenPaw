@@ -353,6 +353,85 @@ class AgentRunner:
             "message_count": len(messages),
         }
 
+    async def resolve_orphaned_tool_calls(
+        self, thread_id: str, responses: dict[str, str] | None = None
+    ) -> None:
+        """Inject synthetic ToolMessages for orphaned tool_calls in checkpoint state.
+
+        When approval middleware raises ApprovalRequiredError, LangGraph has already
+        checkpointed an AIMessage with tool_calls but no corresponding ToolMessages.
+        This creates an invalid state that OpenAI-compatible APIs reject.
+
+        This method reads the checkpoint, finds orphaned tool_calls, and injects
+        synthetic ToolMessages via aupdate_state() to restore valid message ordering.
+
+        Args:
+            thread_id: Conversation thread with orphaned state.
+            responses: Optional {tool_call_id: content} mapping for specific responses.
+                       Unmapped calls get a generic interruption message.
+        """
+        if not self.checkpointer:
+            return
+
+        from langchain_core.messages import AIMessage, ToolMessage
+
+        config = {"configurable": {"thread_id": thread_id}}
+        state = await self._agent.aget_state(config)
+
+        if not state or not state.values:
+            return
+
+        messages = state.values.get("messages", [])
+        if not messages:
+            return
+
+        # Find the last AIMessage with tool_calls
+        last_ai_idx = None
+        for i in range(len(messages) - 1, -1, -1):
+            if isinstance(messages[i], AIMessage) and getattr(messages[i], "tool_calls", None):
+                last_ai_idx = i
+                break
+
+        if last_ai_idx is None:
+            return
+
+        ai_msg = messages[last_ai_idx]
+        tool_calls = ai_msg.tool_calls
+
+        # Collect tool_call_ids that already have matching ToolMessages
+        resolved_ids = set()
+        for msg in messages[last_ai_idx + 1:]:
+            if isinstance(msg, ToolMessage):
+                resolved_ids.add(msg.tool_call_id)
+
+        # Find orphaned tool_calls (no matching ToolMessage)
+        orphaned = [tc for tc in tool_calls if tc.get("id") not in resolved_ids]
+
+        if not orphaned:
+            return
+
+        responses = responses or {}
+        synthetic_messages = []
+        for tc in orphaned:
+            tc_id = tc.get("id", "")
+            content = responses.get(tc_id, "Tool execution was interrupted.")
+            synthetic_messages.append(
+                ToolMessage(content=content, tool_call_id=tc_id)
+            )
+
+        logger.info(
+            f"Resolving {len(synthetic_messages)} orphaned tool call(s) "
+            f"in thread {thread_id}"
+        )
+
+        # Inject synthetic ToolMessages as if they came from the "tools" node.
+        # as_node="tools" is critical: without it, LangGraph defaults to the last
+        # active node ("model"), leaving the graph in an ambiguous state that hangs
+        # on the next astream() invocation.
+        await self._agent.aupdate_state(
+            config, {"messages": synthetic_messages}, as_node="tools"
+        )
+
     def _validate_tool_names(self, tools: list[Any]) -> None:
         """Validate tool names comply with Bedrock requirements.
 

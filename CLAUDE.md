@@ -645,11 +645,12 @@ approval_gates:
 
 **Lifecycle**:
 1. Middleware detects gated tool call → creates `PendingApproval`
-2. Raises `ApprovalRequiredError` → `WorkspaceRunner` catches exception
+2. Raises `ApprovalRequiredError` → `MessageProcessor` catches exception
 3. Channel sends approval request with inline buttons (Approve/Deny)
 4. User responds → `ApprovalGateManager.resolve()` called
-5. On approval: agent re-runs with same message, middleware lets tool through
-6. On denial: agent receives `[SYSTEM] The tool 'X' was denied by the user. Do not retry this action.`
+5. `AgentRunner.resolve_orphaned_tool_calls()` injects synthetic `ToolMessage`s for the interrupted tool_calls (required because LangGraph checkpoints the `AIMessage(tool_calls=[...])` before the middleware raises)
+6. On approval: agent re-runs with same message, middleware lets tool through via `check_recent_approval()` bypass
+7. On denial: agent receives `[SYSTEM] The tool 'X' was denied by the user. Do not retry this action.`
 
 **Timeout Behavior**: If user doesn't respond within `timeout_seconds`, `default_action` is applied automatically (`approve` or `deny`). This prevents agents from hanging indefinitely.
 

@@ -8,6 +8,7 @@ import pytest
 from openpaw.core.config.models import ApprovalGatesConfig, ToolApprovalConfig
 from openpaw.stores.approval import ApprovalGateManager
 from openpaw.agent.middleware.approval import ApprovalRequiredError, ApprovalToolMiddleware
+from openpaw.agent.runner import AgentRunner
 
 
 class TestApprovalConfig:
@@ -291,7 +292,7 @@ class TestApprovalToolMiddleware:
         middleware.set_context(manager, "session:123", "thread1")
 
         mock_request = MagicMock()
-        mock_request.tool_call = {"name": "dangerous_tool", "args": {"arg": "value"}}
+        mock_request.tool_call = {"name": "dangerous_tool", "args": {"arg": "value"}, "id": "call_abc123"}
         mock_handler = AsyncMock()
 
         with pytest.raises(ApprovalRequiredError) as exc_info:
@@ -300,6 +301,7 @@ class TestApprovalToolMiddleware:
         assert exc_info.value.tool_name == "dangerous_tool"
         assert exc_info.value.tool_args == {"arg": "value"}
         assert len(exc_info.value.approval_id) > 0
+        assert exc_info.value.tool_call_id == "call_abc123"
 
         # Handler should NOT have been called
         mock_handler.assert_not_called()
@@ -383,3 +385,90 @@ class TestChannelApprovalIntegration:
         assert "dangerous_tool" in messages[0]
         assert "abc123" in messages[0]
         assert "value1" in messages[0]
+
+
+class TestResolveOrphanedToolCalls:
+    """Test orphaned tool call resolution in AgentRunner."""
+
+    async def test_resolve_with_no_checkpointer(self):
+        """No-op when checkpointer is None."""
+        runner = MagicMock(spec=AgentRunner)
+        runner.checkpointer = None
+        # Call the real method with mocked self
+        await AgentRunner.resolve_orphaned_tool_calls(runner, "thread1")
+        # Should not raise
+
+    async def test_resolve_with_orphaned_calls(self):
+        """Injects synthetic ToolMessages for orphaned tool_calls."""
+        from langchain_core.messages import AIMessage, ToolMessage
+
+        # Build mock state with orphaned tool_calls
+        ai_msg = AIMessage(
+            content="I'll overwrite the file.",
+            tool_calls=[{"id": "call_xyz", "name": "overwrite_file", "args": {"path": "test.txt"}}],
+        )
+        mock_state = MagicMock()
+        mock_state.values = {"messages": [ai_msg]}
+
+        mock_agent = AsyncMock()
+        mock_agent.aget_state = AsyncMock(return_value=mock_state)
+        mock_agent.aupdate_state = AsyncMock()
+
+        runner = MagicMock(spec=AgentRunner)
+        runner.checkpointer = MagicMock()
+        runner._agent = mock_agent
+
+        await AgentRunner.resolve_orphaned_tool_calls(
+            runner,
+            "thread1",
+            responses={"call_xyz": "Tool denied."},
+        )
+
+        # Verify aupdate_state was called with synthetic ToolMessage
+        mock_agent.aupdate_state.assert_called_once()
+        call_args = mock_agent.aupdate_state.call_args
+        injected_messages = call_args[1]["messages"] if "messages" in call_args[1] else call_args[0][1]["messages"]
+        assert len(injected_messages) == 1
+        assert isinstance(injected_messages[0], ToolMessage)
+        assert injected_messages[0].tool_call_id == "call_xyz"
+        assert injected_messages[0].content == "Tool denied."
+
+    async def test_resolve_skips_already_resolved(self):
+        """Does not inject for tool_calls that already have ToolMessages."""
+        from langchain_core.messages import AIMessage, ToolMessage
+
+        ai_msg = AIMessage(
+            content="Running tool.",
+            tool_calls=[{"id": "call_1", "name": "ls", "args": {}}],
+        )
+        tool_msg = ToolMessage(content="file.txt", tool_call_id="call_1")
+        mock_state = MagicMock()
+        mock_state.values = {"messages": [ai_msg, tool_msg]}
+
+        mock_agent = AsyncMock()
+        mock_agent.aget_state = AsyncMock(return_value=mock_state)
+        mock_agent.aupdate_state = AsyncMock()
+
+        runner = MagicMock(spec=AgentRunner)
+        runner.checkpointer = MagicMock()
+        runner._agent = mock_agent
+
+        await AgentRunner.resolve_orphaned_tool_calls(runner, "thread1")
+
+        # Should NOT call aupdate_state since no orphans
+        mock_agent.aupdate_state.assert_not_called()
+
+    async def test_resolve_with_empty_state(self):
+        """No-op when state is empty."""
+        mock_state = MagicMock()
+        mock_state.values = {}
+
+        mock_agent = AsyncMock()
+        mock_agent.aget_state = AsyncMock(return_value=mock_state)
+
+        runner = MagicMock(spec=AgentRunner)
+        runner.checkpointer = MagicMock()
+        runner._agent = mock_agent
+
+        await AgentRunner.resolve_orphaned_tool_calls(runner, "thread1")
+        # Should not raise
