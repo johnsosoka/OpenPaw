@@ -24,6 +24,22 @@ class BuiltinLoader:
     - Workspace path injection for tools that need it
     """
 
+    # Typed fields that need explicit extraction from builtin config models.
+    # Maps builtin name → list of field names to extract.
+    _CONFIG_FIELDS: dict[str, list[str]] = {
+        "send_file": ["max_file_size"],
+        "docling": [
+            "max_file_size", "ocr_backend", "ocr_languages",
+            "force_full_page_ocr", "document_timeout", "do_ocr", "do_table_structure",
+        ],
+        "browser": [
+            "headless", "allowed_domains", "blocked_domains",
+            "timeout_seconds", "persist_cookies", "downloads_dir", "screenshots_dir",
+        ],
+        "spawn": ["max_concurrent"],
+        "file_persistence": ["max_file_size", "clear_data_after_save"],
+    }
+
     def __init__(
         self,
         global_config: "BuiltinsConfig | None" = None,
@@ -67,6 +83,29 @@ class BuiltinLoader:
         if isinstance(obj, dict):
             return obj.get(field, default)
         return getattr(obj, field, default)
+
+    def _extract_typed_fields(self, config: dict[str, Any], name: str) -> None:
+        """Extract typed fields from builtin config models into config dict.
+
+        Global fields are applied first; workspace fields override them.
+
+        Args:
+            config: Config dict to populate (modified in place).
+            name: Builtin name to look up in _CONFIG_FIELDS.
+        """
+        fields = self._CONFIG_FIELDS.get(name)
+        if not fields:
+            return
+
+        for source in (self.global_config, self.workspace_config):
+            if not source:
+                continue
+            cfg = getattr(source, name, None)
+            if not cfg:
+                continue
+            for field_name in fields:
+                if hasattr(cfg, field_name):
+                    config[field_name] = getattr(cfg, field_name)
 
     def _is_allowed(self, name: str, group: str | None) -> bool:
         """Check if a builtin is allowed based on allow/deny lists.
@@ -146,86 +185,8 @@ class BuiltinLoader:
             channel_type = self.channel_config.get("type", "telegram")
             config["default_channel"] = channel_type
 
-        # Extract max_file_size from SendFileBuiltinConfig if present
-        if name == "send_file":
-            if self.global_config:
-                global_cfg = getattr(self.global_config, name, None)
-                if global_cfg and hasattr(global_cfg, "max_file_size"):
-                    config["max_file_size"] = global_cfg.max_file_size
-            if self.workspace_config:
-                workspace_cfg = getattr(self.workspace_config, name, None)
-                if workspace_cfg and hasattr(workspace_cfg, "max_file_size"):
-                    config["max_file_size"] = workspace_cfg.max_file_size
-
-        # Extract typed fields from DoclingBuiltinConfig
-        if name == "docling":
-            _docling_fields = [
-                "max_file_size", "ocr_backend", "ocr_languages",
-                "force_full_page_ocr", "document_timeout", "do_ocr", "do_table_structure",
-            ]
-            if self.global_config:
-                global_cfg = getattr(self.global_config, name, None)
-                if global_cfg:
-                    for field in _docling_fields:
-                        if hasattr(global_cfg, field):
-                            config[field] = getattr(global_cfg, field)
-            if self.workspace_config:
-                workspace_cfg = getattr(self.workspace_config, name, None)
-                if workspace_cfg:
-                    for field in _docling_fields:
-                        if hasattr(workspace_cfg, field):
-                            config[field] = getattr(workspace_cfg, field)
-
-        # Extract typed fields from BrowserBuiltinConfig
-        if name == "browser":
-            _browser_fields = [
-                "headless", "allowed_domains", "blocked_domains",
-                "timeout_seconds", "persist_cookies", "downloads_dir", "screenshots_dir",
-            ]
-            if self.global_config:
-                global_cfg = getattr(self.global_config, name, None)
-                if global_cfg:
-                    for fld in _browser_fields:
-                        if hasattr(global_cfg, fld):
-                            config[fld] = getattr(global_cfg, fld)
-            if self.workspace_config:
-                workspace_cfg = getattr(self.workspace_config, name, None)
-                if workspace_cfg:
-                    for fld in _browser_fields:
-                        if hasattr(workspace_cfg, fld):
-                            config[fld] = getattr(workspace_cfg, fld)
-
-        # Extract typed fields from SpawnBuiltinConfig
-        if name == "spawn":
-            _spawn_fields = ["max_concurrent"]
-            if self.global_config:
-                global_cfg = getattr(self.global_config, name, None)
-                if global_cfg:
-                    for fld in _spawn_fields:
-                        if hasattr(global_cfg, fld):
-                            config[fld] = getattr(global_cfg, fld)
-            if self.workspace_config:
-                workspace_cfg = getattr(self.workspace_config, name, None)
-                if workspace_cfg:
-                    for fld in _spawn_fields:
-                        if hasattr(workspace_cfg, fld):
-                            config[fld] = getattr(workspace_cfg, fld)
-
-        # Extract typed fields from FilePersistenceBuiltinConfig
-        if name == "file_persistence":
-            _fp_fields = ["max_file_size", "clear_data_after_save"]
-            if self.global_config:
-                global_cfg = getattr(self.global_config, name, None)
-                if global_cfg:
-                    for fld in _fp_fields:
-                        if hasattr(global_cfg, fld):
-                            config[fld] = getattr(global_cfg, fld)
-            if self.workspace_config:
-                workspace_cfg = getattr(self.workspace_config, name, None)
-                if workspace_cfg:
-                    for fld in _fp_fields:
-                        if hasattr(workspace_cfg, fld):
-                            config[fld] = getattr(workspace_cfg, fld)
+        # Extract typed fields from builtin config models (global first, workspace overrides)
+        self._extract_typed_fields(config, name)
 
         # Global config
         if self.global_config:

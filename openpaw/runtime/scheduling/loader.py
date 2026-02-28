@@ -6,7 +6,7 @@ from typing import Any
 import yaml
 
 from openpaw.core.config import expand_env_vars_recursive
-from openpaw.model.cron import CronDefinition
+from openpaw.core.config.models import CronDefinition
 
 
 class CronLoader:

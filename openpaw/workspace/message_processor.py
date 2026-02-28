@@ -16,11 +16,12 @@ from openpaw.core.prompts.system_events import (
     INTERRUPT_NOTIFICATION,
     TOOL_DENIED_TEMPLATE,
 )
+from openpaw.core.utils import resolve_user_name
 from openpaw.model.message import Message
+from openpaw.runtime.approval import ApprovalGateManager
 from openpaw.runtime.queue.lane import QueueMode
 from openpaw.runtime.queue.manager import QueueManager
 from openpaw.runtime.session.manager import SessionManager
-from openpaw.stores.approval import ApprovalGateManager
 
 
 class MessageProcessor:
@@ -73,41 +74,19 @@ class MessageProcessor:
         self._auto_compact_config = auto_compact_config
         self._user_aliases = user_aliases or {}
 
-    def _resolve_user_name(self, message: Message) -> str | None:
-        """Resolve display name for a message's user.
+    def update_agent_runner(self, runner: "AgentRunner") -> None:
+        """Update the agent runner instance.
+
+        Used when the agent is rebuilt (e.g., after removing broken tools).
 
         Args:
-            message: The message to resolve user name for.
-
-        Returns:
-            Display name if available, None otherwise.
+            runner: The new AgentRunner instance.
         """
-        # Opt-in: only resolve if aliases configured
-        if not self._user_aliases:
-            return None
+        self._agent_runner = runner
 
-        # Skip system messages
-        if message.user_id == "system":
-            return None
-
-        # Try alias lookup (with numeric conversion fallback)
-        try:
-            name = self._user_aliases.get(int(message.user_id))
-            if name:
-                return name
-        except ValueError:
-            pass  # user_id not numeric, skip alias lookup
-
-        # Fall through to metadata
-        first_name = message.metadata.get("first_name")
-        if first_name:
-            return str(first_name)
-
-        username = message.metadata.get("username")
-        if username:
-            return str(username)
-
-        return None
+    def _resolve_user_name(self, message: Message) -> str | None:
+        """Resolve display name for a message's user."""
+        return resolve_user_name(message.user_id, message.metadata, self._user_aliases)
 
     def _build_combined_content(self, messages: list[Message]) -> str:
         """Build combined content from messages with optional user name prefixes.
@@ -180,11 +159,11 @@ class MessageProcessor:
 
             try:
                 # Set queue awareness on middleware before each run
-                session_queue = await self._queue_manager._get_or_create_session(session_key)
+                session_mode = await self._queue_manager.get_session_mode(session_key)
                 self._queue_middleware.set_queue_awareness(
                     queue_manager=self._queue_manager,
                     session_key=session_key,
-                    queue_mode=session_queue.mode,
+                    queue_mode=session_mode,
                 )
 
                 # Set approval context on middleware before each run
@@ -221,19 +200,19 @@ class MessageProcessor:
                 steer_messages = self._queue_middleware.pending_steer_message
 
                 # Post-run steer/interrupt check
-                if not steered and session_queue.mode in (QueueMode.STEER, QueueMode.INTERRUPT):
+                if not steered and session_mode in (QueueMode.STEER, QueueMode.INTERRUPT):
                     has_post_run_pending = await self._queue_manager.peek_pending(session_key)
                     if has_post_run_pending:
                         pending = await self._queue_manager.consume_pending(session_key)
                         if pending:
-                            if session_queue.mode == QueueMode.STEER:
+                            if session_mode == QueueMode.STEER:
                                 steered = True
                                 steer_messages = pending
                                 self._logger.info(
                                     f"Post-run steer: {len(pending)} pending message(s) "
                                     f"detected after agent run"
                                 )
-                            elif session_queue.mode == QueueMode.INTERRUPT:
+                            elif session_mode == QueueMode.INTERRUPT:
                                 self._logger.info(
                                     f"Post-run interrupt: {len(pending)} pending message(s) "
                                     f"detected after agent run"

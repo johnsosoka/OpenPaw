@@ -16,12 +16,13 @@ from apscheduler.triggers.interval import IntervalTrigger
 from openpaw.agent.metrics import TokenUsageLogger
 from openpaw.agent.session_logger import SessionLogger
 from openpaw.channels.base import ChannelAdapter
+from openpaw.core.config.models import CronDefinition
 from openpaw.core.prompts.system_events import (
     CRON_RESULT_TEMPLATE,
     CRON_RESULT_TRUNCATED_TEMPLATE,
     INJECTION_TRUNCATION_LIMIT,
 )
-from openpaw.model.cron import CronDefinition, DynamicCronTask
+from openpaw.model.cron import DynamicCronTask
 from openpaw.runtime.scheduling.loader import CronLoader
 from openpaw.stores.cron import DynamicCronStore
 

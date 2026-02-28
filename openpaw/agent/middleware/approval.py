@@ -6,7 +6,7 @@ from typing import Any
 
 from langchain.agents.middleware import wrap_tool_call
 
-from openpaw.stores.approval import ApprovalGateManager
+from openpaw.runtime.approval import ApprovalGateManager
 
 logger = logging.getLogger(__name__)
 

@@ -65,10 +65,10 @@ openpaw/
 │   ├── task.py       # Task, TaskStatus
 │   ├── session.py    # SessionState
 │   ├── subagent.py   # SubAgentRequest, SubAgentStatus
-│   └── cron.py       # CronJobDefinition, DynamicCronTask
+│   └── cron.py       # DynamicCronTask (pure dataclass)
 ├── core/             # Configuration, logging, timezone, utilities
 │   ├── config/       # Pydantic config models and loaders
-│   │   ├── models.py         # WorkspaceConfig, GlobalConfig
+│   │   ├── models.py         # WorkspaceConfig, GlobalConfig, CronDefinition, CronOutputConfig
 │   │   ├── loader.py         # Config loading and merging
 │   │   └── env_expansion.py  # ${VAR} substitution
 │   ├── prompts/      # Centralized prompt text
@@ -77,9 +77,10 @@ openpaw/
 │   │   ├── heartbeat.py      # Heartbeat prompt template
 │   │   ├── processors.py     # Processor notification text
 │   │   └── system_events.py  # System event messages
+│   ├── workspace.py  # AgentWorkspace dataclass (system prompt builder)
 │   ├── logging.py    # Structured logging
 │   ├── timezone.py   # Workspace timezone utilities
-│   └── utils.py      # Generic utilities (sanitization, deduplication)
+│   └── utils.py      # Generic utilities (sanitization, deduplication, user name resolution)
 ├── agent/            # Agent execution
 │   ├── runner.py     # AgentRunner (LangGraph wrapper)
 │   ├── metrics.py    # Token usage tracking
@@ -89,7 +90,7 @@ openpaw/
 │       ├── filesystem.py  # Sandboxed file operations
 │       └── sandbox.py     # Path validation
 ├── workspace/        # Workspace management
-│   ├── loader.py     # Load AGENT.md, USER.md, SOUL.md, HEARTBEAT.md
+│   ├── loader.py     # WorkspaceLoader: loads workspace files, returns AgentWorkspace
 │   ├── runner.py     # WorkspaceRunner (slim orchestrator)
 │   ├── message_processor.py  # Message processing loop
 │   ├── agent_factory.py      # Agent creation with middleware
@@ -104,6 +105,7 @@ openpaw/
 │   │   ├── cron.py           # CronScheduler
 │   │   ├── heartbeat.py      # HeartbeatScheduler
 │   │   └── dynamic_cron.py   # DynamicCronStore
+│   ├── approval.py   # ApprovalGateManager (in-memory state machine)
 │   ├── session/      # Session management and archiving
 │   │   ├── manager.py        # SessionManager
 │   │   └── archiver.py       # ConversationArchiver
@@ -113,7 +115,6 @@ openpaw/
 │   ├── task.py       # TaskStore (TASKS.yaml)
 │   ├── subagent.py   # SubAgentStore (subagents.yaml)
 │   ├── cron.py       # DynamicCronStore (dynamic_crons.json)
-│   ├── approval.py   # ApprovalGateManager (in-memory)
 │   └── vector/       # Semantic search infrastructure
 ├── channels/         # External communication
 │   ├── factory.py    # Channel factory
@@ -146,11 +147,13 @@ openpaw/
 
 **`openpaw/agent/metrics.py`** - Token usage tracking infrastructure. `InvocationMetrics` dataclass, `extract_metrics_from_callback()` for `UsageMetadataCallbackHandler`, `TokenUsageLogger` (thread-safe JSONL append to `.openpaw/token_usage.jsonl`), and `TokenUsageReader` for aggregation (today/session).
 
-**`openpaw/core/config/models.py`** - Pydantic models for global and workspace configuration. Handles environment variable expansion (`${VAR}`) and deep-merging workspace config over global defaults.
+**`openpaw/core/config/models.py`** - Pydantic models for global and workspace configuration. Includes `CronDefinition` and `CronOutputConfig` (cron scheduling config with APScheduler dependency). Handles environment variable expansion (`${VAR}`) and deep-merging workspace config over global defaults.
 
 **`openpaw/core/config/loader.py`** - Configuration loading and merging. Discovers workspace directories, loads global and per-workspace config, and performs deep merge.
 
-**`openpaw/workspace/loader.py`** - Loads agent "workspaces" from `agent_workspaces/<name>/`. Each workspace requires: `AGENT.md`, `USER.md`, `SOUL.md`, `HEARTBEAT.md`. Optional `agent.yaml` and `crons/*.yaml` are loaded if present. These are combined into XML-tagged sections for the system prompt.
+**`openpaw/core/workspace.py`** - `AgentWorkspace` dataclass containing loaded workspace content (AGENT.md, USER.md, SOUL.md, HEARTBEAT.md, crons, config). Builds the XML-tagged system prompt via `build_system_prompt()` with dynamic framework orientation sections.
+
+**`openpaw/workspace/loader.py`** - `WorkspaceLoader` loads agent workspaces from `agent_workspaces/<name>/`. Returns an `AgentWorkspace` instance from `core/`. Each workspace requires: `AGENT.md`, `USER.md`, `SOUL.md`, `HEARTBEAT.md`. Optional `agent.yaml` and `crons/*.yaml` are loaded if present.
 
 **`openpaw/workspace/tool_loader.py`** - Dynamically loads LangChain tools from workspace `tools/` directories. Imports Python files and extracts `@tool` decorated functions (BaseTool instances).
 
@@ -166,7 +169,7 @@ openpaw/
 
 **`openpaw/builtins/tools/spawn.py`** - `SpawnToolBuiltin` provides `spawn_agent`, `list_subagents`, `get_subagent_result`, `cancel_subagent` tools for concurrent task execution.
 
-**`openpaw/stores/approval.py`** - `ApprovalGateManager` state machine for pending approval requests. Manages lifecycle: create → wait → resolve → cleanup, with automatic timeout handling. Includes `ApprovalGatesConfig` Pydantic models.
+**`openpaw/runtime/approval.py`** - `ApprovalGateManager` state machine for pending approval requests. Manages lifecycle: create → wait → resolve → cleanup, with automatic timeout handling. Includes `ApprovalGatesConfig` Pydantic models.
 
 **`openpaw/agent/middleware/approval.py`** - `ApprovalToolMiddleware` intercepts tool calls requiring user authorization. Raises `ApprovalRequiredError` to pause execution, sends UI to user, and resumes on approval.
 
@@ -200,7 +203,7 @@ openpaw/
 
 **`openpaw/agent/tools/sandbox.py`** - Standalone `resolve_sandboxed_path()` utility. Validates paths within workspace root, rejecting absolute paths, `~`, `..`, and `.openpaw/` access. Shared by `FilesystemTools`, `SendFileTool`, and inbound processors (DoclingProcessor, WhisperProcessor).
 
-**`openpaw/core/utils.py`** - Generic utilities. `sanitize_filename()` removes special characters, normalizes spaces, and lowercases. `deduplicate_path()` appends counters (1), (2), etc. for uniqueness.
+**`openpaw/core/utils.py`** - Generic utilities. `sanitize_filename()` removes special characters, normalizes spaces, and lowercases. `deduplicate_path()` appends counters (1), (2), etc. for uniqueness. `resolve_user_name()` maps user IDs to display names via aliases/metadata.
 
 **`openpaw/builtins/processors/file_persistence.py`** - `FilePersistenceProcessor` saves all uploaded files to `uploads/{YYYY-MM-DD}/` with date partitioning. Sets `attachment.saved_path` for downstream processors.
 

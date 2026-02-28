@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 import pytest
 
 from openpaw.stores.subagent import SubAgentStore
-from openpaw.workspace.loader import AgentWorkspace, WorkspaceLoader
+from openpaw.core.workspace import AgentWorkspace
+from openpaw.workspace.loader import WorkspaceLoader
 
 
 @pytest.fixture

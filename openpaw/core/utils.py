@@ -1,6 +1,6 @@
 """Shared utility modules for OpenPaw.
 
-Filename sanitization and deduplication utilities.
+Filename sanitization, deduplication, and user name resolution utilities.
 """
 
 import re
@@ -95,3 +95,45 @@ def deduplicate_path(path: Path) -> Path:
     # Safety cap reached - return the 1000th version anyway
     # (filesystem will handle the conflict)
     return parent / f"{stem}(1000){suffix}"
+
+
+def resolve_user_name(
+    user_id: str,
+    metadata: dict,
+    user_aliases: dict[int, str] | None,
+) -> str | None:
+    """Resolve display name for a user from aliases or metadata.
+
+    Uses opt-in semantics: returns None when no aliases are configured,
+    skips system messages, and falls back through first_name → username.
+
+    Args:
+        user_id: The user's ID string.
+        metadata: Message metadata dict (may contain first_name, username).
+        user_aliases: Optional mapping of numeric user IDs to display names.
+
+    Returns:
+        Display name if resolvable, None otherwise.
+    """
+    if not user_aliases:
+        return None
+
+    if user_id == "system":
+        return None
+
+    try:
+        name = user_aliases.get(int(user_id))
+        if name:
+            return name
+    except (ValueError, TypeError):
+        pass
+
+    first_name = metadata.get("first_name")
+    if first_name:
+        return str(first_name)
+
+    username = metadata.get("username")
+    if username:
+        return str(username)
+
+    return None

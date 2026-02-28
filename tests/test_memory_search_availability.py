@@ -386,7 +386,7 @@ class TestConnectMemorySearchTool:
         assert runner._agent_runner is new_agent
 
     def test_message_processor_agent_runner_updated_on_rebuild(self):
-        """After rebuild, message processor receives the new agent runner."""
+        """After rebuild, message processor's update_agent_runner is called with new agent."""
         mock_memory_tool = MagicMock()
         new_agent = MagicMock()
         runner = _make_mock_runner(
@@ -398,7 +398,7 @@ class TestConnectMemorySearchTool:
 
         WorkspaceRunner._connect_memory_search_tool(runner)
 
-        assert runner._message_processor._agent_runner is new_agent
+        runner._message_processor.update_agent_runner.assert_called_once_with(new_agent)
 
     def test_set_context_not_called_when_vector_store_unavailable(self):
         """When vector store is None, set_context is never called."""

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from openpaw.agent.runner import AgentRunner
 from openpaw.agent.metrics import InvocationMetrics
-from openpaw.workspace.loader import AgentWorkspace
+from openpaw.core.workspace import AgentWorkspace
 
 
 @pytest.fixture

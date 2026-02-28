@@ -3,20 +3,15 @@
 This package contains stable dataclasses and enums representing core business
 concepts. These models have no dependencies on infrastructure or application
 logic, making them the foundation of the codebase.
+
+Note: CronDefinition and CronOutputConfig (Pydantic + APScheduler) live in
+openpaw.core.config.models. Only the pure DynamicCronTask dataclass belongs here.
 """
 
-# Message domain
-# Cron domain
-from openpaw.model.cron import CronDefinition, CronOutputConfig, DynamicCronTask
+from openpaw.model.cron import DynamicCronTask
 from openpaw.model.message import Attachment, Message, MessageDirection
-
-# Session domain
 from openpaw.model.session import SessionState
-
-# Sub-agent domain
 from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
-
-# Task domain
 from openpaw.model.task import Task, TaskPriority, TaskStatus, TaskType
 
 __all__ = [
@@ -36,7 +31,5 @@ __all__ = [
     "SubAgentResult",
     "SubAgentStatus",
     # Cron
-    "CronDefinition",
-    "CronOutputConfig",
     "DynamicCronTask",
 ]

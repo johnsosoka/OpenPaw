@@ -17,7 +17,7 @@ from openpaw.core.prompts.system_events import (
     HEARTBEAT_RESULT_TRUNCATED_TEMPLATE,
     INJECTION_TRUNCATION_LIMIT,
 )
-from openpaw.model.cron import CronDefinition, CronOutputConfig
+from openpaw.core.config.models import CronDefinition, CronOutputConfig
 from openpaw.model.subagent import SubAgentRequest
 from openpaw.runtime.scheduling.cron import CronScheduler
 from openpaw.runtime.scheduling.heartbeat import HeartbeatScheduler
