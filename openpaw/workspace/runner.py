@@ -593,14 +593,29 @@ class WorkspaceRunner:
             self.logger.warning(f"Failed to connect SpawnTool to runner: {e}")
 
     def _connect_memory_search_tool(self) -> None:
-        """Connect MemorySearchTool builtin to vector store and embedding provider."""
+        """Connect MemorySearchTool builtin to vector store and embedding provider.
+
+        If the vector store is not available (e.g., missing API key), removes the
+        memory search tools from the agent so the LLM never sees a broken tool.
+        """
         try:
             memory_tool = self._builtin_loader.get_tool_instance("memory_search")
             if memory_tool and self._vector_store and self._embedding_provider:
                 memory_tool.set_context(self._vector_store, self._embedding_provider)
                 self.logger.info("Connected MemorySearchTool to vector store")
             elif memory_tool:
-                self.logger.debug("MemorySearchTool loaded but vector store not initialized")
+                # Vector store not available — remove broken tool from agent
+                self._agent_factory.remove_builtin_tools({"search_conversations"})
+                self._agent_factory.remove_enabled_builtin("memory_search")
+                # Rebuild agent without the broken tool and propagate to all holders.
+                # If additional agent_runner holders are added, update them here too.
+                self._agent_runner = self._agent_factory.create_agent(
+                    checkpointer=self._checkpointer
+                )
+                self._message_processor._agent_runner = self._agent_runner
+                self.logger.info(
+                    "Removed memory_search tools from agent (vector store not initialized)"
+                )
             else:
                 self.logger.debug("MemorySearchTool not loaded for this workspace")
         except Exception as e:

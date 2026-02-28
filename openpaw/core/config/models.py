@@ -297,7 +297,7 @@ class VectorStoreConfig(BaseModel):
 class MemoryConfig(BaseModel):
     """Configuration for conversation memory and vector search."""
 
-    enabled: bool = Field(default=False, description="Enable conversation vector search")
+    enabled: bool = Field(default=True, description="Enable conversation vector search")
     vector_store: VectorStoreConfig = Field(
         default_factory=VectorStoreConfig, description="Vector store backend config"
     )

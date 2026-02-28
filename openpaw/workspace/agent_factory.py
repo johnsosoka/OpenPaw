@@ -194,6 +194,34 @@ class AgentFactory:
             middleware=[],  # No middleware for stateless agents
         )
 
+    def remove_builtin_tools(self, tool_names: set[str]) -> None:
+        """Remove builtin tools by LangChain tool name.
+
+        Filters tools from the factory's builtin tool list and enabled names.
+        Subsequent create_agent() calls will exclude these tools.
+
+        Args:
+            tool_names: Set of LangChain tool names to remove (e.g., {"search_conversations"}).
+        """
+        before_count = len(self._builtin_tools)
+        self._builtin_tools = [t for t in self._builtin_tools if t.name not in tool_names]
+        removed = before_count - len(self._builtin_tools)
+        if removed:
+            self._logger.info(f"Removed {removed} builtin tool(s): {tool_names}")
+        else:
+            self._logger.debug(f"No matching builtin tools found to remove: {tool_names}")
+
+    def remove_enabled_builtin(self, name: str) -> None:
+        """Remove a builtin name from the enabled list.
+
+        This affects framework prompt generation (conditional sections).
+
+        Args:
+            name: Builtin name to remove (e.g., "memory_search").
+        """
+        if name in self._enabled_builtin_names:
+            self._enabled_builtin_names.remove(name)
+
     def get_agent_factory_closure(self) -> Callable[[], AgentRunner]:
         """Create a closure for spawning stateless agents.
 
