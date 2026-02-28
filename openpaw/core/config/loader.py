@@ -88,6 +88,39 @@ def merge_configs(global_config: dict[str, Any], workspace_config: dict[str, Any
     return result
 
 
+def check_unexpanded_vars(data: Any, source: str) -> None:
+    """Recursively check for unresolved ${VAR} patterns after expansion.
+
+    Args:
+        data: Expanded configuration data (dict, list, str, or other).
+        source: Human-readable label for error messages (e.g., file path).
+
+    Raises:
+        ValueError: If any ${VAR} patterns remain unresolved.
+    """
+    unresolved: list[str] = []
+    _collect_unexpanded_vars(data, unresolved)
+    if unresolved:
+        unique = sorted(set(unresolved))
+        raise ValueError(
+            f"Unresolved environment variable(s) in {source}: {', '.join(unique)}. "
+            f"Set these variables or remove the ${{VAR}} references."
+        )
+
+
+def _collect_unexpanded_vars(obj: Any, found: list[str]) -> None:
+    """Walk data structure collecting unresolved ${VAR} patterns."""
+    if isinstance(obj, dict):
+        for value in obj.values():
+            _collect_unexpanded_vars(value, found)
+    elif isinstance(obj, list):
+        for item in obj:
+            _collect_unexpanded_vars(item, found)
+    elif isinstance(obj, str):
+        for match in re.finditer(r'\$\{([^}]+)\}', obj):
+            found.append(f"${{{match.group(1)}}}")
+
+
 def load_config(path: Path | str) -> Config:
     """Load configuration from a YAML file with environment variable expansion.
 
@@ -110,5 +143,6 @@ def load_config(path: Path | str) -> Config:
 
     # Expand environment variables in all string values
     data = expand_env_vars_recursive(data)
+    check_unexpanded_vars(data, source=str(config_path))
 
     return Config(**data)

@@ -71,6 +71,24 @@ builtins:
 #   notify_shutdown: true   # Notify users when workspace stops
 #   notify_auto_compact: true  # Notify users on auto-compact
 
+# Conversation memory (vector search)
+# Disabled by default — requires embedding API key
+# memory:
+#   enabled: true
+#   embedding:
+#     provider: openai
+#     model: text-embedding-3-small
+#     api_key: ${OPENAI_API_KEY}
+
+# Per-workspace model config (in agent.yaml, not here)
+# Two equivalent formats:
+#   Combined: model: "anthropic:claude-sonnet-4-20250514"
+#   Explicit:
+#     model:
+#       provider: anthropic
+#       model: claude-sonnet-4-20250514
+#       temperature: 0.5
+
 # Per-workspace channel settings (in agent.yaml, not here)
 # channel:
 #   type: telegram

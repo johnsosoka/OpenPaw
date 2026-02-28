@@ -7,6 +7,7 @@ All models and functions are re-exported at the package level for backward compa
 # Import all models
 # Import loading utilities
 from openpaw.core.config.loader import (
+    check_unexpanded_vars,
     expand_env_vars,
     expand_env_vars_recursive,
     load_config,
@@ -56,6 +57,7 @@ __all__ = [
     "WorkspaceQueueConfig",
     "WorkspaceToolsConfig",
     # Loaders
+    "check_unexpanded_vars",
     "expand_env_vars",
     "expand_env_vars_recursive",
     "load_config",

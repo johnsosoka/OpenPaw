@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from apscheduler.triggers.cron import CronTrigger
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class QueueConfig(BaseModel):
@@ -50,6 +50,25 @@ class WorkspaceModelConfig(BaseModel):
     temperature: float | None = Field(default=None, description="Model temperature")
     max_turns: int | None = Field(default=None, description="Max agent turns per run")
     region: str | None = Field(default=None, description="AWS region for Bedrock models (e.g., us-east-1)")
+
+    @model_validator(mode="before")
+    @classmethod
+    def split_combined_model_string(cls, data: Any) -> Any:
+        """Auto-split 'provider:model_id' into separate fields.
+
+        Supports combined format like "anthropic:claude-sonnet-4-20250514"
+        when provider is not explicitly set. Only splits on the first colon
+        to handle Bedrock IDs like "us.anthropic.claude-haiku:v1:0".
+        """
+        if not isinstance(data, dict):
+            return data
+        model_val = data.get("model")
+        provider_val = data.get("provider")
+        if model_val and provider_val is None and isinstance(model_val, str) and ":" in model_val:
+            provider, _, model_id = model_val.partition(":")
+            data["provider"] = provider
+            data["model"] = model_id
+        return data
 
     model_config = {"extra": "allow"}
 
@@ -298,7 +317,7 @@ class VectorStoreConfig(BaseModel):
 class MemoryConfig(BaseModel):
     """Configuration for conversation memory and vector search."""
 
-    enabled: bool = Field(default=True, description="Enable conversation vector search")
+    enabled: bool = Field(default=False, description="Enable conversation vector search")
     vector_store: VectorStoreConfig = Field(
         default_factory=VectorStoreConfig, description="Vector store backend config"
     )

@@ -137,3 +137,22 @@ def resolve_user_name(
         return str(username)
 
     return None
+
+
+def sanitize_error_for_user(error: Exception) -> str:
+    """Convert an exception to a user-safe error message.
+
+    Maps known exception types to friendly messages. Prevents internal
+    details (tracebacks, file paths, credentials) from leaking to users.
+
+    Args:
+        error: The caught exception.
+
+    Returns:
+        A user-friendly error message string.
+    """
+    if isinstance(error, TimeoutError):
+        return "The request timed out. Please try again."
+    if isinstance(error, ConnectionError):
+        return "A connection error occurred. Please try again shortly."
+    return "Something went wrong processing your message. Please try again."

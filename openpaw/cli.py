@@ -4,7 +4,10 @@ import argparse
 import asyncio
 import logging
 import signal
+import sys
 from pathlib import Path
+
+import yaml
 
 from openpaw.core.config import load_config
 from openpaw.core.logging import setup_logging
@@ -103,7 +106,22 @@ async def main() -> None:
 
 def run() -> None:
     """Entry point for poetry scripts."""
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except yaml.YAMLError as e:
+        print(f"Invalid YAML in config: {e}", file=sys.stderr)
+        sys.exit(1)
+    except ValueError as e:
+        print(f"Configuration error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Startup failed: {e}\nUse -v for verbose logging.", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

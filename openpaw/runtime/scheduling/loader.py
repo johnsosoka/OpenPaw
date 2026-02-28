@@ -5,7 +5,7 @@ from typing import Any
 
 import yaml
 
-from openpaw.core.config import expand_env_vars_recursive
+from openpaw.core.config import check_unexpanded_vars, expand_env_vars_recursive
 from openpaw.core.config.models import CronDefinition
 
 
@@ -42,6 +42,7 @@ class CronLoader:
                     raw_data: dict[str, Any] = yaml.safe_load(f) or {}
 
                 expanded_data = expand_env_vars_recursive(raw_data)
+                check_unexpanded_vars(expanded_data, source=f"crons/{cron_file.name}")
 
                 cron_def = CronDefinition(**expanded_data)
                 cron_definitions.append(cron_def)
@@ -72,5 +73,6 @@ class CronLoader:
             raw_data: dict[str, Any] = yaml.safe_load(f) or {}
 
         expanded_data = expand_env_vars_recursive(raw_data)
+        check_unexpanded_vars(expanded_data, source=f"crons/{name}")
 
         return CronDefinition(**expanded_data)
