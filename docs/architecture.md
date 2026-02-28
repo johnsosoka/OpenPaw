@@ -317,7 +317,7 @@ def get_weather(city: str) -> str:
     return fetch_weather_api(city)
 ```
 
-### Queue System (`openpaw/core/queue/`)
+### Queue System (`openpaw/runtime/queue/`)
 
 Lane-based FIFO queue with configurable concurrency per lane.
 
@@ -871,8 +871,8 @@ CLI (openpaw/cli.py)
            ├─→ ConfigLoader (openpaw/core/config/loader.py)
            ├─→ ChannelFactory (openpaw/channels/factory.py)
            │    └─→ TelegramAdapter (openpaw/channels/telegram.py)
-           ├─→ QueueManager (openpaw/core/queue/manager.py)
-           │    └─→ LaneQueue (openpaw/core/queue/lane.py)
+           ├─→ QueueManager (openpaw/runtime/queue/manager.py)
+           │    └─→ LaneQueue (openpaw/runtime/queue/lane.py)
            ├─→ BuiltinLoader (openpaw/builtins/loader.py)
            ├─→ CronScheduler (openpaw/runtime/scheduling/cron.py)
            ├─→ HeartbeatScheduler (openpaw/runtime/scheduling/heartbeat.py)
@@ -1061,7 +1061,7 @@ See [builtins.md](builtins.md) for details.
 
 ### Adding a New Queue Mode
 
-1. Add mode to `QueueMode` enum in `openpaw/core/queue/lane.py`
+1. Add mode to `QueueMode` enum in `openpaw/runtime/queue/lane.py`
 2. Implement handling logic in `QueueManager.add_message()`
 3. Update middleware behavior in `QueueAwareToolMiddleware` if needed
 4. Update configuration schema in `openpaw/core/config/models.py`
@@ -1210,7 +1210,7 @@ Middleware enables:
 
 **Unit tests:**
 - Configuration parsing and merging (`openpaw/core/config/`)
-- Queue mode behaviors (`openpaw/core/queue/`)
+- Queue mode behaviors (`openpaw/runtime/queue/`)
 - Message format conversions (`openpaw/channels/`)
 - Builtin registration and loading (`openpaw/builtins/`)
 - Timezone utilities (`openpaw/core/timezone.py`)

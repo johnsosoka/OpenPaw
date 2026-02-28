@@ -17,7 +17,7 @@ This guide walks through installing OpenPaw, creating your first agent workspace
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/jsosoka/OpenPaw.git
+git clone https://github.com/johnsosoka/OpenPaw.git
 cd OpenPaw
 ```
 
@@ -441,6 +441,6 @@ poetry run openpaw -c config.yaml -w my-agent
 
 ### Still Having Issues?
 
-- Check the [GitHub Issues](https://github.com/jsosoka/OpenPaw/issues) for similar problems
+- Check the [GitHub Issues](https://github.com/johnsosoka/OpenPaw/issues) for similar problems
 - Review the full logs in `logs/<workspace>_YYYY-MM-DD.log`
 - Ensure your Poetry environment is up to date: `poetry update`
