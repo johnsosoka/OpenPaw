@@ -42,9 +42,6 @@ poetry install -E voice
 # Web search (Brave Search API)
 poetry install -E web
 
-# System tools (SSH remote execution)
-poetry install -E system
-
 # Memory search (semantic search over past conversations)
 poetry install -E memory
 
@@ -58,11 +55,10 @@ poetry install -E all-builtins
 |-------|----------|----------|
 | `voice` | Whisper audio transcription, ElevenLabs text-to-speech | `OPENAI_API_KEY`, `ELEVENLABS_API_KEY` |
 | `web` | Brave Search web search | `BRAVE_API_KEY` |
-| `system` | Shell command execution, SSH remote execution | `asyncssh` package |
 | `memory` | Semantic search over conversation archives | `sqlite-vec` package |
 | `all-builtins` | All of the above | All API keys above |
 
-**Note:** Docling (document conversion) and Playwright (browser automation) are **core dependencies** and installed automatically with `poetry install`.
+**Note:** Docling (document conversion), Playwright (browser automation), and all LLM providers (Anthropic, OpenAI, AWS Bedrock, xAI) are **core dependencies** installed automatically with `poetry install`.
 
 ### 4. Set Up Environment Variables
 

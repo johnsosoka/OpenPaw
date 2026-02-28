@@ -21,7 +21,6 @@ BuiltinRegistry
 │  ├─ followup         Self-continuation
 │  ├─ memory_search    Semantic conversation search
 │  ├─ shell            Local command execution
-│  ├─ ssh              Remote SSH execution
 │  └─ elevenlabs       Text-to-speech
 │
 └─ Processors (4)
@@ -401,7 +400,7 @@ Agent: "Last Tuesday we discussed rolling back the deployment due to..."
 
 **Group:** `system`
 **Type:** Tool
-**Prerequisites:** `poetry install -E system`
+**Prerequisites:** None (core dependency)
 
 Execute shell commands on the host system with configurable security controls. **Disabled by default** — must explicitly enable.
 
@@ -439,45 +438,6 @@ builtins:
 User: "What files are in the current directory?"
 Agent: [Calls shell with command "ls -la"]
 Agent: "Here are the files in the directory..."
-```
-
----
-
-### ssh
-
-**Group:** `system`
-**Type:** Tool
-**Prerequisites:** `asyncssh`, `poetry install -E system`
-
-Execute commands on remote hosts via SSH with mandatory host allowlisting.
-
-**Security:**
-
-- Mandatory host allowlist — connections to non-allowlisted hosts are rejected
-- Uses system SSH keys or specified key paths
-- Configurable connection timeout
-
-**Configuration:**
-
-```yaml
-builtins:
-  ssh:
-    enabled: true
-    config:
-      allowed_hosts:  # REQUIRED
-        - server1.example.com
-        - 192.168.1.100
-      default_user: deploy
-      default_key_path: ~/.ssh/id_rsa
-      timeout: 30
-```
-
-**Usage Example:**
-
-```
-User: "Check disk space on the dev server"
-Agent: [Calls ssh(host="server1.example.com", command="df -h")]
-Agent: "The dev server has 45% disk usage..."
 ```
 
 ---
@@ -785,7 +745,7 @@ builtins:
 |-------|---------|
 | `voice` | whisper, elevenlabs |
 | `web` | brave_search |
-| `system` | shell, ssh |
+| `system` | shell |
 | `context` | timestamp |
 | `agent` | spawn, cron, task_tracker, send_message, followup, send_file |
 | `browser` | browser |
@@ -805,7 +765,7 @@ builtins:
 
 ## Installation
 
-Builtins require optional dependencies. Install only what you need:
+Most builtins are included in the core install. A few require optional extras:
 
 **Voice capabilities:**
 ```bash
@@ -819,26 +779,22 @@ poetry install -E web
 ```
 Installs: `langchain-community`
 
-**System capabilities:**
-```bash
-poetry install -E system
-```
-Installs: `langchain-experimental`, `asyncssh`
-
 **Memory search:**
 ```bash
 poetry install -E memory
 ```
 Installs: `sqlite-vec`
 
-**All builtins:**
+**All optional builtins:**
 ```bash
 poetry install -E all-builtins
 ```
 
-**Core dependencies** (included in base install):
+**Core dependencies** (included in base `poetry install`):
+- `docling`, `easyocr`, `opencv-python-headless` — Document conversion and OCR
 - `playwright` — Browser automation
-- `docling` — Document conversion
+- `langchain-anthropic`, `langchain-openai`, `langchain-aws`, `langchain-xai` — LLM providers
+- Shell tool — No extra dependencies required
 
 ---
 
@@ -1028,10 +984,10 @@ Reduce attack surface:
 builtins:
   deny:
     - elevenlabs  # Don't need TTS in this workspace
-    - group:system  # Disable shell/ssh for security
+    - group:system  # Disable shell for security
 ```
 
-**Security Note:** System tools (shell, ssh) should be denied unless explicitly needed. The shell tool is disabled by default and requires explicit enablement.
+**Security Note:** The shell tool should be denied unless explicitly needed. It is disabled by default and requires explicit enablement.
 
 ### 4. Use Groups for Bulk Operations
 
@@ -1100,30 +1056,21 @@ curl https://api.elevenlabs.io/v1/voices \
 
 ## Security Considerations
 
-### System Tools (shell, ssh)
+### Shell Tool
 
-The `shell` and `ssh` tools provide powerful system access and require careful configuration:
+The shell tool provides powerful system access and requires careful configuration:
 
-**Shell Tool:**
 - Disabled by default — must explicitly enable in config
 - Use `allowed_commands` for strict allowlisting when possible
 - Default `blocked_commands` list prevents common dangerous operations
 - Consider constraining `working_directory` to a sandbox
 - Never enable in untrusted environments
 
-**SSH Tool:**
-- Requires mandatory `allowed_hosts` configuration
-- Rejects connections to non-allowlisted hosts
-- Uses system SSH keys — ensure keys have appropriate permissions
-- Consider separate keys for agent SSH access
-- Audit `allowed_hosts` list regularly
-
 **Best Practices:**
-1. Enable system tools only in workspaces that need them
+1. Enable the shell tool only in workspaces that need it
 2. Use `group:system` deny rule in untrusted workspaces
-3. Configure minimal permissions (minimal allowed_commands, minimal allowed_hosts)
+3. Configure minimal allowed_commands
 4. Monitor logs for blocked command attempts
-5. Keep SSH keys secured with appropriate file permissions (600)
 
 ### Browser Tool
 
