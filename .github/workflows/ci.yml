@@ -5,9 +5,17 @@ on:
     branches:
       - main
       - develop
+    paths-ignore:
+      - "*.md"
+      - "docs/**"
+      - "LICENSE"
   push:
     branches:
       - develop
+    paths-ignore:
+      - "*.md"
+      - "docs/**"
+      - "LICENSE"
 
 concurrency:
   group: ci-${{ github.ref }}
