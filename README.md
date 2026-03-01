@@ -20,8 +20,8 @@
 ### 1. Install
 
 ```bash
-git clone https://github.com/johnsosoka/openpaw.git
-cd openpaw
+git clone https://github.com/johnsosoka/OpenPaw.git
+cd OpenPaw
 poetry install
 ```
 
@@ -107,6 +107,16 @@ Once running, agents respond to framework commands in Telegram:
 - [Queue System](docs/queue-system.md) -- Queue modes and message handling
 - [Cron Scheduler](docs/cron-scheduler.md) -- Scheduled tasks and heartbeat system
 - [Built-ins](docs/builtins.md) -- Web search, browser automation, voice, sub-agents, and more
+
+## Contributing
+
+Development follows a GitFlow branching model:
+
+- **`main`** — Stable releases only. Protected branch, requires CI to pass.
+- **`develop`** — Integration branch. Feature and bugfix PRs target `develop`.
+- **Feature branches** — Branch from `develop` as `feature/`, `bugfix/`, `docs/`, or `chore/`.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
 
 ## Prerequisites
 
