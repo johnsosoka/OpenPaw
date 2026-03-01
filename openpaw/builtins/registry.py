@@ -132,6 +132,13 @@ class BuiltinRegistry:
         except ImportError as e:
             logger.debug(f"Memory search tool not available: {e}")
 
+        try:
+            from openpaw.builtins.tools.md2pdf import Md2pdfToolBuiltin
+
+            self.register_tool(Md2pdfToolBuiltin)
+        except ImportError as e:
+            logger.debug(f"md2pdf tool not available: {e}")
+
         # Processors (sorted by metadata.priority in BuiltinLoader.load_processors)
         try:
             from openpaw.builtins.processors.file_persistence import FilePersistenceProcessor
