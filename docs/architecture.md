@@ -2,6 +2,10 @@
 
 OpenPaw is a multi-workspace AI agent framework built on [LangGraph](https://langchain-ai.github.io/langgraph/) (`create_react_agent`) and [LangChain](https://www.langchain.com/). This document describes the system design, component interactions, and architectural decisions.
 
+<div align="center">
+  <img src="../assets/images/features.png" alt="OpenPaw Architecture Overview" width="650">
+</div>
+
 ## System Overview
 
 ```

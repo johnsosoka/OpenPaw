@@ -1,6 +1,9 @@
-# OpenPaw
+<div align="center">
+  <img src="docs/assets/images/logo.png" alt="OpenPaw" width="400">
+  <p><strong>Multi-channel AI agent framework built on <a href="https://langchain-ai.github.io/langgraph/">LangGraph</a></strong></p>
+</div>
 
-Multi-channel AI agent framework built on [LangGraph](https://langchain-ai.github.io/langgraph/).
+---
 
 ## Features
 

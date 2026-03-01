@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="assets/images/hero.png" alt="OpenPaw — Multi-Agent AI Framework" width="700">
+</div>
+
 # OpenPaw
 
 **Multi-Channel AI Agent Framework built on LangGraph**
