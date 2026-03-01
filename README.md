@@ -1,27 +1,51 @@
 <div align="center">
   <img src="docs/assets/images/logo.png" alt="OpenPaw" width="400">
-  <p><strong>Multi-channel AI agent framework built on <a href="https://langchain-ai.github.io/langgraph/">LangGraph</a></strong></p>
+  <p><strong>A Friendly <a href="https://langchain-ai.github.io/langgraph/">LangChain/LangGraph</a> Multi-Agent Runner</strong></p>
+  <p>
+    <a href="https://github.com/johnsosoka/OpenPaw/actions/workflows/ci.yml"><img src="https://github.com/johnsosoka/OpenPaw/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+    <a href="https://github.com/johnsosoka/OpenPaw/actions/workflows/docs.yml"><img src="https://github.com/johnsosoka/OpenPaw/actions/workflows/docs.yml/badge.svg?branch=main" alt="Docs"></a>
+    <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
+    <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-green" alt="License">
+  </p>
 </div>
 
 ---
 
-## Features
+OpenPaw gives each agent its own workspace -- personality files, custom tools, scheduled tasks -- then gets out of the way. It handles the orchestration so you can focus on what your agents actually do.
 
-- **Isolated workspaces** -- Each agent runs with its own personality, channel, tools, and conversation history
-- **Multi-provider LLM support** -- Anthropic, OpenAI, AWS Bedrock, xAI, and any OpenAI-compatible API
-- **Telegram integration** -- Communicate with agents via Telegram bots with allowlist-based access control
-- **Scheduled tasks and heartbeats** -- Cron-based scheduling and proactive agent check-ins
-- **Sandboxed filesystem** -- Agents read and write files within their workspace with path traversal protection
-- **Sub-agent spawning** -- Background workers for concurrent task execution with lifecycle management
-- **Browser automation** -- Playwright-based web interaction using accessibility tree navigation
+Agents can ingest documents, browse the web, search the internet, and manage their own files -- making them well-suited for research, information processing, and long-running autonomous workflows. Give them a schedule and they'll check in on their own.
+
+> **[Read the full documentation](https://johnsosoka.github.io/OpenPaw/)**
+
+## Highlights
+
+**First Class Document processing** -- Docling OCR/ICR turns scanned PDFs, DOCX, and PPTX into markdown automatically. Whisper transcribes voice messages on arrival.
+
+**Drop-in custom tools** -- Write a `@tool` function, put it in `tools/`, restart. Your agent picks it up with zero wiring.
+
+**Multi-agent spawning** -- Agents spin up background workers for parallel tasks with full lifecycle tracking and result collection.
+
+**Dynamic tool assignment** -- Spawned sub-agents can be given a tailored tool loadout via allow/deny lists, so each worker gets only the capabilities it needs.
+
+**Cron scheduling and heartbeats** -- Recurring jobs, one-shot timers, proactive check-ins. Agents can even self-schedule follow-ups at runtime.
+
+**Browser automation** -- Playwright-driven web interaction via accessibility tree. Agents reference page elements by number, not CSS selectors.
+
+**Approval gates** -- Human-in-the-loop authorization for dangerous operations, with configurable timeouts and channel-native UI.
+
+**Workspace isolation** -- Each agent gets its own SOUL.md personality, tools directory, conversation history, channel, and sandboxed filesystem.
+
+**Multi-provider LLM support** -- Anthropic, OpenAI, AWS Bedrock, xAI, and any OpenAI-compatible endpoint. Switch models at runtime with `/model`.
+
+**Memory and observability** -- Vector search for semantic recall, conversation archiving to markdown and JSON, and session logs for every cron, heartbeat, and sub-agent run. Full visibility into what your agents are doing and thinking.
 
 ## Quick Start
 
 ### 1. Install
 
 ```bash
-git clone https://github.com/johnsosoka/openpaw.git
-cd openpaw
+git clone https://github.com/johnsosoka/OpenPaw.git
+cd OpenPaw
 poetry install
 ```
 
@@ -67,7 +91,7 @@ poetry run openpaw -c config.yaml -w my_agent
 
 All commands should be prefixed with `poetry run` when running from the project directory.
 
-## Workspace Structure
+## Agent Workspace Structure
 
 Each workspace lives under `agent_workspaces/<name>/` and requires four markdown files that define the agent's identity:
 
@@ -107,6 +131,16 @@ Once running, agents respond to framework commands in Telegram:
 - [Queue System](docs/queue-system.md) -- Queue modes and message handling
 - [Cron Scheduler](docs/cron-scheduler.md) -- Scheduled tasks and heartbeat system
 - [Built-ins](docs/builtins.md) -- Web search, browser automation, voice, sub-agents, and more
+
+## Contributing
+
+Development follows a GitFlow branching model:
+
+- **`main`** -- Stable releases only. Protected branch, requires CI to pass.
+- **`develop`** -- Integration branch. Feature and bugfix PRs target `develop`.
+- **Feature branches** -- Branch from `develop` as `feature/`, `bugfix/`, `docs/`, or `chore/`.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
 
 ## Prerequisites
 

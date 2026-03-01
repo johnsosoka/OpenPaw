@@ -4,13 +4,13 @@ Builtins are optional capabilities conditionally loaded based on API key availab
 
 ## Overview
 
-OpenPaw ships with 12 built-in tools and 4 message processors. Builtins are discovered at runtime — if prerequisites (API keys, packages) are missing, the builtin is unavailable. The allow/deny system provides fine-grained control over which capabilities are active in each workspace.
+OpenPaw ships with 13 built-in tools and 4 message processors. Builtins are discovered at runtime — if prerequisites (API keys, packages) are missing, the builtin is unavailable. The allow/deny system provides fine-grained control over which capabilities are active in each workspace.
 
 **Architecture:**
 
 ```
 BuiltinRegistry
-├─ Tools (12)
+├─ Tools (13)
 │  ├─ browser          Web automation via Playwright
 │  ├─ brave_search     Web search
 │  ├─ spawn            Sub-agent spawning
@@ -21,6 +21,7 @@ BuiltinRegistry
 │  ├─ followup         Self-continuation
 │  ├─ memory_search    Semantic conversation search
 │  ├─ shell            Local command execution
+│  ├─ md2pdf            Markdown-to-PDF conversion
 │  └─ elevenlabs       Text-to-speech
 │
 └─ Processors (4)
@@ -442,6 +443,63 @@ Agent: "Here are the files in the directory..."
 
 ---
 
+### md2pdf
+
+**Group:** `document`
+**Type:** Tool
+**Prerequisites:** `weasyprint`, `markdown`, `pygments` (core dependencies)
+
+Convert workspace markdown files to polished PDF documents with CSS theming, Mermaid diagram rendering, and AI self-healing for broken diagrams.
+
+**Themes:**
+
+| Theme | Style |
+|-------|-------|
+| `minimal` | Clean serif font, light styling, academic feel |
+| `professional` | Indigo accents, sans-serif, business report look |
+| `technical` | Dark code blocks, monospace-heavy, engineering docs |
+
+**Features:**
+
+- Mermaid diagrams rendered via mermaid.ink API (no local dependencies)
+- SVG auto-scaling to fit page width
+- AI self-healing for broken Mermaid syntax (configurable LLM, default: gpt-4o-mini)
+- Syntax-highlighted code blocks via Pygments
+- Tables, table of contents, and standard markdown extensions
+
+**Configuration:**
+
+```yaml
+builtins:
+  md2pdf:
+    theme: professional           # minimal, professional, or technical
+    max_diagram_width: 6.5        # Max diagram width in inches
+    self_heal: true               # AI repair for broken Mermaid diagrams
+    self_heal_model: "openai:gpt-4o-mini"  # Any LangChain model spec
+    max_heal_iterations: 3        # Max repair attempts per diagram
+```
+
+**Self-Healing:**
+
+When a Mermaid diagram fails to render, the tool can optionally invoke a LangGraph subgraph that:
+
+1. Sends the broken source + error to a configurable LLM
+2. Validates the repair by re-rendering via mermaid.ink
+3. Loops up to `max_heal_iterations` times
+4. Marks repaired diagrams with a visual indicator in the PDF
+
+Self-healing requires an API key for the configured model (e.g., `OPENAI_API_KEY` for gpt-4o-mini). If unavailable, the tool degrades gracefully — broken diagrams get an error placeholder instead.
+
+**Usage Example:**
+
+```
+User: "Convert my research notes to a PDF"
+Agent: [Calls markdown_to_pdf(source_path="reports/notes.md", theme="professional")]
+Agent: "PDF created: reports/notes.pdf (3 Mermaid diagrams rendered, 1 repaired by AI)"
+```
+
+---
+
 ### elevenlabs
 
 **Group:** `voice`
@@ -750,6 +808,7 @@ builtins:
 | `agent` | spawn, cron, task_tracker, send_message, followup, send_file |
 | `browser` | browser |
 | `memory` | memory_search |
+| `document` | md2pdf |
 
 **Usage:**
 
@@ -794,6 +853,7 @@ poetry install -E all-builtins
 - `docling`, `easyocr`, `opencv-python-headless` — Document conversion and OCR
 - `playwright` — Browser automation
 - `langchain-anthropic`, `langchain-openai`, `langchain-aws`, `langchain-xai` — LLM providers
+- `weasyprint`, `markdown`, `pygments` — Markdown-to-PDF conversion
 - Shell tool — No extra dependencies required
 
 ---
