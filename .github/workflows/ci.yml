@@ -5,9 +5,17 @@ on:
     branches:
       - main
       - develop
+    paths-ignore:
+      - "*.md"
+      - "docs/**"
+      - "LICENSE"
   push:
     branches:
       - develop
+    paths-ignore:
+      - "*.md"
+      - "docs/**"
+      - "LICENSE"
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -27,15 +35,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install Poetry
-        run: |
-          pipx install poetry
-          poetry config virtualenvs.in-project true
-
-      - name: Cache virtualenv
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-3.12-${{ hashFiles('poetry.lock') }}
+        run: pipx install poetry
 
       - name: Install dependencies
         run: poetry install --only main,dev
@@ -67,15 +67,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install Poetry
-        run: |
-          pipx install poetry
-          poetry config virtualenvs.in-project true
-
-      - name: Cache virtualenv
-        uses: actions/cache@v4
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('poetry.lock') }}
+        run: pipx install poetry
 
       - name: Install dependencies
         run: poetry install
