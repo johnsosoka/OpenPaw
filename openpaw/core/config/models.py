@@ -170,6 +170,16 @@ class SpawnBuiltinConfig(BuiltinItemConfig):
     max_concurrent: int = Field(default=8, description="Maximum simultaneous sub-agents")
 
 
+class Md2pdfBuiltinConfig(BuiltinItemConfig):
+    """Configuration for the md2pdf conversion tool."""
+
+    theme: str = Field(default="minimal", description="CSS theme: minimal, professional, or technical")
+    max_diagram_width: float = Field(default=6.5, description="Maximum Mermaid diagram width in inches")
+    self_heal: bool = Field(default=True, description="Enable AI self-healing for broken Mermaid diagrams")
+    self_heal_model: str = Field(default="gpt-4o-mini", description="Model for self-healing (e.g., gpt-4o-mini)")
+    max_heal_iterations: int = Field(default=3, description="Maximum repair attempts per broken diagram")
+
+
 class FilePersistenceBuiltinConfig(BuiltinItemConfig):
     """Configuration for the file persistence processor."""
 
@@ -207,6 +217,7 @@ class BuiltinsConfig(BaseModel):
     browser: BrowserBuiltinConfig = Field(default_factory=BrowserBuiltinConfig)
     spawn: SpawnBuiltinConfig = Field(default_factory=SpawnBuiltinConfig)
     file_persistence: FilePersistenceBuiltinConfig = Field(default_factory=FilePersistenceBuiltinConfig)
+    md2pdf: Md2pdfBuiltinConfig = Field(default_factory=Md2pdfBuiltinConfig)
 
     model_config = {"extra": "allow"}
 
@@ -234,6 +245,7 @@ class WorkspaceBuiltinsConfig(BaseModel):
     browser: BrowserBuiltinConfig | None = None
     spawn: SpawnBuiltinConfig | None = None
     file_persistence: FilePersistenceBuiltinConfig | None = None
+    md2pdf: Md2pdfBuiltinConfig | None = None
 
     model_config = {"extra": "allow"}
 

@@ -38,6 +38,7 @@ class BuiltinLoader:
         ],
         "spawn": ["max_concurrent"],
         "file_persistence": ["max_file_size", "clear_data_after_save"],
+        "md2pdf": ["theme", "max_diagram_width", "self_heal", "self_heal_model", "max_heal_iterations"],
     }
 
     def __init__(

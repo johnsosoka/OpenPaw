@@ -29,13 +29,15 @@ jobs:
       - name: Install Poetry
         run: pipx install poetry
 
-      - name: Cache Poetry virtualenv
+      - name: Cache Poetry downloads
         uses: actions/cache@v4
         with:
-          path: ~/.cache/pypoetry
-          key: poetry-${{ runner.os }}-3.12-${{ hashFiles('poetry.lock') }}
+          path: |
+            ~/.cache/pypoetry/artifacts
+            ~/.cache/pypoetry/cache
+          key: poetry-v2-${{ runner.os }}-3.12-${{ hashFiles('poetry.lock') }}
           restore-keys: |
-            poetry-${{ runner.os }}-3.12-
+            poetry-v2-${{ runner.os }}-3.12-
 
       - name: Install dependencies
         run: poetry install --only main,dev
@@ -69,13 +71,15 @@ jobs:
       - name: Install Poetry
         run: pipx install poetry
 
-      - name: Cache Poetry virtualenv
+      - name: Cache Poetry downloads
         uses: actions/cache@v4
         with:
-          path: ~/.cache/pypoetry
-          key: poetry-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('poetry.lock') }}
+          path: |
+            ~/.cache/pypoetry/artifacts
+            ~/.cache/pypoetry/cache
+          key: poetry-v2-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('poetry.lock') }}
           restore-keys: |
-            poetry-${{ runner.os }}-${{ matrix.python-version }}-
+            poetry-v2-${{ runner.os }}-${{ matrix.python-version }}-
 
       - name: Install dependencies
         run: poetry install
