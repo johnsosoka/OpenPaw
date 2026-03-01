@@ -43,7 +43,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .venv
-          key: venv-${{ runner.os }}-3.12-${{ hashFiles('poetry.lock') }}
+          key: venv-lint-${{ runner.os }}-3.12-${{ hashFiles('poetry.lock') }}
 
       - name: Install dependencies
         run: poetry install --only main,dev
