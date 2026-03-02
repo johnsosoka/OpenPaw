@@ -136,7 +136,7 @@ class TestDynamicCronStore:
 
         assert workspace.exists()
         assert workspace.is_dir()
-        assert store.storage_file == workspace / "dynamic_crons.json"
+        assert store.storage_file == workspace / "data" / "dynamic_crons.json"
 
     def test_load_empty_returns_empty_list(self, tmp_path: Any) -> None:
         """Test loading from non-existent file returns empty list."""

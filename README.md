@@ -21,7 +21,7 @@ Agents can ingest documents, browse the web, search the internet, and manage the
 
 **First Class Document processing** -- Docling OCR/ICR turns scanned PDFs, DOCX, and PPTX into markdown automatically. Whisper transcribes voice messages on arrival.
 
-**Drop-in custom tools** -- Write a `@tool` function, put it in `tools/`, restart. Your agent picks it up with zero wiring.
+**Drop-in custom tools** -- Write a `@tool` function, put it in `agent/tools/`, restart. Your agent picks it up with zero wiring.
 
 **Multi-agent spawning** -- Agents spin up background workers for parallel tasks with full lifecycle tracking and result collection.
 
@@ -63,7 +63,7 @@ poetry run openpaw init my_agent \
 cp config.example.yaml config.yaml
 ```
 
-Add your API keys to `agent_workspaces/my_agent/.env`:
+Add your API keys to `agent_workspaces/my_agent/config/.env`:
 
 ```bash
 ANTHROPIC_API_KEY=your-key-here
@@ -93,21 +93,36 @@ All commands should be prefixed with `poetry run` when running from the project 
 
 ## Agent Workspace Structure
 
-Each workspace lives under `agent_workspaces/<name>/` and requires four markdown files that define the agent's identity:
+Each workspace lives under `agent_workspaces/<name>/` and is organized into five directories:
 
 ```
 agent_workspaces/my_agent/
-├── AGENT.md          # Capabilities and behavior guidelines
-├── USER.md           # User context and preferences
-├── SOUL.md           # Core personality and values
-├── HEARTBEAT.md      # Session state scratchpad (can start empty)
-├── agent.yaml        # Per-workspace configuration (optional)
-├── .env              # API keys and secrets (optional)
-├── tools/            # Custom LangChain @tool functions (optional)
-└── crons/            # Scheduled task definitions (optional)
+├── agent/              # Identity and extensions
+│   ├── AGENT.md        # Capabilities and behavior guidelines
+│   ├── USER.md         # User context and preferences
+│   ├── SOUL.md         # Core personality and values
+│   ├── HEARTBEAT.md    # Session state scratchpad (agent-writable)
+│   ├── tools/          # Custom LangChain @tool functions
+│   └── skills/         # Skill directories
+├── config/             # Configuration (write-protected)
+│   ├── agent.yaml      # Per-workspace settings (model, channel, queue)
+│   ├── .env            # API keys and secrets
+│   └── crons/          # Scheduled task definitions
+├── data/               # Framework-managed state (write-protected)
+│   ├── TASKS.yaml      # Persistent task tracking
+│   ├── uploads/        # User-uploaded files
+│   └── ...             # Conversations DB, session state, token logs
+├── memory/             # Archived conversations and session logs
+│   ├── conversations/  # Conversation exports (markdown + JSON)
+│   └── logs/           # Heartbeat, cron, and sub-agent session logs
+└── workspace/          # Agent work area (default write target)
+    ├── downloads/      # Browser-downloaded files
+    └── screenshots/    # Browser screenshots
 ```
 
-The `openpaw init` command generates all required files with starter templates. Customize the markdown files to shape your agent's personality and purpose. Configure model, channel, and queue behavior in `agent.yaml`.
+The `openpaw init` command scaffolds this structure with starter templates. Customize the identity files in `agent/` to shape your agent's personality and purpose. Configure model, channel, and queue behavior in `config/agent.yaml`.
+
+Existing workspaces using the older flat layout are automatically migrated on first startup. The `data/` and `config/` directories are write-protected from agent filesystem tools. Write operations default to the `workspace/` directory unless an explicit path is provided.
 
 ## In-Chat Commands
 

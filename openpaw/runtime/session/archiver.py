@@ -13,6 +13,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
+from openpaw.core.paths import MEMORY_CONVERSATIONS_DIR
 from openpaw.core.timezone import format_for_display
 
 logger = logging.getLogger(__name__)
@@ -75,7 +76,7 @@ class ConversationArchive:
             ConversationArchive instance.
         """
         conversation_id = data["conversation_id"]
-        archive_dir = workspace_path / "memory" / "conversations"
+        archive_dir = workspace_path / str(MEMORY_CONVERSATIONS_DIR)
 
         return cls(
             conversation_id=conversation_id,
@@ -113,7 +114,7 @@ class ConversationArchiver:
         self._workspace_name = workspace_name
         self._timezone = timezone
         self._indexer = indexer
-        self._archive_dir = self._workspace_path / "memory" / "conversations"
+        self._archive_dir = self._workspace_path / str(MEMORY_CONVERSATIONS_DIR)
         self._archive_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"ConversationArchiver initialized: {self._archive_dir}")

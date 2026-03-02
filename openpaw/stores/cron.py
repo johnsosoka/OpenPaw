@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 
+from openpaw.core.paths import DYNAMIC_CRONS_JSON
 from openpaw.model.cron import DynamicCronTask
 
 logger = logging.getLogger(__name__)
@@ -19,11 +20,9 @@ logger = logging.getLogger(__name__)
 class DynamicCronStore:
     """Manages persistent storage of dynamically scheduled agent tasks.
 
-    Stores tasks in JSON format at {workspace_path}/dynamic_crons.json.
+    Stores tasks in JSON format at {workspace_path}/data/dynamic_crons.json.
     Thread-safe with file locking for concurrent access.
     """
-
-    STORAGE_FILENAME = "dynamic_crons.json"
 
     def __init__(self, workspace_path: Path):
         """Initialize the dynamic cron store.
@@ -32,11 +31,11 @@ class DynamicCronStore:
             workspace_path: Path to the agent workspace root.
         """
         self.workspace_path = Path(workspace_path)
-        self.storage_file = self.workspace_path / self.STORAGE_FILENAME
+        self.storage_file = self.workspace_path / str(DYNAMIC_CRONS_JSON)
         self._lock = Lock()
 
-        # Ensure workspace directory exists
-        self.workspace_path.mkdir(parents=True, exist_ok=True)
+        # Ensure the data/ directory exists
+        self.storage_file.parent.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"DynamicCronStore initialized: {self.storage_file}")
 

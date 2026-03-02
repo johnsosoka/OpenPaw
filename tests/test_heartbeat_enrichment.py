@@ -80,6 +80,7 @@ def scheduler(
 ) -> HeartbeatScheduler:
     """Create a heartbeat scheduler instance."""
     workspace_path.mkdir(parents=True, exist_ok=True)
+    (workspace_path / "data").mkdir(parents=True, exist_ok=True)
     return HeartbeatScheduler(
         workspace_name="test_workspace",
         workspace_path=workspace_path,
@@ -92,14 +93,15 @@ def scheduler(
 
 def create_tasks_yaml(workspace_path: Path, tasks: list[dict]) -> None:
     """Create a TASKS.yaml file with given tasks."""
-    tasks_file = workspace_path / "TASKS.yaml"
+    (workspace_path / "data").mkdir(parents=True, exist_ok=True)
+    tasks_file = workspace_path / "data" / "TASKS.yaml"
     with tasks_file.open("w") as f:
         yaml.dump({"tasks": tasks}, f)
 
 
 def read_heartbeat_log(workspace_path: Path) -> list[dict]:
     """Read and parse heartbeat_log.jsonl."""
-    log_file = workspace_path / "heartbeat_log.jsonl"
+    log_file = workspace_path / "data" / "heartbeat_log.jsonl"
     if not log_file.exists():
         return []
 
@@ -200,7 +202,8 @@ class TestHeartbeatJSONLEnrichment:
         mock_token_logger: Mock,
     ):
         """Test that skipped heartbeats don't include token counts."""
-        # Create empty HEARTBEAT.md and no tasks (triggers skip)
+        # Create empty HEARTBEAT.md and no tasks (triggers skip).
+        # NOTE: path will move to agent/HEARTBEAT.md after workspace restructure.
         heartbeat_md = workspace_path / "HEARTBEAT.md"
         heartbeat_md.write_text("")
 
@@ -260,7 +263,8 @@ class TestHeartbeatJSONLEnrichment:
         workspace_path: Path,
     ):
         """Test task_count is None when no TASKS.yaml exists."""
-        # Create HEARTBEAT.md with content to prevent skip
+        # Create HEARTBEAT.md with content to prevent skip.
+        # NOTE: path will move to agent/HEARTBEAT.md after workspace restructure.
         heartbeat_md = workspace_path / "HEARTBEAT.md"
         heartbeat_md.write_text("# Heartbeat\n\nSome pending work here")
 
@@ -398,6 +402,7 @@ class TestHeartbeatJSONLEnrichment:
         )
 
         workspace_path.mkdir(parents=True, exist_ok=True)
+        (workspace_path / "data").mkdir(parents=True, exist_ok=True)
 
         # Mock active hours check to guarantee outside-hours behavior
         scheduler._is_within_active_hours = Mock(return_value=False)  # type: ignore[method-assign]

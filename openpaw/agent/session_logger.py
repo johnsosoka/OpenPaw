@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from openpaw.agent.metrics import InvocationMetrics
+from openpaw.core.paths import MEMORY_LOGS_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ class SessionLogger:
     """Writes agent session data to JSONL files.
 
     Session files are stored at:
-        {workspace_path}/memory/sessions/{session_type}/{name}_{timestamp}.jsonl
+        {workspace_path}/memory/logs/{session_type}/{name}_{timestamp}.jsonl
 
     These are readable by the main agent via read_file().
     """
@@ -42,7 +43,7 @@ class SessionLogger:
         """
         self._workspace_path = Path(workspace_path)
         self._session_type = session_type
-        self._sessions_dir = self._workspace_path / "memory" / "sessions" / session_type
+        self._sessions_dir = self._workspace_path / str(MEMORY_LOGS_DIR) / session_type
         self._current_path: Path | None = None
 
     def _ensure_dir(self) -> None:

@@ -38,7 +38,7 @@ class TestSessionLogger:
         logger = SessionLogger(workspace, session_type="heartbeat")
         logger._ensure_dir()
 
-        sessions_dir = workspace / "memory" / "sessions" / "heartbeat"
+        sessions_dir = workspace / "memory" / "logs" / "heartbeat"
         assert sessions_dir.exists()
         assert sessions_dir.is_dir()
 
@@ -63,7 +63,7 @@ class TestSessionLogger:
 
         # Verify path is relative
         assert not relative_path.startswith("/")
-        assert relative_path.startswith("memory/sessions/heartbeat/")
+        assert relative_path.startswith("memory/logs/heartbeat/")
 
         # Read back and verify 3 records
         full_path = workspace / relative_path
@@ -114,7 +114,7 @@ class TestSessionLogger:
 
         # Should be relative path
         assert not relative_path.startswith("/")
-        assert relative_path.startswith("memory/sessions/cron/")
+        assert relative_path.startswith("memory/logs/cron/")
 
         # Should be readable from workspace root
         full_path = workspace / relative_path

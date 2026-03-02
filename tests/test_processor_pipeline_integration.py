@@ -184,13 +184,13 @@ async def test_pdf_pipeline_full(tmp_path, base_message, mock_docling):
     # Should have file receipt info (after timestamp)
     assert "[File received: report.pdf" in content
     assert "application/pdf)]" in content
-    assert "[Saved to: uploads/" in content
+    assert "[Saved to: data/uploads/" in content
 
     # Should have user caption preserved
     assert "Can you summarize this document?" in content
 
     # Should have conversion info at the end
-    assert "[Converted to markdown: uploads/" in content
+    assert "[Converted to markdown: data/uploads/" in content
     assert ".md]" in content
     assert "Contents: full text" in content
     assert "1 tables" in content
@@ -208,7 +208,7 @@ async def test_pdf_pipeline_full(tmp_path, base_message, mock_docling):
 
     # Verify attachment.saved_path is set
     assert attachment.saved_path is not None
-    assert attachment.saved_path.startswith("uploads/")
+    assert attachment.saved_path.startswith("data/uploads/")
     assert attachment.saved_path.endswith(".pdf")
 
     # Verify sibling .md file exists
@@ -279,7 +279,7 @@ async def test_audio_pipeline_full(tmp_path, base_message, mock_openai_client):
         # Should have file receipt info
         assert "[File received: voice_123.ogg" in content
         assert "audio/ogg)]" in content
-        assert "[Saved to: uploads/" in content
+        assert "[Saved to: data/uploads/" in content
 
         # Should have transcription
         assert "[Voice message]: Hello, please check the document I sent." in content
@@ -362,7 +362,7 @@ async def test_image_pipeline_no_conversion(tmp_path, base_message):
     # Should have file receipt info
     assert "[File received: photo_123.jpg" in content
     assert "image/jpeg)]" in content
-    assert "[Saved to: uploads/" in content
+    assert "[Saved to: data/uploads/" in content
 
     # Should NOT have transcription (not audio)
     assert "[Voice message]:" not in content
@@ -442,7 +442,7 @@ async def test_unknown_file_still_saved(tmp_path, base_message):
     # Should have file receipt info
     assert "[File received: archive.zip" in content
     assert "application/zip)]" in content
-    assert "[Saved to: uploads/" in content
+    assert "[Saved to: data/uploads/" in content
 
     # Should NOT have any conversion notes
     assert "[Converted to markdown:" not in content

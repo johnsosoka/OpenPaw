@@ -214,12 +214,12 @@ def test_conversation_id_format(tmp_path: Path):
 
 
 def test_openpaw_directory_created(tmp_path: Path):
-    """Test SessionManager creates .openpaw directory."""
+    """Test SessionManager creates data directory."""
     manager = SessionManager(tmp_path)
 
-    openpaw_dir = tmp_path / ".openpaw"
-    assert openpaw_dir.exists()
-    assert openpaw_dir.is_dir()
+    data_dir = tmp_path / "data"
+    assert data_dir.exists()
+    assert data_dir.is_dir()
 
 
 def test_sessions_json_created_on_first_save(tmp_path: Path):
@@ -227,7 +227,7 @@ def test_sessions_json_created_on_first_save(tmp_path: Path):
     manager = SessionManager(tmp_path)
 
     # Initially no file
-    state_file = tmp_path / ".openpaw" / "sessions.json"
+    state_file = tmp_path / "data" / "sessions.json"
     # File may or may not exist yet (depends on whether constructor saves empty state)
 
     # Create a session (definitely triggers save)
@@ -241,9 +241,9 @@ def test_sessions_json_created_on_first_save(tmp_path: Path):
 def test_corrupted_json_handled_gracefully(tmp_path: Path):
     """Test manager handles corrupted JSON file gracefully."""
     # Create corrupted JSON file
-    openpaw_dir = tmp_path / ".openpaw"
-    openpaw_dir.mkdir(parents=True, exist_ok=True)
-    state_file = openpaw_dir / "sessions.json"
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    state_file = data_dir / "sessions.json"
     state_file.write_text("{corrupted json content")
 
     # Should not crash

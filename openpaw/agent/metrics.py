@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from openpaw.core.paths import TOKEN_USAGE_JSONL
+
 logger = logging.getLogger(__name__)
 
 
@@ -94,7 +96,7 @@ def extract_metrics_from_callback(
 class TokenUsageLogger:
     """Append-only JSONL logger for token usage metrics.
 
-    Logs each agent invocation to {workspace}/.openpaw/token_usage.jsonl
+    Logs each agent invocation to {workspace}/data/token_usage.jsonl
     for session-level and workspace-level token tracking.
     """
 
@@ -105,7 +107,7 @@ class TokenUsageLogger:
             workspace_path: Path to the workspace directory.
         """
         self._workspace_path = Path(workspace_path)
-        self._log_path = self._workspace_path / ".openpaw" / "token_usage.jsonl"
+        self._log_path = self._workspace_path / str(TOKEN_USAGE_JSONL)
         self._lock = threading.Lock()
 
     def log(
@@ -158,7 +160,7 @@ class TokenUsageReader:
             workspace_path: Path to the workspace directory.
         """
         self._workspace_path = Path(workspace_path)
-        self._log_path = self._workspace_path / ".openpaw" / "token_usage.jsonl"
+        self._log_path = self._workspace_path / str(TOKEN_USAGE_JSONL)
 
     def tokens_today(self, timezone_str: str = "UTC") -> InvocationMetrics:
         """Aggregate all entries from today in the specified timezone.

@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from openpaw.core.paths import AGENT_MD, HEARTBEAT_MD, SOUL_MD, USER_MD
 from openpaw.core.prompts.framework import (
     SECTION_AUTONOMOUS_PLANNING,
     SECTION_CONVERSATION_MEMORY,
@@ -60,10 +61,10 @@ class AgentWorkspace:
         its own AGENT.md or HEARTBEAT.md) to ensure the next prompt build
         uses current content.
         """
-        self.agent_md = self._read_file(self.path / "AGENT.md")
-        self.user_md = self._read_file(self.path / "USER.md")
-        self.soul_md = self._read_file(self.path / "SOUL.md")
-        self.heartbeat_md = self._read_file(self.path / "HEARTBEAT.md")
+        self.agent_md = self._read_file(self.path / str(AGENT_MD))
+        self.user_md = self._read_file(self.path / str(USER_MD))
+        self.soul_md = self._read_file(self.path / str(SOUL_MD))
+        self.heartbeat_md = self._read_file(self.path / str(HEARTBEAT_MD))
         logger.debug(f"Reloaded workspace files for: {self.name}")
 
     @staticmethod
@@ -140,8 +141,10 @@ class AgentWorkspace:
             entries = sorted(self.path.iterdir(), key=lambda p: p.name)
             for entry in entries:
                 name = entry.name
-                # Skip hidden files/dirs except .env
-                # (.openpaw/ is excluded by this rule — must remain invisible to agents)
+                # Skip hidden files/dirs.  In the new layout, .env lives at
+                # config/.env so there is no hidden file the agent needs to see
+                # at the workspace root.  Keep the `.env` exception for
+                # backward compatibility with workspaces not yet migrated.
                 if name.startswith(".") and name != ".env":
                     continue
                 if entry.is_dir():

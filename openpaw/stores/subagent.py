@@ -13,16 +13,17 @@ from typing import Any
 
 import yaml
 
+from openpaw.core.paths import SUBAGENTS_YAML
 from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
 
 logger = logging.getLogger(__name__)
 
 
 class SubAgentStore:
-    """Manages persistent storage of sub-agent state in .openpaw/subagents.yaml.
+    """Manages persistent storage of sub-agent state in data/subagents.yaml.
 
     Provides CRUD operations for sub-agent requests and results with thread-safe
-    file access. State is stored in YAML format at {workspace}/.openpaw/subagents.yaml.
+    file access. State is stored in YAML format at {workspace}/data/subagents.yaml.
 
     Example:
         >>> store = SubAgentStore(Path("agent_workspaces/gilfoyle"))
@@ -39,7 +40,6 @@ class SubAgentStore:
         >>> store.save_result(result)
     """
 
-    STORAGE_FILENAME = ".openpaw/subagents.yaml"
     MAX_RESULT_SIZE = 50_000  # 50K char truncation (consistent with read_file 100K valve)
     VERSION = 1
 
@@ -52,12 +52,11 @@ class SubAgentStore:
         """
         self.workspace_path = Path(workspace_path)
         self.max_age_hours = max_age_hours
-        self.storage_file = self.workspace_path / self.STORAGE_FILENAME
+        self.storage_file = self.workspace_path / str(SUBAGENTS_YAML)
         self._lock = Lock()
 
-        # Ensure .openpaw directory exists
-        storage_dir = self.storage_file.parent
-        storage_dir.mkdir(parents=True, exist_ok=True)
+        # Ensure the data/ directory exists
+        self.storage_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Clean up stale records on initialization
         self.cleanup_stale()

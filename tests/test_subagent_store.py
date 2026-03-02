@@ -517,12 +517,12 @@ def test_storage_file_does_not_exist_yet(tmp_path: Path):
 
 
 def test_openpaw_directory_created(tmp_path: Path):
-    """Test SubAgentStore creates .openpaw directory."""
+    """Test SubAgentStore creates data directory."""
     store = SubAgentStore(tmp_path)
 
-    openpaw_dir = tmp_path / ".openpaw"
-    assert openpaw_dir.exists()
-    assert openpaw_dir.is_dir()
+    data_dir = tmp_path / "data"
+    assert data_dir.exists()
+    assert data_dir.is_dir()
 
 
 def test_persistence_survives_reload(tmp_path: Path):

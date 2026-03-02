@@ -12,6 +12,7 @@ from openpaw.builtins.base import (
     BuiltinType,
     ProcessorResult,
 )
+from openpaw.core.paths import UPLOADS_DIR
 from openpaw.core.prompts.processors import FILE_RECEIVED_TEMPLATE
 from openpaw.core.timezone import workspace_now
 from openpaw.core.utils import deduplicate_path, sanitize_filename
@@ -205,7 +206,7 @@ class FilePersistenceProcessor(BaseBuiltinProcessor):
 
         # Build target directory (use workspace timezone for date partition)
         today = workspace_now(self._timezone).strftime("%Y-%m-%d")
-        target_dir = Path(self.workspace_path) / "uploads" / today
+        target_dir = Path(self.workspace_path) / str(UPLOADS_DIR) / today
         target_dir.mkdir(parents=True, exist_ok=True)
 
         # Build target path and deduplicate
