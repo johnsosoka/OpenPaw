@@ -1,5 +1,9 @@
 # Configuration
 
+<div align="center">
+  <img src="../assets/images/openpaw-fox-1.png" alt="OpenPaw Configuration" width="500">
+</div>
+
 OpenPaw uses a two-tier configuration system: global configuration (`config.yaml`) and per-workspace overrides (`agent.yaml`).
 
 Configuration is managed by Pydantic models in `openpaw/core/config/models.py` with loading and merging logic in `openpaw/core/config/loader.py`.

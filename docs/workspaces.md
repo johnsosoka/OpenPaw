@@ -1,5 +1,9 @@
 # Workspaces
 
+<div align="center">
+  <img src="../assets/images/openpaw-team.png" alt="OpenPaw Workspaces" width="500">
+</div>
+
 Workspaces are isolated agent instances with their own personality, configuration, and capabilities. Each workspace represents a distinct AI agent with specific behavior patterns and access permissions.
 
 ## Directory Structure
