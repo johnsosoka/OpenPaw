@@ -9,13 +9,14 @@ import os
 import re
 import subprocess
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from langchain_core.tools import BaseTool, tool
 
 from openpaw.agent.tools.sandbox import resolve_sandboxed_path
+from openpaw.core.paths import TOP_LEVEL_DIRS, WORKSPACE_DIR
 
 
 class FilesystemTools:
@@ -52,6 +53,40 @@ class FilesystemTools:
     def _resolve_path(self, path: str) -> Path:
         """Resolve a path relative to workspace root with security checks."""
         return resolve_sandboxed_path(self.root, path)
+
+    def _resolve_write_path(self, path: str) -> Path:
+        """Resolve a path for write operations with protection enforcement.
+
+        Behaviour:
+        - Bare filenames and paths whose first component is not a known
+          top-level directory (``agent/``, ``config/``, ``data/``,
+          ``memory/``, ``workspace/``) are transparently prefixed with
+          ``workspace/`` so that the agent's default write area is the
+          ``workspace/`` subdirectory.
+        - Paths that explicitly target a known top-level directory are
+          resolved as-is, then passed through write-mode sandbox validation
+          (which blocks writes to ``data/``, ``config/``, ``memory/logs``,
+          ``memory/conversations`` — except ``agent/HEARTBEAT.md``).
+
+        Args:
+            path: Workspace-relative path string supplied by the agent.
+
+        Returns:
+            Resolved absolute Path within the workspace.
+
+        Raises:
+            ValueError: If the path violates sandbox or write-protection rules.
+        """
+        # Determine the first path component so we can detect explicit top-level dir.
+        first_part = PurePosixPath(path).parts[0] if PurePosixPath(path).parts else ""
+
+        if first_part not in TOP_LEVEL_DIRS and first_part not in {".", ""}:
+            # Bare filename or relative path — redirect to workspace/ transparently.
+            effective_path = str(WORKSPACE_DIR / path)
+        else:
+            effective_path = path
+
+        return resolve_sandboxed_path(self.root, effective_path, write_mode=True)
 
     def _format_file_listing(self, file_info: dict[str, Any]) -> str:
         """Format file info for display."""
@@ -254,6 +289,8 @@ class FilesystemTools:
             """Write content to a new file.
 
             Creates parent directories if needed. Fails if file already exists.
+            Bare filenames (e.g. 'report.md') are written to the workspace/
+            subdirectory by default.
 
             Args:
                 file_path: File path relative to workspace root
@@ -263,7 +300,7 @@ class FilesystemTools:
                 Success message or error
             """
             try:
-                resolved_path = self._resolve_path(file_path)
+                resolved_path = self._resolve_write_path(file_path)
             except ValueError as e:
                 error_msg = f"Error: {e}"
                 if self._workspace_name:
@@ -303,7 +340,9 @@ class FilesystemTools:
 
             Creates parent directories if needed. Overwrites existing file content.
             Use this when you want to replace the entire contents of a file,
-            such as updating HEARTBEAT.md or other state files.
+            such as updating agent/HEARTBEAT.md or other state files.
+            Bare filenames (e.g. 'notes.md') are written to the workspace/
+            subdirectory by default.
 
             Args:
                 file_path: File path relative to workspace root
@@ -313,7 +352,7 @@ class FilesystemTools:
                 Success message or error
             """
             try:
-                resolved_path = self._resolve_path(file_path)
+                resolved_path = self._resolve_write_path(file_path)
             except ValueError as e:
                 error_msg = f"Error: {e}"
                 if self._workspace_name:
@@ -346,6 +385,9 @@ class FilesystemTools:
         def edit_file(file_path: str, old_text: str, new_text: str, replace_all: bool = False) -> str:
             """Edit existing file by replacing text.
 
+            Bare filenames (e.g. 'notes.md') are resolved under the workspace/
+            subdirectory by default.
+
             Args:
                 file_path: File path relative to workspace root
                 old_text: Text to search for and replace (must be exact match)
@@ -356,7 +398,7 @@ class FilesystemTools:
                 Success message with occurrence count, or error
             """
             try:
-                resolved_path = self._resolve_path(file_path)
+                resolved_path = self._resolve_write_path(file_path)
             except ValueError as e:
                 error_msg = f"Error: {e}"
                 if self._workspace_name:

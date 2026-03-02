@@ -163,7 +163,7 @@ async def test_status_handles_corrupted_log(
 ):
     """Test /status handles corrupted JSONL gracefully."""
     # Create a corrupted token log
-    log_path = workspace_path / ".openpaw" / "token_usage.jsonl"
+    log_path = workspace_path / "data" / "token_usage.jsonl"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(log_path, "w") as f:

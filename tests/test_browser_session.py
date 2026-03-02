@@ -24,8 +24,8 @@ def config(tmp_path: Path) -> dict:
         "viewport_width": 1280,
         "viewport_height": 720,
         "timeout_seconds": 30,
-        "downloads_dir": "downloads",
-        "screenshots_dir": "screenshots",
+        "downloads_dir": "workspace/downloads",
+        "screenshots_dir": "workspace/screenshots",
         "persist_cookies": False,
         "allowed_domains": [],
         "blocked_domains": [],
@@ -385,7 +385,7 @@ async def test_cookie_persistence_saves_on_close(config: dict, tmp_path: Path, m
         await session.close()
 
     # Check cookie file was created
-    cookie_file = tmp_path / ".openpaw" / "browser_cookies.json"
+    cookie_file = tmp_path / "data" / "browser_cookies.json"
     assert cookie_file.exists()
 
     with open(cookie_file) as f:
@@ -399,7 +399,7 @@ async def test_cookie_persistence_loads_on_launch(config: dict, tmp_path: Path, 
     config["persist_cookies"] = True
 
     # Create cookie file
-    cookie_file = tmp_path / ".openpaw" / "browser_cookies.json"
+    cookie_file = tmp_path / "data" / "browser_cookies.json"
     cookie_file.parent.mkdir(parents=True, exist_ok=True)
     storage_state = {"cookies": [{"name": "test", "value": "456"}], "origins": []}
     with open(cookie_file, "w") as f:
@@ -461,7 +461,7 @@ async def test_screenshot_saves_to_workspace(config: dict, tmp_path: Path, mock_
         result = await session.screenshot()
 
     assert "screenshot" in result.lower()
-    assert "screenshots/" in result
+    assert "workspace/screenshots/" in result
     mock_playwright["page"].screenshot.assert_called_once()
 
 

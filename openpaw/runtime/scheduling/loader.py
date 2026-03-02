@@ -7,12 +7,11 @@ import yaml
 
 from openpaw.core.config import check_unexpanded_vars, expand_env_vars_recursive
 from openpaw.core.config.models import CronDefinition
+from openpaw.core.paths import CRONS_DIR
 
 
 class CronLoader:
-    """Loads cron definitions from a workspace's crons/ directory."""
-
-    CRONS_DIR = "crons"
+    """Loads cron definitions from a workspace's config/crons/ directory."""
 
     def __init__(self, workspace_path: Path):
         """Initialize the cron loader.
@@ -21,7 +20,7 @@ class CronLoader:
             workspace_path: Path to the agent workspace root.
         """
         self.workspace_path = Path(workspace_path)
-        self.crons_path = self.workspace_path / self.CRONS_DIR
+        self.crons_path = self.workspace_path / str(CRONS_DIR)
 
     def load_all(self) -> list[CronDefinition]:
         """Load all cron definitions from the workspace.
@@ -42,7 +41,10 @@ class CronLoader:
                     raw_data: dict[str, Any] = yaml.safe_load(f) or {}
 
                 expanded_data = expand_env_vars_recursive(raw_data)
-                check_unexpanded_vars(expanded_data, source=f"crons/{cron_file.name}")
+                check_unexpanded_vars(
+                    expanded_data,
+                    source=f"config/crons/{cron_file.name}",
+                )
 
                 cron_def = CronDefinition(**expanded_data)
                 cron_definitions.append(cron_def)
@@ -73,6 +75,6 @@ class CronLoader:
             raw_data: dict[str, Any] = yaml.safe_load(f) or {}
 
         expanded_data = expand_env_vars_recursive(raw_data)
-        check_unexpanded_vars(expanded_data, source=f"crons/{name}")
+        check_unexpanded_vars(expanded_data, source=f"config/crons/{name}")
 
         return CronDefinition(**expanded_data)

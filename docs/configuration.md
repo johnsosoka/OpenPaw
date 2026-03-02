@@ -231,7 +231,7 @@ Per-workspace configuration (`agent.yaml`) overrides global defaults for a speci
 ### Location
 
 ```
-agent_workspaces/<workspace-name>/agent.yaml
+agent_workspaces/<workspace-name>/config/agent.yaml
 ```
 
 ### Complete Example
@@ -312,7 +312,7 @@ timezone: America/Denver  # IANA timezone identifier
 - Heartbeat active hours window (`active_hours: "09:00-17:00"`)
 - Cron schedule expressions (APScheduler `CronTrigger`)
 - Agent-created scheduled tasks (`schedule_at` timestamp parsing)
-- File upload date partitions (`uploads/{YYYY-MM-DD}/`)
+- File upload date partitions (`data/uploads/{YYYY-MM-DD}/`)
 - `/status` "tokens today" day boundary
 - Display timestamps in conversation archives, task notes, and filesystem listings
 
@@ -411,7 +411,7 @@ heartbeat:
 
 **Task Summary Injection:** When active tasks exist, a compact summary is injected into the heartbeat prompt as `<active_tasks>` XML tags. This avoids an extra LLM tool call to `list_tasks()`.
 
-**Event Logging:** Every heartbeat event is logged to `{workspace}/heartbeat_log.jsonl` with outcome, duration, token metrics, and active task count.
+**Event Logging:** Every heartbeat event is logged to `{workspace}/data/heartbeat_log.jsonl` with outcome, duration, token metrics, and active task count.
 
 ---
 
@@ -513,7 +513,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 Each workspace can have its own `.env` file for workspace-specific secrets:
 
 ```
-agent_workspaces/my-agent/.env
+agent_workspaces/my-agent/config/.env
 ```
 
 These are automatically loaded via `python-dotenv` when the workspace starts.
@@ -780,32 +780,32 @@ builtins:
 
 **Workspace config:**
 ```
-agent_workspaces/<workspace-name>/agent.yaml
+agent_workspaces/<workspace-name>/config/agent.yaml
 ```
 
 **Workspace .env:**
 ```
-agent_workspaces/<workspace-name>/.env
+agent_workspaces/<workspace-name>/config/.env
 ```
 
 **Static cron definitions:**
 ```
-agent_workspaces/<workspace-name>/crons/*.yaml
+agent_workspaces/<workspace-name>/config/crons/*.yaml
 ```
 
 **Dynamic cron storage:**
 ```
-agent_workspaces/<workspace-name>/dynamic_crons.json
+agent_workspaces/<workspace-name>/data/dynamic_crons.json
 ```
 
 **Task storage:**
 ```
-agent_workspaces/<workspace-name>/TASKS.yaml
+agent_workspaces/<workspace-name>/data/TASKS.yaml
 ```
 
-**Framework internals (.openpaw/ is protected from agent access):**
+**Framework-managed state (data/ is write-protected from agents):**
 ```
-agent_workspaces/<workspace-name>/.openpaw/
+agent_workspaces/<workspace-name>/data/
 ├── conversations.db      # AsyncSqliteSaver checkpoint database
 ├── sessions.json         # Session/conversation thread state
 ├── token_usage.jsonl     # Token usage metrics (append-only)
@@ -912,7 +912,7 @@ Warning: Token contains literal '${TELEGRAM_BOT_TOKEN}'
 ```
 Error: Workspace 'my-agent' not found in agent_workspaces/
 ```
-**Solution:** Ensure workspace directory exists and contains required markdown files (AGENT.md, USER.md, SOUL.md, HEARTBEAT.md).
+**Solution:** Ensure workspace directory exists and contains required identity files (`agent/AGENT.md`, `agent/USER.md`, `agent/SOUL.md`, `agent/HEARTBEAT.md`).
 
 **Model provider error:**
 ```

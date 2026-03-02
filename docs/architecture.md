@@ -463,7 +463,7 @@ Conversations persist across restarts via `AsyncSqliteSaver` (from `langgraph-ch
 **Conversation ID format:** `conv_{ISO_timestamp_with_microseconds}` (e.g., `conv_2026-02-07T14-30-00-123456`)
 
 **Storage locations:**
-- Framework internals: `{workspace}/.openpaw/` (protected from agent access)
+- Framework internals: `{workspace}/data/` (write-protected from agents)
   - `conversations.db` - AsyncSqliteSaver checkpoint database
   - `sessions.json` - Session/thread state
   - `token_usage.jsonl` - Token metrics
@@ -477,8 +477,8 @@ Conversations persist across restarts via `AsyncSqliteSaver` (from `langgraph-ch
 Scheduled task execution using APScheduler.
 
 **Responsibilities:**
-- Load static cron job definitions from `{workspace}/crons/*.yaml`
-- Load dynamic agent-scheduled tasks from `dynamic_crons.json`
+- Load static cron job definitions from `{workspace}/config/crons/*.yaml`
+- Load dynamic agent-scheduled tasks from `data/dynamic_crons.json`
 - Parse cron expressions (standard format: `"minute hour day month weekday"`)
 - Schedule jobs with APScheduler `CronTrigger` (workspace timezone)
 - Build fresh agent instance per execution (no checkpointer, stateless)
@@ -506,7 +506,7 @@ output:
 Agents can schedule their own follow-up actions at runtime using the CronTool builtin.
 
 **Components:**
-- **`dynamic_cron.py`** - `DynamicCronStore` for persisting agent-scheduled tasks to `{workspace}/dynamic_crons.json`
+- **`dynamic_cron.py`** - `DynamicCronStore` for persisting agent-scheduled tasks to `{workspace}/data/dynamic_crons.json`
 
 **Available tools (from `openpaw/builtins/tools/cron.py`):**
 - `schedule_at` - One-time action at specific timestamp
@@ -514,7 +514,7 @@ Agents can schedule their own follow-up actions at runtime using the CronTool bu
 - `list_scheduled` - List pending scheduled tasks
 - `cancel_scheduled` - Cancel task by ID
 
-**Storage:** Tasks persist to `dynamic_crons.json` and survive restarts. One-time tasks auto-cleanup after execution or if expired on startup.
+**Storage:** Tasks persist to `data/dynamic_crons.json` and survive restarts. One-time tasks auto-cleanup after execution or if expired on startup.
 
 ### Heartbeat Scheduler (`openpaw/runtime/scheduling/heartbeat.py`)
 
@@ -526,7 +526,7 @@ Proactive agent check-ins on a configurable schedule.
 - Pre-flight skip: Avoid LLM call if HEARTBEAT.md is empty and no active tasks
 - Inject task summary into heartbeat prompt (avoids extra `list_tasks()` call)
 - Suppress output if agent responds "HEARTBEAT_OK" (when `suppress_ok: true`)
-- Log events to `{workspace}/heartbeat_log.jsonl` with outcome, duration, token metrics
+- Log events to `{workspace}/data/heartbeat_log.jsonl` with outcome, duration, token metrics
 
 **Configuration:**
 ```yaml
@@ -609,11 +609,11 @@ Agents can spawn background workers for concurrent task execution.
 
 **Notifications:** When `notify: true` (default), completion results are injected into the message queue as `[SYSTEM]` events, triggering a new agent turn.
 
-**Storage:** State persists to `.openpaw/subagents.yaml`. Completed requests older than 24 hours auto-cleanup.
+**Storage:** State persists to `data/subagents.yaml`. Completed requests older than 24 hours auto-cleanup.
 
 ### Token Usage Tracking (`openpaw/agent/metrics.py`)
 
-Every agent invocation logs token counts to `{workspace}/.openpaw/token_usage.jsonl`.
+Every agent invocation logs token counts to `{workspace}/data/token_usage.jsonl`.
 
 **Components:**
 - **`InvocationMetrics`** - Dataclass for input/output token counts
@@ -636,14 +636,14 @@ OpenPaw uses a "store in UTC, display in workspace timezone" pattern.
 - Heartbeat active hours (`active_hours: "09:00-17:00"`)
 - Cron schedule expressions (APScheduler `CronTrigger`)
 - Agent-scheduled tasks (`schedule_at` timestamp parsing)
-- File upload date partitions (`uploads/{YYYY-MM-DD}/`)
+- File upload date partitions (`data/uploads/{YYYY-MM-DD}/`)
 - `/status` "tokens today" day boundary
 - Display timestamps (conversation archives, task notes, filesystem listings)
 
 **What remains UTC (internal storage):**
 - JSONL logs (`token_usage.jsonl`, `heartbeat_log.jsonl`)
 - Session state (`sessions.json`)
-- Task timestamps (`created_at`, `started_at`, `completed_at` in `TASKS.yaml`)
+- Task timestamps (`created_at`, `started_at`, `completed_at` in `data/TASKS.yaml`)
 - Conversation archive JSON sidecar files
 - LangGraph checkpoint data
 
@@ -673,8 +673,8 @@ Agents have sandboxed filesystem access to their workspace directory.
 
 **Security:**
 - Agents restricted to workspace root
-- Cannot read/write `.openpaw/` directory (framework internals protected)
-- `resolve_sandboxed_path()` validates all paths (rejects absolute paths, `~`, `..`, `.openpaw/`)
+- Cannot write to `data/` or `config/` directories (write-protected from agents)
+- `resolve_sandboxed_path()` validates all paths (rejects absolute paths, `~`, and `..`; `data/` and `config/` are write-protected)
 - Shared by `FilesystemTools`, `SendFileTool`, and inbound processors
 
 ### Inbound File Handling (`openpaw/builtins/processors/`)
@@ -684,7 +684,7 @@ OpenPaw provides universal file persistence with optional content enrichment.
 **Processor pipeline order:** `file_persistence` → `whisper` → `timestamp` → `docling`
 
 **FilePersistenceProcessor:**
-- Saves all uploaded files to `{workspace}/uploads/{YYYY-MM-DD}/` (date partitioning)
+- Saves all uploaded files to `{workspace}/data/uploads/{YYYY-MM-DD}/` (date partitioning)
 - Sets `attachment.saved_path` for downstream processors
 - Enriches message content with file receipt notifications
 
@@ -692,7 +692,7 @@ OpenPaw provides universal file persistence with optional content enrichment.
 - **WhisperProcessor** - Transcribes audio/voice, saves `.txt` sibling (e.g., `voice.ogg` → `voice.txt`)
 - **DoclingProcessor** - Converts PDF/DOCX/PPTX to markdown with OCR, saves `.md` sibling (e.g., `report.pdf` → `report.md`)
 
-**Agent view:** The agent receives enriched message content with file metadata and transcripts/conversions appended inline. Original files remain in `uploads/` for agent filesystem access.
+**Agent view:** The agent receives enriched message content with file metadata and transcripts/conversions appended inline. Original files remain in `data/uploads/` for agent filesystem access.
 
 **Filename handling:**
 - `sanitize_filename()` - Normalizes filenames (lowercase, remove special chars, replace spaces)
@@ -801,7 +801,7 @@ OpenPaw provides universal file persistence with optional content enrichment.
    ↓
 2. SubAgentStore
    - Create SubAgentRequest (status: pending)
-   - Persist to .openpaw/subagents.yaml
+   - Persist to data/subagents.yaml
    ↓
 3. SubAgentRunner
    - Acquire semaphore (max 8 concurrent)
@@ -900,7 +900,7 @@ Each workspace is **fully isolated** from other workspaces:
 
 **Separate agent instances:**
 - Own `AgentRunner` with LangGraph agent
-- Own conversation memory (`AsyncSqliteSaver` at `.openpaw/conversations.db`)
+- Own conversation memory (`AsyncSqliteSaver` at `data/conversations.db`)
 - Own system prompt (stitched from AGENT.md, USER.md, SOUL.md, HEARTBEAT.md)
 
 **Separate channels:**
@@ -917,7 +917,7 @@ Each workspace is **fully isolated** from other workspaces:
 - Sandboxed to workspace directory
 - Cannot access other workspaces
 - Cannot access OpenPaw core files
-- `.openpaw/` directory protected from agent access
+- `data/` and `config/` directories write-protected from agents
 
 **Separate schedulers:**
 - Own `CronScheduler` (APScheduler instance)
@@ -938,7 +938,7 @@ This enables running multiple distinct agents simultaneously without interferenc
 **Per session:**
 - Session ID: `{channel}:{id}` (e.g., `telegram:123456`)
 - Thread ID: `{session_key}:{conversation_id}` (e.g., `telegram:123456:conv_2026-02-07T14-30-00-123456`)
-- Stored in `AsyncSqliteSaver` at `.openpaw/conversations.db`
+- Stored in `AsyncSqliteSaver` at `data/conversations.db`
 - Persists across restarts
 - Archived on `/new`, `/compact`, and shutdown to `memory/conversations/`
 
@@ -952,7 +952,7 @@ This enables running multiple distinct agents simultaneously without interferenc
 **Filesystem-based:**
 - Agents read/write workspace files for state persistence
 - `HEARTBEAT.md` commonly used for session state tracking
-- `TASKS.yaml` for persistent task management
+- `data/TASKS.yaml` for persistent task management
 - State persists across restarts (filesystem-backed)
 - Accessible in cron jobs and heartbeats
 
@@ -1178,8 +1178,8 @@ Middleware enables:
 - Agents restricted to workspace directory
 - Cannot read/write OpenPaw core files
 - Cannot access other workspaces
-- `.openpaw/` directory protected (framework internals)
-- `resolve_sandboxed_path()` validates all paths (rejects absolute paths, `~`, `..`, `.openpaw/`)
+- `data/` and `config/` directories write-protected from agents
+- `resolve_sandboxed_path()` validates all paths (rejects absolute paths, `~`, and `..`; `data/` and `config/` are write-protected)
 
 **Tool access:**
 - Agents only have tools from enabled builtins
@@ -1196,7 +1196,7 @@ Middleware enables:
 **Configuration:**
 - Environment variables for secrets (`${VAR}` syntax)
 - No secrets in config files (use `.env` or environment export)
-- `.gitignore` for sensitive data (`.env`, `.openpaw/`)
+- `.gitignore` for sensitive data (`.env`, `data/`)
 
 **Browser security:**
 - Domain allowlist/blocklist per workspace

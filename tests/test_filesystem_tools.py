@@ -7,21 +7,21 @@ import pytest
 from openpaw.agent.tools.filesystem import FilesystemTools
 
 
-def test_openpaw_directory_rejected(tmp_path: Path):
-    """Verify .openpaw/ directory access is blocked."""
+def test_data_directory_readable(tmp_path: Path):
+    """Verify data/ directory can be read (not protected like old .openpaw was)."""
     fs = FilesystemTools(tmp_path)
 
-    # Direct access
-    with pytest.raises(ValueError, match=r"\.openpaw"):
-        fs._resolve_path(".openpaw/conversations.db")
+    # Create data directory with a file
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "sessions.json").write_text('{"sessions": []}')
 
-    # Nested access
-    with pytest.raises(ValueError, match=r"\.openpaw"):
-        fs._resolve_path(".openpaw/sessions.json")
+    tools_dict = {tool.name: tool for tool in fs.get_tools()}
 
-    # Subdirectory access
-    with pytest.raises(ValueError, match=r"\.openpaw"):
-        fs._resolve_path("subdir/.openpaw/something")
+    # Read should work since data/ is readable
+    read_tool = tools_dict["read_file"]
+    result = read_tool.invoke({"file_path": "data/sessions.json"})
+    assert '{"sessions": []}' in result or "Error:" not in result
 
 
 def test_normal_paths_still_work(tmp_path: Path):
@@ -32,65 +32,46 @@ def test_normal_paths_still_work(tmp_path: Path):
     resolved = fs._resolve_path("memory/conversations")
     assert resolved == (tmp_path / "memory" / "conversations").resolve()
 
-    resolved = fs._resolve_path("TASKS.yaml")
-    assert resolved == (tmp_path / "TASKS.yaml").resolve()
+    resolved = fs._resolve_path("data/TASKS.yaml")
+    assert resolved == (tmp_path / "data" / "TASKS.yaml").resolve()
+
+    resolved = fs._resolve_path("agent/AGENT.md")
+    assert resolved == (tmp_path / "agent" / "AGENT.md").resolve()
 
 
-def test_openpaw_like_filenames_allowed(tmp_path: Path):
-    """Verify files with similar names are not blocked."""
+def test_new_structure_paths_allowed(tmp_path: Path):
+    """Verify new workspace structure paths are accessible."""
     fs = FilesystemTools(tmp_path)
 
-    # These should NOT raise (only directory named exactly ".openpaw" is blocked)
-    resolved = fs._resolve_path("openpaw_notes.txt")
-    assert resolved == (tmp_path / "openpaw_notes.txt").resolve()
+    # Agent subdirectory
+    resolved = fs._resolve_path("agent/AGENT.md")
+    assert resolved == (tmp_path / "agent" / "AGENT.md").resolve()
 
-    resolved = fs._resolve_path("memory/openpaw_archive")
-    assert resolved == (tmp_path / "memory" / "openpaw_archive").resolve()
+    # Config subdirectory
+    resolved = fs._resolve_path("config/agent.yaml")
+    assert resolved == (tmp_path / "config" / "agent.yaml").resolve()
+
+    # Data subdirectory
+    resolved = fs._resolve_path("data/TASKS.yaml")
+    assert resolved == (tmp_path / "data" / "TASKS.yaml").resolve()
+
+    # Workspace subdirectory
+    resolved = fs._resolve_path("workspace/downloads")
+    assert resolved == (tmp_path / "workspace" / "downloads").resolve()
 
 
-def test_openpaw_directory_blocked_in_tool_operations(tmp_path: Path):
-    """Verify .openpaw/ is blocked through actual tool operations."""
+def test_write_operations_in_workspace_subdir(tmp_path: Path):
+    """Verify write operations work within workspace/ subdirectory."""
     fs = FilesystemTools(tmp_path)
     tools_dict = {tool.name: tool for tool in fs.get_tools()}
 
-    # Create .openpaw directory with a file
-    openpaw_dir = tmp_path / ".openpaw"
-    openpaw_dir.mkdir()
-    (openpaw_dir / "conversations.db").write_text("secret data")
-
-    # Test read_file
-    read_tool = tools_dict["read_file"]
-    result = read_tool.invoke({"file_path": ".openpaw/conversations.db"})
-    assert "Error:" in result
-    assert ".openpaw" in result
-
-    # Test write_file
+    # Write to workspace/ dir (the agent's writable area)
     write_tool = tools_dict["write_file"]
     result = write_tool.invoke({
-        "file_path": ".openpaw/new_file.txt",
-        "content": "should not work"
+        "file_path": "workspace/notes.txt",
+        "content": "some content"
     })
-    assert "Error:" in result
-    assert ".openpaw" in result
-
-    # Test overwrite_file
-    overwrite_tool = tools_dict["overwrite_file"]
-    result = overwrite_tool.invoke({
-        "file_path": ".openpaw/conversations.db",
-        "content": "should not work"
-    })
-    assert "Error:" in result
-    assert ".openpaw" in result
-
-    # Test edit_file
-    edit_tool = tools_dict["edit_file"]
-    result = edit_tool.invoke({
-        "file_path": ".openpaw/conversations.db",
-        "old_text": "secret",
-        "new_text": "public"
-    })
-    assert "Error:" in result
-    assert ".openpaw" in result
+    assert "Error:" not in result or "Successfully" in result
 
 
 def test_existing_security_checks_still_work(tmp_path: Path):

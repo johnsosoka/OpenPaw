@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 
+from openpaw.core.paths import SESSIONS_JSON
 from openpaw.model.session import SessionState
 
 logger = logging.getLogger(__name__)
@@ -32,9 +33,6 @@ class SessionManager:
         # Rotates to new conversation, returns old conversation ID for archiving
     """
 
-    OPENPAW_DIR = ".openpaw"
-    STATE_FILE = "sessions.json"
-
     def __init__(self, workspace_path: Path):
         """Initialize the session manager.
 
@@ -42,13 +40,12 @@ class SessionManager:
             workspace_path: Path to the agent workspace root.
         """
         self.workspace_path = Path(workspace_path)
-        self._openpaw_dir = self.workspace_path / self.OPENPAW_DIR
-        self._state_file = self._openpaw_dir / self.STATE_FILE
+        self._state_file = self.workspace_path / str(SESSIONS_JSON)
         self._lock = Lock()
         self._sessions: dict[str, SessionState] = {}
 
-        # Ensure .openpaw directory exists
-        self._openpaw_dir.mkdir(parents=True, exist_ok=True)
+        # Ensure the data/ directory exists
+        self._state_file.parent.mkdir(parents=True, exist_ok=True)
 
         # Load existing state
         self._load()

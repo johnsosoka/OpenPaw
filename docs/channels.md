@@ -194,9 +194,9 @@ builtins:
 
 **Processing Flow:**
 1. User sends voice message
-2. `FilePersistenceProcessor` saves audio to `uploads/{YYYY-MM-DD}/voice_123.ogg`
+2. `FilePersistenceProcessor` saves audio to `data/uploads/{YYYY-MM-DD}/voice_123.ogg`
 3. `WhisperProcessor` transcribes audio to text
-4. Transcript saved as sibling file `uploads/{YYYY-MM-DD}/voice_123.txt`
+4. Transcript saved as sibling file `data/uploads/{YYYY-MM-DD}/voice_123.txt`
 5. Message content enriched with file receipt notification and transcript
 6. Agent processes enriched message
 
@@ -223,9 +223,9 @@ builtins:
 
 **Processing Flow:**
 1. User uploads document
-2. `FilePersistenceProcessor` saves to `uploads/{YYYY-MM-DD}/report.pdf`
+2. `FilePersistenceProcessor` saves to `data/uploads/{YYYY-MM-DD}/report.pdf`
 3. `DoclingProcessor` converts document to markdown
-4. Markdown saved as sibling file `uploads/{YYYY-MM-DD}/report.md`
+4. Markdown saved as sibling file `data/uploads/{YYYY-MM-DD}/report.md`
 5. Message content enriched with file receipt notification and conversion summary
 6. Agent can read the converted markdown or original file
 
@@ -237,13 +237,13 @@ Photos are automatically saved to the workspace uploads directory.
 
 **Processing Flow:**
 1. User sends photo
-2. `FilePersistenceProcessor` downloads and saves to `uploads/{YYYY-MM-DD}/photo_123.jpg`
+2. `FilePersistenceProcessor` downloads and saves to `data/uploads/{YYYY-MM-DD}/photo_123.jpg`
 3. Message content enriched with file receipt notification
 4. Agent can access the saved image file
 
 ### File Persistence
 
-All uploaded files are automatically saved to `{workspace}/uploads/{YYYY-MM-DD}/` with date partitioning by the `FilePersistenceProcessor` (enabled by default).
+All uploaded files are automatically saved to `{workspace}/data/uploads/{YYYY-MM-DD}/` with date partitioning by the `FilePersistenceProcessor` (enabled by default).
 
 **Configuration:**
 
@@ -265,7 +265,7 @@ builtins:
 Uploaded files are enriched with metadata notifications:
 ```
 [File received: report.pdf (2.3 MB, application/pdf)]
-[Saved to: uploads/2026-02-17/report.pdf]
+[Saved to: data/uploads/2026-02-17/report.pdf]
 ```
 
 Processors (Whisper, Docling) create sibling output files alongside the original:

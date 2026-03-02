@@ -16,10 +16,12 @@ def mock_workspace(tmp_path: Path) -> AgentWorkspace:
     workspace_dir.mkdir()
 
     # Create required markdown files
-    (workspace_dir / "AGENT.md").write_text("# Agent\nTest agent")
-    (workspace_dir / "USER.md").write_text("# User\nTest user")
-    (workspace_dir / "SOUL.md").write_text("# Soul\nTest soul")
-    (workspace_dir / "HEARTBEAT.md").write_text("")
+    agent_dir = workspace_dir / "agent"
+    agent_dir.mkdir()
+    (agent_dir / "AGENT.md").write_text("# Agent\nTest agent")
+    (agent_dir / "USER.md").write_text("# User\nTest user")
+    (agent_dir / "SOUL.md").write_text("# Soul\nTest soul")
+    (agent_dir / "HEARTBEAT.md").write_text("")
 
     workspace = Mock(spec=AgentWorkspace)
     workspace.name = "test_workspace"

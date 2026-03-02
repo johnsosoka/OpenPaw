@@ -214,9 +214,11 @@ class TestFrameworkSections:
     def test_section_workspace_filesystem_content(self) -> None:
         """SECTION_WORKSPACE_FILESYSTEM has expected content."""
         assert "## Workspace Filesystem" in SECTION_WORKSPACE_FILESYSTEM
-        assert "relative to your workspace root" in SECTION_WORKSPACE_FILESYSTEM
+        assert "five top-level directories" in SECTION_WORKSPACE_FILESYSTEM
+        assert "agent/" in SECTION_WORKSPACE_FILESYSTEM
+        assert "data/" in SECTION_WORKSPACE_FILESYSTEM
+        assert "workspace/" in SECTION_WORKSPACE_FILESYSTEM
         assert "ls('.')" in SECTION_WORKSPACE_FILESYSTEM
-        assert "NOT a code repository" in SECTION_WORKSPACE_FILESYSTEM
 
     def test_shell_hygiene_section_exists(self) -> None:
         """SECTION_SHELL_HYGIENE is defined with expected content."""
@@ -316,11 +318,13 @@ class TestSystemPromptIdentity:
         workspace_path = tmp_path / "test_workspace"
         workspace_path.mkdir()
 
-        # Create required markdown files
-        (workspace_path / "AGENT.md").write_text("# Agent")
-        (workspace_path / "USER.md").write_text("# User")
-        (workspace_path / "SOUL.md").write_text("# Soul")
-        (workspace_path / "HEARTBEAT.md").write_text("# Heartbeat with content")
+        # Create required markdown files in the agent/ subdirectory.
+        agent_path = workspace_path / "agent"
+        agent_path.mkdir(parents=True, exist_ok=True)
+        (agent_path / "AGENT.md").write_text("# Agent")
+        (agent_path / "USER.md").write_text("# User")
+        (agent_path / "SOUL.md").write_text("# Soul")
+        (agent_path / "HEARTBEAT.md").write_text("# Heartbeat with content")
 
         loader = WorkspaceLoader(tmp_path)
         return loader.load("test_workspace")

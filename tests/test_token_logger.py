@@ -41,20 +41,20 @@ def sample_metrics() -> InvocationMetrics:
 
 
 def test_logger_creates_directory(logger: TokenUsageLogger, temp_workspace: Path) -> None:
-    """Test that logger creates .openpaw directory on first log."""
-    openpaw_dir = temp_workspace / ".openpaw"
-    assert not openpaw_dir.exists()
+    """Test that logger creates data directory on first log."""
+    data_dir = temp_workspace / "data"
+    assert not data_dir.exists()
 
     metrics = InvocationMetrics(input_tokens=100, output_tokens=50, total_tokens=150)
     logger.log(metrics, workspace="test", invocation_type="user", session_key="test:123")
 
-    assert openpaw_dir.exists()
-    assert openpaw_dir.is_dir()
+    assert data_dir.exists()
+    assert data_dir.is_dir()
 
 
 def test_logger_creates_jsonl_file(logger: TokenUsageLogger, temp_workspace: Path) -> None:
     """Test that logger creates JSONL file on first log."""
-    log_file = temp_workspace / ".openpaw" / "token_usage.jsonl"
+    log_file = temp_workspace / "data" / "token_usage.jsonl"
     assert not log_file.exists()
 
     metrics = InvocationMetrics(input_tokens=100, output_tokens=50, total_tokens=150)
@@ -70,7 +70,7 @@ def test_logger_writes_valid_json(
     """Test that logger writes valid JSON entries."""
     logger.log(sample_metrics, workspace="gilfoyle", invocation_type="user", session_key="telegram:123")
 
-    log_file = temp_workspace / ".openpaw" / "token_usage.jsonl"
+    log_file = temp_workspace / "data" / "token_usage.jsonl"
     with open(log_file) as f:
         line = f.readline()
         entry = json.loads(line)
@@ -97,7 +97,7 @@ def test_logger_appends_multiple_entries(
     logger.log(metrics1, workspace="test", invocation_type="user", session_key="test:123")
     logger.log(metrics2, workspace="test", invocation_type="cron", session_key=None)
 
-    log_file = temp_workspace / ".openpaw" / "token_usage.jsonl"
+    log_file = temp_workspace / "data" / "token_usage.jsonl"
     with open(log_file) as f:
         lines = f.readlines()
 
@@ -173,7 +173,7 @@ def test_reader_filters_old_entries(
 ) -> None:
     """Test that reader filters out entries from previous days."""
     # Manually write an entry from yesterday
-    log_file = temp_workspace / ".openpaw" / "token_usage.jsonl"
+    log_file = temp_workspace / "data" / "token_usage.jsonl"
     log_file.parent.mkdir(parents=True, exist_ok=True)
 
     yesterday = datetime.now(UTC) - timedelta(days=1)
@@ -244,7 +244,7 @@ def test_reader_handles_malformed_entries(
     logger: TokenUsageLogger, reader: TokenUsageReader, temp_workspace: Path, caplog
 ) -> None:
     """Test that reader handles malformed JSON entries gracefully."""
-    log_file = temp_workspace / ".openpaw" / "token_usage.jsonl"
+    log_file = temp_workspace / "data" / "token_usage.jsonl"
     log_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Write valid entry
@@ -277,7 +277,7 @@ def test_reader_handles_missing_fields(
     logger: TokenUsageLogger, reader: TokenUsageReader, temp_workspace: Path
 ) -> None:
     """Test that reader handles entries with missing fields."""
-    log_file = temp_workspace / ".openpaw" / "token_usage.jsonl"
+    log_file = temp_workspace / "data" / "token_usage.jsonl"
     log_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Write entry with missing fields
@@ -305,7 +305,7 @@ def test_logger_cron_invocation(logger: TokenUsageLogger, temp_workspace: Path) 
     metrics = InvocationMetrics(input_tokens=100, output_tokens=50, total_tokens=150)
     logger.log(metrics, workspace="test", invocation_type="cron", session_key=None)
 
-    log_file = temp_workspace / ".openpaw" / "token_usage.jsonl"
+    log_file = temp_workspace / "data" / "token_usage.jsonl"
     with open(log_file) as f:
         entry = json.loads(f.readline())
 
@@ -318,7 +318,7 @@ def test_logger_heartbeat_invocation(logger: TokenUsageLogger, temp_workspace: P
     metrics = InvocationMetrics(input_tokens=200, output_tokens=100, total_tokens=300)
     logger.log(metrics, workspace="test", invocation_type="heartbeat", session_key=None)
 
-    log_file = temp_workspace / ".openpaw" / "token_usage.jsonl"
+    log_file = temp_workspace / "data" / "token_usage.jsonl"
     with open(log_file) as f:
         entry = json.loads(f.readline())
 

@@ -10,6 +10,8 @@ from typing import Any, Literal
 from apscheduler.triggers.cron import CronTrigger
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from openpaw.core.paths import DOWNLOADS_DIR, SCREENSHOTS_DIR
+
 
 class QueueConfig(BaseModel):
     """Configuration for the command queue system."""
@@ -160,8 +162,8 @@ class BrowserBuiltinConfig(BuiltinItemConfig):
     blocked_domains: list[str] = Field(default_factory=list, description="Domain blocklist (takes precedence)")
     timeout_seconds: int = Field(default=30, description="Default timeout for browser operations")
     persist_cookies: bool = Field(default=False, description="Persist cookies across agent runs")
-    downloads_dir: str = Field(default="downloads", description="Directory for downloaded files")
-    screenshots_dir: str = Field(default="screenshots", description="Directory for screenshots")
+    downloads_dir: str = Field(default=str(DOWNLOADS_DIR), description="Directory for downloaded files")
+    screenshots_dir: str = Field(default=str(SCREENSHOTS_DIR), description="Directory for screenshots")
 
 
 class SpawnBuiltinConfig(BuiltinItemConfig):
