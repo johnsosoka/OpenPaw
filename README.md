@@ -122,7 +122,7 @@ agent_workspaces/my_agent/
 
 The `openpaw init` command scaffolds this structure with starter templates. Customize the identity files in `agent/` to shape your agent's personality and purpose. Configure model, channel, and queue behavior in `config/agent.yaml`.
 
-Existing workspaces using the older flat layout are automatically migrated on first startup. The `data/` and `config/` directories are write-protected from agent filesystem tools. Write operations default to the `workspace/` directory unless an explicit path is provided.
+The `data/` and `config/` directories are write-protected from agent filesystem tools. Write operations default to the `workspace/` directory unless an explicit path is provided.
 
 ## In-Chat Commands
 

@@ -64,7 +64,6 @@ async def test_workspace_runner_initializes_command_router(mock_config, mock_wor
 
     # Mock workspace loader
     with (
-        patch("openpaw.workspace.runner.migrate_workspace", return_value=[]),
         patch("openpaw.workspace.runner.WorkspaceLoader") as mock_loader_cls,
         patch("openpaw.workspace.runner.load_workspace_tools", return_value=[]),
         patch("openpaw.workspace.runner.BuiltinLoader") as mock_builtin_loader_cls,
@@ -108,7 +107,6 @@ async def test_workspace_runner_registers_framework_commands(mock_config, mock_w
     from openpaw.workspace.runner import WorkspaceRunner
 
     with (
-        patch("openpaw.workspace.runner.migrate_workspace", return_value=[]),
         patch("openpaw.workspace.runner.WorkspaceLoader") as mock_loader_cls,
         patch("openpaw.workspace.runner.load_workspace_tools", return_value=[]),
         patch("openpaw.workspace.runner.BuiltinLoader") as mock_builtin_loader_cls,
@@ -157,7 +155,6 @@ async def test_workspace_runner_build_command_context(mock_config, mock_workspac
     from openpaw.workspace.runner import WorkspaceRunner
 
     with (
-        patch("openpaw.workspace.runner.migrate_workspace", return_value=[]),
         patch("openpaw.workspace.runner.WorkspaceLoader") as mock_loader_cls,
         patch("openpaw.workspace.runner.load_workspace_tools", return_value=[]),
         patch("openpaw.workspace.runner.BuiltinLoader") as mock_builtin_loader_cls,
@@ -230,7 +227,6 @@ async def test_workspace_runner_build_command_context_missing_channel_raises(
     from openpaw.workspace.runner import WorkspaceRunner
 
     with (
-        patch("openpaw.workspace.runner.migrate_workspace", return_value=[]),
         patch("openpaw.workspace.runner.WorkspaceLoader") as mock_loader_cls,
         patch("openpaw.workspace.runner.load_workspace_tools", return_value=[]),
         patch("openpaw.workspace.runner.BuiltinLoader") as mock_builtin_loader_cls,

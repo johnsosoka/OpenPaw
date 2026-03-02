@@ -77,10 +77,8 @@ class OpenPawOrchestrator:
     def discover_workspaces(cls, workspaces_path: Path) -> list[str]:
         """Discover all valid workspaces in the workspaces directory.
 
-        A valid workspace is a directory containing the agent identity marker.
-        Checks both the new structured layout (``agent/AGENT.md``) and the
-        legacy flat layout (``AGENT.md`` at root). Legacy workspaces are
-        auto-migrated at startup by ``WorkspaceRunner``.
+        A valid workspace is a directory containing the agent identity marker
+        (``agent/AGENT.md``).
 
         Args:
             workspaces_path: Path to workspaces directory.
@@ -97,8 +95,7 @@ class OpenPawOrchestrator:
         for entry in workspaces_path.iterdir():
             if not entry.is_dir():
                 continue
-            # New structured layout or legacy flat layout
-            if (entry / str(AGENT_MD)).exists() or (entry / "AGENT.md").exists():
+            if (entry / str(AGENT_MD)).exists():
                 workspaces.append(entry.name)
                 logger.debug(f"Discovered workspace: {entry.name}")
 

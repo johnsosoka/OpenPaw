@@ -41,7 +41,6 @@ from openpaw.workspace.agent_factory import AgentFactory, filter_workspace_tools
 from openpaw.workspace.lifecycle import LifecycleManager
 from openpaw.workspace.loader import WorkspaceLoader
 from openpaw.workspace.message_processor import MessageProcessor
-from openpaw.workspace.migration import migrate_workspace
 from openpaw.workspace.tool_loader import load_workspace_tools
 
 
@@ -69,15 +68,8 @@ class WorkspaceRunner:
         else:
             self.logger = logging.getLogger(f"{__name__}.{workspace_name}")
 
-        # Migrate legacy layout before loading
-        workspace_root = Path(config.workspaces_path) / workspace_name
-        migration_actions = migrate_workspace(workspace_root)
-        if migration_actions:
-            self.logger.info(
-                "Migrated workspace '%s': %d actions", workspace_name, len(migration_actions)
-            )
-
         # Load workspace and merge configuration
+        workspace_root = Path(config.workspaces_path) / workspace_name
         self._workspace_loader = WorkspaceLoader(config.workspaces_path)
         workspace_env = workspace_root / str(DOT_ENV)
         if workspace_env.exists():

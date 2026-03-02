@@ -128,9 +128,8 @@ class AgentWorkspace:
     def _build_workspace_context(self) -> str:
         """Build a workspace context block showing the workspace name and top-level contents.
 
-        Lists only top-level directory entries (no recursion). Hidden files are skipped
-        except for .env (which agents may need to know about). Directories are marked
-        with a trailing '/'.
+        Lists only top-level directory entries (no recursion). Hidden files and
+        directories are skipped. Directories are marked with a trailing '/'.
 
         Returns:
             Formatted workspace context string.
@@ -141,11 +140,7 @@ class AgentWorkspace:
             entries = sorted(self.path.iterdir(), key=lambda p: p.name)
             for entry in entries:
                 name = entry.name
-                # Skip hidden files/dirs.  In the new layout, .env lives at
-                # config/.env so there is no hidden file the agent needs to see
-                # at the workspace root.  Keep the `.env` exception for
-                # backward compatibility with workspaces not yet migrated.
-                if name.startswith(".") and name != ".env":
+                if name.startswith("."):
                     continue
                 if entry.is_dir():
                     lines.append(f"  {name}/")
