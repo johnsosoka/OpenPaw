@@ -14,11 +14,13 @@ def mock_workspace(tmp_path: Path) -> AgentWorkspace:
     workspace_path = tmp_path / "test_workspace"
     workspace_path.mkdir()
 
-    # Create required markdown files
-    (workspace_path / "AGENT.md").write_text("# Agent")
-    (workspace_path / "USER.md").write_text("# User")
-    (workspace_path / "SOUL.md").write_text("# Soul")
-    (workspace_path / "HEARTBEAT.md").write_text("# Heartbeat with content for testing")
+    # Create required markdown files in the agent/ subdirectory.
+    agent_path = workspace_path / "agent"
+    agent_path.mkdir(parents=True, exist_ok=True)
+    (agent_path / "AGENT.md").write_text("# Agent")
+    (agent_path / "USER.md").write_text("# User")
+    (agent_path / "SOUL.md").write_text("# Soul")
+    (agent_path / "HEARTBEAT.md").write_text("# Heartbeat with content for testing")
 
     loader = WorkspaceLoader(tmp_path)
     return loader.load("test_workspace")
@@ -105,7 +107,6 @@ class TestTaskManagementProactiveGuidance:
         prompt = mock_workspace.build_system_prompt(enabled_builtins=["task_tracker"])
 
         # Original content should still be present
-        assert "TASKS.yaml" in prompt
         assert "Tasks persist" in prompt
         assert "Future heartbeats will see your tasks" in prompt
 

@@ -5,6 +5,25 @@ import re
 import sys
 from pathlib import Path
 
+from openpaw.core.paths import (
+    AGENT_DIR,
+    AGENT_MD,
+    AGENT_YAML,
+    CONFIG_DIR,
+    CRONS_DIR,
+    DATA_DIR,
+    DOT_ENV,
+    HEARTBEAT_MD,
+    MEMORY_CONVERSATIONS_DIR,
+    MEMORY_DIR,
+    MEMORY_LOGS_DIR,
+    SKILLS_DIR,
+    SOUL_MD,
+    TOOLS_DIR,
+    USER_MD,
+    WORKSPACE_DIR,
+)
+
 # ---------------------------------------------------------------------------
 # Template constants
 # ---------------------------------------------------------------------------
@@ -282,21 +301,36 @@ def _create_workspace(
 
     workspace_path.mkdir(parents=True, exist_ok=False)
 
-    # Write the four required markdown files, substituting {name} where used.
-    (workspace_path / "AGENT.md").write_text(
+    # Create all required subdirectories.
+    for subdir in [
+        AGENT_DIR,
+        TOOLS_DIR,
+        SKILLS_DIR,
+        CONFIG_DIR,
+        CRONS_DIR,
+        DATA_DIR,
+        MEMORY_DIR,
+        MEMORY_CONVERSATIONS_DIR,
+        MEMORY_LOGS_DIR,
+        WORKSPACE_DIR,
+    ]:
+        (workspace_path / str(subdir)).mkdir(parents=True, exist_ok=True)
+
+    # Write the four required identity files under agent/.
+    (workspace_path / str(AGENT_MD)).write_text(
         TEMPLATE_AGENT_MD.format(name=name), encoding="utf-8"
     )
-    (workspace_path / "USER.md").write_text(TEMPLATE_USER_MD, encoding="utf-8")
-    (workspace_path / "SOUL.md").write_text(
+    (workspace_path / str(USER_MD)).write_text(TEMPLATE_USER_MD, encoding="utf-8")
+    (workspace_path / str(SOUL_MD)).write_text(
         TEMPLATE_SOUL_MD.format(name=name), encoding="utf-8"
     )
-    (workspace_path / "HEARTBEAT.md").write_text(TEMPLATE_HEARTBEAT_MD, encoding="utf-8")
+    (workspace_path / str(HEARTBEAT_MD)).write_text(TEMPLATE_HEARTBEAT_MD, encoding="utf-8")
 
-    # Write optional but recommended files.
-    (workspace_path / "agent.yaml").write_text(
+    # Write config files under config/.
+    (workspace_path / str(AGENT_YAML)).write_text(
         _build_agent_yaml(name, channel, model), encoding="utf-8"
     )
-    (workspace_path / ".env").write_text(TEMPLATE_ENV, encoding="utf-8")
+    (workspace_path / str(DOT_ENV)).write_text(TEMPLATE_ENV, encoding="utf-8")
 
     return workspace_path
 
@@ -316,9 +350,9 @@ def _print_next_steps(workspace_path: Path, name: str) -> None:
     print(f"  Path: {workspace_path}/")
     print()
     print("Next steps:")
-    print("  1. Edit agent.yaml with your model and channel settings")
-    print("  2. Add API keys to .env")
-    print("  3. Customize AGENT.md, USER.md, and SOUL.md")
+    print("  1. Edit config/agent.yaml with your model and channel settings")
+    print("  2. Add API keys to config/.env")
+    print("  3. Customize agent/AGENT.md, agent/USER.md, and agent/SOUL.md")
     print(f"  4. Run: openpaw -c config.yaml -w {name}")
 
 

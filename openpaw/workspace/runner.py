@@ -26,6 +26,7 @@ from openpaw.channels.commands.router import CommandRouter
 from openpaw.core.config import Config, merge_configs
 from openpaw.core.config.models import ApprovalGatesConfig, ToolTimeoutsConfig
 from openpaw.core.logging import setup_workspace_logger
+from openpaw.core.paths import CONVERSATIONS_DB, DOT_ENV
 from openpaw.core.utils import resolve_user_name
 from openpaw.model.message import Message, MessageDirection
 from openpaw.runtime.approval import ApprovalGateManager
@@ -40,6 +41,7 @@ from openpaw.workspace.agent_factory import AgentFactory, filter_workspace_tools
 from openpaw.workspace.lifecycle import LifecycleManager
 from openpaw.workspace.loader import WorkspaceLoader
 from openpaw.workspace.message_processor import MessageProcessor
+from openpaw.workspace.migration import migrate_workspace
 from openpaw.workspace.tool_loader import load_workspace_tools
 
 
@@ -67,9 +69,17 @@ class WorkspaceRunner:
         else:
             self.logger = logging.getLogger(f"{__name__}.{workspace_name}")
 
+        # Migrate legacy layout before loading
+        workspace_root = Path(config.workspaces_path) / workspace_name
+        migration_actions = migrate_workspace(workspace_root)
+        if migration_actions:
+            self.logger.info(
+                "Migrated workspace '%s': %d actions", workspace_name, len(migration_actions)
+            )
+
         # Load workspace and merge configuration
         self._workspace_loader = WorkspaceLoader(config.workspaces_path)
-        workspace_env = Path(config.workspaces_path) / workspace_name / ".env"
+        workspace_env = workspace_root / str(DOT_ENV)
         if workspace_env.exists():
             load_dotenv(workspace_env, override=True)
             self.logger.info(f"Loaded environment from: {workspace_env}")
@@ -98,7 +108,7 @@ class WorkspaceRunner:
         )
 
         # Checkpointer placeholder (initialized in start())
-        self._db_path = self._workspace.path / ".openpaw" / "conversations.db"
+        self._db_path = self._workspace.path / str(CONVERSATIONS_DB)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db_conn: aiosqlite.Connection | None = None
         self._checkpointer: Any | None = None

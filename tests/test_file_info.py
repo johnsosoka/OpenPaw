@@ -177,23 +177,27 @@ def test_file_info_absolute_path_attempt(fs_tools, workspace):
     assert "Absolute paths not allowed" in data["error"]
 
 
-def test_file_info_openpaw_directory_rejection(fs_tools, workspace):
-    """Test file_info rejects access to .openpaw directory."""
-    openpaw_dir = workspace / ".openpaw"
-    openpaw_dir.mkdir()
-    test_file = openpaw_dir / "secret.txt"
-    test_file.write_text("Framework internals")
+def test_file_info_data_directory_is_readable(fs_tools, workspace):
+    """Test file_info can read files inside data/ (data/ is write-protected, not read-protected).
+
+    The sandbox blocks WRITE access to data/, config/, memory/logs, and memory/conversations,
+    but read operations (file_info, read_file) are permitted everywhere within the workspace.
+    """
+    data_dir = workspace / "data"
+    data_dir.mkdir()
+    test_file = data_dir / "sessions.json"
+    test_file.write_text('{"session": "data"}')
 
     tools = fs_tools.get_tools()
     file_info_tool = tools[7]
 
-    result = file_info_tool.invoke({"path": ".openpaw/secret.txt"})
+    result = file_info_tool.invoke({"path": "data/sessions.json"})
     data = json.loads(result)
 
-    assert data["path"] == ".openpaw/secret.txt"
-    assert data["exists"] is False
-    assert "error" in data
-    assert ".openpaw" in data["error"]
+    assert data["path"] == "data/sessions.json"
+    assert data["exists"] is True
+    assert data["is_binary"] is False
+    assert "error" not in data
 
 
 def test_file_info_size_formatting(fs_tools, workspace):

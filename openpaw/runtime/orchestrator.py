@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 
 from openpaw.core.config import Config
-from openpaw.workspace.loader import WorkspaceLoader
+from openpaw.core.paths import AGENT_MD
 from openpaw.workspace.runner import WorkspaceRunner
 
 logger = logging.getLogger(__name__)
@@ -77,8 +77,10 @@ class OpenPawOrchestrator:
     def discover_workspaces(cls, workspaces_path: Path) -> list[str]:
         """Discover all valid workspaces in the workspaces directory.
 
-        A valid workspace is a directory containing all required files
-        (AGENT.md, USER.md, SOUL.md, HEARTBEAT.md).
+        A valid workspace is a directory containing the agent identity marker.
+        Checks both the new structured layout (``agent/AGENT.md``) and the
+        legacy flat layout (``AGENT.md`` at root). Legacy workspaces are
+        auto-migrated at startup by ``WorkspaceRunner``.
 
         Args:
             workspaces_path: Path to workspaces directory.
@@ -93,9 +95,10 @@ class OpenPawOrchestrator:
             return workspaces
 
         for entry in workspaces_path.iterdir():
-            if entry.is_dir() and all(
-                (entry / f).exists() for f in WorkspaceLoader.REQUIRED_FILES
-            ):
+            if not entry.is_dir():
+                continue
+            # New structured layout or legacy flat layout
+            if (entry / str(AGENT_MD)).exists() or (entry / "AGENT.md").exists():
                 workspaces.append(entry.name)
                 logger.debug(f"Discovered workspace: {entry.name}")
 

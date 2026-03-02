@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from openpaw.core.paths import VECTORS_DB
 from openpaw.stores.vector.base import BaseVectorStore
 from openpaw.stores.vector.embeddings import BaseEmbeddingProvider
 
@@ -27,7 +28,7 @@ def create_vector_store(provider: str, config: dict[str, Any], workspace_path: P
     if provider == "sqlite_vec":
         from openpaw.stores.vector.sqlite_vec import SqliteVecStore
 
-        db_path = workspace_path / ".openpaw" / "vectors.db"
+        db_path = workspace_path / str(VECTORS_DB)
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
         return SqliteVecStore(

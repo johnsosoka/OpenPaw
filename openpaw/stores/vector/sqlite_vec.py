@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class SqliteVecStore(BaseVectorStore):
     """sqlite-vec backed vector store.
 
-    Storage: {workspace}/.openpaw/vectors.db
+    Storage: {workspace}/data/vectors.db
     Uses aiosqlite + sqlite-vec extension for vector similarity search.
 
     Tables:

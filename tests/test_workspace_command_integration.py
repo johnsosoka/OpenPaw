@@ -16,10 +16,12 @@ def mock_workspace(tmp_path: Path):
     workspace_path.mkdir()
 
     # Create required workspace files
-    (workspace_path / "AGENT.md").write_text("# Agent\nTest agent")
-    (workspace_path / "USER.md").write_text("# User\nTest user")
-    (workspace_path / "SOUL.md").write_text("# Soul\nTest soul")
-    (workspace_path / "HEARTBEAT.md").write_text("# Heartbeat\nTest heartbeat")
+    agent_dir = workspace_path / "agent"
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    (agent_dir / "AGENT.md").write_text("# Agent\nTest agent")
+    (agent_dir / "USER.md").write_text("# User\nTest user")
+    (agent_dir / "SOUL.md").write_text("# Soul\nTest soul")
+    (agent_dir / "HEARTBEAT.md").write_text("# Heartbeat\nTest heartbeat")
 
     return workspace_path
 
@@ -62,6 +64,7 @@ async def test_workspace_runner_initializes_command_router(mock_config, mock_wor
 
     # Mock workspace loader
     with (
+        patch("openpaw.workspace.runner.migrate_workspace", return_value=[]),
         patch("openpaw.workspace.runner.WorkspaceLoader") as mock_loader_cls,
         patch("openpaw.workspace.runner.load_workspace_tools", return_value=[]),
         patch("openpaw.workspace.runner.BuiltinLoader") as mock_builtin_loader_cls,
@@ -105,6 +108,7 @@ async def test_workspace_runner_registers_framework_commands(mock_config, mock_w
     from openpaw.workspace.runner import WorkspaceRunner
 
     with (
+        patch("openpaw.workspace.runner.migrate_workspace", return_value=[]),
         patch("openpaw.workspace.runner.WorkspaceLoader") as mock_loader_cls,
         patch("openpaw.workspace.runner.load_workspace_tools", return_value=[]),
         patch("openpaw.workspace.runner.BuiltinLoader") as mock_builtin_loader_cls,
@@ -153,6 +157,7 @@ async def test_workspace_runner_build_command_context(mock_config, mock_workspac
     from openpaw.workspace.runner import WorkspaceRunner
 
     with (
+        patch("openpaw.workspace.runner.migrate_workspace", return_value=[]),
         patch("openpaw.workspace.runner.WorkspaceLoader") as mock_loader_cls,
         patch("openpaw.workspace.runner.load_workspace_tools", return_value=[]),
         patch("openpaw.workspace.runner.BuiltinLoader") as mock_builtin_loader_cls,
@@ -225,6 +230,7 @@ async def test_workspace_runner_build_command_context_missing_channel_raises(
     from openpaw.workspace.runner import WorkspaceRunner
 
     with (
+        patch("openpaw.workspace.runner.migrate_workspace", return_value=[]),
         patch("openpaw.workspace.runner.WorkspaceLoader") as mock_loader_cls,
         patch("openpaw.workspace.runner.load_workspace_tools", return_value=[]),
         patch("openpaw.workspace.runner.BuiltinLoader") as mock_builtin_loader_cls,

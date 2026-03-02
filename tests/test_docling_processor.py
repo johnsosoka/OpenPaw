@@ -465,7 +465,7 @@ async def test_saved_path_reads_from_disk(
 ):
     """Verify that processor reads from saved_path when available."""
     # Create a saved file on disk
-    uploads_dir = workspace_path / "uploads" / "2026-02-07"
+    uploads_dir = workspace_path / "data" / "uploads" / "2026-02-07"
     uploads_dir.mkdir(parents=True, exist_ok=True)
     source_file = uploads_dir / "report.pdf"
     source_file.write_bytes(b"%PDF-1.4 fake pdf content")
@@ -476,7 +476,7 @@ async def test_saved_path_reads_from_disk(
             data=None,  # No data - should read from saved_path
             mime_type="application/pdf",
             filename="report.pdf",
-            saved_path="uploads/2026-02-07/report.pdf",
+            saved_path="data/uploads/2026-02-07/report.pdf",
         )
     ]
 
@@ -509,7 +509,7 @@ async def test_saved_path_reads_from_disk(
     assert "# Report" in md_file.read_text()
 
     # Verify attachment metadata was set
-    assert sample_message.attachments[0].metadata.get("processed_path") == "uploads/2026-02-07/report.md"
+    assert sample_message.attachments[0].metadata.get("processed_path") == "data/uploads/2026-02-07/report.md"
 
 
 @pytest.mark.asyncio
@@ -563,7 +563,7 @@ async def test_sibling_md_written(
 ):
     """Verify that .md file is written as sibling to source file."""
     # Create a saved file on disk
-    uploads_dir = workspace_path / "uploads" / "2026-02-07"
+    uploads_dir = workspace_path / "data" / "uploads" / "2026-02-07"
     uploads_dir.mkdir(parents=True, exist_ok=True)
     source_file = uploads_dir / "document.pdf"
     source_file.write_bytes(b"%PDF-1.4 content")
@@ -574,7 +574,7 @@ async def test_sibling_md_written(
             data=None,
             mime_type="application/pdf",
             filename="document.pdf",
-            saved_path="uploads/2026-02-07/document.pdf",
+            saved_path="data/uploads/2026-02-07/document.pdf",
         )
     ]
 
@@ -616,7 +616,7 @@ async def test_processed_path_metadata_set(
 ):
     """Verify that attachment.metadata['processed_path'] is set correctly."""
     # Create a saved file on disk
-    uploads_dir = workspace_path / "uploads" / "2026-02-07"
+    uploads_dir = workspace_path / "data" / "uploads" / "2026-02-07"
     uploads_dir.mkdir(parents=True, exist_ok=True)
     source_file = uploads_dir / "test.pdf"
     source_file.write_bytes(b"%PDF content")
@@ -626,7 +626,7 @@ async def test_processed_path_metadata_set(
         data=None,
         mime_type="application/pdf",
         filename="test.pdf",
-        saved_path="uploads/2026-02-07/test.pdf",
+        saved_path="data/uploads/2026-02-07/test.pdf",
     )
     sample_message.attachments = [attachment]
 
@@ -652,7 +652,7 @@ async def test_processed_path_metadata_set(
     # Verify processed_path metadata is set
     assert attachment.metadata is not None
     assert "processed_path" in attachment.metadata
-    assert attachment.metadata["processed_path"] == "uploads/2026-02-07/test.md"
+    assert attachment.metadata["processed_path"] == "data/uploads/2026-02-07/test.md"
 
 
 # ============================================================================

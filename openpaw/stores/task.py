@@ -13,16 +13,17 @@ from typing import Any
 
 import yaml
 
+from openpaw.core.paths import TASKS_YAML
 from openpaw.model.task import Task, TaskPriority, TaskStatus
 
 logger = logging.getLogger(__name__)
 
 
 class TaskStore:
-    """Manages persistent storage of task state in TASKS.yaml.
+    """Manages persistent storage of task state in data/TASKS.yaml.
 
     Provides CRUD operations for task management with thread-safe file access.
-    Tasks are stored in YAML format at {workspace_path}/TASKS.yaml.
+    Tasks are stored in YAML format at {workspace_path}/data/TASKS.yaml.
 
     Example:
         >>> store = TaskStore(Path("agent_workspaces/gilfoyle"))
@@ -37,7 +38,6 @@ class TaskStore:
         >>> store.update(task.id, status=TaskStatus.COMPLETED)
     """
 
-    STORAGE_FILENAME = "TASKS.yaml"
     VERSION = 1
 
     def __init__(self, workspace_path: Path):
@@ -47,11 +47,11 @@ class TaskStore:
             workspace_path: Path to the agent workspace root.
         """
         self.workspace_path = Path(workspace_path)
-        self.storage_file = self.workspace_path / self.STORAGE_FILENAME
+        self.storage_file = self.workspace_path / str(TASKS_YAML)
         self._lock = Lock()
 
-        # Ensure workspace directory exists
-        self.workspace_path.mkdir(parents=True, exist_ok=True)
+        # Ensure the data/ directory exists
+        self.storage_file.parent.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"TaskStore initialized: {self.storage_file}")
 
