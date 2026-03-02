@@ -517,7 +517,7 @@ class TestBuildHeartbeatPrompt:
         result = scheduler._build_heartbeat_prompt()
 
         # Should contain key sections from template
-        assert "Check your HEARTBEAT.md file" in result
+        assert "agent/HEARTBEAT.md" in result
         assert "If nothing requires immediate attention" in result
 
 
@@ -613,7 +613,8 @@ class TestHeartbeatSchedulerStart:
     async def test_start_configures_interval_trigger(self, mock_scheduler_class: Any, tmp_workspace) -> None:
         """Test start configures correct interval trigger."""
         # Create HEARTBEAT.md to prevent skip
-        (tmp_workspace / "HEARTBEAT.md").write_text("# Heartbeat\nSome content here")
+        (tmp_workspace / "agent").mkdir(parents=True, exist_ok=True)
+        (tmp_workspace / "agent" / "HEARTBEAT.md").write_text("# Heartbeat\nSome content here")
 
         mock_scheduler_instance = Mock()
         mock_scheduler_class.return_value = mock_scheduler_instance
@@ -725,9 +726,6 @@ class TestRunHeartbeat:
     @patch("openpaw.runtime.scheduling.heartbeat.workspace_now")
     async def test_run_heartbeat_executes_within_active_hours(self, mock_workspace_now: Any, tmp_workspace) -> None:
         """Test heartbeat executes when within active hours."""
-        # Create HEARTBEAT.md to prevent skip
-        (tmp_workspace / "HEARTBEAT.md").write_text("# Heartbeat\nSome content here")
-
         mock_dt = Mock()
         mock_dt.time.return_value = time(14, 0)
         mock_workspace_now.return_value = mock_dt
@@ -749,7 +747,9 @@ class TestRunHeartbeat:
             config=config,
         )
 
-        await scheduler._run_heartbeat()
+        # Mock pre-flight check so file layout doesn't affect this test
+        with patch.object(scheduler, "_should_skip_heartbeat", return_value=(False, "test", None, 0)):
+            await scheduler._run_heartbeat()
 
         # Agent factory should be called
         mock_agent_factory.assert_called_once()
@@ -757,9 +757,6 @@ class TestRunHeartbeat:
 
     async def test_run_heartbeat_passes_prompt_to_agent(self, tmp_workspace) -> None:
         """Test heartbeat passes generated prompt to agent."""
-        # Create HEARTBEAT.md to prevent skip
-        (tmp_workspace / "HEARTBEAT.md").write_text("# Heartbeat\nSome content here")
-
         mock_agent_runner = AsyncMock()
         mock_agent_runner.run.return_value = "HEARTBEAT_OK"
         mock_agent_factory = Mock(return_value=mock_agent_runner)
@@ -773,7 +770,9 @@ class TestRunHeartbeat:
             config=config,
         )
 
-        await scheduler._run_heartbeat()
+        # Mock pre-flight check so file layout doesn't affect this test
+        with patch.object(scheduler, "_should_skip_heartbeat", return_value=(False, "test", None, 0)):
+            await scheduler._run_heartbeat()
 
         # Verify run was called with heartbeat prompt
         mock_agent_runner.run.assert_called_once()
@@ -812,9 +811,6 @@ class TestRunHeartbeat:
 
     async def test_run_heartbeat_sends_non_ok_response(self, tmp_workspace) -> None:
         """Test non-OK response is sent to channel."""
-        # Create HEARTBEAT.md to prevent skip
-        (tmp_workspace / "HEARTBEAT.md").write_text("# Heartbeat\nSome content here")
-
         response_text = "Found issues requiring attention"
         mock_agent_runner = AsyncMock()
         mock_agent_runner.run.return_value = response_text
@@ -839,7 +835,9 @@ class TestRunHeartbeat:
             config=config,
         )
 
-        await scheduler._run_heartbeat()
+        # Mock pre-flight check so file layout doesn't affect this test
+        with patch.object(scheduler, "_should_skip_heartbeat", return_value=(False, "test", None, 0)):
+            await scheduler._run_heartbeat()
 
         # Channel send_message should be called
         mock_channel.build_session_key.assert_called_once_with(123456)
@@ -850,9 +848,6 @@ class TestRunHeartbeat:
 
     async def test_run_heartbeat_sends_ok_when_not_suppressed(self, tmp_workspace) -> None:
         """Test HEARTBEAT_OK is sent when suppress_ok=False."""
-        # Create HEARTBEAT.md to prevent skip
-        (tmp_workspace / "HEARTBEAT.md").write_text("# Heartbeat\nSome content here")
-
         mock_agent_runner = AsyncMock()
         mock_agent_runner.run.return_value = "HEARTBEAT_OK"
         mock_agent_factory = Mock(return_value=mock_agent_runner)
@@ -876,7 +871,9 @@ class TestRunHeartbeat:
             config=config,
         )
 
-        await scheduler._run_heartbeat()
+        # Mock pre-flight check so file layout doesn't affect this test
+        with patch.object(scheduler, "_should_skip_heartbeat", return_value=(False, "test", None, 0)):
+            await scheduler._run_heartbeat()
 
         # Channel send_message should be called
         mock_channel.send_message.assert_called_once_with(
@@ -953,9 +950,6 @@ class TestRunHeartbeat:
 
     async def test_run_heartbeat_no_active_hours_always_runs(self, tmp_workspace) -> None:
         """Test heartbeat always runs when no active hours set."""
-        # Create HEARTBEAT.md to prevent skip
-        (tmp_workspace / "HEARTBEAT.md").write_text("# Heartbeat\nSome content here")
-
         mock_agent_runner = AsyncMock()
         mock_agent_runner.run.return_value = "HEARTBEAT_OK"
         mock_agent_factory = Mock(return_value=mock_agent_runner)
@@ -973,7 +967,9 @@ class TestRunHeartbeat:
             config=config,
         )
 
-        await scheduler._run_heartbeat()
+        # Mock pre-flight check so file layout doesn't affect this test
+        with patch.object(scheduler, "_should_skip_heartbeat", return_value=(False, "test", None, 0)):
+            await scheduler._run_heartbeat()
 
         # Should execute regardless of current time
         mock_agent_factory.assert_called_once()

@@ -16,10 +16,12 @@ def mock_workspace(tmp_path: Path):
     workspace_path.mkdir()
 
     # Create required workspace files
-    (workspace_path / "AGENT.md").write_text("# Agent\nTest agent")
-    (workspace_path / "USER.md").write_text("# User\nTest user")
-    (workspace_path / "SOUL.md").write_text("# Soul\nTest soul")
-    (workspace_path / "HEARTBEAT.md").write_text("# Heartbeat\nTest heartbeat")
+    agent_dir = workspace_path / "agent"
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    (agent_dir / "AGENT.md").write_text("# Agent\nTest agent")
+    (agent_dir / "USER.md").write_text("# User\nTest user")
+    (agent_dir / "SOUL.md").write_text("# Soul\nTest soul")
+    (agent_dir / "HEARTBEAT.md").write_text("# Heartbeat\nTest heartbeat")
 
     return workspace_path
 

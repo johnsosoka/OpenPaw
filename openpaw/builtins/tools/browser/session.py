@@ -8,6 +8,7 @@ from typing import Any
 
 from openpaw.builtins.tools.browser.security import DomainPolicy
 from openpaw.builtins.tools.browser.snapshot import SnapshotTransformer
+from openpaw.core.paths import BROWSER_COOKIES_JSON
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +56,11 @@ class BrowserSession:
         # Paths (workspace-relative)
         workspace_path = Path(config["workspace_path"])
         self.workspace_path = workspace_path
-        self.downloads_dir = workspace_path / config.get("downloads_dir", "downloads")
+        self.downloads_dir = workspace_path / config.get("downloads_dir", "workspace/downloads")
         self.screenshots_dir = workspace_path / config.get(
-            "screenshots_dir", "screenshots"
+            "screenshots_dir", "workspace/screenshots"
         )
-        self.cookie_file = workspace_path / ".openpaw" / "browser_cookies.json"
+        self.cookie_file = workspace_path / str(BROWSER_COOKIES_JSON)
 
         # Create directories if needed
         self.downloads_dir.mkdir(parents=True, exist_ok=True)
@@ -716,7 +717,7 @@ class BrowserSession:
             return
 
         try:
-            # Ensure .openpaw directory exists
+            # Ensure the data/ directory exists
             self.cookie_file.parent.mkdir(parents=True, exist_ok=True)
 
             # Save storage state

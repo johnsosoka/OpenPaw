@@ -14,6 +14,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from openpaw.agent.session_logger import SessionLogger
 from openpaw.channels.base import ChannelAdapter
 from openpaw.core.config import HeartbeatConfig
+from openpaw.core.paths import HEARTBEAT_LOG_JSONL, HEARTBEAT_MD, TASKS_YAML
 from openpaw.core.prompts.heartbeat import (
     ACTIVE_TASKS_TEMPLATE,
     HEARTBEAT_PROMPT,
@@ -30,8 +31,6 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
-
-HEARTBEAT_LOG_FILENAME = "heartbeat_log.jsonl"
 
 
 class HeartbeatScheduler:
@@ -181,7 +180,7 @@ class HeartbeatScheduler:
             task_summary is None if skipping or no active tasks, otherwise a formatted string.
             task_count is the number of active tasks found (0 if none or on error).
         """
-        heartbeat_md = self.workspace_path / "HEARTBEAT.md"
+        heartbeat_md = self.workspace_path / str(HEARTBEAT_MD)
         heartbeat_empty = True
         if heartbeat_md.exists():
             try:
@@ -190,7 +189,7 @@ class HeartbeatScheduler:
             except OSError:
                 heartbeat_empty = False  # Can't read = don't skip
 
-        tasks_file = self.workspace_path / "TASKS.yaml"
+        tasks_file = self.workspace_path / str(TASKS_YAML)
         active_tasks = []
         if tasks_file.exists():
             try:
@@ -240,7 +239,7 @@ class HeartbeatScheduler:
             response: Full agent response text.
             tools_used: List of tool names invoked during the heartbeat.
         """
-        log_path = self.workspace_path / HEARTBEAT_LOG_FILENAME
+        log_path = self.workspace_path / str(HEARTBEAT_LOG_JSONL)
         event: dict[str, Any] = {
             "timestamp": datetime.now(UTC).isoformat(),
             "workspace": self.workspace_name,

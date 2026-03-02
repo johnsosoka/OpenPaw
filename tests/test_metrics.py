@@ -292,7 +292,7 @@ def test_tokens_today_mountain_time(workspace_with_tokens: Path):
     ) - timedelta(days=1)
 
     # Manually log an entry with yesterday's timestamp
-    log_path = workspace_with_tokens / ".openpaw" / "token_usage.jsonl"
+    log_path = workspace_with_tokens / "data" / "token_usage.jsonl"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(log_path, "a") as f:
@@ -378,7 +378,7 @@ def test_tokens_today_multiple_timezones(workspace_with_tokens: Path):
     reader = TokenUsageReader(workspace_with_tokens)
 
     # Create entries near midnight boundary
-    log_path = workspace_with_tokens / ".openpaw" / "token_usage.jsonl"
+    log_path = workspace_with_tokens / "data" / "token_usage.jsonl"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Entry at 11:30 PM Pacific Time

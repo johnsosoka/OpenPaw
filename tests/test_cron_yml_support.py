@@ -19,13 +19,13 @@ class TestCronLoaderYmlSupport:
         with tempfile.TemporaryDirectory() as tmpdir:
             workspace = Path(tmpdir) / "test_workspace"
             workspace.mkdir()
-            crons_dir = workspace / "crons"
-            crons_dir.mkdir()
+            crons_dir = workspace / "config" / "crons"
+            crons_dir.mkdir(parents=True, exist_ok=True)
             yield workspace
 
     def test_load_all_includes_yml_files(self, workspace_path):
         """Test that load_all() includes both .yaml and .yml files."""
-        crons_dir = workspace_path / "crons"
+        crons_dir = workspace_path / "config" / "crons"
 
         # Create .yaml file
         yaml_cron = {
@@ -59,7 +59,7 @@ class TestCronLoaderYmlSupport:
 
     def test_load_all_sorted_order(self, workspace_path):
         """Test that .yaml and .yml files are loaded in sorted order."""
-        crons_dir = workspace_path / "crons"
+        crons_dir = workspace_path / "config" / "crons"
 
         # Create files in non-alphabetical order
         for name in ["c.yml", "a.yaml", "b.yml"]:
@@ -83,7 +83,7 @@ class TestCronLoaderYmlSupport:
 
     def test_load_one_prefers_yaml_then_yml(self, workspace_path):
         """Test that load_one() checks .yaml first, then .yml."""
-        crons_dir = workspace_path / "crons"
+        crons_dir = workspace_path / "config" / "crons"
 
         yml_cron = {
             "name": "test-cron",
@@ -103,7 +103,7 @@ class TestCronLoaderYmlSupport:
 
     def test_load_one_yaml_takes_precedence(self, workspace_path):
         """Test that .yaml takes precedence over .yml when both exist."""
-        crons_dir = workspace_path / "crons"
+        crons_dir = workspace_path / "config" / "crons"
 
         # Create both .yaml and .yml
         yaml_cron = {
@@ -156,20 +156,22 @@ class TestWorkspaceLoaderYmlSupport:
             workspace = root / "test_workspace"
             workspace.mkdir()
 
-            # Create required workspace files
+            # Create required workspace files in agent/ subdirectory
+            agent_dir = workspace / "agent"
+            agent_dir.mkdir(parents=True, exist_ok=True)
             for filename in ["AGENT.md", "USER.md", "SOUL.md", "HEARTBEAT.md"]:
-                (workspace / filename).write_text(f"# {filename}\n")
+                (agent_dir / filename).write_text(f"# {filename}\n")
 
-            # Create crons directory
-            crons_dir = workspace / "crons"
-            crons_dir.mkdir()
+            # Create crons directory under config/
+            crons_dir = workspace / "config" / "crons"
+            crons_dir.mkdir(parents=True, exist_ok=True)
 
             yield root
 
     def test_workspace_loader_includes_yml_crons(self, workspaces_root):
         """Test that WorkspaceLoader._load_crons() includes .yml files."""
         workspace_path = workspaces_root / "test_workspace"
-        crons_dir = workspace_path / "crons"
+        crons_dir = workspace_path / "config" / "crons"
 
         # Create .yaml file
         yaml_cron = {
@@ -204,7 +206,7 @@ class TestWorkspaceLoaderYmlSupport:
     def test_workspace_loader_crons_sorted(self, workspaces_root):
         """Test that crons are loaded in sorted order."""
         workspace_path = workspaces_root / "test_workspace"
-        crons_dir = workspace_path / "crons"
+        crons_dir = workspace_path / "config" / "crons"
 
         # Create files in non-alphabetical order
         for name in ["z.yml", "a.yaml", "m.yml"]:
@@ -229,7 +231,7 @@ class TestWorkspaceLoaderYmlSupport:
     def test_workspace_loader_handles_invalid_yml_gracefully(self, workspaces_root):
         """Test that invalid .yml files are logged as warnings, not errors."""
         workspace_path = workspaces_root / "test_workspace"
-        crons_dir = workspace_path / "crons"
+        crons_dir = workspace_path / "config" / "crons"
 
         # Create invalid .yml file
         with (crons_dir / "invalid.yml").open("w") as f:

@@ -6,6 +6,17 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from openpaw.core.paths import (
+    AGENT_MD,
+    AGENT_YAML,
+    CRONS_DIR,
+    HEARTBEAT_MD,
+    IDENTITY_FILES,
+    SKILLS_DIR,
+    SOUL_MD,
+    TOOLS_DIR,
+    USER_MD,
+)
 from openpaw.core.workspace import AgentWorkspace
 
 logger = logging.getLogger(__name__)
@@ -18,9 +29,7 @@ if TYPE_CHECKING:
 class WorkspaceLoader:
     """Loads agent workspaces from filesystem."""
 
-    REQUIRED_FILES = ["AGENT.md", "USER.md", "SOUL.md", "HEARTBEAT.md"]
-    SKILLS_DIR = "skills"
-    TOOLS_DIR = "tools"
+    REQUIRED_FILES = [str(f) for f in IDENTITY_FILES]
 
     def __init__(self, workspaces_root: Path):
         """Initialize the workspace loader.
@@ -71,8 +80,8 @@ class WorkspaceLoader:
         if missing:
             raise FileNotFoundError(f"Missing required files in {workspace_name}: {missing}")
 
-        skills_path = workspace_path / self.SKILLS_DIR
-        tools_path = workspace_path / self.TOOLS_DIR
+        skills_path = workspace_path / str(SKILLS_DIR)
+        tools_path = workspace_path / str(TOOLS_DIR)
 
         # Load optional workspace config and crons
         workspace_config = self._load_workspace_config(workspace_path)
@@ -81,10 +90,10 @@ class WorkspaceLoader:
         return AgentWorkspace(
             name=workspace_name,
             path=workspace_path,
-            agent_md=self._read_file(workspace_path / "AGENT.md"),
-            user_md=self._read_file(workspace_path / "USER.md"),
-            soul_md=self._read_file(workspace_path / "SOUL.md"),
-            heartbeat_md=self._read_file(workspace_path / "HEARTBEAT.md"),
+            agent_md=self._read_file(workspace_path / str(AGENT_MD)),
+            user_md=self._read_file(workspace_path / str(USER_MD)),
+            soul_md=self._read_file(workspace_path / str(SOUL_MD)),
+            heartbeat_md=self._read_file(workspace_path / str(HEARTBEAT_MD)),
             skills_path=skills_path,
             tools_path=tools_path,
             config=workspace_config,
@@ -104,9 +113,9 @@ class WorkspaceLoader:
             workspace_path: Path to the workspace directory.
 
         Returns:
-            WorkspaceConfig object or None if agent.yaml doesn't exist.
+            WorkspaceConfig object or None if config/agent.yaml doesn't exist.
         """
-        config_file = workspace_path / "agent.yaml"
+        config_file = workspace_path / str(AGENT_YAML)
         if not config_file.exists():
             return None
 
@@ -118,20 +127,20 @@ class WorkspaceLoader:
 
         # Apply environment variable substitution
         data = expand_env_vars_recursive(data)
-        check_unexpanded_vars(data, source=f"{workspace_path.name}/agent.yaml")
+        check_unexpanded_vars(data, source=f"{workspace_path.name}/config/agent.yaml")
 
         return WorkspaceConfig(**data)
 
     def _load_crons(self, workspace_path: Path) -> "list[CronDefinition]":
-        """Load all cron definitions from workspace's crons/ directory.
+        """Load all cron definitions from workspace's config/crons/ directory.
 
         Args:
             workspace_path: Path to the workspace directory.
 
         Returns:
-            List of CronDefinition objects, empty list if crons/ doesn't exist.
+            List of CronDefinition objects, empty list if config/crons/ doesn't exist.
         """
-        crons_dir = workspace_path / "crons"
+        crons_dir = workspace_path / str(CRONS_DIR)
         if not crons_dir.exists() or not crons_dir.is_dir():
             return []
 
@@ -149,7 +158,10 @@ class WorkspaceLoader:
 
                 # Apply environment variable substitution
                 data = expand_env_vars_recursive(data)
-                check_unexpanded_vars(data, source=f"{workspace_path.name}/crons/{cron_file.name}")
+                check_unexpanded_vars(
+                    data,
+                    source=f"{workspace_path.name}/config/crons/{cron_file.name}",
+                )
 
                 cron_definitions.append(CronDefinition(**data))
             except Exception as e:

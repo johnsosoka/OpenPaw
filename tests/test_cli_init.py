@@ -25,8 +25,10 @@ def _make_valid_workspace(base: Path, name: str) -> Path:
     """Create a minimal valid workspace directory under base."""
     ws = base / name
     ws.mkdir(parents=True)
+    agent_dir = ws / "agent"
+    agent_dir.mkdir()
     for fname in ["AGENT.md", "USER.md", "SOUL.md", "HEARTBEAT.md"]:
-        (ws / fname).write_text(f"# {fname}", encoding="utf-8")
+        (agent_dir / fname).write_text(f"# {fname}", encoding="utf-8")
     return ws
 
 
@@ -91,26 +93,29 @@ class TestCreateWorkspace:
     """Unit tests for _create_workspace()."""
 
     def test_creates_required_files(self, tmp_path: Path) -> None:
-        """All four required markdown files and agent.yaml must be present."""
+        """All four required markdown files must be in agent/ and agent.yaml in config/."""
         _create_workspace(tmp_path, "my_agent", None, None)
 
         ws = tmp_path / "my_agent"
-        for fname in ["AGENT.md", "USER.md", "SOUL.md", "HEARTBEAT.md", "agent.yaml"]:
-            assert (ws / fname).exists(), f"Expected {fname} to exist"
+        agent_dir = ws / "agent"
+        config_dir = ws / "config"
+        for fname in ["AGENT.md", "USER.md", "SOUL.md", "HEARTBEAT.md"]:
+            assert (agent_dir / fname).exists(), f"Expected agent/{fname} to exist"
+        assert (config_dir / "agent.yaml").exists(), "Expected config/agent.yaml to exist"
 
     def test_creates_env_file(self, tmp_path: Path) -> None:
         _create_workspace(tmp_path, "my_agent", None, None)
-        assert (tmp_path / "my_agent" / ".env").exists()
+        assert (tmp_path / "my_agent" / "config" / ".env").exists()
 
     def test_name_placeholder_replaced_in_agent_md(self, tmp_path: Path) -> None:
         _create_workspace(tmp_path, "hal", None, None)
-        content = (tmp_path / "hal" / "AGENT.md").read_text()
+        content = (tmp_path / "hal" / "agent" / "AGENT.md").read_text()
         assert "AGENT: hal" in content
         assert "{name}" not in content
 
     def test_name_placeholder_replaced_in_soul_md(self, tmp_path: Path) -> None:
         _create_workspace(tmp_path, "hal", None, None)
-        content = (tmp_path / "hal" / "SOUL.md").read_text()
+        content = (tmp_path / "hal" / "agent" / "SOUL.md").read_text()
         assert "SOUL: hal" in content
         assert "{name}" not in content
 
@@ -133,7 +138,7 @@ class TestCreateWorkspace:
         from openpaw.core.config.models import WorkspaceConfig
 
         _create_workspace(tmp_path, "chomsky", None, None)
-        data = yaml.safe_load((tmp_path / "chomsky" / "agent.yaml").read_text())
+        data = yaml.safe_load((tmp_path / "chomsky" / "config" / "agent.yaml").read_text())
         # Pydantic should not raise here.
         WorkspaceConfig(**data)
 
@@ -242,12 +247,12 @@ class TestHandleInit:
 
     def test_model_flag_passed_through(self, tmp_path: Path) -> None:
         _handle_init(["agent_x", "--path", str(tmp_path), "--model", "anthropic:claude-sonnet-4-20250514"])
-        data = yaml.safe_load((tmp_path / "agent_x" / "agent.yaml").read_text())
+        data = yaml.safe_load((tmp_path / "agent_x" / "config" / "agent.yaml").read_text())
         assert data["model"]["provider"] == "anthropic"
 
     def test_channel_flag_passed_through(self, tmp_path: Path) -> None:
         _handle_init(["agent_y", "--path", str(tmp_path), "--channel", "telegram"])
-        data = yaml.safe_load((tmp_path / "agent_y" / "agent.yaml").read_text())
+        data = yaml.safe_load((tmp_path / "agent_y" / "config" / "agent.yaml").read_text())
         assert data["channel"]["type"] == "telegram"
 
 

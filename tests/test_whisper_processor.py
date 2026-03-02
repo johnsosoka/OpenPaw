@@ -278,7 +278,7 @@ async def test_transcript_saved_to_disk(
 ):
     """Verify transcript is saved as sibling .txt file."""
     # Create the saved audio file on disk
-    uploads_dir = workspace_path / "uploads" / "2026-02-07"
+    uploads_dir = workspace_path / "data" / "uploads" / "2026-02-07"
     uploads_dir.mkdir(parents=True)
     audio_path = uploads_dir / "voice_123.ogg"
     audio_path.write_bytes(b"fake audio data")
@@ -289,7 +289,7 @@ async def test_transcript_saved_to_disk(
             data=b"fake audio data",
             mime_type="audio/ogg",
             filename="voice_123.ogg",
-            saved_path="uploads/2026-02-07/voice_123.ogg",
+            saved_path="data/uploads/2026-02-07/voice_123.ogg",
         )
     ]
 
@@ -304,7 +304,7 @@ async def test_transcript_saved_to_disk(
 
     # Verify processed_path in metadata
     attachment = result.message.attachments[0]
-    assert attachment.metadata.get("processed_path") == "uploads/2026-02-07/voice_123.txt"
+    assert attachment.metadata.get("processed_path") == "data/uploads/2026-02-07/voice_123.txt"
 
 
 @pytest.mark.asyncio
@@ -340,7 +340,7 @@ async def test_transcript_no_workspace_path(
 ):
     """Verify no disk write when workspace_path is not configured."""
     # Create audio file (won't be used for saving)
-    uploads_dir = tmp_path / "uploads" / "2026-02-07"
+    uploads_dir = tmp_path / "data" / "uploads" / "2026-02-07"
     uploads_dir.mkdir(parents=True)
     audio_path = uploads_dir / "voice_123.ogg"
     audio_path.write_bytes(b"fake audio data")
@@ -351,7 +351,7 @@ async def test_transcript_no_workspace_path(
             data=b"fake audio data",
             mime_type="audio/ogg",
             filename="voice_123.ogg",
-            saved_path="uploads/2026-02-07/voice_123.ogg",
+            saved_path="data/uploads/2026-02-07/voice_123.ogg",
         )
     ]
 

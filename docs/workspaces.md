@@ -6,36 +6,45 @@ Workspaces are isolated agent instances with their own personality, configuratio
 
 ```
 agent_workspaces/<name>/
-├── AGENT.md          # Capabilities, behavior guidelines
-├── USER.md           # User context/preferences
-├── SOUL.md           # Core personality, values
-├── HEARTBEAT.md      # Current state, session notes (agent-writable)
-├── agent.yaml        # Optional per-workspace configuration
-├── .env              # Workspace-specific environment variables
-├── .openpaw/         # Framework internals (protected from agent access)
+├── agent/                  # Identity and extensions
+│   ├── AGENT.md            # Capabilities, behavior guidelines
+│   ├── USER.md             # User context/preferences
+│   ├── SOUL.md             # Core personality, values
+│   ├── HEARTBEAT.md        # Session state scratchpad (agent-writable)
+│   ├── tools/              # Custom LangChain @tool functions
+│   │   ├── *.py
+│   │   └── requirements.txt
+│   └── skills/             # Skill directories
+├── config/                 # Configuration (write-protected from agent)
+│   ├── agent.yaml          # Per-workspace settings (model, channel, queue)
+│   ├── .env                # API keys and secrets
+│   └── crons/              # Scheduled task definitions
+│       └── *.yaml
+├── data/                   # Framework-managed state (write-protected from agent)
 │   ├── conversations.db    # AsyncSqliteSaver checkpoint database
 │   ├── sessions.json       # Session/conversation thread state
-│   ├── token_usage.jsonl   # Token usage metrics
-│   └── subagents.yaml      # Sub-agent state
-├── uploads/          # User-uploaded files (from FilePersistenceProcessor)
-│   └── {YYYY-MM-DD}/      # Date-partitioned storage
-│       ├── report.pdf        # Original uploaded file
-│       ├── report.md         # Docling-converted markdown (sibling)
-│       ├── voice_123.ogg     # Original audio file
-│       └── voice_123.txt     # Whisper transcript (sibling)
-├── downloads/        # Browser-downloaded files
-├── screenshots/      # Browser screenshots
-├── TASKS.yaml        # Persistent task tracking
-├── heartbeat_log.jsonl  # Heartbeat event log
-├── memory/
-│   └── conversations/  # Archived conversation exports
-│       ├── conv_*.md     # Markdown archives (human-readable)
-│       └── conv_*.json   # JSON sidecars (machine-readable)
-├── crons/            # Static scheduled task definitions
-│   └── *.yaml
-└── tools/            # Custom LangChain @tool functions
-    ├── *.py
-    └── requirements.txt
+│   ├── token_usage.jsonl   # Token usage metrics (append-only)
+│   ├── subagents.yaml      # Sub-agent state
+│   ├── TASKS.yaml          # Persistent task tracking
+│   ├── dynamic_crons.json  # Agent-scheduled tasks
+│   ├── heartbeat_log.jsonl # Heartbeat event log
+│   └── uploads/            # User-uploaded files (from FilePersistenceProcessor)
+│       └── {YYYY-MM-DD}/   # Date-partitioned storage
+│           ├── report.pdf        # Original uploaded file
+│           ├── report.md         # Docling-converted markdown (sibling)
+│           ├── voice_123.ogg     # Original audio file
+│           └── voice_123.txt     # Whisper transcript (sibling)
+├── memory/                 # Archived conversations and session logs
+│   ├── conversations/      # Conversation exports (markdown + JSON)
+│   │   ├── conv_*.md       # Markdown archives (human-readable)
+│   │   └── conv_*.json     # JSON sidecars (machine-readable)
+│   └── logs/               # Heartbeat, cron, and sub-agent session logs
+│       ├── heartbeat/
+│       ├── cron/
+│       └── subagent/
+└── workspace/              # Agent work area (default write target)
+    ├── downloads/          # Browser-downloaded files
+    └── screenshots/        # Browser screenshots
 ```
 
 ## Required Files
@@ -154,7 +163,7 @@ The agent can update HEARTBEAT.md during conversations to track ongoing work, de
 
 ### agent.yaml - Workspace Configuration
 
-Override global configuration for this specific workspace.
+Place at `config/agent.yaml` to override global configuration for this specific workspace.
 
 **Example:**
 
@@ -199,7 +208,7 @@ See the main CLAUDE.md documentation for detailed configuration options.
 
 ### .env - Environment Variables
 
-Workspace-specific environment variables are automatically loaded from `.env` files in the workspace root.
+Workspace-specific environment variables are automatically loaded from `config/.env`.
 
 **Example:**
 
@@ -225,7 +234,7 @@ Each workspace is fully isolated:
 - **Dedicated agent instance** - Own LangGraph agent with separate memory
 - **Per-workspace crons** - Scheduled tasks scoped to workspace
 - **Isolated sub-agents** - Background workers managed per workspace
-- **Protected framework internals** - `.openpaw/` directory is read-only to agents
+- **Protected framework internals** - `data/` and `config/` directories are write-protected from agents
 
 This enables running multiple agents simultaneously without interference:
 
@@ -257,7 +266,7 @@ All filesystem operations use `resolve_sandboxed_path()` from `openpaw/agent/too
 - **Workspace-scoped** - Cannot access files outside workspace directory
 - **No absolute paths** - Rejects paths starting with `/` or `~`
 - **No parent traversal** - Rejects `..` in paths
-- **Framework protection** - Cannot read or write `.openpaw/` directory
+- **Framework protection** - Cannot write to `data/` or `config/` directories
 
 ### Example Use Cases
 
@@ -283,11 +292,11 @@ User uploads document → FilePersistenceProcessor saves to uploads/ → Agent r
 
 ## Custom Tools
 
-Workspaces can define custom LangChain tools in the `tools/` directory. These are Python files containing `@tool` decorated functions that are automatically loaded and made available to the agent.
+Workspaces can define custom LangChain tools in the `agent/tools/` directory. These are Python files containing `@tool` decorated functions that are automatically loaded and made available to the agent.
 
 ### Creating Custom Tools
 
-**Example: Calendar tool** (`tools/calendar.py`)
+**Example: Calendar tool** (`agent/tools/calendar.py`)
 
 ```python
 from langchain_core.tools import tool
@@ -328,10 +337,10 @@ def check_availability(date: str) -> str:
 
 ### Tool Dependencies
 
-Add a `tools/requirements.txt` for tool-specific packages:
+Add a `agent/tools/requirements.txt` for tool-specific packages:
 
 ```
-# tools/requirements.txt
+# agent/tools/requirements.txt
 icalendar>=5.0.0
 caldav>=1.0.0
 requests>=2.31.0
@@ -341,7 +350,7 @@ Missing dependencies are automatically installed at workspace startup.
 
 ### Tool Loading
 
-- Files must be in `{workspace}/tools/*.py`
+- Files must be in `{workspace}/agent/tools/*.py`
 - Use LangChain's `@tool` decorator from `langchain_core.tools`
 - Tools are merged with framework builtins (brave_search, cron, browser, etc.)
 - Environment variables from workspace `.env` are available
@@ -360,9 +369,9 @@ Missing dependencies are automatically installed at workspace startup.
 
 ## Scheduled Tasks (Crons)
 
-Define scheduled tasks in the `crons/` directory using YAML files.
+Define scheduled tasks in the `config/crons/` directory using YAML files.
 
-**Example: crons/daily-summary.yaml**
+**Example: config/crons/daily-summary.yaml**
 
 ```yaml
 name: daily-summary
@@ -418,7 +427,7 @@ heartbeat:
 
 **Task Summary Injection:** When active tasks exist, a compact summary is automatically injected into the heartbeat prompt as `<active_tasks>` XML tags.
 
-**Event Logging:** Every heartbeat event is logged to `{workspace}/heartbeat_log.jsonl` with outcome, duration, token metrics, and active task count.
+**Event Logging:** Every heartbeat event is logged to `data/heartbeat_log.jsonl` with outcome, duration, token metrics, and active task count.
 
 ## Conversation Persistence
 
@@ -426,8 +435,8 @@ Conversations persist across restarts via `AsyncSqliteSaver` (from `langgraph-ch
 
 ### Storage Locations
 
-- **Active conversations** - `.openpaw/conversations.db` (SQLite checkpoint database)
-- **Session state** - `.openpaw/sessions.json` (thread tracking)
+- **Active conversations** - `data/conversations.db` (SQLite checkpoint database)
+- **Session state** - `data/sessions.json` (thread tracking)
 - **Archives** - `memory/conversations/` (dual-format exports: markdown + JSON)
 
 ### Conversation Lifecycle
@@ -462,14 +471,14 @@ poetry run openpaw init my_agent --model anthropic:claude-sonnet-4-20250514 --ch
 poetry run openpaw init my_agent --path /path/to/workspaces
 ```
 
-This creates the workspace directory with all required files (AGENT.md, USER.md, SOUL.md, HEARTBEAT.md, agent.yaml, .env) pre-populated with templates and TODO markers.
+This creates the workspace directory with the full 5-directory structure (`agent/`, `config/`, `data/`, `memory/`, `workspace/`) and pre-populates required files with templates and TODO markers.
 
 **After scaffolding:**
 
-1. Edit `agent.yaml` with your model and channel settings
-2. Add API keys to `.env`
-3. Customize AGENT.md, USER.md, and SOUL.md to define personality
-4. Optionally add custom tools in `tools/` and cron jobs in `crons/`
+1. Edit `config/agent.yaml` with your model and channel settings
+2. Add API keys to `config/.env`
+3. Customize `agent/AGENT.md`, `agent/USER.md`, and `agent/SOUL.md` to define personality
+4. Optionally add custom tools in `agent/tools/` and cron jobs in `config/crons/`
 5. Run the workspace:
 
 ```bash
@@ -533,7 +542,7 @@ You generate daily reports by analyzing system state and recent activity.
 - Analyzing conversation archives for trends
 ```
 
-**crons/daily-report.yaml:**
+**config/crons/daily-report.yaml:**
 ```yaml
 name: daily-report
 schedule: "0 9 * * 1-5"  # Weekdays at 9 AM
@@ -582,7 +591,7 @@ builtins:
     enabled: true
 ```
 
-**tools/calendar.py:**
+**agent/tools/calendar.py:**
 ```python
 from langchain_core.tools import tool
 

@@ -82,7 +82,7 @@ export BRAVE_API_KEY="your-brave-key"                # Web search
 export ELEVENLABS_API_KEY="your-elevenlabs-key"      # Text-to-speech
 ```
 
-**Per-workspace secrets:** You can also create a `.env` file in any workspace directory (`agent_workspaces/<name>/.env`) for workspace-specific environment variables. These are automatically loaded at workspace startup.
+**Per-workspace secrets:** You can also create a `.env` file in any workspace directory (`agent_workspaces/<name>/config/.env`) for workspace-specific environment variables. These are automatically loaded at workspace startup.
 
 ## Initial Configuration
 
@@ -134,18 +134,18 @@ This creates `agent_workspaces/my_agent/` with all required files:
 
 | File | Purpose |
 |------|---------|
-| `AGENT.md` | Capabilities, behavior guidelines |
-| `USER.md` | User context and preferences |
-| `SOUL.md` | Core personality and values |
-| `HEARTBEAT.md` | Session state scratchpad |
-| `agent.yaml` | Model, channel, and queue config |
-| `.env` | API key placeholders |
+| `agent/AGENT.md` | Capabilities, behavior guidelines |
+| `agent/USER.md` | User context and preferences |
+| `agent/SOUL.md` | Core personality and values |
+| `agent/HEARTBEAT.md` | Session state scratchpad |
+| `config/agent.yaml` | Model, channel, and queue config |
+| `config/.env` | API key placeholders |
 
 Each file includes TODO markers to guide customization.
 
 ### 2. Configure Your Workspace
 
-Edit `agent.yaml` with your model and channel settings. If you used `--model` and `--channel` flags, the relevant sections are already populated:
+Edit `config/agent.yaml` with your model and channel settings. If you used `--model` and `--channel` flags, the relevant sections are already populated:
 
 ```yaml
 name: my_agent
@@ -167,7 +167,7 @@ queue:
   debounce_ms: 1000
 ```
 
-Add your API keys to `.env`:
+Add your API keys to `config/.env`:
 
 ```bash
 ANTHROPIC_API_KEY=your-key-here
@@ -192,13 +192,13 @@ See [workspaces.md](workspaces.md) for detailed examples of each file.
 
 ### 4. Optional: Custom Tools
 
-Drop LangChain `@tool` functions into `tools/` directory:
+Drop LangChain `@tool` functions into `agent/tools/` directory:
 
 ```bash
-mkdir tools
+mkdir -p agent/tools
 ```
 
-Example `tools/weather.py`:
+Example `agent/tools/weather.py`:
 
 ```python
 from langchain_core.tools import tool
@@ -217,7 +217,7 @@ def get_weather(city: str) -> str:
     return f"Weather for {city}: Sunny, 72°F"
 ```
 
-Add tool-specific dependencies to `tools/requirements.txt`:
+Add tool-specific dependencies to `agent/tools/requirements.txt`:
 
 ```
 requests>=2.31.0
@@ -227,13 +227,13 @@ Dependencies are auto-installed at workspace startup.
 
 ### 5. Optional: Scheduled Tasks
 
-Create cron jobs in `crons/` directory:
+Create cron jobs in `config/crons/` directory:
 
 ```bash
-mkdir crons
+mkdir -p config/crons
 ```
 
-Example `crons/daily-summary.yaml`:
+Example `config/crons/daily-summary.yaml`:
 
 ```yaml
 name: daily-summary
@@ -364,7 +364,7 @@ env | grep API_KEY
 ```
 
 **For workspace-specific variables:**
-Ensure `.env` file exists in `agent_workspaces/<name>/.env` and contains the required keys.
+Ensure `.env` file exists in `agent_workspaces/<name>/config/.env` and contains the required keys.
 
 **Test API key directly:**
 ```python
@@ -397,7 +397,7 @@ Check logs for OCR-related errors when processing PDFs.
 ### Agent Responds Incorrectly
 
 **Review workspace markdown files:**
-- Check for typos or inconsistent instructions in AGENT.md, USER.md, SOUL.md
+- Check for typos or inconsistent instructions in `agent/AGENT.md`, `agent/USER.md`, `agent/SOUL.md`
 - Ensure AGENT.md clearly defines capabilities and communication style
 
 **Adjust temperature:**

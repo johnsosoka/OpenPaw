@@ -1,6 +1,6 @@
 # Cron Scheduler
 
-OpenPaw supports both static and dynamic scheduled tasks per workspace. Static tasks are defined via YAML files in the `crons/` directory, while dynamic tasks can be scheduled by agents at runtime using the CronTool builtin.
+OpenPaw supports both static and dynamic scheduled tasks per workspace. Static tasks are defined via YAML files in the `config/crons/` directory, while dynamic tasks can be scheduled by agents at runtime using the CronTool builtin.
 
 ## Architecture
 
@@ -14,7 +14,7 @@ All cron schedules fire in the **workspace timezone** (IANA identifier from `age
 
 ## Static Cron Jobs
 
-Create YAML files in `agent_workspaces/<workspace>/crons/<job-name>.yaml`:
+Create YAML files in `agent_workspaces/<workspace>/config/crons/<job-name>.yaml`:
 
 ```yaml
 name: daily-summary
@@ -121,7 +121,7 @@ schedule_every(
 
 ### Storage and Lifecycle
 
-- Tasks persist to `{workspace}/dynamic_crons.json` and survive restarts
+- Tasks persist to `{workspace}/data/dynamic_crons.json` and survive restarts
 - One-time tasks are automatically cleaned up after execution
 - Expired one-time tasks are cleaned up on workspace startup
 - Recurring tasks continue until explicitly cancelled
@@ -182,7 +182,7 @@ Heartbeats only fire within the specified window (workspace timezone). Outside a
 
 ### Pre-flight Skip
 
-Before invoking the LLM, the scheduler checks HEARTBEAT.md and TASKS.yaml:
+Before invoking the LLM, the scheduler checks HEARTBEAT.md and `data/TASKS.yaml`:
 
 - If HEARTBEAT.md is empty or trivial
 - AND no active tasks exist
@@ -194,7 +194,7 @@ When active tasks exist, a compact summary is automatically injected into the he
 
 ### Event Logging
 
-Every heartbeat event is logged to `{workspace}/heartbeat_log.jsonl` with:
+Every heartbeat event is logged to `{workspace}/data/heartbeat_log.jsonl` with:
 - Outcome (sent, suppressed, skipped)
 - Duration
 - Token metrics (input/output tokens)
@@ -499,10 +499,10 @@ Useful for:
 
 ### Multiple Jobs per Workspace
 
-Create multiple YAML files in `crons/`:
+Create multiple YAML files in `config/crons/`:
 
 ```
-agent_workspaces/my-agent/crons/
+agent_workspaces/my-agent/config/crons/
 ├── daily-summary.yaml
 ├── weekly-report.yaml
 ├── health-check.yaml
@@ -516,8 +516,8 @@ All enabled jobs run independently.
 Crons are workspace-scoped:
 
 ```
-workspace1/crons/report.yaml  → Runs in workspace1 context
-workspace2/crons/report.yaml  → Runs in workspace2 context (independent)
+workspace1/config/crons/report.yaml  → Runs in workspace1 context
+workspace2/config/crons/report.yaml  → Runs in workspace2 context (independent)
 ```
 
 Each workspace's crons run in isolation with that workspace's agent configuration, timezone, and filesystem access.
@@ -537,7 +537,7 @@ Logs show:
 - Message delivery status
 - Errors or failures
 
-For heartbeats, check `heartbeat_log.jsonl` for detailed event history:
+For heartbeats, check `data/heartbeat_log.jsonl` for detailed event history:
 
 ```json
 {"timestamp": "2026-02-17T14:30:00Z", "outcome": "sent", "duration_ms": 1234, "tokens_in": 500, "tokens_out": 150, "active_tasks": 3}
@@ -631,7 +631,7 @@ Agents can manage their own scheduled tasks:
 - `heartbeat.enabled: true` in agent.yaml
 - Current time is within `active_hours` window (workspace timezone)
 - HEARTBEAT.md has content or active tasks exist (otherwise pre-flight skip)
-- Check `heartbeat_log.jsonl` for skip reasons
+- Check `data/heartbeat_log.jsonl` for skip reasons
 
 ### Filesystem errors
 
@@ -639,12 +639,12 @@ Agents can manage their own scheduled tasks:
 - Cron jobs have sandboxed access to workspace directory only
 - Cannot access files outside workspace
 - Check file paths are relative to workspace root (not absolute)
-- `.openpaw/` directory is protected (framework internals)
+- `data/` and `config/` directories are write-protected from agents
 
 ### Dynamic tasks not persisting
 
 **Check**:
 - `builtins.cron.enabled: true` in configuration
-- Tasks are saved to `dynamic_crons.json` in workspace root
+- Tasks are saved to `data/dynamic_crons.json` in the workspace
 - File permissions allow writing
 - Check logs for persistence errors

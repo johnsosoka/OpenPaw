@@ -53,7 +53,7 @@ Web automation via Playwright with accessibility tree navigation. Agents interac
 - `browser_select` — Select dropdown option by numeric reference
 - `browser_scroll` — Scroll the page (up/down/top/bottom)
 - `browser_back` — Navigate back in browser history
-- `browser_screenshot` — Capture page screenshot (saved to `screenshots/`)
+- `browser_screenshot` — Capture page screenshot (saved to `workspace/screenshots/`)
 - `browser_close` — Close current page/tab
 - `browser_tabs` — List all open tabs
 - `browser_switch_tab` — Switch to a different tab by index
@@ -107,7 +107,7 @@ When `persist_cookies: true`, authentication state and cookies survive across ag
 
 **Downloads and Screenshots:**
 
-Files downloaded by the browser are saved to `{workspace}/downloads/` with sanitized filenames. Page screenshots are saved to `{workspace}/screenshots/` and returned as relative paths for agent reference.
+Files downloaded by the browser are saved to `{workspace}/workspace/downloads/` with sanitized filenames. Page screenshots are saved to `{workspace}/workspace/screenshots/` and returned as relative paths for agent reference.
 
 ---
 
@@ -190,7 +190,7 @@ Maximum 8 concurrent sub-agents (configurable), timeout defaults to 30 minutes (
 
 **Storage:**
 
-Sub-agent state persists to `{workspace}/.openpaw/subagents.yaml` and survives restarts. Completed/failed/cancelled requests older than 24 hours are automatically cleaned up on initialization.
+Sub-agent state persists to `{workspace}/data/subagents.yaml` and survives restarts. Completed/failed/cancelled requests older than 24 hours are automatically cleaned up on initialization.
 
 ---
 
@@ -221,7 +221,7 @@ builtins:
 
 **Storage:**
 
-Tasks persist to `{workspace}/dynamic_crons.json` and survive restarts. One-time tasks are automatically cleaned up after execution or if expired on startup.
+Tasks persist to `{workspace}/data/dynamic_crons.json` and survive restarts. One-time tasks are automatically cleaned up after execution or if expired on startup.
 
 **Routing:**
 
@@ -261,7 +261,7 @@ builtins:
 
 **Storage:**
 
-Tasks persist to `{workspace}/TASKS.yaml`. Thread-safe with atomic writes.
+Tasks persist to `{workspace}/data/TASKS.yaml`. Thread-safe with atomic writes.
 
 **Integration with Heartbeat:**
 
@@ -539,7 +539,7 @@ To find voice IDs, visit the [ElevenLabs Voice Library](https://elevenlabs.io/vo
 **Type:** Processor
 **Prerequisites:** None (always available)
 
-Universal file upload handling with date partitioning. First processor in the pipeline — saves all uploaded files to `{workspace}/uploads/{YYYY-MM-DD}/`.
+Universal file upload handling with date partitioning. First processor in the pipeline — saves all uploaded files to `{workspace}/data/uploads/{YYYY-MM-DD}/`.
 
 **Configuration:**
 
@@ -558,7 +558,7 @@ Sets `attachment.saved_path` (relative to workspace root) so downstream processo
 
 ```
 [File received: report.pdf (2.3 MB, application/pdf)]
-[Saved to: uploads/2026-02-07/report.pdf]
+[Saved to: data/uploads/2026-02-07/report.pdf]
 ```
 
 **Filename Handling:**
@@ -675,7 +675,7 @@ Converts documents to markdown and saves as `.md` sibling file (e.g., `report.pd
 
 ```
 User: [Uploads report.pdf]
-FilePersistence: [Saves to uploads/2026-02-17/report.pdf]
+FilePersistence: [Saves to data/uploads/2026-02-17/report.pdf]
 Docling: [Converts to markdown, saves report.md]
 Agent: [Processes markdown content]
 ```
@@ -1142,6 +1142,6 @@ The shell tool provides powerful system access and requires careful configuratio
 
 **Best Practices:**
 1. Configure domain allowlist for untrusted agents
-2. Monitor downloads directory for unexpected files
+2. Monitor the `workspace/downloads/` directory for unexpected files
 3. Set reasonable timeout values
 4. Review screenshot captures for sensitive data

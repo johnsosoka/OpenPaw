@@ -56,7 +56,7 @@ async def test_single_document_saved(processor, sample_message, temp_workspace):
     result = await processor.process_inbound(sample_message)
 
     # Verify file was saved
-    uploads_dir = Path(temp_workspace) / "uploads"
+    uploads_dir = Path(temp_workspace) / "data" / "uploads"
     assert uploads_dir.exists()
 
     # Find the saved file (date-based subdirectory)
@@ -68,7 +68,7 @@ async def test_single_document_saved(processor, sample_message, temp_workspace):
 
     # Verify saved_path is set
     assert attachment.saved_path is not None
-    assert attachment.saved_path.startswith("uploads/")
+    assert attachment.saved_path.startswith("data/uploads/")
     assert attachment.saved_path.endswith("report.pdf")
 
     # Verify content enrichment
@@ -115,7 +115,7 @@ async def test_multiple_attachments(processor, sample_message, temp_workspace):
     result = await processor.process_inbound(sample_message)
 
     # Verify all files saved
-    uploads_dir = Path(temp_workspace) / "uploads"
+    uploads_dir = Path(temp_workspace) / "data" / "uploads"
     saved_files = list(uploads_dir.rglob("*"))
     saved_files = [f for f in saved_files if f.is_file()]
     assert len(saved_files) == 3
@@ -123,7 +123,7 @@ async def test_multiple_attachments(processor, sample_message, temp_workspace):
     # Verify all saved_paths set
     for attachment in attachments:
         assert attachment.saved_path is not None
-        assert attachment.saved_path.startswith("uploads/")
+        assert attachment.saved_path.startswith("data/uploads/")
 
     # Verify all listed in content
     assert "report.pdf" in result.message.content
@@ -149,7 +149,7 @@ async def test_audio_no_filename(processor, sample_message, temp_workspace):
     await processor.process_inbound(sample_message)
 
     # Verify filename generated
-    uploads_dir = Path(temp_workspace) / "uploads"
+    uploads_dir = Path(temp_workspace) / "data" / "uploads"
     saved_files = list(uploads_dir.rglob("*.ogg"))
     assert len(saved_files) == 1
     assert saved_files[0].name.startswith("voice_msg123")
@@ -171,7 +171,7 @@ async def test_photo_no_filename(processor, sample_message, temp_workspace):
     await processor.process_inbound(sample_message)
 
     # Verify filename generated
-    uploads_dir = Path(temp_workspace) / "uploads"
+    uploads_dir = Path(temp_workspace) / "data" / "uploads"
     saved_files = list(uploads_dir.rglob("*.jpg"))
     assert len(saved_files) == 1
     assert saved_files[0].name.startswith("photo_msg123")
@@ -197,7 +197,7 @@ async def test_file_too_large(processor, sample_message, temp_workspace):
     result = await processor.process_inbound(sample_message)
 
     # Verify file NOT saved
-    uploads_dir = Path(temp_workspace) / "uploads"
+    uploads_dir = Path(temp_workspace) / "data" / "uploads"
     if uploads_dir.exists():
         saved_files = list(uploads_dir.rglob("*.pdf"))
         assert len(saved_files) == 0
@@ -249,7 +249,7 @@ async def test_attachment_no_data(processor, sample_message, temp_workspace):
     result = await processor.process_inbound(sample_message)
 
     # No files should be saved
-    uploads_dir = Path(temp_workspace) / "uploads"
+    uploads_dir = Path(temp_workspace) / "data" / "uploads"
     if uploads_dir.exists():
         saved_files = list(uploads_dir.rglob("*"))
         saved_files = [f for f in saved_files if f.is_file()]
@@ -283,7 +283,7 @@ async def test_filename_collision(processor, sample_message, temp_workspace):
     await processor.process_inbound(sample_message)
 
     # Verify both files exist
-    uploads_dir = Path(temp_workspace) / "uploads"
+    uploads_dir = Path(temp_workspace) / "data" / "uploads"
     saved_files = list(uploads_dir.rglob("*.pdf"))
     assert len(saved_files) == 2
 
@@ -318,7 +318,7 @@ async def test_content_enrichment_format(processor, sample_message, temp_workspa
 
     # Second line: [Saved to: ...]
     assert content_lines[1].startswith("[Saved to:")
-    assert "uploads/" in content_lines[1]
+    assert "data/uploads/" in content_lines[1]
     assert "report.pdf" in content_lines[1]
 
     # User caption preserved
@@ -349,7 +349,7 @@ async def test_metadata_populated(processor, sample_message, temp_workspace):
     assert file_meta["mime_type"] == "application/pdf"
     assert file_meta["size_bytes"] == len(b"PDF data")
     assert "original_path" in file_meta
-    assert file_meta["original_path"].startswith("uploads/")
+    assert file_meta["original_path"].startswith("data/uploads/")
 
 
 @pytest.mark.asyncio
@@ -455,7 +455,7 @@ async def test_mime_type_fallback(processor, sample_message, temp_workspace):
     await processor.process_inbound(sample_message)
 
     # File should still be saved
-    uploads_dir = Path(temp_workspace) / "uploads"
+    uploads_dir = Path(temp_workspace) / "data" / "uploads"
     saved_files = list(uploads_dir.rglob("*.json"))
     assert len(saved_files) == 1
 
@@ -474,7 +474,7 @@ async def test_binary_file_no_extension(processor, sample_message, temp_workspac
     await processor.process_inbound(sample_message)
 
     # Should generate upload_{id}.bin
-    uploads_dir = Path(temp_workspace) / "uploads"
+    uploads_dir = Path(temp_workspace) / "data" / "uploads"
     saved_files = list(uploads_dir.rglob("*.bin"))
     assert len(saved_files) == 1
     assert saved_files[0].name.startswith("upload_msg123")
@@ -497,7 +497,7 @@ async def test_date_partitioning(processor, sample_message, temp_workspace):
 
     # Verify date-based directory (processor defaults to UTC timezone)
     today = workspace_now("UTC").strftime("%Y-%m-%d")
-    expected_dir = Path(temp_workspace) / "uploads" / today
+    expected_dir = Path(temp_workspace) / "data" / "uploads" / today
     assert expected_dir.exists()
     assert expected_dir.is_dir()
 
@@ -520,7 +520,7 @@ async def test_special_characters_sanitized(processor, sample_message, temp_work
     await processor.process_inbound(sample_message)
 
     # Filename should be sanitized
-    uploads_dir = Path(temp_workspace) / "uploads"
+    uploads_dir = Path(temp_workspace) / "data" / "uploads"
     saved_files = list(uploads_dir.rglob("*.pdf"))
     assert len(saved_files) == 1
 
@@ -571,7 +571,7 @@ async def test_timezone_aware_date_partition(temp_workspace, sample_message):
         await processor.process_inbound(sample_message)
 
     # Verify file landed in 2026-02-07 (Mountain Time date), NOT 2026-02-08
-    expected_dir = Path(temp_workspace) / "uploads" / "2026-02-07"
+    expected_dir = Path(temp_workspace) / "data" / "uploads" / "2026-02-07"
     assert expected_dir.exists(), "Expected Mountain Time date directory to exist"
 
     saved_files = list(expected_dir.glob("*.pdf"))
@@ -579,5 +579,5 @@ async def test_timezone_aware_date_partition(temp_workspace, sample_message):
     assert saved_files[0].name == "report.pdf"
 
     # Verify no file in the UTC date directory
-    utc_dir = Path(temp_workspace) / "uploads" / "2026-02-08"
+    utc_dir = Path(temp_workspace) / "data" / "uploads" / "2026-02-08"
     assert not utc_dir.exists(), "UTC date directory should not exist"

@@ -24,10 +24,12 @@ def mock_workspace(tmp_path: Path) -> AgentWorkspace:
     workspace_path = tmp_path / "test_workspace"
     workspace_path.mkdir()
 
-    (workspace_path / "AGENT.md").write_text("Test agent")
-    (workspace_path / "USER.md").write_text("Test user")
-    (workspace_path / "SOUL.md").write_text("Test soul")
-    (workspace_path / "HEARTBEAT.md").write_text("Test heartbeat")
+    agent_dir = workspace_path / "agent"
+    agent_dir.mkdir()
+    (agent_dir / "AGENT.md").write_text("Test agent")
+    (agent_dir / "USER.md").write_text("Test user")
+    (agent_dir / "SOUL.md").write_text("Test soul")
+    (agent_dir / "HEARTBEAT.md").write_text("Test heartbeat")
 
     workspace = Mock(spec=AgentWorkspace)
     workspace.path = workspace_path

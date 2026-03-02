@@ -29,8 +29,8 @@ class TestCreateVectorStore:
         # Verify the returned instance
         assert store is mock_store
 
-    def test_sqlite_vec_creates_openpaw_directory(self, tmp_path):
-        """Test create_vector_store creates .openpaw directory."""
+    def test_sqlite_vec_creates_data_directory(self, tmp_path):
+        """Test create_vector_store creates data directory."""
         with patch("openpaw.stores.vector.sqlite_vec.SqliteVecStore") as mock_sqlite_vec_class:
             mock_store = MagicMock()
             mock_sqlite_vec_class.return_value = mock_store
@@ -38,10 +38,10 @@ class TestCreateVectorStore:
             config = {"dimensions": 1536}
             create_vector_store("sqlite_vec", config, tmp_path)
 
-            # Verify .openpaw directory was created
-            openpaw_dir = tmp_path / ".openpaw"
-            assert openpaw_dir.exists()
-            assert openpaw_dir.is_dir()
+            # Verify data directory was created
+            data_dir = tmp_path / "data"
+            assert data_dir.exists()
+            assert data_dir.is_dir()
 
     @patch("openpaw.stores.vector.sqlite_vec.SqliteVecStore")
     def test_sqlite_vec_db_path_location(self, mock_sqlite_vec_class, tmp_path):
@@ -54,7 +54,7 @@ class TestCreateVectorStore:
 
         call_kwargs = mock_sqlite_vec_class.call_args[1]
         db_path = call_kwargs["db_path"]
-        expected_path = tmp_path / ".openpaw" / "vectors.db"
+        expected_path = tmp_path / "data" / "vectors.db"
         assert db_path == expected_path
 
     def test_unknown_provider_raises_value_error(self, tmp_path):
