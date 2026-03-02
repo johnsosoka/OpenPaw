@@ -1,5 +1,9 @@
 # Getting Started
 
+<div align="center">
+  <img src="../assets/images/openpaw-golden.png" alt="Getting Started with OpenPaw" width="500">
+</div>
+
 This guide walks through installing OpenPaw, creating your first agent workspace, and running it with a Telegram channel.
 
 ## Prerequisites
