@@ -1,5 +1,9 @@
 # Channels
 
+<div align="center">
+  <img src="../assets/images/openpaw-dog-bernese.png" alt="OpenPaw Channels" width="500">
+</div>
+
 Channels connect agents to communication platforms. OpenPaw currently supports Telegram with an extensible architecture for additional platforms.
 
 ## Channel Architecture

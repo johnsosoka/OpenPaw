@@ -1,5 +1,9 @@
 # Builtins
 
+<div align="center">
+  <img src="../assets/images/openpaw-bear-1.png" alt="OpenPaw Built-in Tools" width="500">
+</div>
+
 Builtins are optional capabilities conditionally loaded based on API key availability and installed packages. They come in two types: **tools** (agent-invokable functions) and **processors** (message transformers).
 
 ## Overview

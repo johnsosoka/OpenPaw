@@ -1,0 +1,65 @@
+[project]
+site_name = "OpenPaw Documentation"
+site_description = "Multi-Channel AI Agent Framework with LangGraph"
+site_author = "John Sosoka"
+site_url = "https://johnsosoka.github.io/OpenPaw/"
+repo_url = "https://github.com/johnsosoka/OpenPaw"
+repo_name = "OpenPaw"
+copyright = "Copyright &copy; 2025 John Sosoka"
+
+nav = [
+  { "Home" = "index.md" },
+  { "Getting Started" = "getting-started.md" },
+  { "Architecture" = "architecture.md" },
+  { "Configuration" = "configuration.md" },
+  { "Workspaces" = "workspaces.md" },
+  { "Channels" = "channels.md" },
+  { "Queue System" = "queue-system.md" },
+  { "Cron Scheduler" = "cron-scheduler.md" },
+  { "Built-ins" = "builtins.md" },
+]
+
+[project.theme]
+logo = "assets/images/logo.png"
+favicon = "assets/images/logo.png"
+features = [
+  "navigation.tabs",
+  "navigation.sections",
+  "navigation.expand",
+  "search.suggest",
+  "search.highlight",
+  "content.code.copy",
+]
+
+[[project.theme.palette]]
+scheme = "slate"
+primary = "indigo"
+accent = "indigo"
+toggle = { icon = "material/brightness-4", name = "Switch to light mode" }
+
+[[project.theme.palette]]
+scheme = "default"
+primary = "indigo"
+accent = "indigo"
+toggle = { icon = "material/brightness-7", name = "Switch to dark mode" }
+
+[project.markdown_extensions]
+admonition = {}
+tables = {}
+toc = { permalink = true }
+
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+
+[project.markdown_extensions.pymdownx]
+inlinehilite = {}
+snippets = {}
+superfences = {}
+details = {}
+
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/johnsosoka/OpenPaw"

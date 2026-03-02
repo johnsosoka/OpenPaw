@@ -1,5 +1,9 @@
 # Cron Scheduler
 
+<div align="center">
+  <img src="../assets/images/openpaw-bear-2.png" alt="OpenPaw Cron Scheduler" width="500">
+</div>
+
 OpenPaw supports both static and dynamic scheduled tasks per workspace. Static tasks are defined via YAML files in the `config/crons/` directory, while dynamic tasks can be scheduled by agents at runtime using the CronTool builtin.
 
 ## Architecture

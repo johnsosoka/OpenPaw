@@ -6,7 +6,7 @@ on:
       - main
     paths:
       - "docs/**"
-      - "mkdocs.yml"
+      - "zensical.toml"
   workflow_dispatch:
 
 permissions:
@@ -38,11 +38,11 @@ jobs:
       - name: Install Poetry
         run: pipx install poetry
 
-      - name: Install MkDocs dependencies
+      - name: Install docs dependencies
         run: poetry install --only docs
 
       - name: Build docs
-        run: poetry run mkdocs build --strict
+        run: poetry run zensical build
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
