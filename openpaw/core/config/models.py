@@ -43,6 +43,21 @@ class AgentConfig(BaseModel):
 
 
 
+class ProviderDefinition(BaseModel):
+    """Named provider in the global catalog.
+
+    Defines connection details (type, api_key, base_url, region) that can be
+    referenced by name from workspace model configurations.
+    """
+
+    type: str | None = Field(default=None, description="LangChain provider type. Defaults to catalog key name.")
+    api_key: str | None = Field(default=None, description="API key for the provider")
+    base_url: str | None = Field(default=None, description="Custom API endpoint URL")
+    region: str | None = Field(default=None, description="AWS region for Bedrock models")
+
+    model_config = {"extra": "allow"}
+
+
 class WorkspaceModelConfig(BaseModel):
     """LLM configuration for a workspace agent."""
 
@@ -422,7 +437,24 @@ class CronDefinition(BaseModel):
 
 
 class WorkspaceConfig(BaseModel):
-    """Configuration for a workspace agent (loaded from agent.yaml)."""
+    """Configuration for a workspace agent (loaded from agent.yaml).
+
+    Supports shorthand ``model: "provider:model_id"`` in agent.yaml, which is
+    coerced to ``model: {provider: ..., model: ...}`` before validation.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_model_string(cls, data: Any) -> Any:
+        """Allow ``model: 'provider:model_id'`` shorthand in agent.yaml."""
+        if isinstance(data, dict) and isinstance(data.get("model"), str):
+            model_str = data["model"]
+            if ":" in model_str:
+                p, _, m = model_str.partition(":")
+                data["model"] = {"provider": p, "model": m}
+            else:
+                data["model"] = {"model": model_str}
+        return data
 
     timezone: str = Field(default="UTC", description="Workspace timezone (e.g., 'America/Los_Angeles')")
     model: WorkspaceModelConfig = Field(default_factory=WorkspaceModelConfig, description="LLM configuration")
@@ -491,6 +523,10 @@ class Config(BaseModel):
 
     workspaces_path: Path = Field(default=Path("agent_workspaces"), description="Path to agent workspaces")
     logging: LoggingConfig = Field(default_factory=LoggingConfig, description="Logging configuration")
+    providers: dict[str, ProviderDefinition] = Field(
+        default_factory=dict,
+        description="Named provider catalog for reusable connection details",
+    )
     queue: QueueConfig = Field(default_factory=QueueConfig)
     lanes: LaneConfig = Field(default_factory=LaneConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)

@@ -38,6 +38,26 @@ agent:
   temperature: 0.7
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Provider catalog — define provider connection details once, reference by name.
+# Workspaces use shorthand: model: "provider_name:model_id"
+# The /model command can switch between any configured provider.
+# ──────────────────────────────────────────────────────────────────────────────
+# providers:
+#   anthropic:
+#     api_key: ${ANTHROPIC_API_KEY}
+#   openai:
+#     api_key: ${OPENAI_API_KEY}
+#   moonshot:
+#     type: openai                    # LangChain backend class to use
+#     api_key: ${MOONSHOT_API_KEY}
+#     base_url: https://api.moonshot.ai/v1
+#   xai:
+#     api_key: ${XAI_API_KEY}
+#   bedrock:
+#     type: bedrock_converse
+#     region: us-east-1
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Builtins — tools and processors conditionally loaded based on API key
 # availability and installed packages. All sections below are commented out;
 # uncomment only what you need.

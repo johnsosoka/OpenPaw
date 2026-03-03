@@ -54,6 +54,7 @@ def mock_config():
     config.tool_timeouts = MagicMock()
     config.tool_timeouts.default_seconds = 120
     config.tool_timeouts.overrides = {}
+    config.providers = {}
     return config
 
 

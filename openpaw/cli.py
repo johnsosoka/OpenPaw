@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import yaml
+from dotenv import load_dotenv
 
 from openpaw.core.config import load_config
 from openpaw.core.logging import setup_logging
@@ -64,6 +65,12 @@ async def main() -> None:
     )
 
     args = parser.parse_args()
+
+    # Load project-root .env (next to config file) before config parsing
+    # so that ${VAR} references in config.yaml (e.g., providers section) resolve.
+    root_env = args.config.parent / ".env"
+    if root_env.exists():
+        load_dotenv(root_env, override=False)
 
     config = load_config(args.config)
 

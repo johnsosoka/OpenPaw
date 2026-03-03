@@ -7,6 +7,8 @@ from typing import Any
 
 from openpaw.agent import AgentRunner
 from openpaw.core.config import WorkspaceToolsConfig
+from openpaw.core.config.models import ProviderDefinition
+from openpaw.core.config.providers import ResolvedProvider, resolve_provider
 
 
 @dataclass
@@ -43,6 +45,7 @@ class AgentFactory:
         extra_model_kwargs: dict[str, Any],
         middleware: list[Any],
         logger: logging.Logger,
+        provider_catalog: dict[str, ProviderDefinition] | None = None,
     ):
         """Initialize agent factory.
 
@@ -60,6 +63,10 @@ class AgentFactory:
             extra_model_kwargs: Additional model parameters.
             middleware: List of middleware instances.
             logger: Logger instance.
+            provider_catalog: Named provider catalog from global config. When
+                provided, provider names are resolved before being passed to
+                LangChain so that catalog entries (e.g. ``moonshot``) map to
+                the correct LangChain type (e.g. ``openai``).
         """
         self._workspace = workspace
         self._configured_model = model
@@ -74,19 +81,34 @@ class AgentFactory:
         self._extra_model_kwargs = extra_model_kwargs
         self._middleware = middleware
         self._logger = logger
+        self._provider_catalog: dict[str, ProviderDefinition] = provider_catalog or {}
         self._runtime_override: RuntimeModelOverride | None = None
+
+    # ------------------------------------------------------------------
+    # Public properties
+    # ------------------------------------------------------------------
 
     @property
     def active_model(self) -> str:
-        """Return currently active model (runtime override or configured)."""
+        """Return the user-facing display name of the currently active model.
+
+        When a runtime override is set the override's display string is
+        returned; otherwise the configured model's display string is used.
+        Display strings preserve the original catalog name (e.g.
+        ``moonshot:kimi-k2.5``) rather than the underlying LangChain type.
+        """
         if self._runtime_override and self._runtime_override.model:
-            return self._runtime_override.model
-        return self._configured_model
+            return self._resolve_for_model(self._runtime_override.model).display_str
+        return self._resolve_for_model(self._configured_model).display_str
 
     @property
     def configured_model(self) -> str:
-        """Return statically configured model (ignoring overrides)."""
-        return self._configured_model
+        """Return the user-facing display name of the statically configured model."""
+        return self._resolve_for_model(self._configured_model).display_str
+
+    # ------------------------------------------------------------------
+    # Runtime override management
+    # ------------------------------------------------------------------
 
     def set_runtime_override(self, override: RuntimeModelOverride) -> None:
         """Apply a runtime model override for the main agent."""
@@ -96,12 +118,44 @@ class AgentFactory:
         """Clear runtime override, reverting to configured model."""
         self._runtime_override = None
 
+    # ------------------------------------------------------------------
+    # Internal resolution helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_for_model(self, model_str: str) -> ResolvedProvider:
+        """Resolve a model string through the provider catalog.
+
+        Args:
+            model_str: Model identifier, e.g. ``"moonshot:kimi-k2.5"``.
+
+        Returns:
+            ResolvedProvider with LangChain model_str, display_str, api_key,
+            region, and extra_kwargs.
+        """
+        return resolve_provider(model_str, self._provider_catalog)
+
     def _resolve_api_key(self, model_str: str) -> str | None:
-        """Resolve API key for the given model's provider."""
+        """Resolve API key for the given model's provider.
+
+        Catalog resolution takes priority: if the provider is defined in the
+        catalog and carries an api_key, that value is returned immediately.
+        Otherwise the original logic applies (same-provider reuse, then env
+        var lookup).
+        """
         import os
 
-        provider = model_str.split(":")[0] if ":" in model_str else "openai"
-        configured_provider = self._configured_model.split(":")[0] if ":" in self._configured_model else "openai"
+        resolved = self._resolve_for_model(model_str)
+        if resolved.api_key is not None:
+            return resolved.api_key
+
+        # Extract LangChain provider name from the resolved model string.
+        lc_model = resolved.model_str
+        provider = lc_model.split(":")[0] if ":" in lc_model else "openai"
+        configured_provider = (
+            self._configured_model.split(":")[0]
+            if ":" in self._configured_model
+            else "openai"
+        )
 
         if provider == configured_provider:
             return self._api_key
@@ -113,29 +167,51 @@ class AgentFactory:
             return os.environ.get(env_var)
         return None
 
+    # ------------------------------------------------------------------
+    # Model validation
+    # ------------------------------------------------------------------
+
     def validate_model(self, model_str: str) -> tuple[bool, str]:
-        """Validate a model string by attempting instantiation."""
+        """Validate a model string by attempting instantiation.
+
+        Resolves through the catalog first so that catalog providers (e.g.
+        ``moonshot``) are validated against their underlying LangChain type.
+        """
         from openpaw.agent.runner import create_chat_model
 
-        if ":" in model_str:
-            provider, _model_name = model_str.split(":", 1)
+        resolved = self._resolve_for_model(model_str)
+        lc_model = resolved.model_str
+
+        if ":" in lc_model:
+            provider, _model_name = lc_model.split(":", 1)
         else:
             provider = "openai"
 
         supported = {"openai", "anthropic", "bedrock_converse", "bedrock", "xai"}
         if provider not in supported:
-            return False, f"Unsupported provider: '{provider}'. Supported: {', '.join(sorted(supported))}"
+            return False, (
+                f"Unsupported provider: '{provider}'. "
+                f"Supported: {', '.join(sorted(supported))}"
+            )
 
-        api_key = self._resolve_api_key(model_str)
+        api_key = resolved.api_key if resolved.api_key is not None else self._resolve_api_key(model_str)
         if provider not in ("bedrock_converse", "bedrock") and not api_key:
             env_var = self._PROVIDER_KEY_ENV_VARS.get(provider, f"{provider.upper()}_API_KEY")
             return False, f"No API key for provider '{provider}'. Set {env_var} in environment."
 
+        # Merge catalog extras with workspace extras (workspace wins).
+        merged_extra = {**resolved.extra_kwargs, **self._extra_model_kwargs}
+        region = resolved.region or self._region
+
         try:
-            create_chat_model(model_str, api_key, self._temperature, self._region)
+            create_chat_model(lc_model, api_key, self._temperature, region, merged_extra)
             return True, f"Model validated: {model_str}"
         except Exception as e:
             return False, f"Invalid model '{model_str}': {e}"
+
+    # ------------------------------------------------------------------
+    # Agent creation
+    # ------------------------------------------------------------------
 
     def create_agent(self, checkpointer: Any | None = None) -> AgentRunner:
         """Create a configured AgentRunner instance.
@@ -148,24 +224,39 @@ class AgentFactory:
         """
         all_tools = list(self._builtin_tools) + list(self._workspace_tools)
 
-        model = self.active_model
-        api_key = self._resolve_api_key(model) if self._runtime_override else self._api_key
+        raw_model = (
+            self._runtime_override.model
+            if self._runtime_override and self._runtime_override.model
+            else self._configured_model
+        )
+        resolved = self._resolve_for_model(raw_model)
+
+        api_key = (
+            resolved.api_key
+            if resolved.api_key is not None
+            else (self._resolve_api_key(raw_model) if self._runtime_override else self._api_key)
+        )
+
         temperature = self._temperature
         if self._runtime_override and self._runtime_override.temperature is not None:
             temperature = self._runtime_override.temperature
 
+        # Merge catalog extras with workspace-level extras; workspace wins.
+        merged_extra = {**resolved.extra_kwargs, **self._extra_model_kwargs}
+        region = resolved.region or self._region
+
         return AgentRunner(
             workspace=self._workspace,
-            model=model,
+            model=resolved.model_str,
             api_key=api_key,
             max_turns=self._max_turns,
             temperature=temperature,
             checkpointer=checkpointer,
             tools=all_tools if all_tools else None,
-            region=self._region,
+            region=region,
             timeout_seconds=self._timeout_seconds,
             enabled_builtins=self._enabled_builtin_names,
-            extra_model_kwargs=self._extra_model_kwargs,
+            extra_model_kwargs=merged_extra,
             middleware=self._middleware,
         )
 
@@ -179,20 +270,29 @@ class AgentFactory:
         """
         all_tools = list(self._builtin_tools) + list(self._workspace_tools)
 
+        resolved = self._resolve_for_model(self._configured_model)
+        api_key = resolved.api_key if resolved.api_key is not None else self._api_key
+        merged_extra = {**resolved.extra_kwargs, **self._extra_model_kwargs}
+        region = resolved.region or self._region
+
         return AgentRunner(
             workspace=self._workspace,
-            model=self._configured_model,
-            api_key=self._api_key,
+            model=resolved.model_str,
+            api_key=api_key,
             max_turns=self._max_turns,
             temperature=self._temperature,
             checkpointer=None,  # No checkpointer for scheduled tasks
             tools=all_tools if all_tools else None,
-            region=self._region,
+            region=region,
             timeout_seconds=self._timeout_seconds,
             enabled_builtins=self._enabled_builtin_names,
-            extra_model_kwargs=self._extra_model_kwargs,
+            extra_model_kwargs=merged_extra,
             middleware=[],  # No middleware for stateless agents
         )
+
+    # ------------------------------------------------------------------
+    # Tool management
+    # ------------------------------------------------------------------
 
     def remove_builtin_tools(self, tool_names: set[str]) -> None:
         """Remove builtin tools by LangChain tool name.
