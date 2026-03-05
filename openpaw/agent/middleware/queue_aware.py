@@ -127,6 +127,17 @@ class QueueAwareToolMiddleware:
             logger.debug(f"Middleware pass-through: mode={self._queue_mode.value}")
             return await handler(request)
 
+        # Once steered, skip ALL remaining tool calls for the entire invocation.
+        # Without this, the ReAct loop re-enters after the LLM sees the skip
+        # message, peek_pending() returns False (messages already consumed),
+        # and subsequent tools execute normally — defeating the steer.
+        if self._steered:
+            logger.debug(f"Steer already active: skipping tool {tool_name}")
+            return ToolMessage(
+                content=STEER_SKIP_MESSAGE,
+                tool_call_id=request.tool_call["id"],
+            )
+
         # Check for pending messages
         has_pending = await self._queue_manager.peek_pending(self._session_key)
         logger.debug(f"Middleware peek_pending={has_pending} for session={self._session_key}")
