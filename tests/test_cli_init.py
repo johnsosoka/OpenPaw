@@ -211,6 +211,22 @@ class TestBuildAgentYaml:
         assert parsed["model"]["provider"] == "anthropic"
         assert parsed["model"]["model"] == "gpt-4o"
 
+    def test_native_provider_includes_shorthand_comment(self) -> None:
+        """Well-known providers should include a shorthand alternative comment."""
+        yaml_text = _build_agent_yaml("mybot", None, "anthropic:claude-sonnet-4-20250514")
+        assert "# model: anthropic:claude-sonnet-4-20250514" in yaml_text
+        assert "# Or use shorthand with a configured provider:" in yaml_text
+
+    def test_shorthand_comment_included_for_openai(self) -> None:
+        """openai is a native provider and should include the shorthand comment."""
+        yaml_text = _build_agent_yaml("mybot", None, "openai:gpt-4o")
+        assert "# model: openai:gpt-4o" in yaml_text
+
+    def test_unknown_provider_no_shorthand_comment(self) -> None:
+        """Custom/unknown providers should NOT include the shorthand comment."""
+        yaml_text = _build_agent_yaml("mybot", None, "mycustom:my-model")
+        assert "# Or use shorthand with a configured provider:" not in yaml_text
+
 
 # ---------------------------------------------------------------------------
 # 4. Error cases via _handle_init

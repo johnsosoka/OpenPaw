@@ -113,6 +113,12 @@ SECTION_SUB_AGENT_SPAWNING = (
     "to the user — do not let completions pass silently\n"
     "3. If a sub-agent fails or times out, inform the user and explain next steps\n\n"
     "Use list_subagents to check status and get_subagent_result to retrieve output."
+    "\n\n"
+    "**Cron-spawned sub-agents:** You may receive sub-agent completion notifications "
+    "that you did not create. These were spawned by a scheduled cron job that ran as a "
+    "separate stateless agent. The notification will include the origin (e.g., 'spawned "
+    "by cron: weekly-ai-deep-dive'). Treat these as completed background work — review "
+    "the result, take follow-up action if needed, and inform the user."
 )
 
 # Web browsing - conditional on browser builtin

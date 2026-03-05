@@ -15,6 +15,7 @@ from openpaw.builtins.base import (
     BuiltinPrerequisite,
     BuiltinType,
 )
+from openpaw.builtins.tools._channel_context import get_current_session_key
 from openpaw.stores.cron import (
     DynamicCronStore,
     create_interval_task,
@@ -38,7 +39,15 @@ class ScheduleAtInput(BaseModel):
         )
     )
     prompt: str = Field(
-        description="The instruction or reminder for the future action"
+        description=(
+            "The instruction for the future action. "
+            "IMPORTANT: This prompt will be executed by a stateless agent with NO memory "
+            "of the current conversation. Include ALL relevant context: the user's name, "
+            "what topic to follow up on, and any specific details. "
+            "Bad: 'Follow up with Anna'. "
+            "Good: 'Follow up with Anna about her migraine — check pain level, "
+            "nausea, and whether sumatriptan helped.'"
+        )
     )
 
 
@@ -53,7 +62,17 @@ class ScheduleEveryInput(BaseModel):
         ),
         ge=60,
     )
-    prompt: str = Field(description="The instruction to repeat on each execution")
+    prompt: str = Field(
+        description=(
+            "The instruction to repeat on each execution. "
+            "IMPORTANT: This prompt will be executed by a stateless agent with NO memory "
+            "of the current conversation. Include ALL relevant context: the user's name, "
+            "what topic to follow up on, and any specific details. "
+            "Bad: 'Follow up with Anna'. "
+            "Good: 'Follow up with Anna about her migraine — check pain level, "
+            "nausea, and whether sumatriptan helped.'"
+        )
+    )
 
 
 class CancelScheduledInput(BaseModel):
@@ -123,6 +142,9 @@ class CronToolBuiltin(BaseBuiltinTool):
         self.default_channel = self.config.get("default_channel", "telegram")
         self.default_chat_id = self.config.get("default_chat_id")
 
+        # User identity for prompt enrichment
+        self.user_aliases: dict[int, str] = self.config.get("user_aliases", {})
+
         logger.info(
             f"CronToolBuiltin initialized for workspace: {self.workspace_path.name}"
         )
@@ -171,12 +193,27 @@ class CronToolBuiltin(BaseBuiltinTool):
                     f"Provided: {run_at_dt.isoformat()}, Current time: {now.isoformat()}]"
                 )
 
+            # Resolve chat_id from the active session so the task is routed back
+            # to the user who scheduled it, not the startup default.
+            session_key = get_current_session_key()
+            chat_id = self.default_chat_id  # fallback
+            if session_key:
+                try:
+                    chat_id = int(session_key.rsplit(":", 1)[-1])
+                except (ValueError, IndexError):
+                    pass  # keep default
+
+            # Enrich prompt with user identity for stateless cron agent
+            user_name = self.user_aliases.get(chat_id) if chat_id else None
+            if user_name:
+                prompt = f"[Scheduled for user: {user_name}]\n{prompt}"
+
             # Create and store task with routing info
             task = create_once_task(
                 prompt=prompt,
                 run_at=run_at_dt,
                 channel=self.default_channel,
-                chat_id=self.default_chat_id,
+                chat_id=chat_id,
             )
             self.store.add_task(task)
 
@@ -237,13 +274,28 @@ class CronToolBuiltin(BaseBuiltinTool):
             # Calculate next run time (interval from now)
             next_run = datetime.now(UTC)
 
+            # Resolve chat_id from the active session so the task is routed back
+            # to the user who scheduled it, not the startup default.
+            session_key = get_current_session_key()
+            chat_id = self.default_chat_id  # fallback
+            if session_key:
+                try:
+                    chat_id = int(session_key.rsplit(":", 1)[-1])
+                except (ValueError, IndexError):
+                    pass  # keep default
+
+            # Enrich prompt with user identity for stateless cron agent
+            user_name = self.user_aliases.get(chat_id) if chat_id else None
+            if user_name:
+                prompt = f"[Scheduled for user: {user_name}]\n{prompt}"
+
             # Create and store task with routing info
             task = create_interval_task(
                 prompt=prompt,
                 interval_seconds=interval_seconds,
                 next_run=next_run,
                 channel=self.default_channel,
-                chat_id=self.default_chat_id,
+                chat_id=chat_id,
             )
             self.store.add_task(task)
 

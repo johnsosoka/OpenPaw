@@ -164,6 +164,41 @@ async def test_working_directory(shell_tool_with_config):
 
 
 @pytest.mark.asyncio
+async def test_workspace_path_fallback_for_working_directory():
+    """Test that workspace_path is used as working directory when no explicit working_directory set."""
+    tool_builtin = ShellToolBuiltin(config={"workspace_path": "/home/agent/workspace"})
+    tool = tool_builtin.get_langchain_tool()
+
+    mock_process = MagicMock()
+    mock_process.communicate = AsyncMock(return_value=(b"output", b""))
+
+    with patch("asyncio.create_subprocess_shell", return_value=mock_process) as mock_create:
+        await tool.coroutine(command="ls", timeout_seconds=60)
+
+        call_args = mock_create.call_args
+        assert call_args[0][0] == "cd /home/agent/workspace && ls"
+
+
+@pytest.mark.asyncio
+async def test_explicit_working_directory_overrides_workspace_path():
+    """Test that explicit working_directory takes precedence over workspace_path."""
+    tool_builtin = ShellToolBuiltin(config={
+        "workspace_path": "/home/agent/workspace",
+        "working_directory": "/custom/dir",
+    })
+    tool = tool_builtin.get_langchain_tool()
+
+    mock_process = MagicMock()
+    mock_process.communicate = AsyncMock(return_value=(b"output", b""))
+
+    with patch("asyncio.create_subprocess_shell", return_value=mock_process) as mock_create:
+        await tool.coroutine(command="ls", timeout_seconds=60)
+
+        call_args = mock_create.call_args
+        assert call_args[0][0] == "cd /custom/dir && ls"
+
+
+@pytest.mark.asyncio
 async def test_duration_logging(shell_tool, caplog):
     """Test that command duration is logged."""
     import logging

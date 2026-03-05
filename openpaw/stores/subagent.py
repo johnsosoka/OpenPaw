@@ -421,6 +421,7 @@ def create_subagent_request(
     notify: bool = True,
     allowed_tools: list[str] | None = None,
     denied_tools: list[str] | None = None,
+    origin: str | None = None,
 ) -> SubAgentRequest:
     """Factory function for creating a new sub-agent request with auto-generated ID.
 
@@ -455,4 +456,5 @@ def create_subagent_request(
         notify=notify,
         allowed_tools=allowed_tools,
         denied_tools=denied_tools,
+        origin=origin,
     )

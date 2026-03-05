@@ -15,6 +15,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from openpaw.agent.metrics import TokenUsageLogger
 from openpaw.agent.session_logger import SessionLogger
+from openpaw.builtins.tools._channel_context import set_invocation_origin
 from openpaw.channels.base import ChannelAdapter
 from openpaw.core.config.models import CronDefinition
 from openpaw.core.prompts.system_events import (
@@ -111,6 +112,7 @@ class CronScheduler:
             cron: The cron definition to execute.
         """
         logger.info(f"Executing cron job: {cron.name}")
+        set_invocation_origin(f"cron:{cron.name}")
 
         try:
             agent_runner = self.agent_factory()
@@ -181,6 +183,8 @@ class CronScheduler:
 
         except Exception as e:
             logger.error(f"Failed to execute cron job {cron.name}: {e}", exc_info=True)
+        finally:
+            set_invocation_origin(None)
 
     def add_job(self, cron: CronDefinition) -> None:
         """Add a cron job to the scheduler.
@@ -280,6 +284,7 @@ class CronScheduler:
             task: DynamicCronTask to execute.
         """
         logger.info(f"Executing dynamic task: {task.id}")
+        set_invocation_origin(f"dynamic_cron:{task.id[:8]}")
 
         try:
             agent_runner = self.agent_factory()
@@ -343,6 +348,8 @@ class CronScheduler:
 
         except Exception as e:
             logger.error(f"Dynamic task {task.id} failed: {e}", exc_info=True)
+        finally:
+            set_invocation_origin(None)
 
     def _prune_expired_tasks(self, tasks: list[DynamicCronTask]) -> list[DynamicCronTask]:
         """Remove expired one-time tasks that will never execute.
