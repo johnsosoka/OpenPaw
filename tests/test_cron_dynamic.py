@@ -7,6 +7,10 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from openpaw.builtins.tools._channel_context import (
+    clear_channel_context,
+    set_channel_context,
+)
 from openpaw.builtins.tools.cron import CronToolBuiltin
 from openpaw.stores.cron import (
     DynamicCronStore,
@@ -766,3 +770,118 @@ class TestCronToolBuiltin:
         # Verify _notify_scheduler_update was called
         # Note: Currently it's just a placeholder, but we verify it doesn't error
         assert len(tool.store.list_tasks()) == 1
+
+
+class TestCronToolSessionRouting:
+    """Tests verifying that scheduled tasks route to the active session's user."""
+
+    @pytest.mark.asyncio
+    async def test_schedule_at_uses_session_chat_id(self, tmp_path: Any) -> None:
+        """schedule_at should route to the session user, not the startup default."""
+        config = {
+            "workspace_path": str(tmp_path),
+            "default_chat_id": 111,
+            "min_interval_seconds": 60,
+        }
+        tool = CronToolBuiltin(config)
+        schedule_at_tool = next(
+            t for t in tool.get_langchain_tool() if t.name == "schedule_at"
+        )
+
+        mock_channel = Mock()
+        set_channel_context(mock_channel, "telegram:8297899298")
+        try:
+            future_time = datetime.now(UTC) + timedelta(hours=1)
+            await schedule_at_tool.ainvoke({
+                "run_at": future_time.isoformat(),
+                "prompt": "Reminder for Anna",
+            })
+        finally:
+            clear_channel_context()
+
+        tasks = tool.store.list_tasks()
+        assert len(tasks) == 1
+        assert tasks[0].chat_id == 8297899298
+
+    @pytest.mark.asyncio
+    async def test_schedule_at_falls_back_to_default_without_context(
+        self, tmp_path: Any
+    ) -> None:
+        """schedule_at should use default_chat_id when no session context is set."""
+        config = {
+            "workspace_path": str(tmp_path),
+            "default_chat_id": 111,
+            "min_interval_seconds": 60,
+        }
+        tool = CronToolBuiltin(config)
+        schedule_at_tool = next(
+            t for t in tool.get_langchain_tool() if t.name == "schedule_at"
+        )
+
+        # No context set — should fall back to default_chat_id
+        future_time = datetime.now(UTC) + timedelta(hours=1)
+        await schedule_at_tool.ainvoke({
+            "run_at": future_time.isoformat(),
+            "prompt": "Default routing reminder",
+        })
+
+        tasks = tool.store.list_tasks()
+        assert len(tasks) == 1
+        assert tasks[0].chat_id == 111
+
+    @pytest.mark.asyncio
+    async def test_schedule_every_uses_session_chat_id(self, tmp_path: Any) -> None:
+        """schedule_every should route to the session user, not the startup default."""
+        config = {
+            "workspace_path": str(tmp_path),
+            "default_chat_id": 111,
+            "min_interval_seconds": 60,
+        }
+        tool = CronToolBuiltin(config)
+        schedule_every_tool = next(
+            t for t in tool.get_langchain_tool() if t.name == "schedule_every"
+        )
+
+        mock_channel = Mock()
+        set_channel_context(mock_channel, "telegram:8297899298")
+        try:
+            await schedule_every_tool.ainvoke({
+                "interval_seconds": 300,
+                "prompt": "Recurring check for Anna",
+            })
+        finally:
+            clear_channel_context()
+
+        tasks = tool.store.list_tasks()
+        assert len(tasks) == 1
+        assert tasks[0].chat_id == 8297899298
+
+    @pytest.mark.asyncio
+    async def test_schedule_at_fallback_on_non_numeric_session_key(
+        self, tmp_path: Any
+    ) -> None:
+        """schedule_at should fall back to default_chat_id when session key is non-numeric."""
+        config = {
+            "workspace_path": str(tmp_path),
+            "default_chat_id": 999,
+            "min_interval_seconds": 60,
+        }
+        tool = CronToolBuiltin(config)
+        schedule_at_tool = next(
+            t for t in tool.get_langchain_tool() if t.name == "schedule_at"
+        )
+
+        mock_channel = Mock()
+        set_channel_context(mock_channel, "telegram:not-a-number")
+        try:
+            future_time = datetime.now(UTC) + timedelta(hours=1)
+            await schedule_at_tool.ainvoke({
+                "run_at": future_time.isoformat(),
+                "prompt": "Fallback test",
+            })
+        finally:
+            clear_channel_context()
+
+        tasks = tool.store.list_tasks()
+        assert len(tasks) == 1
+        assert tasks[0].chat_id == 999
