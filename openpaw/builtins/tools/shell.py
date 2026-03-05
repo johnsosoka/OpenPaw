@@ -92,8 +92,15 @@ class ShellToolBuiltin(BaseBuiltinTool):
         # Get configuration
         allowed_commands = self.config.get("allowed_commands", [])
         blocked_commands = self.config.get("blocked_commands", self.default_blocked)
-        working_directory = self.config.get("working_directory")
         default_timeout = self.config.get("default_timeout_seconds", 120)
+
+        # Default working directory to workspace root so shell commands
+        # operate in the same directory as filesystem tools (ls, write_file, etc.)
+        working_directory = self.config.get("working_directory")
+        if not working_directory:
+            workspace_path = self.config.get("workspace_path")
+            if workspace_path:
+                working_directory = str(workspace_path)
 
         async def execute_shell_command(command: str, timeout_seconds: int = default_timeout) -> str:
             """Execute a shell command with safety filtering and timeout.
