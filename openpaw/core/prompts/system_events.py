@@ -19,30 +19,30 @@ STEER_SKIP_MESSAGE = "[Skipped: user sent new message — redirecting]"
 
 # Sub-agent timeout notification
 SUBAGENT_TIMED_OUT_TEMPLATE = PromptTemplate(
-    template="[SYSTEM] Sub-agent '{label}' timed out after {timeout_minutes} minutes.",
-    input_variables=["label", "timeout_minutes"],
+    template="[SYSTEM] Sub-agent '{label}' timed out{origin_suffix} after {timeout_minutes} minutes.",
+    input_variables=["label", "timeout_minutes", "origin_suffix"],
 )
 
 # Sub-agent failure notification
 SUBAGENT_FAILED_TEMPLATE = PromptTemplate(
-    template="[SYSTEM] Sub-agent '{label}' failed.\nError: {error}",
-    input_variables=["label", "error"],
+    template="[SYSTEM] Sub-agent '{label}' failed{origin_suffix}.\nError: {error}",
+    input_variables=["label", "error", "origin_suffix"],
 )
 
 # Sub-agent completion (truncated with reference to full output)
 SUBAGENT_COMPLETED_TEMPLATE = PromptTemplate(
     template=(
-        "[SYSTEM] Sub-agent '{label}' completed.\n\n"
+        "[SYSTEM] Sub-agent '{label}' completed{origin_suffix}.\n\n"
         "{output}\n\n"
         'Use get_subagent_result(id="{request_id}") to read the full output.'
     ),
-    input_variables=["label", "output", "request_id"],
+    input_variables=["label", "output", "request_id", "origin_suffix"],
 )
 
 # Sub-agent completion (short output, no truncation)
 SUBAGENT_COMPLETED_SHORT_TEMPLATE = PromptTemplate(
-    template="[SYSTEM] Sub-agent '{label}' completed.\n\n{output}",
-    input_variables=["label", "output"],
+    template="[SYSTEM] Sub-agent '{label}' completed{origin_suffix}.\n\n{output}",
+    input_variables=["label", "output", "origin_suffix"],
 )
 
 # Interrupt mode notification (static, no variables)

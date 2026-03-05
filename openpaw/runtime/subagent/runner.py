@@ -518,21 +518,30 @@ class SubAgentRunner:
         Returns:
             Formatted notification content with [SYSTEM] prefix.
         """
+        # Build origin suffix from request
+        origin_suffix = ""
+        if request.origin:
+            parts = request.origin.split(":", 1)
+            if len(parts) == 2:
+                origin_suffix = f" (spawned by {parts[0]}: {parts[1]})"
+            else:
+                origin_suffix = f" (spawned by {request.origin})"
+
         # Determine status and format message
         if result.error:
-            # Check if it's a timeout error
             if "timed out" in result.error.lower():
                 return SUBAGENT_TIMED_OUT_TEMPLATE.format(
                     label=request.label,
                     timeout_minutes=request.timeout_minutes,
+                    origin_suffix=origin_suffix,
                 )
             else:
                 return SUBAGENT_FAILED_TEMPLATE.format(
                     label=request.label,
                     error=result.error,
+                    origin_suffix=origin_suffix,
                 )
         else:
-            # Success case - truncate output if too long
             output = result.output
             if len(output) > 500:
                 output = output[:500]
@@ -540,11 +549,13 @@ class SubAgentRunner:
                     label=request.label,
                     output=output,
                     request_id=request.id,
+                    origin_suffix=origin_suffix,
                 )
             else:
                 return SUBAGENT_COMPLETED_SHORT_TEMPLATE.format(
                     label=request.label,
                     output=output,
+                    origin_suffix=origin_suffix,
                 )
 
     async def _send_notification(self, request: SubAgentRequest, result: SubAgentResult) -> None:

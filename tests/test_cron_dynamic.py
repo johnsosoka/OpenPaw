@@ -885,3 +885,153 @@ class TestCronToolSessionRouting:
         tasks = tool.store.list_tasks()
         assert len(tasks) == 1
         assert tasks[0].chat_id == 999
+
+
+class TestCronToolPromptEnrichment:
+    """Tests verifying that scheduled prompts are enriched with user identity."""
+
+    @pytest.mark.asyncio
+    async def test_schedule_at_prepends_user_context(self, tmp_path: Any) -> None:
+        """schedule_at should prepend user identity when aliases are configured."""
+        config = {
+            "workspace_path": str(tmp_path),
+            "default_chat_id": 111,
+            "user_aliases": {8297899298: "Anna"},
+            "min_interval_seconds": 60,
+        }
+        tool = CronToolBuiltin(config)
+        schedule_at_tool = next(
+            t for t in tool.get_langchain_tool() if t.name == "schedule_at"
+        )
+
+        mock_channel = Mock()
+        set_channel_context(mock_channel, "telegram:8297899298")
+        try:
+            future_time = datetime.now(UTC) + timedelta(hours=1)
+            await schedule_at_tool.ainvoke({
+                "run_at": future_time.isoformat(),
+                "prompt": "Ping Anna now (she asked for a 5-minute reminder)",
+            })
+        finally:
+            clear_channel_context()
+
+        tasks = tool.store.list_tasks()
+        assert len(tasks) == 1
+        assert tasks[0].prompt.startswith("[Scheduled for user: Anna]")
+        assert "Ping Anna now" in tasks[0].prompt
+
+    @pytest.mark.asyncio
+    async def test_schedule_every_prepends_user_context(self, tmp_path: Any) -> None:
+        """schedule_every should prepend user identity when aliases are configured."""
+        config = {
+            "workspace_path": str(tmp_path),
+            "default_chat_id": 111,
+            "user_aliases": {8297899298: "Anna"},
+            "min_interval_seconds": 60,
+        }
+        tool = CronToolBuiltin(config)
+        schedule_every_tool = next(
+            t for t in tool.get_langchain_tool() if t.name == "schedule_every"
+        )
+
+        mock_channel = Mock()
+        set_channel_context(mock_channel, "telegram:8297899298")
+        try:
+            await schedule_every_tool.ainvoke({
+                "interval_seconds": 300,
+                "prompt": "Check on Anna's migraine status",
+            })
+        finally:
+            clear_channel_context()
+
+        tasks = tool.store.list_tasks()
+        assert len(tasks) == 1
+        assert tasks[0].prompt.startswith("[Scheduled for user: Anna]")
+        assert "Check on Anna's migraine status" in tasks[0].prompt
+
+    @pytest.mark.asyncio
+    async def test_no_enrichment_without_aliases(self, tmp_path: Any) -> None:
+        """Prompt should remain unchanged when no user_aliases configured."""
+        config = {
+            "workspace_path": str(tmp_path),
+            "default_chat_id": 111,
+            "min_interval_seconds": 60,
+        }
+        tool = CronToolBuiltin(config)
+        schedule_at_tool = next(
+            t for t in tool.get_langchain_tool() if t.name == "schedule_at"
+        )
+
+        mock_channel = Mock()
+        set_channel_context(mock_channel, "telegram:111")
+        try:
+            future_time = datetime.now(UTC) + timedelta(hours=1)
+            await schedule_at_tool.ainvoke({
+                "run_at": future_time.isoformat(),
+                "prompt": "Generic reminder",
+            })
+        finally:
+            clear_channel_context()
+
+        tasks = tool.store.list_tasks()
+        assert len(tasks) == 1
+        assert tasks[0].prompt == "Generic reminder"
+
+    @pytest.mark.asyncio
+    async def test_no_enrichment_when_user_not_in_aliases(
+        self, tmp_path: Any
+    ) -> None:
+        """Prompt should remain unchanged when user is not in the aliases map."""
+        config = {
+            "workspace_path": str(tmp_path),
+            "default_chat_id": 111,
+            "user_aliases": {999: "Someone Else"},
+            "min_interval_seconds": 60,
+        }
+        tool = CronToolBuiltin(config)
+        schedule_at_tool = next(
+            t for t in tool.get_langchain_tool() if t.name == "schedule_at"
+        )
+
+        mock_channel = Mock()
+        set_channel_context(mock_channel, "telegram:111")
+        try:
+            future_time = datetime.now(UTC) + timedelta(hours=1)
+            await schedule_at_tool.ainvoke({
+                "run_at": future_time.isoformat(),
+                "prompt": "Reminder for unknown user",
+            })
+        finally:
+            clear_channel_context()
+
+        tasks = tool.store.list_tasks()
+        assert len(tasks) == 1
+        assert tasks[0].prompt == "Reminder for unknown user"
+
+    @pytest.mark.asyncio
+    async def test_no_enrichment_without_session_context(
+        self, tmp_path: Any
+    ) -> None:
+        """Prompt should remain unchanged when no session context (fallback chat_id)."""
+        config = {
+            "workspace_path": str(tmp_path),
+            "default_chat_id": 111,
+            "user_aliases": {111: "John"},
+            "min_interval_seconds": 60,
+        }
+        tool = CronToolBuiltin(config)
+        schedule_at_tool = next(
+            t for t in tool.get_langchain_tool() if t.name == "schedule_at"
+        )
+
+        # No session context set — falls back to default_chat_id
+        future_time = datetime.now(UTC) + timedelta(hours=1)
+        await schedule_at_tool.ainvoke({
+            "run_at": future_time.isoformat(),
+            "prompt": "Reminder without context",
+        })
+
+        tasks = tool.store.list_tasks()
+        assert len(tasks) == 1
+        # default_chat_id 111 IS in aliases, so it should still enrich
+        assert tasks[0].prompt.startswith("[Scheduled for user: John]")

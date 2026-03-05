@@ -12,6 +12,9 @@ logger = logging.getLogger(__name__)
 # Context variables for the current channel session
 _channel_var: contextvars.ContextVar[Any] = contextvars.ContextVar("_channel", default=None)
 _session_key_var: contextvars.ContextVar[str | None] = contextvars.ContextVar("_session_key", default=None)
+_invocation_origin_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_invocation_origin", default=None
+)
 
 
 def set_channel_context(channel: "ChannelAdapter", session_key: str) -> None:
@@ -30,6 +33,7 @@ def clear_channel_context() -> None:
     """Clear the channel context."""
     _channel_var.set(None)
     _session_key_var.set(None)
+    _invocation_origin_var.set(None)
     logger.debug("Channel context cleared")
 
 
@@ -49,3 +53,21 @@ def get_current_session_key() -> str | None:
         Session key string (e.g., 'telegram:123456') or None if context not set.
     """
     return _session_key_var.get()
+
+
+def set_invocation_origin(origin: str | None) -> None:
+    """Set the invocation origin for the current async task.
+
+    Args:
+        origin: Origin identifier (e.g., 'cron:daily-summary') or None to clear.
+    """
+    _invocation_origin_var.set(origin)
+
+
+def get_invocation_origin() -> str | None:
+    """Get the current invocation origin.
+
+    Returns:
+        Origin string or None if not set.
+    """
+    return _invocation_origin_var.get()

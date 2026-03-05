@@ -53,6 +53,7 @@ class SubAgentRequest:
     notify: bool = True
     allowed_tools: list[str] | None = None
     denied_tools: list[str] | None = None
+    origin: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary with ISO 8601 datetime strings.
@@ -77,6 +78,8 @@ class SubAgentRequest:
             data.pop("allowed_tools", None)
         if self.denied_tools is None:
             data.pop("denied_tools", None)
+        if self.origin is None:
+            data.pop("origin", None)
 
         return data
 
@@ -111,6 +114,7 @@ class SubAgentRequest:
             notify=data.get("notify", True),
             allowed_tools=data.get("allowed_tools"),
             denied_tools=data.get("denied_tools"),
+            origin=data.get("origin"),
         )
 
 
