@@ -247,48 +247,48 @@ async def test_pending_steer_message_stores_consumed_messages(
 
 
 @pytest.mark.asyncio
-async def test_multiple_tools_first_triggers_steer_subsequent_skipped(
+async def test_multiple_tools_first_triggers_steer_all_subsequent_skipped(
     middleware, mock_queue_manager, mock_handler
 ):
-    """Multiple tools in batch: first tool triggers steer, subsequent tools also skipped."""
+    """Once steer triggers, ALL subsequent tools are skipped for the entire invocation.
+
+    This prevents the ReAct loop from continuing to execute tools after the LLM
+    sees skip messages and generates new tool calls in a subsequent iteration.
+    """
     middleware.set_queue_awareness(mock_queue_manager, "test_session", QueueMode.STEER)
     mock_queue_manager.peek_pending.return_value = True
     mock_queue_manager.consume_pending.return_value = [("telegram", "New message")]
 
-    # First tool call
+    # First tool call — triggers steer and consumes
     request1 = MagicMock()
     request1.tool_call = {"id": "tool-1", "name": "tool_1", "args": {}}
     result1 = await middleware._check_and_execute(request1, mock_handler)
 
-    # First call triggers steer and consumes
     assert middleware.was_steered is True
     assert isinstance(result1, ToolMessage)
     assert "[Skipped" in result1.content
     mock_queue_manager.consume_pending.assert_called_once()
 
-    # Second tool call (simulate subsequent tool in the same batch)
+    # Second tool call — same batch, no pending anymore (already consumed)
+    # Must still be skipped because _steered is True
     request2 = MagicMock()
     request2.tool_call = {"id": "tool-2", "name": "tool_2", "args": {}}
-
-    # Reset peek to still return True (messages were consumed, but steered flag is set)
-    # In reality, after consume, peek would return False. But we're testing that
-    # once steered, subsequent tools are skipped even if peek returns False now.
     mock_queue_manager.peek_pending.return_value = False
     result2 = await middleware._check_and_execute(request2, mock_handler)
 
-    # Second call should execute normally (no pending messages now)
-    mock_handler.assert_called_once_with(request2)
-    assert result2.content == "Tool executed successfully"
+    assert isinstance(result2, ToolMessage)
+    assert "[Skipped" in result2.content
+    mock_handler.assert_not_called()  # Handler never called after steer
 
-    # More realistic test: messages are still pending (user keeps typing)
-    mock_queue_manager.peek_pending.return_value = True
+    # Third tool call — simulates a NEW ReAct iteration where the LLM ignored
+    # skip messages and generated new tool calls. Must still be skipped.
     request3 = MagicMock()
     request3.tool_call = {"id": "tool-3", "name": "tool_3", "args": {}}
     result3 = await middleware._check_and_execute(request3, mock_handler)
 
-    # Third call should be skipped (still steered, but consume not called again)
     assert isinstance(result3, ToolMessage)
     assert "[Skipped" in result3.content
+    mock_handler.assert_not_called()
     # consume_pending only called once (on first steer)
     assert mock_queue_manager.consume_pending.call_count == 1
 

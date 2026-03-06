@@ -75,6 +75,7 @@ class TestTemplateRendering:
         result = SUBAGENT_TIMED_OUT_TEMPLATE.format(
             label="research-task",
             timeout_minutes=30,
+            origin_suffix="",
         )
         assert "research-task" in result
         assert "30 minutes" in result
@@ -84,6 +85,7 @@ class TestTemplateRendering:
         result = SUBAGENT_FAILED_TEMPLATE.format(
             label="analysis",
             error="Connection timeout",
+            origin_suffix="",
         )
         assert "analysis" in result
         assert "Connection timeout" in result
@@ -94,6 +96,7 @@ class TestTemplateRendering:
             label="search",
             output="Found 42 results...",
             request_id="abc123",
+            origin_suffix="",
         )
         assert "search" in result
         assert "Found 42 results..." in result
@@ -104,6 +107,7 @@ class TestTemplateRendering:
         result = SUBAGENT_COMPLETED_SHORT_TEMPLATE.format(
             label="quick-task",
             output="Done!",
+            origin_suffix="",
         )
         assert "quick-task" in result
         assert "Done!" in result

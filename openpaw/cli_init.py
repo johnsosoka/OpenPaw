@@ -196,8 +196,16 @@ def _build_agent_yaml(name: str, channel: str | None, model: str | None) -> str:
             lines.append(f"  api_key: ${{{api_key_env}}}")
         lines += [
             "  temperature: 0.7",
-            "",
         ]
+
+        # For well-known native providers, hint at the shorthand alternative.
+        if provider in _PROVIDER_API_KEY_ENV:
+            lines += [
+                "",
+                "# Or use shorthand with a configured provider:",
+                f"# model: {provider}:{model_id}",
+            ]
+        lines.append("")
     else:
         lines += [
             "# model:",

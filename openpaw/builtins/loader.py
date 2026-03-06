@@ -180,6 +180,10 @@ class BuiltinLoader:
             allowed_users = self.channel_config.get("allowed_users", [])
             if allowed_users:
                 config["default_chat_id"] = allowed_users[0]
+            # Pass user aliases so cron can enrich prompts with user identity
+            user_aliases = self.channel_config.get("user_aliases", {})
+            if user_aliases:
+                config["user_aliases"] = user_aliases
 
         # Inject channel routing config for send_message tool
         if name == "send_message" and self.channel_config:

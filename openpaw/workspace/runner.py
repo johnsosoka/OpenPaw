@@ -292,6 +292,7 @@ class WorkspaceRunner:
             extra_model_kwargs=extra_model_kwargs,
             middleware=middlewares,
             logger=self.logger,
+            provider_catalog=self.config.providers,
         )
         self._agent_runner = self._agent_factory.create_agent(checkpointer=None)
 

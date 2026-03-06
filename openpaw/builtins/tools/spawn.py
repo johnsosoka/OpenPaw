@@ -14,7 +14,7 @@ from openpaw.builtins.base import (
     BuiltinPrerequisite,
     BuiltinType,
 )
-from openpaw.builtins.tools._channel_context import get_current_session_key
+from openpaw.builtins.tools._channel_context import get_current_session_key, get_invocation_origin
 from openpaw.model.subagent import SubAgentStatus
 from openpaw.runtime.subagent import SubAgentRunner
 from openpaw.stores.subagent import create_subagent_request
@@ -175,6 +175,7 @@ class SpawnToolBuiltin(BaseBuiltinTool):
                 notify=notify,
                 allowed_tools=allowed_tools,
                 denied_tools=denied_tools,
+                origin=get_invocation_origin(),
             )
 
             # Persist request to store
@@ -248,6 +249,7 @@ class SpawnToolBuiltin(BaseBuiltinTool):
                 notify=notify,
                 allowed_tools=allowed_tools,
                 denied_tools=denied_tools,
+                origin=get_invocation_origin(),
             )
 
             # Persist request to store

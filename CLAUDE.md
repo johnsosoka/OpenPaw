@@ -308,6 +308,63 @@ queue:
 
 **User Identity**: When `user_aliases` is configured, messages from multiple users are prefixed with `[Name]: ` so the agent can distinguish speakers. Falls back to Telegram `first_name` → `username` if a user is not in the aliases map. System messages and single-user workspaces without aliases are unaffected.
 
+#### Provider Catalog
+
+Define provider connection details once in global `config.yaml`, then reference them by name from workspaces. This eliminates duplication of `api_key`, `base_url`, and other provider-specific settings across multiple workspaces.
+
+**Global config (`config.yaml`)**:
+
+```yaml
+providers:
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+  openai:
+    api_key: ${OPENAI_API_KEY}
+  moonshot:
+    type: openai                     # LangChain backend class
+    api_key: ${MOONSHOT_API_KEY}
+    base_url: https://api.moonshot.ai/v1
+  xai:
+    api_key: ${XAI_API_KEY}
+  bedrock:
+    type: bedrock_converse
+    region: us-east-1
+```
+
+**Per-workspace shorthand (`agent.yaml`)**:
+
+```yaml
+# Before (full connection details):
+model:
+  provider: openai
+  model: kimi-k2.5
+  api_key: ${MOONSHOT_API_KEY}
+  base_url: https://api.moonshot.ai/v1
+
+# After (references catalog):
+model: moonshot:kimi-k2.5
+temperature: 0.6
+```
+
+**Resolution Flow**: When a workspace says `moonshot:kimi-k2.5`, the framework: (1) extracts "moonshot" as the provider name, (2) looks it up in the `providers` catalog, (3) resolves `type: openai` → calls `create_chat_model("openai:kimi-k2.5", ...)` with the catalog's `api_key` and `base_url`.
+
+**Key Behaviors**:
+- No `providers:` section → all current behavior unchanged (full backward compatibility)
+- API key priority: catalog → workspace (same-provider fallback) → env var
+- Unknown provider name → passed through to LangChain as-is (existing behavior)
+- `/model moonshot:kimi-k2.5` works — the command resolves through the catalog
+- `/model list` — shows all configured providers with their types and connection details
+- `display_str` vs `model_str`: users see the catalog name ("moonshot:kimi-k2.5"), LangChain receives the resolved type ("openai:kimi-k2.5")
+- Extra kwargs merge: catalog extras + workspace extras, workspace wins on conflict
+
+**Components**:
+- `ProviderDefinition` Pydantic model in `openpaw/core/config/models.py` — `type`, `api_key`, `base_url`, `region`, plus arbitrary extras via `extra="allow"`
+- `Config.providers: dict[str, ProviderDefinition]` — the catalog field
+- `ResolvedProvider` frozen dataclass in `openpaw/core/config/providers.py` — `model_str`, `display_str`, `api_key`, `region`, `extra_kwargs`
+- `resolve_provider()` — pure function, no side effects, maps catalog name to connection details
+- `AgentFactory._resolve_for_model()` — wires resolution into agent creation
+- `WorkspaceConfig.coerce_model_string` — model validator allowing `model: "provider:model_id"` shorthand in agent.yaml
+
 #### AWS Bedrock Configuration
 
 OpenPaw supports AWS Bedrock models via the `bedrock_converse` provider. Available models include Kimi K2 Thinking, Claude, Mistral, and others.
