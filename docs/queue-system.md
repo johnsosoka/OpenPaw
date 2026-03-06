@@ -2,12 +2,9 @@
 
 OpenPaw implements a sophisticated lane-based queuing system that enables responsive, context-aware message handling for AI agents. The queue system supports multiple processing modes, per-session isolation, and middleware-driven responsiveness.
 
+[![Queue Modes](../assets/diagrams/queue-modes.png)](../assets/diagrams/queue-modes.png)
+
 ## Architecture
-
-The queue system is implemented in two core components:
-
-- **`openpaw/runtime/queue/lane.py`** - `LaneQueue` provides lane-based FIFO queuing with configurable concurrency
-- **`openpaw/runtime/queue/manager.py`** - `QueueManager` coordinates message routing, debouncing, and queue mode behavior
 
 Each workspace maintains its own isolated queue system with three lanes:
 

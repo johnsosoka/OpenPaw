@@ -296,39 +296,7 @@ Channels automatically register bot commands using `channel.register_commands()`
 
 ### Approval Gate UI
 
-Telegram channels support approval gates for dangerous tool operations via inline keyboards.
-
-**Example Approval Request:**
-
-```
-The agent wants to run: overwrite_file
-
-Arguments:
-  path: important_config.yaml
-  content: [300 characters]
-
-[Approve] [Deny]
-```
-
-When a gated tool is called:
-1. Execution pauses
-2. Telegram sends inline keyboard with Approve/Deny buttons
-3. User clicks a button
-4. On approval: agent re-runs with tool execution allowed
-5. On denial: agent receives system message that tool was denied
-
-**Configuration:**
-
-```yaml
-approval_gates:
-  enabled: true
-  timeout_seconds: 120
-  default_action: deny
-  tools:
-    overwrite_file:
-      require_approval: true
-      show_args: true
-```
+Telegram supports approval gates via inline keyboards — when a gated tool is called, the user sees Approve/Deny buttons in chat. See [Concepts](concepts.md) for how approval gates work and [Configuration](configuration.md) for the full config reference.
 
 ### Telegram Metadata Fields
 

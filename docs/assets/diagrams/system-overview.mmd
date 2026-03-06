@@ -1,0 +1,98 @@
+graph TD
+    CLI["CLI\nopenpaw.cli"]
+
+    CLI --> ORC
+
+    subgraph ORC["OpenPawOrchestrator"]
+        direction TB
+
+        subgraph WS1["WorkspaceRunner: gilfoyle"]
+            direction TB
+            CH1["Channel Adapter\n(Telegram)"]
+            QM1["QueueManager\nLanes: main · subagent · cron"]
+            AF1["AgentFactory"]
+            AR1["AgentRunner\n(LangGraph ReAct)"]
+            MW1["Middleware\nqueue-aware · approval"]
+            TL1["Tools\nfilesystem · builtins · custom"]
+            SC1["Schedulers\nCronScheduler · HeartbeatScheduler"]
+            SM1["SessionManager\nConversationArchiver"]
+            SA1["SubAgentRunner"]
+
+            CH1 --> QM1
+            QM1 --> AF1
+            AF1 --> AR1
+            AR1 --> MW1
+            AR1 --> TL1
+            SC1 --> AF1
+            SM1 --> AR1
+            SA1 --> AF1
+        end
+
+        subgraph WS2["WorkspaceRunner: assistant"]
+            direction TB
+            CH2["Channel Adapter\n(Telegram)"]
+            QM2["QueueManager\nLanes: main · subagent · cron"]
+            AF2["AgentFactory"]
+            AR2["AgentRunner\n(LangGraph ReAct)"]
+            MW2["Middleware\nqueue-aware · approval"]
+            TL2["Tools\nfilesystem · builtins · custom"]
+            SC2["Schedulers\nCronScheduler · HeartbeatScheduler"]
+            SM2["SessionManager\nConversationArchiver"]
+            SA2["SubAgentRunner"]
+
+            CH2 --> QM2
+            QM2 --> AF2
+            AF2 --> AR2
+            AR2 --> MW2
+            AR2 --> TL2
+            SC2 --> AF2
+            SM2 --> AR2
+            SA2 --> AF2
+        end
+
+        subgraph WS3["WorkspaceRunner: scheduler"]
+            direction TB
+            CH3["Channel Adapter\n(Telegram)"]
+            QM3["QueueManager\nLanes: main · subagent · cron"]
+            AF3["AgentFactory"]
+            AR3["AgentRunner\n(LangGraph ReAct)"]
+            SC3["Schedulers\nCronScheduler · HeartbeatScheduler"]
+
+            CH3 --> QM3
+            QM3 --> AF3
+            AF3 --> AR3
+            SC3 --> AF3
+        end
+    end
+
+    style ORC fill:#1a1a2e,stroke:#4a4a8a,stroke-width:2px,color:#e0e0ff
+    style WS1 fill:#16213e,stroke:#0f3460,stroke-width:2px,color:#a8d8ff
+    style WS2 fill:#16213e,stroke:#0f3460,stroke-width:2px,color:#a8d8ff
+    style WS3 fill:#16213e,stroke:#0f3460,stroke-width:2px,color:#a8d8ff
+
+    style CLI fill:#2d2d44,stroke:#6a6aaa,color:#e0e0ff
+    style CH1 fill:#1e3a5f,stroke:#2e6aaf,color:#a8d8ff
+    style QM1 fill:#1e3a5f,stroke:#2e6aaf,color:#a8d8ff
+    style AF1 fill:#1e3a5f,stroke:#2e6aaf,color:#a8d8ff
+    style AR1 fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+    style MW1 fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+    style TL1 fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+    style SC1 fill:#3b2a1e,stroke:#8a5a2e,color:#ffd8a8
+    style SM1 fill:#3b2a1e,stroke:#8a5a2e,color:#ffd8a8
+    style SA1 fill:#3b1e3b,stroke:#8a2e8a,color:#f0a8ff
+
+    style CH2 fill:#1e3a5f,stroke:#2e6aaf,color:#a8d8ff
+    style QM2 fill:#1e3a5f,stroke:#2e6aaf,color:#a8d8ff
+    style AF2 fill:#1e3a5f,stroke:#2e6aaf,color:#a8d8ff
+    style AR2 fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+    style MW2 fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+    style TL2 fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+    style SC2 fill:#3b2a1e,stroke:#8a5a2e,color:#ffd8a8
+    style SM2 fill:#3b2a1e,stroke:#8a5a2e,color:#ffd8a8
+    style SA2 fill:#3b1e3b,stroke:#8a2e8a,color:#f0a8ff
+
+    style CH3 fill:#1e3a5f,stroke:#2e6aaf,color:#a8d8ff
+    style QM3 fill:#1e3a5f,stroke:#2e6aaf,color:#a8d8ff
+    style AF3 fill:#1e3a5f,stroke:#2e6aaf,color:#a8d8ff
+    style AR3 fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+    style SC3 fill:#3b2a1e,stroke:#8a5a2e,color:#ffd8a8
