@@ -253,7 +253,7 @@ output:
   chat_id: 123456789  # Your Telegram user ID
 ```
 
-See [cron-scheduler.md](cron-scheduler.md) for detailed configuration.
+See [scheduling.md](scheduling.md) for detailed configuration.
 
 ## Running Your Agent
 
@@ -313,7 +313,7 @@ Now that you have a working agent, explore advanced features:
 
 - **[Configuration](configuration.md)** - Deep-dive into global and workspace config options
 - **[Queue System](queue-system.md)** - Understand queue modes (collect, steer, interrupt, followup)
-- **[Cron Scheduler](cron-scheduler.md)** - Set up scheduled tasks and heartbeats
+- **[Scheduling](scheduling.md)** - Set up scheduled tasks and heartbeats
 - **[Builtins](builtins.md)** - Enable web search, voice, browser automation, sub-agents
 - **[Workspaces](workspaces.md)** - Advanced workspace organization and custom tools
 - **[Channels](channels.md)** - Channel system details and access control

@@ -411,11 +411,7 @@ heartbeat:
 
 **output** — Where to send heartbeat messages.
 
-**Pre-flight Skip:** Before invoking the LLM, the scheduler checks HEARTBEAT.md and TASKS.yaml. If HEARTBEAT.md is empty/trivial and no active tasks exist, the heartbeat is skipped entirely — saving API costs for idle workspaces.
-
-**Task Summary Injection:** When active tasks exist, a compact summary is injected into the heartbeat prompt as `<active_tasks>` XML tags. This avoids an extra LLM tool call to `list_tasks()`.
-
-**Event Logging:** Every heartbeat event is logged to `{workspace}/data/heartbeat_log.jsonl` with outcome, duration, token metrics, and active task count.
+See [Scheduling](scheduling.md) for detailed heartbeat behavior including pre-flight skip, task-aware prompts, and the HEARTBEAT_OK protocol.
 
 ---
 
@@ -442,15 +438,7 @@ approval_gates:
 
 **tools** — Per-tool approval settings.
 
-**Lifecycle:**
-1. Middleware detects gated tool call → creates `PendingApproval`
-2. Raises `ApprovalRequiredError` → `WorkspaceRunner` catches exception
-3. Channel sends approval request with inline buttons (Approve/Deny)
-4. User responds → `ApprovalGateManager.resolve()` called
-5. On approval: agent re-runs with same message, middleware lets tool through
-6. On denial: agent receives `[SYSTEM] The tool 'X' was denied by the user. Do not retry this action.`
-
-**Channel Integration:** Channels implement `send_approval_request()` and register approval callbacks via `on_approval()`. Telegram uses inline keyboards; other channels can implement their own UI patterns.
+When a gated tool is called, execution pauses and the user sees approve/deny buttons in their chat. On approval, the agent re-runs with tool execution allowed. On denial, the agent receives a system message and can adjust its approach. See [Concepts](concepts.md) for a detailed walkthrough of the approval flow.
 
 ---
 
@@ -711,34 +699,9 @@ model:
 
 ---
 
-### Queue Modes in Detail
+### Queue Modes
 
-**collect mode** (default):
-- Messages are debounced before processing
-- Multiple rapid messages are batched into a single agent invocation
-- No middleware behavior during tool execution
-- Best for: interactive use with occasional rapid-fire messages
-
-**steer mode**:
-- Messages are processed immediately
-- If new message arrives during agent run, remaining tools are skipped
-- Pending messages are injected as next agent input
-- Agent sees `[Skipped: user sent new message — redirecting]` for skipped tools
-- Best for: responsive agents that should react to new input mid-execution
-
-**interrupt mode**:
-- Messages are processed immediately
-- If new message arrives during agent run, current tool raises `InterruptSignalError`
-- Agent's response is discarded, new message is processed immediately
-- More aggressive than steer — aborts mid-run rather than redirecting
-- Best for: high-priority interruptions (e.g., emergency commands)
-
-**followup mode**:
-- Messages are processed sequentially
-- No middleware behavior (reserved for followup tool chaining)
-- Best for: multi-step workflows with `request_followup` tool
-
-See [queue-system.md](queue-system.md) for middleware implementation details.
+The four queue modes — `collect`, `steer`, `interrupt`, and `followup` — control how the system handles messages that arrive while the agent is already working. See [Queue System](queue-system.md) for detailed behavior and examples of each mode.
 
 ---
 

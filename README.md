@@ -139,13 +139,14 @@ Once running, agents respond to framework commands in Telegram:
 ## Documentation
 
 - [Getting Started](docs/getting-started.md) -- Installation, first workspace, and troubleshooting
+- [Concepts](docs/concepts.md) -- How workspaces, scheduling, queues, and tools fit together
 - [Configuration](docs/configuration.md) -- Global and per-workspace configuration reference
-- [Workspaces](docs/workspaces.md) -- Workspace structure, custom tools, and cron jobs
-- [Architecture](docs/architecture.md) -- System design and component interactions
-- [Channels](docs/channels.md) -- Channel system and access control
-- [Queue System](docs/queue-system.md) -- Queue modes and message handling
-- [Cron Scheduler](docs/cron-scheduler.md) -- Scheduled tasks and heartbeat system
+- [Workspaces](docs/workspaces.md) -- Workspace structure, identity files, and custom tools
+- [Scheduling](docs/scheduling.md) -- Cron jobs, heartbeats, and dynamic scheduling
 - [Built-ins](docs/builtins.md) -- Web search, browser automation, voice, sub-agents, and more
+- [Channels](docs/channels.md) -- Channel adapters and access control
+- [Queue System](docs/queue-system.md) -- Queue modes and message handling
+- [Architecture](docs/architecture.md) -- System design, data flows, and architectural decisions
 
 ## Contributing
 

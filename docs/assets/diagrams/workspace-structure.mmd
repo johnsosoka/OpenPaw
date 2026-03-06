@@ -1,0 +1,87 @@
+graph LR
+    WR["agent_workspaces/my-agent/"]
+
+    WR --> ID
+    WR --> CFG
+    WR --> DATA
+    WR --> MEM
+    WR --> WORK
+    WR --> INT
+
+    subgraph ID["Identity — Agent Read/Write"]
+        direction TB
+        AGENT["AGENT.md\nCapabilities and behavior"]
+        USER["USER.md\nUser context and preferences"]
+        SOUL["SOUL.md\nCore personality and values"]
+        HB["HEARTBEAT.md\nCurrent state and session notes"]
+        TOOLS["tools/\nCustom @tool Python files"]
+        SKILLS["skills/\nLangChain skill directories"]
+    end
+
+    subgraph CFG["Config — Write-Protected from Agent"]
+        direction TB
+        AY["agent.yaml\nModel, channel, queue settings"]
+        ENV[".env\nWorkspace environment variables"]
+        CRONS["crons/\nScheduled task YAML definitions"]
+    end
+
+    subgraph DATA["Persistent Data — Write-Protected from Agent"]
+        direction TB
+        TASKS["TASKS.yaml\nCross-session task tracking"]
+        UPL["uploads/\nUser-uploaded files by date"]
+        DCRON["dynamic_crons.json\nAgent-scheduled tasks"]
+    end
+
+    subgraph MEM["Memory — Agent Read/Write"]
+        direction TB
+        CONV["memory/conversations/\nArchived conversation exports"]
+        SESS["memory/sessions/\nHeartbeat, cron, subagent logs"]
+    end
+
+    subgraph WORK["Work Area — Agent Read/Write"]
+        direction TB
+        DL["downloads/\nBrowser-downloaded files"]
+        SS["screenshots/\nBrowser page captures"]
+    end
+
+    subgraph INT["Framework Internals — Agent Blocked"]
+        direction TB
+        DB[".openpaw/conversations.db\nLangGraph checkpoint store"]
+        SJ[".openpaw/sessions.json\nConversation thread state"]
+        TU[".openpaw/token_usage.jsonl\nPer-invocation token log"]
+        SA[".openpaw/subagents.yaml\nSub-agent request state"]
+    end
+
+    style WR fill:#2d2d44,stroke:#6a6aaa,color:#e0e0ff
+
+    style ID fill:#0d3b2e,stroke:#1a7a5e,stroke-width:2px,color:#a8ffda
+    style AGENT fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+    style USER fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+    style SOUL fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+    style HB fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+    style TOOLS fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+    style SKILLS fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+
+    style CFG fill:#3b3b10,stroke:#8a8a1e,stroke-width:2px,color:#ffffa8
+    style AY fill:#3b3b10,stroke:#8a8a1e,color:#ffffa8
+    style ENV fill:#3b3b10,stroke:#8a8a1e,color:#ffffa8
+    style CRONS fill:#3b3b10,stroke:#8a8a1e,color:#ffffa8
+
+    style DATA fill:#3b2a1e,stroke:#8a5a2e,stroke-width:2px,color:#ffd8a8
+    style TASKS fill:#3b2a1e,stroke:#8a5a2e,color:#ffd8a8
+    style UPL fill:#3b2a1e,stroke:#8a5a2e,color:#ffd8a8
+    style DCRON fill:#3b2a1e,stroke:#8a5a2e,color:#ffd8a8
+
+    style MEM fill:#1e2e3b,stroke:#2e5a8a,stroke-width:2px,color:#a8d8ff
+    style CONV fill:#1e2e3b,stroke:#2e5a8a,color:#a8d8ff
+    style SESS fill:#1e2e3b,stroke:#2e5a8a,color:#a8d8ff
+
+    style WORK fill:#1e3b2e,stroke:#2e8a5a,stroke-width:2px,color:#a8ffd8
+    style DL fill:#1e3b2e,stroke:#2e8a5a,color:#a8ffd8
+    style SS fill:#1e3b2e,stroke:#2e8a5a,color:#a8ffd8
+
+    style INT fill:#3b1e1e,stroke:#8a2e2e,stroke-width:2px,color:#ffa8a8
+    style DB fill:#3b1e1e,stroke:#8a2e2e,color:#ffa8a8
+    style SJ fill:#3b1e1e,stroke:#8a2e2e,color:#ffa8a8
+    style TU fill:#3b1e1e,stroke:#8a2e2e,color:#ffa8a8
+    style SA fill:#3b1e1e,stroke:#8a2e2e,color:#ffa8a8
