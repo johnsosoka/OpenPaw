@@ -81,6 +81,23 @@ class HeartbeatScheduler:
         # Parse active hours at initialization
         self._active_hours = self._parse_active_hours(config.active_hours)
 
+    @staticmethod
+    def _resolve_heartbeat_session_key(channel: ChannelAdapter, config: HeartbeatConfig) -> str | None:
+        """Resolve session key from heartbeat config, channel-agnostically.
+
+        Args:
+            channel: The channel adapter instance to build the session key against.
+            config: The heartbeat configuration specifying channel type and target ID.
+
+        Returns:
+            A session key string, or None if no supported routing config is found.
+        """
+        if config.target_channel == "telegram" and config.target_chat_id:
+            return channel.build_session_key(config.target_chat_id)
+        if config.target_channel == "discord" and config.target_channel_id:
+            return channel.build_session_key(config.target_channel_id)
+        return None
+
     def _parse_active_hours(self, active_hours: str | None) -> tuple[time, time] | None:
         """Parse active hours string like '08:00-22:00' into start/end times.
 
@@ -411,9 +428,9 @@ class HeartbeatScheduler:
                     )
                 return
 
-            if self.config.target_channel == "telegram" and self.config.target_chat_id:
-                session_key = channel.build_session_key(self.config.target_chat_id)
+            session_key = self._resolve_heartbeat_session_key(channel, self.config)
 
+            if session_key:
                 # Delivery routing
                 delivery = self.config.delivery
 
@@ -462,7 +479,7 @@ class HeartbeatScheduler:
                         session_key=session_key,
                     )
             else:
-                # No routing configured (no chat_id or unsupported channel)
+                # No routing configured (no target ID or unsupported channel)
                 delivery = self.config.delivery
                 if delivery in ("agent", "both") and self._result_callback:
                     logger.warning(

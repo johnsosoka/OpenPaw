@@ -36,4 +36,16 @@ def create_channel(
             allow_all=config.get("allow_all", False),
             workspace_name=workspace_name,
         )
+
+    if channel_type == "discord":
+        from openpaw.channels.discord import DiscordChannel
+
+        return DiscordChannel(
+            token=config.get("token"),
+            allowed_users=config.get("allowed_users", []),
+            allowed_groups=config.get("allowed_groups", []),
+            allow_all=config.get("allow_all", False),
+            workspace_name=workspace_name,
+        )
+
     raise ValueError(f"Unsupported channel type: {channel_type}")

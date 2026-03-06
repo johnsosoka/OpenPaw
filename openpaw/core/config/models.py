@@ -285,7 +285,8 @@ class HeartbeatConfig(BaseModel):
     )
     suppress_ok: bool = Field(default=True, description="Suppress HEARTBEAT_OK responses from channel")
     target_channel: str = Field(default="telegram", description="Channel to route heartbeat responses")
-    target_chat_id: int | None = Field(default=None, description="Default chat ID for heartbeat output")
+    target_chat_id: int | None = Field(default=None, description="Telegram chat ID for heartbeat output")
+    target_channel_id: int | None = Field(default=None, description="Discord channel ID for heartbeat output")
     delivery: Literal["channel", "agent", "both"] = Field(
         default="channel",
         description="Where to deliver results: channel (direct), agent (queue injection), both",

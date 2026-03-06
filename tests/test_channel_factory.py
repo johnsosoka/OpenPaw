@@ -59,9 +59,6 @@ def test_create_channel_unsupported_type() -> None:
     """Test that unsupported channel types raise ValueError."""
     config = {"token": "test_token"}
 
-    with pytest.raises(ValueError, match="Unsupported channel type: discord"):
-        create_channel("discord", config, "test_workspace")
-
     with pytest.raises(ValueError, match="Unsupported channel type: slack"):
         create_channel("slack", config, "test_workspace")
 
