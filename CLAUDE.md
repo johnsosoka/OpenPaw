@@ -125,7 +125,7 @@ openpaw/
 │   ├── cron.py       # DynamicCronStore (dynamic_crons.json)
 │   └── vector/       # Semantic search infrastructure
 ├── channels/         # External communication
-│   ├── factory.py    # Channel factory
+│   ├── factory.py    # Channel factory (telegram, discord)
 │   ├── telegram.py   # Telegram adapter
 │   └── commands/     # Slash command handlers
 │       ├── router.py         # CommandRouter
@@ -183,7 +183,7 @@ openpaw/
 
 **`openpaw/channels/telegram.py`** - Telegram bot adapter using `python-telegram-bot`. Converts platform messages to unified `Message` format, handles allowlisting, and supports voice/audio messages, documents, and photo uploads.
 
-**`openpaw/channels/factory.py`** - Channel factory. Decouples `WorkspaceRunner` from concrete channel types via `create_channel(channel_type, config, workspace_name)`. Currently supports `telegram`; new providers register here.
+**`openpaw/channels/factory.py`** - Channel factory. Decouples `WorkspaceRunner` from concrete channel types via `create_channel(channel_type, config, workspace_name, channel_name)`. Supports `telegram` and `discord`. Optional `channel_name` overrides the adapter's default name for multi-channel session key uniqueness.
 
 **`openpaw/runtime/session/manager.py`** - `SessionManager` for tracking conversation threads per session. Thread-safe JSON persistence at `{workspace}/.openpaw/sessions.json`. Provides `get_thread_id()`, `new_conversation()`, `get_state()`, `increment_message_count()`.
 
@@ -288,6 +288,7 @@ model:
 # Shorthand format also accepted (auto-split on first colon):
 # model: "anthropic:claude-sonnet-4-20250514"
 
+# Single channel (backward compatible):
 channel:
   type: telegram
   token: ${TELEGRAM_BOT_TOKEN}
@@ -296,6 +297,16 @@ channel:
   user_aliases:             # Map user IDs to display names (optional)
     123456789: "John"
     987654321: "Sarah"
+
+# Multi-channel alternative:
+# channels:
+#   - type: telegram
+#     token: ${TELEGRAM_BOT_TOKEN}
+#     allowed_users: [123456789]
+#   - type: discord
+#     token: ${DISCORD_BOT_TOKEN}
+#     allowed_users: [987654321]
+#     mention_required: true
 
 queue:
   mode: collect
@@ -307,6 +318,68 @@ queue:
 **Config Merging**: Workspace settings deep-merge over global config. Missing fields inherit from global, present fields override.
 
 **User Identity**: When `user_aliases` is configured, messages from multiple users are prefixed with `[Name]: ` so the agent can distinguish speakers. Falls back to Telegram `first_name` → `username` if a user is not in the aliases map. System messages and single-user workspaces without aliases are unaffected.
+
+#### Multi-Channel Configuration
+
+A workspace can run multiple channels simultaneously. Use the `channels:` list syntax:
+
+```yaml
+channels:
+  - type: telegram
+    token: ${TELEGRAM_BOT_TOKEN}
+    allowed_users: [123456789]
+
+  - type: discord
+    token: ${DISCORD_BOT_TOKEN}
+    allowed_users: [987654321]
+    allowed_groups: [111222333]
+    mention_required: true
+```
+
+**Backward Compatibility**: The singular `channel:` syntax is still supported. It is automatically normalized to a one-element `channels:` list internally. You cannot specify both `channel:` and `channels:` — the validator rejects this.
+
+**Channel Names**: Each channel needs a unique name. By default, the name is the channel type (e.g., `"telegram"`). When running two channels of the same type, use the `name` field:
+
+```yaml
+channels:
+  - name: telegram-personal
+    type: telegram
+    token: ${TELEGRAM_BOT_TOKEN_1}
+    allowed_users: [123456789]
+
+  - name: telegram-work
+    type: telegram
+    token: ${TELEGRAM_BOT_TOKEN_2}
+    allowed_users: [987654321]
+```
+
+Custom names appear in session keys (e.g., `telegram-personal:123456` instead of `telegram:123456`) and in `/status` output.
+
+**User Aliases**: When multiple channels define `user_aliases`, they are merged with first-wins policy. In practice, user IDs are platform-specific and don't collide.
+
+#### Trigger-Based Activation
+
+Channels support trigger keywords for group chat filtering. Triggers use OR logic with `mention_required` — either condition passing is sufficient.
+
+```yaml
+channels:
+  - type: discord
+    token: ${DISCORD_BOT_TOKEN}
+    allowed_groups: [111222333]
+    mention_required: true
+    triggers:
+      - "!ask"
+      - "hey bot"
+```
+
+**Behavior**:
+- Empty `triggers` + `mention_required: false` (default) → all messages processed
+- `triggers: ["!ask"]` alone → messages must contain "!ask" (case-insensitive substring)
+- `mention_required: true` alone → messages must @mention the bot
+- Both set → either @mention OR trigger keyword passes (OR logic)
+- DMs and slash commands always pass through regardless of filters
+
+**Implementation**: `ChannelAdapter._passes_trigger_filter()` (static helper in base class) + `_passes_activation_filter()` on each adapter.
 
 #### Provider Catalog
 
@@ -548,9 +621,11 @@ prompt: |
 
 output:
   channel: telegram
-  chat_id: 123456789  # Channel-specific routing
+  target_id: 123456789  # Preferred (channel-agnostic). Legacy: chat_id, channel_id
   delivery: channel   # Where to deliver: channel, agent, or both (default: channel)
 ```
+
+**Output Routing**: The `output.channel` field references a channel name (defaults to type). Use `target_id` as the preferred routing field (channel-type-agnostic). Legacy fields `chat_id` and `channel_id` are still supported as fallbacks.
 
 **Schedule Format**: Standard cron expression `"minute hour day-of-month month day-of-week"`
 - `"0 9 * * *"` - Every day at 9:00 AM
@@ -767,7 +842,7 @@ heartbeat:
   delivery: channel              # Where to deliver: channel, agent, or both (default: channel)
   output:
     channel: telegram
-    chat_id: 123456789
+    target_id: 123456789
 ```
 
 **HEARTBEAT_OK Protocol**: If the agent determines there's nothing to report, it can respond with exactly "HEARTBEAT_OK" and no message will be sent (when `suppress_ok: true`). This prevents noisy "all clear" messages.
@@ -1021,16 +1096,21 @@ Framework commands are handled by `CommandRouter` before messages reach the agen
 
 ### Channel Abstraction
 
-Channels are created via the factory pattern in `openpaw/channels/factory.py`. `WorkspaceRunner` is fully decoupled from concrete channel types.
+Channels are created via the factory pattern in `openpaw/channels/factory.py`. `WorkspaceRunner` is fully decoupled from concrete channel types. A workspace can run multiple channels simultaneously — each with its own adapter, session keys, and filtering rules.
 
 ```python
 # Adding a new channel provider:
 # 1. Create adapter extending ChannelAdapter in openpaw/channels/
-# 2. Register in create_channel() factory in openpaw/channels/factory.py
-# 3. Use channel type string in workspace config
+# 2. Implement _passes_activation_filter() for group chat filtering
+# 3. Register in create_channel() factory in openpaw/channels/factory.py
+# 4. Use channel type string in workspace config
 ```
 
-Channels register bot commands (e.g., Telegram's command menu) via `register_commands()` using the command router's definition list. Channels also support `send_file(session_key, file_path, filename, caption)` for delivering files to users (used by `SendFileTool`).
+**Multi-Channel Architecture**: `LifecycleManager.setup_channels()` iterates the `channels` list from merged config, creates one adapter per entry via the factory, and registers each with the queue manager. Channel dict keys use the resolved channel name (explicit `name` field or type). Session keys include the channel name prefix (e.g., `telegram:123456`, `discord-work:987654`), ensuring queue isolation across channels.
+
+**Activation Filtering**: The base class provides `_passes_trigger_filter()` (static, case-insensitive substring match). Concrete adapters implement `_passes_activation_filter()` with OR logic between `mention_required` and `triggers`. DMs always pass through. The filter pipeline is: `allowlist → activation filter → callback`.
+
+Channels register bot commands (e.g., Telegram's command menu, Discord slash commands) via `register_commands()` using the command router's definition list. Channels also support `send_file(session_key, file_data, filename, caption)` for delivering files to users (used by `SendFileTool`).
 
 ### Conversation Persistence
 
