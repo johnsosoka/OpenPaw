@@ -44,7 +44,7 @@ When you run multiple workspaces with `--all`, OpenPaw launches each workspace c
 
 This isolation also applies to configuration. A workspace can override the global model, queue mode, and built-in configuration without affecting other workspaces. You define defaults globally in `config.yaml` and override only what differs in each workspace's `agent.yaml`. For example, you might run most workspaces on a cost-efficient model globally, but configure one specialized workspace to use a more capable model for demanding tasks.
 
-Each workspace also has its own channel — a Telegram bot, for instance. One workspace can listen on one bot token while another listens on a different token. Users who interact with each bot only see responses from the workspace connected to that bot. Channel access control (allowlisted user IDs or groups) is configured per workspace in `agent.yaml`.
+Each workspace also has its own channel connections — a Telegram bot, a Discord bot, or both. One workspace can listen on one bot token while another listens on a different token. A single workspace can even connect to multiple channels simultaneously, receiving messages from Telegram and Discord at the same time. Users who interact with each bot only see responses from the workspace connected to that bot. Channel access control (allowlisted user IDs or groups) and activation filters (mention requirements, keyword triggers) are configured per workspace in `agent.yaml`.
 
 ### Custom Tools
 
