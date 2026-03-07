@@ -545,6 +545,11 @@ class WorkspaceRunner:
         self._channels = await self._lifecycle_manager.setup_channels()
         await self._lifecycle_manager.start_channels()
 
+        # Register framework commands with channels (e.g., Discord slash commands)
+        command_defs = self._command_router.list_commands()
+        for channel in self._channels.values():
+            await channel.register_commands(command_defs)
+
         # Start schedulers if needed
         cron_tool_loaded = self._builtin_loader.get_tool_instance("cron") is not None
         if self._workspace.crons or cron_tool_loaded:
