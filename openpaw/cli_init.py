@@ -86,6 +86,7 @@ TEMPLATE_ENV = """\
 # OPENAI_API_KEY=
 # XAI_API_KEY=
 # BRAVE_API_KEY=
+# DISCORD_BOT_TOKEN=
 """
 
 # ---------------------------------------------------------------------------
@@ -226,6 +227,15 @@ def _build_agent_yaml(name: str, channel: str | None, model: str | None) -> str:
                 "  allowed_users: []",
                 "",
             ]
+        elif channel == "discord":
+            lines += [
+                "channel:",
+                f"  type: {channel}",
+                "  token: ${DISCORD_BOT_TOKEN}",
+                "  allowed_users: []",
+                "  allowed_groups: []  # Guild IDs",
+                "",
+            ]
         else:
             lines += [
                 "channel:",
@@ -235,7 +245,7 @@ def _build_agent_yaml(name: str, channel: str | None, model: str | None) -> str:
     else:
         lines += [
             "# channel:",
-            "#   type: telegram",
+            "#   type: telegram  # or discord",
             "#   token: ${TELEGRAM_BOT_TOKEN}",
             "#   allowed_users: []",
             "",

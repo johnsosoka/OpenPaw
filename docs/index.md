@@ -14,7 +14,7 @@ OpenPaw gives each AI agent its own isolated workspace — complete with memory,
 
 Most AI agent frameworks give you one agent in one context. OpenPaw takes a different approach: **each agent is a fully isolated workspace** with its own identity, tools, conversation history, and scheduled tasks. You define an agent's personality in markdown, configure its model and channel in YAML, drop in custom tools as Python files, and run everything from a single process.
 
-This means you can run a personal assistant, a code reviewer, and a monitoring bot side by side — each with its own Telegram channel, its own filesystem sandbox, and its own scheduled heartbeats — without them interfering with each other.
+This means you can run a personal assistant, a code reviewer, and a monitoring bot side by side — each with its own Telegram or Discord channel (or both), its own filesystem sandbox, and its own scheduled heartbeats — without them interfering with each other.
 
 ---
 

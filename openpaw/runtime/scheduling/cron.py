@@ -17,7 +17,7 @@ from openpaw.agent.metrics import TokenUsageLogger
 from openpaw.agent.session_logger import SessionLogger
 from openpaw.builtins.tools._channel_context import set_invocation_origin
 from openpaw.channels.base import ChannelAdapter
-from openpaw.core.config.models import CronDefinition
+from openpaw.core.config.models import CronDefinition, CronOutputConfig
 from openpaw.core.prompts.system_events import (
     CRON_RESULT_TEMPLATE,
     CRON_RESULT_TRUNCATED_TEMPLATE,
@@ -143,18 +143,19 @@ class CronScheduler:
                 channel = self.channels.get(cron.output.channel)
                 if not channel:
                     logger.error(f"Channel not found for cron {cron.name}: {cron.output.channel}")
-                elif cron.output.channel == "telegram" and cron.output.chat_id:
-                    session_key = channel.build_session_key(cron.output.chat_id)
-                    await channel.send_message(session_key=session_key, content=response)
                 else:
-                    logger.warning(f"Unsupported output config for cron {cron.name}: {cron.output}")
+                    session_key = self._resolve_session_key(channel, cron.output)
+                    if session_key:
+                        await channel.send_message(session_key=session_key, content=response)
+                    else:
+                        logger.warning(f"Unsupported output config for cron {cron.name}: {cron.output}")
 
             # Agent queue injection
             if delivery in ("agent", "both") and self._result_callback and session_path:
                 try:
                     channel = self.channels.get(cron.output.channel)
-                    if channel and cron.output.chat_id:
-                        session_key = channel.build_session_key(cron.output.chat_id)
+                    session_key = self._resolve_session_key(channel, cron.output) if channel else None
+                    if channel and session_key:
                         output = response
                         if len(output) > INJECTION_TRUNCATION_LIMIT:
                             output = output[:INJECTION_TRUNCATION_LIMIT]
@@ -185,6 +186,27 @@ class CronScheduler:
             logger.error(f"Failed to execute cron job {cron.name}: {e}", exc_info=True)
         finally:
             set_invocation_origin(None)
+
+    @staticmethod
+    def _resolve_session_key(channel: ChannelAdapter, output: CronOutputConfig) -> str | None:
+        """Resolve session key from cron output config.
+
+        Uses ``target_id`` (preferred) with fallback to legacy ``chat_id``/``channel_id``.
+
+        Args:
+            channel: The channel adapter instance to build the session key against.
+            output: The cron output config specifying channel name and target ID.
+
+        Returns:
+            A session key string, or None if no supported routing config is found.
+        """
+        target = next(
+            (v for v in (output.target_id, output.chat_id, output.channel_id) if v is not None),
+            None,
+        )
+        if target:
+            return channel.build_session_key(target)
+        return None
 
     def add_job(self, cron: CronDefinition) -> None:
         """Add a cron job to the scheduler.

@@ -186,7 +186,7 @@ builtins:
 #   suppress_ok: true             # Suppress messages when agent responds HEARTBEAT_OK
 #   delivery: channel             # channel, agent, or both
 #   target_channel: telegram
-#   target_chat_id: 123456789     # Telegram chat ID to deliver heartbeat responses
+#   target_id: 123456789          # Preferred (channel-agnostic). Legacy: target_chat_id
 
 # Conversation memory (vector search) — requires embedding API key
 # memory:
@@ -222,17 +222,42 @@ builtins:
 # ──────────────────────────────────────────────────────────────────────────────
 
 # Per-workspace channel settings (typically in agent.yaml, not here)
+# Single channel (backward compatible):
 # channel:
 #   type: telegram
 #   token: ${TELEGRAM_BOT_TOKEN}
 #   allowed_users:
 #     - 123456789
-#     - 987654321
 #   allowed_groups: []
 #   allow_all: false              # Insecure — allow any user; use only for testing
+#   mention_required: false       # Require @mention in group chats
+#   triggers: []                  # Keyword triggers for group chat activation (OR with mention)
 #   user_aliases:                 # Map user IDs to display names for multi-user workspaces
 #     123456789: "John"
 #     987654321: "Sarah"
+#
+# Multi-channel (same workspace, multiple platforms):
+# channels:
+#   - type: telegram
+#     token: ${TELEGRAM_BOT_TOKEN}
+#     allowed_users: [123456789]
+#   - type: discord
+#     token: ${DISCORD_BOT_TOKEN}
+#     allowed_users: [987654321]
+#     allowed_groups: [111222333]  # Guild IDs
+#     mention_required: true
+#     triggers: ["!ask", "hey bot"]
+#
+# Two channels of the same type (requires unique names):
+# channels:
+#   - name: telegram-personal
+#     type: telegram
+#     token: ${TELEGRAM_BOT_TOKEN_1}
+#     allowed_users: [123456789]
+#   - name: telegram-work
+#     type: telegram
+#     token: ${TELEGRAM_BOT_TOKEN_2}
+#     allowed_users: [987654321]
 
 # Per-workspace tool allow/deny (typically in agent.yaml, not here)
 # workspace_tools:

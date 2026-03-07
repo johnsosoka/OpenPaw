@@ -33,7 +33,9 @@ Agents can ingest documents, browse the web, search the internet, and manage the
 
 **Approval gates** -- Human-in-the-loop authorization for dangerous operations, with configurable timeouts and channel-native UI.
 
-**Workspace isolation** -- Each agent gets its own SOUL.md personality, tools directory, conversation history, channel, and sandboxed filesystem.
+**Multi-channel support** -- Connect agents to Telegram, Discord, or both simultaneously. Trigger-based activation lets agents respond to @mentions, keyword triggers, or both in group chats.
+
+**Workspace isolation** -- Each agent gets its own SOUL.md personality, tools directory, conversation history, channels, and sandboxed filesystem.
 
 **Multi-provider LLM support** -- Anthropic, OpenAI, AWS Bedrock, xAI, and any OpenAI-compatible endpoint. Switch models at runtime with `/model`.
 
@@ -82,7 +84,7 @@ poetry run openpaw -c config.yaml -w my_agent
 |---------|-------------|
 | `openpaw init <name>` | Scaffold a new agent workspace |
 | `openpaw init <name> --model <provider:model>` | Scaffold with a pre-configured model |
-| `openpaw init <name> --channel telegram` | Scaffold with Telegram channel pre-configured |
+| `openpaw init <name> --channel telegram` | Scaffold with channel pre-configured (`telegram` or `discord`) |
 | `openpaw list` | List available workspaces |
 | `openpaw -c config.yaml -w <name>` | Run a single workspace |
 | `openpaw -c config.yaml -w name1,name2` | Run multiple workspaces |
@@ -126,7 +128,7 @@ The `data/` and `config/` directories are write-protected from agent filesystem 
 
 ## In-Chat Commands
 
-Once running, agents respond to framework commands in Telegram:
+Once running, agents respond to framework commands in chat:
 
 | Command | Description |
 |---------|-------------|
@@ -162,7 +164,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
 
 - Python 3.11+
 - [Poetry 2.0+](https://python-poetry.org/docs/#installation)
-- A Telegram bot token ([via BotFather](https://core.telegram.org/bots#botfather))
+- At least one channel bot token: [Telegram](https://core.telegram.org/bots#botfather) or [Discord](https://discord.com/developers/applications)
 - At least one model provider API key (Anthropic, OpenAI, or AWS credentials for Bedrock)
 
 ## License

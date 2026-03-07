@@ -201,8 +201,15 @@ class WorkspaceRunner:
         if self._workspace.config and self._workspace.config.builtins:
             workspace_builtins_config = self._workspace.config.builtins
 
-        workspace_channel_config = self._merged_config.get("channel", {})
-        self._user_aliases: dict[int, str] = workspace_channel_config.get("user_aliases", {})
+        # Aggregate user_aliases from all channels (first-wins on conflict)
+        self._user_aliases: dict[int, str] = {}
+        for ch_config in self._merged_config.get("channels", []):
+            for uid, name in ch_config.get("user_aliases", {}).items():
+                if uid not in self._user_aliases:
+                    self._user_aliases[uid] = name
+
+        # Use first channel config for builtin loader compatibility
+        workspace_channel_config = (self._merged_config.get("channels") or [{}])[0]
 
         self._builtin_loader = BuiltinLoader(
             global_config=self.config.builtins,
@@ -349,10 +356,11 @@ class WorkspaceRunner:
             if queue_dict:
                 workspace_dict["queue"] = queue_dict
 
-        if workspace.config.channel:
-            channel_dict = workspace.config.channel.model_dump(exclude_none=True)
-            if channel_dict:
-                workspace_dict["channel"] = channel_dict
+        # Channels: list of channel configs (already normalized by model_validator)
+        if workspace.config.channels:
+            workspace_dict["channels"] = [
+                ch.model_dump(exclude_none=True) for ch in workspace.config.channels
+            ]
 
         return merge_configs(global_dict, workspace_dict)
 
@@ -442,6 +450,7 @@ class WorkspaceRunner:
             task_store=self._task_store,
             subagent_store=self._subagent_store,
             agent_factory=self._agent_factory,
+            channels=self._channels,
         )
 
     async def _handle_inbound_message(self, message: Message) -> None:
@@ -544,6 +553,11 @@ class WorkspaceRunner:
         # Setup channels
         self._channels = await self._lifecycle_manager.setup_channels()
         await self._lifecycle_manager.start_channels()
+
+        # Register framework commands with channels (e.g., Discord slash commands)
+        command_defs = self._command_router.list_commands()
+        for channel in self._channels.values():
+            await channel.register_commands(command_defs)
 
         # Start schedulers if needed
         cron_tool_loaded = self._builtin_loader.get_tool_instance("cron") is not None

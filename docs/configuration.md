@@ -175,21 +175,16 @@ Controls how many concurrent tasks can run per lane. Higher values allow more pa
 
 #### Channel Configuration
 
+Channel configuration is typically done per-workspace in `agent.yaml` rather than globally. See [Channels](channels.md) for full setup guides for each platform.
+
 ```yaml
+# Global defaults (config.yaml) — optional
 channels:
   telegram:
-    token: ${TELEGRAM_BOT_TOKEN}  # Bot token
-    allowed_users: []              # Telegram user IDs
-    allowed_groups: []             # Telegram group IDs
+    token: ${TELEGRAM_BOT_TOKEN}
+    allowed_users: []
+    allowed_groups: []
 ```
-
-**token** — Telegram bot token. Use environment variable syntax `${VAR}` for secrets.
-
-**allowed_users** — List of allowed Telegram user IDs. Empty list = allow all users.
-
-**allowed_groups** — List of allowed Telegram group IDs. Empty list = allow all groups.
-
-To get your Telegram user ID, message [@userinfobot](https://t.me/userinfobot).
 
 ---
 
@@ -280,9 +275,9 @@ heartbeat:
   interval_minutes: 30
   active_hours: "09:00-17:00"
   suppress_ok: true
-  output:
-    channel: telegram
-    chat_id: 123456789
+  delivery: channel
+  target_channel: telegram
+  target_id: 123456789
 
 approval_gates:
   enabled: true
@@ -356,6 +351,8 @@ model:
 
 #### Channel Configuration
 
+Single channel (backward compatible):
+
 ```yaml
 channel:
   type: telegram
@@ -364,13 +361,35 @@ channel:
   allowed_groups: []
 ```
 
-**type** — Channel type (currently only `telegram` is supported).
+Multi-channel (same workspace, multiple platforms):
+
+```yaml
+channels:
+  - type: telegram
+    token: ${TELEGRAM_BOT_TOKEN}
+    allowed_users: [123456789]
+  - type: discord
+    token: ${DISCORD_BOT_TOKEN}
+    allowed_users: [916552354470461470]
+    mention_required: true
+    triggers: ["!ask"]
+```
+
+**type** — Channel type: `telegram` or `discord`.
 
 **token** — Channel-specific bot token.
 
 **allowed_users** — List of allowed user IDs for this workspace.
 
-**allowed_groups** — List of allowed group IDs for this workspace.
+**allowed_groups** — List of allowed group/guild IDs for this workspace.
+
+**mention_required** — Only respond in group channels when @mentioned (default: `false`).
+
+**triggers** — List of keyword triggers for group chat activation. Uses OR logic with `mention_required`.
+
+**name** — Explicit channel name (required when using two channels of the same type).
+
+See [Channels](channels.md) for full setup guides, multi-channel configuration, and trigger-based activation.
 
 ---
 
@@ -396,9 +415,9 @@ heartbeat:
   interval_minutes: 30           # How often to check in
   active_hours: "09:00-17:00"    # Only run during these hours (optional)
   suppress_ok: true              # Don't send message if agent responds "HEARTBEAT_OK"
-  output:
-    channel: telegram
-    chat_id: 123456789
+  delivery: channel              # Where to deliver: channel, agent, or both
+  target_channel: telegram       # Which channel to deliver to
+  target_id: 123456789           # Channel-agnostic user/chat ID (preferred over chat_id)
 ```
 
 **enabled** — Enable proactive heartbeat check-ins.
@@ -520,7 +539,9 @@ These are automatically loaded via `python-dotenv` when the workspace starts.
 ### Required Variables
 
 **For basic operation:**
-- `TELEGRAM_BOT_TOKEN` — Telegram bot token
+- At least one channel bot token:
+  - `TELEGRAM_BOT_TOKEN` — Telegram bot token
+  - `DISCORD_BOT_TOKEN` — Discord bot token
 - At least one model provider credential:
   - `ANTHROPIC_API_KEY` — Claude API access
   - `OPENAI_API_KEY` — OpenAI GPT access
@@ -818,6 +839,7 @@ Create a `.env.example` file:
 ```bash
 # .env.example
 TELEGRAM_BOT_TOKEN=
+DISCORD_BOT_TOKEN=
 ANTHROPIC_API_KEY=
 BRAVE_API_KEY=
 OPENAI_API_KEY=
