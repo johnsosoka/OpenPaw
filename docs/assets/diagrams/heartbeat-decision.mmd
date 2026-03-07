@@ -1,0 +1,62 @@
+graph TD
+    A([Heartbeat Timer Fires]) --> B
+
+    B{Within\nactive_hours?}
+    B -->|No| C[Skip\nlog: outside_active_hours]
+    B -->|Yes| D
+
+    D{HEARTBEAT.md empty\nAND no active tasks?}
+    D -->|Yes| E[Skip\nlog: skipped_preflight]
+    D -->|No| F
+
+    F[Build Heartbeat Prompt]
+    F --> G{Active tasks\nexist?}
+    G -->|Yes| H[Inject task summary\nas active_tasks XML block]
+    G -->|No| I
+    H --> I
+
+    I[Invoke Agent\nfresh AgentRunner, no checkpointer]
+    I --> J
+
+    J{Agent response\nis HEARTBEAT_OK?}
+    J -->|Yes, and suppress_ok=true| K[Suppress\nlog: suppressed_ok]
+    J -->|No| L
+
+    L[Deliver to configured output]
+    L --> M{delivery\nmode?}
+    M -->|channel| N[Send to channel\ne.g. Telegram message]
+    M -->|agent| O[Inject into QueueManager\nas SYSTEM event]
+    M -->|both| P[Send to channel\nAND inject into queue]
+
+    N --> Q[Log Event\noutcome, duration, tokens, task_count]
+    O --> Q
+    P --> Q
+
+    C --> R([Done])
+    E --> R
+    K --> R
+    Q --> R
+
+    style A fill:#2d2d44,stroke:#6a6aaa,color:#e0e0ff
+    style R fill:#2d2d44,stroke:#6a6aaa,color:#e0e0ff
+
+    style B fill:#1e3a5f,stroke:#2e6aaf,color:#a8d8ff
+    style D fill:#1e3a5f,stroke:#2e6aaf,color:#a8d8ff
+    style G fill:#1e3a5f,stroke:#2e6aaf,color:#a8d8ff
+    style J fill:#1e3a5f,stroke:#2e6aaf,color:#a8d8ff
+    style M fill:#1e3a5f,stroke:#2e6aaf,color:#a8d8ff
+
+    style C fill:#4a1e1e,stroke:#8a3e3e,color:#ffb8b8
+    style E fill:#4a1e1e,stroke:#8a3e3e,color:#ffb8b8
+    style K fill:#3b2a1e,stroke:#8a5a2e,color:#ffd8a8
+
+    style F fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+    style H fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+    style I fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+    style L fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+
+    style N fill:#16213e,stroke:#0f3460,color:#a8d8ff
+    style O fill:#16213e,stroke:#0f3460,color:#a8d8ff
+    style P fill:#16213e,stroke:#0f3460,color:#a8d8ff
+
+    style Q fill:#2d2d44,stroke:#6a6aaa,color:#e0e0ff

@@ -1,0 +1,108 @@
+graph TD
+    classDef entry    fill:#2d2d44,stroke:#6a6aaa,color:#e0e0ff
+    classDef runtime  fill:#1e3a5f,stroke:#2e6aaf,color:#a8d8ff
+    classDef agent    fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+    classDef core     fill:#3b2a1e,stroke:#8a5a2e,color:#ffd8a8
+    classDef model    fill:#3b1e1e,stroke:#8a2e2e,color:#ffa8a8
+
+    CLI["CLI\nopenpaw/cli.py"]:::entry
+
+    subgraph ENTRY["Entry Point"]
+        CLI
+    end
+
+    subgraph RUNTIME["Runtime Layer\nopenpaw/runtime · openpaw/workspace · openpaw/channels · openpaw/stores"]
+        ORC["Orchestrator\nruntime/orchestrator.py"]:::runtime
+        WR["WorkspaceRunner\nworkspace/runner.py"]:::runtime
+        CH["Channels\nchannels/telegram.py · factory.py · commands/"]:::runtime
+        QM["Queue\nruntime/queue/lane.py · manager.py"]:::runtime
+        SCH["Schedulers\nruntime/scheduling/cron · heartbeat · dynamic_cron"]:::runtime
+        SM["Session\nruntime/session/manager · archiver"]:::runtime
+        ST["Stores\nstores/task · subagent · cron"]:::runtime
+        SAR["SubAgentRunner\nruntime/subagent/runner.py"]:::runtime
+    end
+
+    subgraph AGENT["Agent Layer\nopenpaw/agent"]
+        AF["AgentFactory\nworkspace/agent_factory.py"]:::agent
+        AR["AgentRunner\nagent/runner.py"]:::agent
+        MW["Middleware\nagent/middleware/queue_aware · approval"]:::agent
+        TL["Tools\nagent/tools/filesystem · sandbox"]:::agent
+        BT["Builtins\nbuiltins/tools · builtins/processors"]:::agent
+        MX["Metrics\nagent/metrics.py"]:::agent
+    end
+
+    subgraph CORE["Core Layer\nopenpaw/core"]
+        CFG["Config\ncore/config/models · loader · env_expansion"]:::core
+        WS["Workspace\ncore/workspace.py"]:::core
+        LOG["Logging\ncore/logging.py"]:::core
+        TZ["Timezone\ncore/timezone.py"]:::core
+        PR["Prompts\ncore/prompts/"]:::core
+        UT["Utils\ncore/utils.py"]:::core
+    end
+
+    subgraph MODEL["Model Layer\nopenpaw/model\n(pure data, no framework deps)"]
+        MSG["Message\nmodel/message.py"]:::model
+        TSK["Task\nmodel/task.py"]:::model
+        SES["Session\nmodel/session.py"]:::model
+        SUB["SubAgent\nmodel/subagent.py"]:::model
+        CRN["Cron\nmodel/cron.py"]:::model
+    end
+
+    CLI --> ORC
+    ORC --> WR
+    WR --> CH
+    WR --> QM
+    WR --> SCH
+    WR --> SM
+    WR --> ST
+    WR --> SAR
+    WR --> AF
+
+    CH --> AF
+    QM --> AF
+    SCH --> AF
+    SAR --> AF
+
+    AF --> AR
+    AR --> MW
+    AR --> TL
+    AR --> BT
+    AR --> MX
+
+    AF --> CFG
+    AR --> CFG
+    BT --> CFG
+
+    CH --> CFG
+    QM --> CFG
+    SCH --> CFG
+    SM --> CFG
+    ST --> MSG
+
+    AR --> WS
+    WS --> PR
+    WS --> CFG
+
+    AF --> LOG
+    AR --> LOG
+    BT --> TZ
+    SCH --> TZ
+    SM --> TZ
+
+    ST --> TSK
+    ST --> SUB
+    ST --> CRN
+    SM --> SES
+    CH --> MSG
+    QM --> MSG
+    SAR --> SUB
+
+    TL --> UT
+    BT --> UT
+    CH --> UT
+
+    style ENTRY fill:#1a1a2e,stroke:#4a4a6a,stroke-width:1px,color:#e0e0ff
+    style RUNTIME fill:#0f1e33,stroke:#2a4a7a,stroke-width:2px,color:#a8d8ff
+    style AGENT fill:#071f14,stroke:#1a5a3e,stroke-width:2px,color:#a8ffda
+    style CORE fill:#1f1507,stroke:#6a4a1e,stroke-width:2px,color:#ffd8a8
+    style MODEL fill:#1f0707,stroke:#6a1e1e,stroke-width:2px,color:#ffa8a8

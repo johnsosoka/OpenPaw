@@ -175,21 +175,16 @@ Controls how many concurrent tasks can run per lane. Higher values allow more pa
 
 #### Channel Configuration
 
+Channel configuration is typically done per-workspace in `agent.yaml` rather than globally. See [Channels](channels.md) for full setup guides for each platform.
+
 ```yaml
+# Global defaults (config.yaml) — optional
 channels:
   telegram:
-    token: ${TELEGRAM_BOT_TOKEN}  # Bot token
-    allowed_users: []              # Telegram user IDs
-    allowed_groups: []             # Telegram group IDs
+    token: ${TELEGRAM_BOT_TOKEN}
+    allowed_users: []
+    allowed_groups: []
 ```
-
-**token** — Telegram bot token. Use environment variable syntax `${VAR}` for secrets.
-
-**allowed_users** — List of allowed Telegram user IDs. Empty list = allow all users.
-
-**allowed_groups** — List of allowed Telegram group IDs. Empty list = allow all groups.
-
-To get your Telegram user ID, message [@userinfobot](https://t.me/userinfobot).
 
 ---
 
@@ -280,9 +275,9 @@ heartbeat:
   interval_minutes: 30
   active_hours: "09:00-17:00"
   suppress_ok: true
-  output:
-    channel: telegram
-    chat_id: 123456789
+  delivery: channel
+  target_channel: telegram
+  target_id: 123456789
 
 approval_gates:
   enabled: true
@@ -356,6 +351,8 @@ model:
 
 #### Channel Configuration
 
+Single channel (backward compatible):
+
 ```yaml
 channel:
   type: telegram
@@ -364,13 +361,35 @@ channel:
   allowed_groups: []
 ```
 
-**type** — Channel type (currently only `telegram` is supported).
+Multi-channel (same workspace, multiple platforms):
+
+```yaml
+channels:
+  - type: telegram
+    token: ${TELEGRAM_BOT_TOKEN}
+    allowed_users: [123456789]
+  - type: discord
+    token: ${DISCORD_BOT_TOKEN}
+    allowed_users: [916552354470461470]
+    mention_required: true
+    triggers: ["!ask"]
+```
+
+**type** — Channel type: `telegram` or `discord`.
 
 **token** — Channel-specific bot token.
 
 **allowed_users** — List of allowed user IDs for this workspace.
 
-**allowed_groups** — List of allowed group IDs for this workspace.
+**allowed_groups** — List of allowed group/guild IDs for this workspace.
+
+**mention_required** — Only respond in group channels when @mentioned (default: `false`).
+
+**triggers** — List of keyword triggers for group chat activation. Uses OR logic with `mention_required`.
+
+**name** — Explicit channel name (required when using two channels of the same type).
+
+See [Channels](channels.md) for full setup guides, multi-channel configuration, and trigger-based activation.
 
 ---
 
@@ -396,9 +415,9 @@ heartbeat:
   interval_minutes: 30           # How often to check in
   active_hours: "09:00-17:00"    # Only run during these hours (optional)
   suppress_ok: true              # Don't send message if agent responds "HEARTBEAT_OK"
-  output:
-    channel: telegram
-    chat_id: 123456789
+  delivery: channel              # Where to deliver: channel, agent, or both
+  target_channel: telegram       # Which channel to deliver to
+  target_id: 123456789           # Channel-agnostic user/chat ID (preferred over chat_id)
 ```
 
 **enabled** — Enable proactive heartbeat check-ins.
@@ -411,11 +430,7 @@ heartbeat:
 
 **output** — Where to send heartbeat messages.
 
-**Pre-flight Skip:** Before invoking the LLM, the scheduler checks HEARTBEAT.md and TASKS.yaml. If HEARTBEAT.md is empty/trivial and no active tasks exist, the heartbeat is skipped entirely — saving API costs for idle workspaces.
-
-**Task Summary Injection:** When active tasks exist, a compact summary is injected into the heartbeat prompt as `<active_tasks>` XML tags. This avoids an extra LLM tool call to `list_tasks()`.
-
-**Event Logging:** Every heartbeat event is logged to `{workspace}/data/heartbeat_log.jsonl` with outcome, duration, token metrics, and active task count.
+See [Scheduling](scheduling.md) for detailed heartbeat behavior including pre-flight skip, task-aware prompts, and the HEARTBEAT_OK protocol.
 
 ---
 
@@ -442,15 +457,7 @@ approval_gates:
 
 **tools** — Per-tool approval settings.
 
-**Lifecycle:**
-1. Middleware detects gated tool call → creates `PendingApproval`
-2. Raises `ApprovalRequiredError` → `WorkspaceRunner` catches exception
-3. Channel sends approval request with inline buttons (Approve/Deny)
-4. User responds → `ApprovalGateManager.resolve()` called
-5. On approval: agent re-runs with same message, middleware lets tool through
-6. On denial: agent receives `[SYSTEM] The tool 'X' was denied by the user. Do not retry this action.`
-
-**Channel Integration:** Channels implement `send_approval_request()` and register approval callbacks via `on_approval()`. Telegram uses inline keyboards; other channels can implement their own UI patterns.
+When a gated tool is called, execution pauses and the user sees approve/deny buttons in their chat. On approval, the agent re-runs with tool execution allowed. On denial, the agent receives a system message and can adjust its approach. See [Concepts](concepts.md) for a detailed walkthrough of the approval flow.
 
 ---
 
@@ -532,7 +539,9 @@ These are automatically loaded via `python-dotenv` when the workspace starts.
 ### Required Variables
 
 **For basic operation:**
-- `TELEGRAM_BOT_TOKEN` — Telegram bot token
+- At least one channel bot token:
+  - `TELEGRAM_BOT_TOKEN` — Telegram bot token
+  - `DISCORD_BOT_TOKEN` — Discord bot token
 - At least one model provider credential:
   - `ANTHROPIC_API_KEY` — Claude API access
   - `OPENAI_API_KEY` — OpenAI GPT access
@@ -711,34 +720,9 @@ model:
 
 ---
 
-### Queue Modes in Detail
+### Queue Modes
 
-**collect mode** (default):
-- Messages are debounced before processing
-- Multiple rapid messages are batched into a single agent invocation
-- No middleware behavior during tool execution
-- Best for: interactive use with occasional rapid-fire messages
-
-**steer mode**:
-- Messages are processed immediately
-- If new message arrives during agent run, remaining tools are skipped
-- Pending messages are injected as next agent input
-- Agent sees `[Skipped: user sent new message — redirecting]` for skipped tools
-- Best for: responsive agents that should react to new input mid-execution
-
-**interrupt mode**:
-- Messages are processed immediately
-- If new message arrives during agent run, current tool raises `InterruptSignalError`
-- Agent's response is discarded, new message is processed immediately
-- More aggressive than steer — aborts mid-run rather than redirecting
-- Best for: high-priority interruptions (e.g., emergency commands)
-
-**followup mode**:
-- Messages are processed sequentially
-- No middleware behavior (reserved for followup tool chaining)
-- Best for: multi-step workflows with `request_followup` tool
-
-See [queue-system.md](queue-system.md) for middleware implementation details.
+The four queue modes — `collect`, `steer`, `interrupt`, and `followup` — control how the system handles messages that arrive while the agent is already working. See [Queue System](queue-system.md) for detailed behavior and examples of each mode.
 
 ---
 
@@ -855,6 +839,7 @@ Create a `.env.example` file:
 ```bash
 # .env.example
 TELEGRAM_BOT_TOKEN=
+DISCORD_BOT_TOKEN=
 ANTHROPIC_API_KEY=
 BRAVE_API_KEY=
 OPENAI_API_KEY=

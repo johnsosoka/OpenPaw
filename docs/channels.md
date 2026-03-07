@@ -4,12 +4,12 @@
   <img src="../assets/images/openpaw-dog-bernese.png" alt="OpenPaw Channels" width="500">
 </div>
 
-Channels connect agents to communication platforms. OpenPaw currently supports Telegram with an extensible architecture for additional platforms.
+Channels connect agents to communication platforms. OpenPaw supports Telegram and Discord, with an extensible architecture for additional platforms. A single workspace can connect to multiple channels simultaneously.
 
 ## Channel Architecture
 
 ```
-Platform (Telegram) → Channel Adapter → Unified Message Format → Queue → Agent
+Platform (Telegram / Discord) → Channel Adapter → Unified Message Format → Queue → Agent
 ```
 
 Channel adapters translate platform-specific messages into OpenPaw's unified `Message` format, enabling consistent agent behavior across platforms.
@@ -19,17 +19,13 @@ Channel adapters translate platform-specific messages into OpenPaw's unified `Me
 Channels are created via the factory pattern in `openpaw/channels/factory.py`:
 
 ```python
-def create_channel(channel_type: str, config: ChannelConfig, workspace_name: str) -> ChannelAdapter:
-    """Create a channel instance based on type.
-
-    Args:
-        channel_type: Channel type ("telegram", etc.)
-        config: Channel configuration
-        workspace_name: Name of workspace this channel belongs to
-
-    Returns:
-        Configured channel adapter instance
-    """
+def create_channel(
+    channel_type: str,
+    config: dict,
+    workspace_name: str,
+    channel_name: str | None = None,
+) -> ChannelAdapter:
+    """Create a channel instance based on type."""
 ```
 
 This decouples `WorkspaceRunner` from concrete channel types, enabling extensibility without framework modifications.
@@ -44,7 +40,7 @@ class Message:
     """Unified message format across all channels."""
 
     id: str                                    # Unique message ID
-    channel: str                               # Channel type ("telegram")
+    channel: str                               # Channel name ("telegram", "discord")
     session_key: str                           # Format: "channel:id" (e.g., "telegram:123456")
     user_id: str                               # User identifier
     content: str                               # Message text
@@ -85,16 +81,7 @@ The Telegram channel uses [python-telegram-bot](https://python-telegram-bot.org/
 
 2. **Configure OpenPaw:**
 
-   Global config (`config.yaml`):
-   ```yaml
-   channels:
-     telegram:
-       token: ${TELEGRAM_BOT_TOKEN}
-       allowed_users: []    # Empty = allow all
-       allowed_groups: []   # Empty = allow all
-   ```
-
-   Or per-workspace (`agent.yaml`):
+   Per-workspace (`agent.yaml`):
    ```yaml
    channel:
      type: telegram
@@ -105,8 +92,9 @@ The Telegram channel uses [python-telegram-bot](https://python-telegram-bot.org/
 
 3. **Set environment variable:**
 
+   Add to `config/.env`:
    ```bash
-   export TELEGRAM_BOT_TOKEN="123456:ABC-DEF..."
+   TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
    ```
 
 4. **Run the workspace:**
@@ -154,29 +142,11 @@ To get a group ID:
 
 Only messages from listed groups are processed.
 
-#### Combined Allowlists
-
-```yaml
-channel:
-  type: telegram
-  allowed_users: [123456789]
-  allowed_groups: [-1001234567890]
-```
-
-Bot will respond in:
-- Direct messages from user `123456789`
-- Messages in group `-1001234567890` from any member
-
 ### Supported Message Types
 
 #### Text Messages
 
 Standard text messages are processed directly.
-
-```
-User: "What's the weather like?"
-Agent: [Processes and responds]
-```
 
 #### Voice Messages
 
@@ -204,50 +174,352 @@ builtins:
 5. Message content enriched with file receipt notification and transcript
 6. Agent processes enriched message
 
-If transcription fails, the user receives an error message.
-
-#### Audio Files
-
-Audio files (MP3, M4A, etc.) are treated the same as voice messages if `whisper` is enabled.
-
 #### Documents
 
 Document files (PDF, DOCX, PPTX, etc.) are automatically processed if the `docling` builtin is enabled.
-
-**Configuration:**
-
-```yaml
-builtins:
-  docling:
-    enabled: true
-```
-
-**Requirements:**
-- `docling` package installed
 
 **Processing Flow:**
 1. User uploads document
 2. `FilePersistenceProcessor` saves to `data/uploads/{YYYY-MM-DD}/report.pdf`
 3. `DoclingProcessor` converts document to markdown
 4. Markdown saved as sibling file `data/uploads/{YYYY-MM-DD}/report.md`
-5. Message content enriched with file receipt notification and conversion summary
-6. Agent can read the converted markdown or original file
+5. Agent can read the converted markdown or original file
 
 Supported formats: PDF, DOCX, PPTX, XLSX, HTML, Markdown, AsciiDoc, and more.
 
 #### Photos
 
-Photos are automatically saved to the workspace uploads directory.
+Photos are automatically saved to the workspace uploads directory by `FilePersistenceProcessor`.
 
-**Processing Flow:**
-1. User sends photo
-2. `FilePersistenceProcessor` downloads and saves to `data/uploads/{YYYY-MM-DD}/photo_123.jpg`
-3. Message content enriched with file receipt notification
-4. Agent can access the saved image file
+### Telegram Metadata Fields
 
-### File Persistence
+When messages are converted to the unified format, platform-specific data is stored in the `metadata` field:
 
-All uploaded files are automatically saved to `{workspace}/data/uploads/{YYYY-MM-DD}/` with date partitioning by the `FilePersistenceProcessor` (enabled by default).
+```python
+{
+    "chat_id": 123456789,        # Telegram chat ID
+    "message_id": 12345,         # Message ID
+    "username": "johndoe",       # Telegram username (if available)
+    "first_name": "John",        # User's first name
+    "last_name": "Doe",          # User's last name (if available)
+    "is_group": False,           # True if from a group chat
+}
+```
+
+### Session Keys
+
+Telegram session keys follow the format `"telegram:{user_id}"` for direct messages and `"telegram:{group_id}"` for group chats.
+
+Examples:
+- Direct message: `"telegram:123456789"`
+- Group chat: `"telegram:-1001234567890"`
+
+### Error Handling
+
+**Bot token invalid:**
+```
+Error: telegram.error.InvalidToken
+```
+Solution: Verify `TELEGRAM_BOT_TOKEN` is correct and active.
+
+**Message too long:**
+Telegram messages have a 4096 character limit. OpenPaw automatically splits long responses into multiple messages.
+
+**File size limits:**
+Telegram has a 50 MB file size limit for bots. The `FilePersistenceProcessor` enforces this limit.
+
+---
+
+## Discord Channel
+
+The Discord channel uses [discord.py](https://discordpy.readthedocs.io/) to interface with Discord's Bot API. It supports text messages, file attachments, slash commands, and approval gate buttons.
+
+### Setup
+
+1. **Create a Discord application:**
+
+   - Go to the [Discord Developer Portal](https://discord.com/developers/applications)
+   - Click "New Application" and give it a name
+   - Navigate to **Bot** in the sidebar
+   - Click "Reset Token" and save the bot token
+
+2. **Enable required intents:**
+
+   In the Developer Portal under **Bot > Privileged Gateway Intents**:
+   - Enable **Message Content Intent** (required for reading message text)
+   - Enable **Server Members Intent** (optional, for user resolution)
+
+3. **Generate an invite URL:**
+
+   Under **OAuth2 > URL Generator**:
+   - Select scopes: `bot`, `applications.commands`
+   - Select permissions: `Send Messages`, `Read Message History`, `Attach Files`, `Use Slash Commands`
+   - Copy the generated URL and open it to invite the bot to your server
+
+4. **Configure OpenPaw:**
+
+   Per-workspace (`agent.yaml`):
+   ```yaml
+   channel:
+     type: discord
+     token: ${DISCORD_BOT_TOKEN}
+     allowed_users: [916552354470461470]  # Discord user ID (snowflake)
+     allowed_groups: []                    # Guild (server) IDs
+     mention_required: true                # Only respond when @mentioned in servers
+   ```
+
+5. **Set environment variable:**
+
+   Add to `config/.env`:
+   ```bash
+   DISCORD_BOT_TOKEN=your-bot-token-here
+   ```
+
+6. **Run the workspace:**
+
+   ```bash
+   poetry run openpaw -c config.yaml -w my-agent
+   ```
+
+7. **Test the bot:**
+
+   - In a server where the bot was invited, @mention the bot with a message
+   - In DMs, message the bot directly (no mention needed)
+
+### Access Control
+
+Discord uses the same allowlist model as Telegram.
+
+#### User Allowlist
+
+```yaml
+channel:
+  type: discord
+  allowed_users: [916552354470461470]
+```
+
+To get your Discord user ID:
+1. Enable Developer Mode in Discord (Settings > App Settings > Advanced > Developer Mode)
+2. Right-click your username and select "Copy User ID"
+
+#### Guild (Server) Allowlist
+
+```yaml
+channel:
+  type: discord
+  allowed_groups: [123456789012345678]  # Guild IDs
+```
+
+When `allowed_groups` is set, messages from other servers are rejected even if the user is in `allowed_users`.
+
+### Activation Filters
+
+Discord supports `mention_required` and `triggers` for controlling when the bot responds in server channels. See [Trigger-Based Activation](#trigger-based-activation) below.
+
+### Discord Metadata Fields
+
+```python
+{
+    "guild_id": 123456789012345678,  # Server ID (None for DMs)
+    "username": "johndoe",           # Discord username
+    "display_name": "John",          # Server nickname or display name
+}
+```
+
+### Session Keys
+
+Discord session keys follow the format `"discord:{channel_id}"`:
+
+- Server channel: `"discord:1234567890123456"`
+- DM channel: `"discord:9876543210987654"`
+
+### Error Handling
+
+**Bot token invalid:**
+```
+RuntimeError: Discord bot failed to connect in time
+```
+Solution: Verify the bot token in Developer Portal. Regenerate if needed.
+
+**Missing intents:**
+```
+discord.errors.PrivilegedIntentsRequired
+```
+Solution: Enable "Message Content Intent" in Developer Portal under Bot settings.
+
+**Message too long:**
+Discord messages have a 2000 character limit. OpenPaw automatically splits long responses, breaking at paragraph boundaries.
+
+**File size limits:**
+Discord free-tier bots have a 25 MB file size limit. Files exceeding this limit are rejected with a clear error.
+
+---
+
+## Multi-Channel Configuration
+
+A single workspace can connect to multiple channels simultaneously, receiving messages from Telegram and Discord (or multiple bots of the same type) through a single agent.
+
+### Basic Multi-Channel
+
+Use `channels:` (plural) instead of `channel:` (singular) in `agent.yaml`:
+
+```yaml
+channels:
+  - type: telegram
+    token: ${TELEGRAM_BOT_TOKEN}
+    allowed_users: [123456789]
+
+  - type: discord
+    token: ${DISCORD_BOT_TOKEN}
+    allowed_users: [916552354470461470]
+    mention_required: true
+```
+
+The agent receives messages from both platforms through the same queue and responds on whichever channel the message came from.
+
+### Named Channels
+
+When running two channels of the same type (e.g., two Telegram bots), use the `name` field to distinguish them:
+
+```yaml
+channels:
+  - name: telegram-personal
+    type: telegram
+    token: ${TELEGRAM_BOT_TOKEN_1}
+    allowed_users: [123456789]
+
+  - name: telegram-work
+    type: telegram
+    token: ${TELEGRAM_BOT_TOKEN_2}
+    allowed_users: [987654321]
+```
+
+Without explicit names, channels default to using their type as the name. Duplicate names cause a startup error.
+
+### Backward Compatibility
+
+The singular `channel:` syntax continues to work and is automatically normalized to a single-element `channels:` list. Existing configurations require no changes.
+
+```yaml
+# These are equivalent:
+channel:
+  type: telegram
+  token: ${TELEGRAM_BOT_TOKEN}
+
+channels:
+  - type: telegram
+    token: ${TELEGRAM_BOT_TOKEN}
+```
+
+You cannot use both `channel:` and `channels:` in the same config — this produces a validation error.
+
+### User Aliases
+
+When a workspace has multiple channels, `user_aliases` from all channels are aggregated. If the same user ID appears in multiple channels, the first occurrence wins.
+
+```yaml
+channels:
+  - type: telegram
+    token: ${TELEGRAM_BOT_TOKEN}
+    allowed_users: [123456789]
+    user_aliases:
+      123456789: "John"
+
+  - type: discord
+    token: ${DISCORD_BOT_TOKEN}
+    allowed_users: [916552354470461470]
+    user_aliases:
+      916552354470461470: "John"
+```
+
+### Cron and Heartbeat Routing
+
+When scheduling cron jobs or heartbeats with multi-channel workspaces, use `target_id` for channel-agnostic routing:
+
+```yaml
+heartbeat:
+  enabled: true
+  interval_minutes: 30
+  target_channel: telegram        # Which channel to deliver to
+  target_id: 123456789            # Channel-agnostic user/chat ID
+```
+
+```yaml
+# crons/daily-summary.yaml
+output:
+  channel: discord                # Channel type
+  target_id: 1234567890123456     # Discord channel ID
+```
+
+The `target_id` field is preferred over legacy `chat_id` (Telegram-specific) and `channel_id` (Discord-specific), though both legacy fields still work.
+
+---
+
+## Trigger-Based Activation
+
+Activation filters control when an agent responds in group channels (Discord servers, Telegram groups). They have no effect on direct messages — DMs always pass through.
+
+### Configuration
+
+```yaml
+channel:
+  type: discord
+  token: ${DISCORD_BOT_TOKEN}
+  allowed_users: [916552354470461470]
+  mention_required: true          # Respond when @mentioned
+  triggers:                       # Respond to keyword triggers
+    - "!ask"
+    - "hey bot"
+```
+
+### Behavior
+
+Activation uses **OR logic** — either condition is sufficient:
+
+| `mention_required` | `triggers` | Behavior |
+|---------------------|------------|----------|
+| `false` | `[]` | All messages pass (no filtering) |
+| `true` | `[]` | Only @mentions pass |
+| `false` | `["!ask"]` | Only trigger keywords pass |
+| `true` | `["!ask"]` | @mentions OR trigger keywords pass |
+
+**Trigger matching** is case-insensitive substring matching. A trigger of `"hey bot"` matches "Hey Bot, what time is it?" and "HEY BOT" equally.
+
+**Commands and DMs** always bypass activation filters:
+- `/help`, `/status`, and other slash commands always work
+- Direct messages are never filtered
+
+### Examples
+
+**Discord bot that only responds when mentioned:**
+```yaml
+channel:
+  type: discord
+  mention_required: true
+```
+
+**Telegram bot that responds to keyword triggers in groups:**
+```yaml
+channel:
+  type: telegram
+  triggers: ["!ask", "hey assistant"]
+```
+
+**Both mention and triggers (OR logic):**
+```yaml
+channel:
+  type: discord
+  mention_required: true
+  triggers: ["!help", "!ask"]
+```
+
+In this configuration, the bot responds in server channels when either @mentioned OR when a message contains "!help" or "!ask".
+
+---
+
+## File Persistence
+
+All uploaded files are automatically saved to `{workspace}/data/uploads/{YYYY-MM-DD}/` with date partitioning by the `FilePersistenceProcessor` (enabled by default). This works identically across Telegram and Discord.
 
 **Configuration:**
 
@@ -276,7 +548,9 @@ Processors (Whisper, Docling) create sibling output files alongside the original
 - `voice_123.ogg` → `voice_123.txt` (transcript)
 - `report.pdf` → `report.md` (converted markdown)
 
-### Framework Commands
+---
+
+## Framework Commands
 
 Framework commands are handled by `CommandRouter` before messages reach the agent. These commands bypass the inbound processor pipeline to avoid content modification breaking detection.
 
@@ -287,148 +561,23 @@ Framework commands are handled by `CommandRouter` before messages reach the agen
 - `/help` - List available commands with descriptions
 - `/queue <mode>` - Change queue mode (`collect`, `steer`, `followup`, `interrupt`)
 - `/status` - Show workspace info: model, conversation stats, active tasks, token usage
+- `/model <provider:model>` - Switch LLM model at runtime
 
 **Command Registration:**
 
-Channels automatically register bot commands using `channel.register_commands()` which pulls from the `CommandRouter`'s definition list. For Telegram, this creates the command menu visible in the chat interface.
+Channels automatically register bot commands using `channel.register_commands()` which pulls from the `CommandRouter`'s definition list. For Telegram, this creates the command menu visible in the chat interface. For Discord, commands are registered as slash commands via the command tree.
 
 **Note:** These are framework commands intercepted before reaching the agent, NOT regular text processed by the agent's personality files.
 
 ### Approval Gate UI
 
-Telegram channels support approval gates for dangerous tool operations via inline keyboards.
+Both Telegram and Discord support approval gates with native UI:
+- **Telegram:** Inline keyboard buttons (Approve / Deny)
+- **Discord:** Interactive buttons with visual feedback
 
-**Example Approval Request:**
+See [Concepts](concepts.md) for how approval gates work and [Configuration](configuration.md) for the full config reference.
 
-```
-The agent wants to run: overwrite_file
-
-Arguments:
-  path: important_config.yaml
-  content: [300 characters]
-
-[Approve] [Deny]
-```
-
-When a gated tool is called:
-1. Execution pauses
-2. Telegram sends inline keyboard with Approve/Deny buttons
-3. User clicks a button
-4. On approval: agent re-runs with tool execution allowed
-5. On denial: agent receives system message that tool was denied
-
-**Configuration:**
-
-```yaml
-approval_gates:
-  enabled: true
-  timeout_seconds: 120
-  default_action: deny
-  tools:
-    overwrite_file:
-      require_approval: true
-      show_args: true
-```
-
-### Telegram Metadata Fields
-
-When messages are converted to the unified format, platform-specific data is stored in the `metadata` field:
-
-```python
-{
-    "chat_id": 123456789,        # Telegram chat ID
-    "message_id": 12345,         # Message ID
-    "username": "johndoe",       # Telegram username (if available)
-    "first_name": "John",        # User's first name
-    "last_name": "Doe",          # User's last name (if available)
-    "is_group": False,           # True if from a group chat
-}
-```
-
-This metadata is available to the agent and custom tools via the `Message.metadata` dict.
-
-### Session Keys
-
-Telegram session keys follow the format `"telegram:{user_id}"` for direct messages and `"telegram:{group_id}"` for group chats.
-
-Examples:
-- Direct message: `"telegram:123456789"`
-- Group chat: `"telegram:-1001234567890"`
-
-Session keys are used for:
-- Conversation thread tracking
-- Queue management
-- Session state persistence
-
-### Multi-Workspace Telegram Setup
-
-Each workspace can have its own Telegram bot or share a bot with user-specific routing.
-
-#### Option 1: Separate Bots per Workspace
-
-```yaml
-# workspace1/agent.yaml
-channel:
-  type: telegram
-  token: ${WORKSPACE1_TELEGRAM_TOKEN}
-  allowed_users: [123456789]
-```
-
-```yaml
-# workspace2/agent.yaml
-channel:
-  type: telegram
-  token: ${WORKSPACE2_TELEGRAM_TOKEN}
-  allowed_users: [987654321]
-```
-
-Each workspace has its own bot and user allowlist.
-
-#### Option 2: Shared Bot with User Routing
-
-```yaml
-# Global config.yaml
-channels:
-  telegram:
-    token: ${TELEGRAM_BOT_TOKEN}
-```
-
-```yaml
-# workspace1/agent.yaml
-channel:
-  allowed_users: [123456789]
-```
-
-```yaml
-# workspace2/agent.yaml
-channel:
-  allowed_users: [987654321]
-```
-
-Single bot token, but each workspace only responds to specific users.
-
-### Error Handling
-
-**Bot token invalid:**
-```
-Error: telegram.error.InvalidToken
-```
-Solution: Verify `TELEGRAM_BOT_TOKEN` is correct and active. Check BotFather conversation for the correct token.
-
-**Forbidden error:**
-```
-Error: telegram.error.Forbidden
-```
-Solution: User has blocked the bot. Remove from `allowed_users` or ask user to unblock.
-
-**Message too long:**
-Telegram messages have a 4096 character limit. OpenPaw automatically splits long responses into multiple messages.
-
-**Rate limiting:**
-Telegram enforces rate limits (30 messages per second to different users). If the agent sends too many messages too quickly, requests will be throttled. The framework handles retries automatically.
-
-**File size limits:**
-Telegram has a 50 MB file size limit for bots. The `FilePersistenceProcessor` enforces this limit and returns an error for larger files.
+---
 
 ## Adding New Channels
 
@@ -441,167 +590,37 @@ Create `openpaw/channels/<platform>.py` extending `ChannelAdapter`:
 ```python
 from openpaw.channels.base import ChannelAdapter
 from openpaw.model.message import Message, Attachment, MessageDirection
-from openpaw.channels.commands.router import CommandRouter, CommandContext, CommandResult
-from typing import Callable, Awaitable
-import discord  # Platform SDK
 
-class DiscordChannel(ChannelAdapter):
-    """Discord channel adapter."""
+class SlackChannel(ChannelAdapter):
+    """Slack channel adapter."""
 
-    def __init__(
-        self,
-        workspace_name: str,
-        config: dict,
-        command_router: CommandRouter,
-        on_message: Callable[[Message], Awaitable[None]],
-        on_command: Callable[[Message], Awaitable[CommandResult]],
-    ):
-        super().__init__(workspace_name, config, command_router, on_message, on_command)
-        self.client = discord.Client(...)
-        self.allowed_guilds = config.get("allowed_guilds", [])
+    name = "slack"
 
-        # Register message handler
-        @self.client.event
-        async def on_message(discord_msg):
-            if discord_msg.author == self.client.user:
-                return
+    def __init__(self, token: str, workspace_name: str = "unknown", **kwargs):
+        self._token = token
+        self.workspace_name = workspace_name
+        # ... platform SDK setup
 
-            # Access control
-            if self.allowed_guilds and discord_msg.guild.id not in self.allowed_guilds:
-                return
-
-            # Convert to unified format
-            message = self._to_unified_message(discord_msg)
-
-            # Handle commands or regular messages
-            if message.is_command:
-                await self._handle_command(message)
-            else:
-                await self.on_message(message)
-
-    async def start(self):
-        """Initialize Discord connection."""
-        await self.client.start(self.config["token"])
-
-    async def stop(self):
-        """Shutdown Discord connection."""
-        await self.client.close()
-
-    async def send_message(self, session_key: str, content: str):
-        """Send message to Discord channel."""
-        # Parse channel ID from session_key
-        _, channel_id = session_key.split(":", 1)
-        channel = self.client.get_channel(int(channel_id))
-        await channel.send(content)
-
-    async def send_file(
-        self,
-        session_key: str,
-        file_path: str,
-        filename: str,
-        caption: str | None = None,
-    ):
-        """Send file to Discord channel."""
-        _, channel_id = session_key.split(":", 1)
-        channel = self.client.get_channel(int(channel_id))
-        with open(file_path, "rb") as f:
-            await channel.send(content=caption, file=discord.File(f, filename=filename))
-
-    async def send_approval_request(
-        self,
-        session_key: str,
-        approval_id: str,
-        tool_name: str,
-        tool_args: dict,
-    ):
-        """Send approval request with UI."""
-        # Implement Discord-specific approval UI (buttons, reactions, etc.)
-        pass
-
-    def _to_unified_message(self, discord_msg) -> Message:
-        """Convert Discord message to unified format."""
-        # Build session key
-        session_key = f"discord:{discord_msg.channel.id}"
-
-        # Handle attachments
-        attachments = [
-            Attachment(
-                type="document",
-                url=att.url,
-                filename=att.filename,
-                mime_type=att.content_type,
-            )
-            for att in discord_msg.attachments
-        ]
-
-        return Message(
-            id=str(discord_msg.id),
-            channel="discord",
-            session_key=session_key,
-            user_id=str(discord_msg.author.id),
-            content=discord_msg.content,
-            direction=MessageDirection.INBOUND,
-            timestamp=discord_msg.created_at,
-            metadata={
-                "channel_id": discord_msg.channel.id,
-                "guild_id": discord_msg.guild.id if discord_msg.guild else None,
-                "author_name": discord_msg.author.name,
-                "author_discriminator": discord_msg.author.discriminator,
-            },
-            attachments=attachments,
-        )
+    async def start(self): ...
+    async def stop(self): ...
+    async def send_message(self, session_key, content, **kwargs) -> Message: ...
+    async def send_file(self, session_key, file_data, filename, **kwargs): ...
+    async def send_approval_request(self, session_key, approval_id, tool_name, tool_args, **kwargs): ...
 ```
 
 ### 2. Register in Channel Factory
 
-Update `openpaw/channels/factory.py`:
+Update `openpaw/channels/factory.py` to handle the new type string.
 
-```python
-from openpaw.channels.telegram import TelegramChannel
-from openpaw.channels.discord import DiscordChannel  # New
-
-def create_channel(
-    channel_type: str,
-    config: ChannelConfig,
-    workspace_name: str,
-    command_router: CommandRouter,
-    on_message: Callable[[Message], Awaitable[None]],
-    on_command: Callable[[Message], Awaitable[CommandResult]],
-) -> ChannelAdapter:
-    """Create a channel instance based on type."""
-    if channel_type == "telegram":
-        return TelegramChannel(workspace_name, config, command_router, on_message, on_command)
-    elif channel_type == "discord":  # New
-        return DiscordChannel(workspace_name, config, command_router, on_message, on_command)
-    else:
-        raise ValueError(f"Unknown channel type: {channel_type}")
-```
-
-### 3. Update Configuration Models
-
-Add to `openpaw/core/config/models.py`:
-
-```python
-class ChannelConfig(BaseModel):
-    """Channel configuration."""
-
-    type: Literal["telegram", "discord"]  # Add new type
-    token: str | None = None
-    allowed_users: list[int] = Field(default_factory=list)
-    allowed_groups: list[int] = Field(default_factory=list)
-    allowed_guilds: list[int] = Field(default_factory=list)  # Discord-specific
-```
-
-### 4. Test the Channel
+### 3. Test the Channel
 
 Create a workspace using the new channel:
 
 ```yaml
-# agent.yaml
 channel:
-  type: discord
-  token: ${DISCORD_BOT_TOKEN}
-  allowed_guilds: [123456789]
+  type: slack
+  token: ${SLACK_BOT_TOKEN}
+  allowed_users: [U12345678]
 ```
 
 ### Channel Adapter Requirements
@@ -613,33 +632,31 @@ New channel implementations must:
    - `async def start()` - Initialize platform connection
    - `async def stop()` - Shutdown platform connection
    - `async def send_message(session_key, content)` - Send text message
-   - `async def send_file(session_key, file_path, filename, caption)` - Send file to user
-   - `async def send_approval_request(session_key, approval_id, tool_name, tool_args)` - Optional approval UI
-   - `def _to_unified_message(platform_msg) -> Message` - Convert platform message to unified format
+   - `async def send_file(session_key, file_data, filename, caption)` - Send file to user
+   - `async def send_approval_request(session_key, approval_id, tool_name, tool_args)` - Approval UI
 3. **Handle platform-specific errors gracefully** - Don't crash on malformed messages
 4. **Support access control** - Implement allowlisting for users/channels/servers
 5. **Register commands** - Call `register_commands()` with command definitions
 6. **Convert attachments** - Map platform attachments to `Attachment` objects with proper metadata
-7. **Session key format** - Use `"{channel}:{id}"` format (e.g., `"discord:987654321"`)
+7. **Session key format** - Use `"{channel_name}:{id}"` format (e.g., `"slack:C12345"`)
 
 ## Best Practices
 
 1. **Use environment variables** - Never commit bot tokens to version control
 2. **Restrict access** - Use allowlists (`allowed_users`, `allowed_groups`) for production bots
 3. **Test in private chats** - Verify bot behavior before adding to groups
-4. **Handle errors gracefully** - Log errors but don't crash on malformed messages
-5. **Enable verbose logging** - Use `-v` flag during setup to debug channel issues
-6. **Rate limit awareness** - Don't spam platforms with rapid messages; respect rate limits
-7. **Platform-specific features** - Leverage inline keyboards, buttons, reactions when available
-8. **File size limits** - Enforce platform-specific file size limits in adapters
-9. **Session key consistency** - Always use `"{channel}:{id}"` format for session keys
-10. **Command registration** - Let the framework handle command registration; don't set manually
+4. **Use activation filters** - Set `mention_required: true` in busy group channels
+5. **Handle errors gracefully** - Log errors but don't crash on malformed messages
+6. **Enable verbose logging** - Use `-v` flag during setup to debug channel issues
+7. **Rate limit awareness** - Don't spam platforms with rapid messages; respect rate limits
+8. **Platform-specific features** - Leverage inline keyboards, buttons, reactions when available
+9. **File size limits** - Telegram allows 50 MB, Discord free-tier allows 25 MB
+10. **Session key consistency** - Always use `"{channel_name}:{id}"` format for session keys
 
 ## Future Channels
 
 Planned channel support:
 
-- **Discord** - Server/channel-based conversations
 - **Slack** - Workspace integration with slash commands
 - **WhatsApp** - Direct messaging via WhatsApp Business API
 - **CLI** - Terminal-based interface for local testing
