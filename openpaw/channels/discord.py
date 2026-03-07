@@ -410,6 +410,13 @@ class DiscordChannel(ChannelAdapter):
                 if self._message_callback:
                     await self._message_callback(message)
 
+                # Delete the deferred "thinking..." message — the actual
+                # response is sent via channel.send() through the normal path.
+                try:
+                    await interaction.delete_original_response()
+                except discord.HTTPException:
+                    logger.debug("Failed to delete deferred interaction response", exc_info=True)
+
             slash_cmd = app_commands.Command(
                 name=cmd_name,
                 description=cmd_description,
