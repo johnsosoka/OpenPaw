@@ -862,14 +862,14 @@ class TestMentionFilter:
         channel = _make_discord_channel(mention_required=False)
         msg = _make_mock_discord_message(guild_id=123)
         msg.mentions = []
-        assert channel._passes_mention_filter(msg) is True
+        assert channel._passes_activation_filter(msg) is True
 
     def test_filter_passes_for_dm(self) -> None:
         """DMs always pass even when mention_required is True."""
         channel = _make_discord_channel(mention_required=True)
         msg = _make_mock_discord_message()  # guild=None → DM
         msg.mentions = []
-        assert channel._passes_mention_filter(msg) is True
+        assert channel._passes_activation_filter(msg) is True
 
     def test_filter_blocks_guild_message_without_mention(self) -> None:
         """Guild messages without @mention are blocked."""
@@ -880,7 +880,7 @@ class TestMentionFilter:
 
         msg = _make_mock_discord_message(guild_id=123)
         msg.mentions = []
-        assert channel._passes_mention_filter(msg) is False
+        assert channel._passes_activation_filter(msg) is False
 
     def test_filter_passes_guild_message_with_bot_mention(self) -> None:
         """Guild messages with bot @mention pass through."""
@@ -891,7 +891,7 @@ class TestMentionFilter:
 
         msg = _make_mock_discord_message(guild_id=123)
         msg.mentions = [bot_user]
-        assert channel._passes_mention_filter(msg) is True
+        assert channel._passes_activation_filter(msg) is True
 
     def test_filter_blocks_guild_message_with_other_mention(self) -> None:
         """Guild messages mentioning someone else are blocked."""
@@ -903,7 +903,7 @@ class TestMentionFilter:
         msg = _make_mock_discord_message(guild_id=123)
         other_user = MagicMock()
         msg.mentions = [other_user]
-        assert channel._passes_mention_filter(msg) is False
+        assert channel._passes_activation_filter(msg) is False
 
     @pytest.mark.asyncio
     async def test_on_message_skips_unmentioned_in_guild(self) -> None:

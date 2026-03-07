@@ -34,6 +34,7 @@ class TelegramChannel(ChannelAdapter):
         allowed_groups: list[int] | None = None,
         allow_all: bool = False,
         mention_required: bool = False,
+        triggers: list[str] | None = None,
         workspace_name: str = "unknown",
     ):
         """Initialize the Telegram channel.
@@ -44,6 +45,7 @@ class TelegramChannel(ChannelAdapter):
             allowed_groups: List of allowed group IDs.
             allow_all: If True, allow all users (insecure). If False, requires allowlists.
             mention_required: If True, only respond in group chats when @mentioned.
+            triggers: Keyword triggers for group chat activation (OR with mention).
             workspace_name: Name of the workspace (for error messages).
         """
         resolved_token = token or os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -55,6 +57,7 @@ class TelegramChannel(ChannelAdapter):
         self.allowed_groups = set(allowed_groups or [])
         self.allow_all = allow_all
         self.mention_required = mention_required
+        self.triggers: list[str] = triggers or []
         self.workspace_name = workspace_name
         self._bot_username: str | None = None
         self._app: Application | None = None  # type: ignore[type-arg]
@@ -376,13 +379,15 @@ class TelegramChannel(ChannelAdapter):
 
         return True
 
-    def _passes_mention_filter(self, update: Update) -> bool:
-        """Check whether the message passes the mention-required filter.
+    def _passes_activation_filter(self, update: Update) -> bool:
+        """Check whether the message passes activation filters (mention OR trigger).
 
-        When mention_required is True, messages in group chats are only
-        processed if the bot is @mentioned via a mention entity, or the
-        message is a command (commands always pass through). DMs always
-        pass through.
+        In group chats, messages must pass at least one activation condition:
+        - Bot is @mentioned (when mention_required is True)
+        - Message contains a trigger keyword (when triggers are configured)
+
+        If neither mention_required nor triggers are configured, all messages pass.
+        DMs and commands always pass through regardless.
 
         Args:
             update: The Telegram Update object.
@@ -390,7 +395,8 @@ class TelegramChannel(ChannelAdapter):
         Returns:
             True if the message should be processed.
         """
-        if not self.mention_required:
+        # No activation filters configured — pass everything
+        if not self.mention_required and not self.triggers:
             return True
 
         # DMs always pass through (positive chat IDs are private chats)
@@ -401,14 +407,27 @@ class TelegramChannel(ChannelAdapter):
         if update.message and update.message.text and update.message.text.startswith("/"):
             return True
 
-        # Check for @mention in message entities
-        if update.message and update.message.entities and self._bot_username:
-            for entity in update.message.entities:
-                if entity.type == "mention":
-                    mention_text = update.message.text[entity.offset:entity.offset + entity.length]
-                    if mention_text.lower() == f"@{self._bot_username.lower()}":
-                        return True
+        # OR logic: either mention or trigger is sufficient
+        if self.mention_required and self._has_bot_mention(update):
+            return True
 
+        content = (update.message.text or update.message.caption or "") if update.message else ""
+        if self._passes_trigger_filter(content, self.triggers):
+            return True
+
+        return False
+
+    def _has_bot_mention(self, update: Update) -> bool:
+        """Check if the message contains an @mention of this bot."""
+        if not update.message or not update.message.entities or not self._bot_username:
+            return False
+
+        text = update.message.text or ""
+        for entity in update.message.entities:
+            if entity.type == "mention":
+                mention_text = text[entity.offset:entity.offset + entity.length]
+                if mention_text.lower() == f"@{self._bot_username.lower()}":
+                    return True
         return False
 
     def _to_message(self, update: Update) -> Message | None:
@@ -469,7 +488,7 @@ class TelegramChannel(ChannelAdapter):
         if not self._is_allowed(update):
             await self._send_unauthorized_response(update)
             return
-        if not self._passes_mention_filter(update):
+        if not self._passes_activation_filter(update):
             return
 
         message = self._to_message(update)
@@ -491,7 +510,7 @@ class TelegramChannel(ChannelAdapter):
         if not self._is_allowed(update):
             await self._send_unauthorized_response(update)
             return
-        if not self._passes_mention_filter(update):
+        if not self._passes_activation_filter(update):
             return
 
         message = await self._voice_to_message(update)
@@ -503,7 +522,7 @@ class TelegramChannel(ChannelAdapter):
         if not self._is_allowed(update):
             await self._send_unauthorized_response(update)
             return
-        if not self._passes_mention_filter(update):
+        if not self._passes_activation_filter(update):
             return
 
         message = await self._document_to_message(update)
@@ -515,7 +534,7 @@ class TelegramChannel(ChannelAdapter):
         if not self._is_allowed(update):
             await self._send_unauthorized_response(update)
             return
-        if not self._passes_mention_filter(update):
+        if not self._passes_activation_filter(update):
             return
 
         message = await self._photo_to_message(update)

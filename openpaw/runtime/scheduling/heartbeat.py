@@ -83,19 +83,23 @@ class HeartbeatScheduler:
 
     @staticmethod
     def _resolve_heartbeat_session_key(channel: ChannelAdapter, config: HeartbeatConfig) -> str | None:
-        """Resolve session key from heartbeat config, channel-agnostically.
+        """Resolve session key from heartbeat config.
+
+        Uses ``target_id`` (preferred) with fallback to legacy ``target_chat_id``/``target_channel_id``.
 
         Args:
             channel: The channel adapter instance to build the session key against.
-            config: The heartbeat configuration specifying channel type and target ID.
+            config: The heartbeat configuration specifying channel name and target ID.
 
         Returns:
             A session key string, or None if no supported routing config is found.
         """
-        if config.target_channel == "telegram" and config.target_chat_id:
-            return channel.build_session_key(config.target_chat_id)
-        if config.target_channel == "discord" and config.target_channel_id:
-            return channel.build_session_key(config.target_channel_id)
+        target = next(
+            (v for v in (config.target_id, config.target_chat_id, config.target_channel_id) if v is not None),
+            None,
+        )
+        if target:
+            return channel.build_session_key(target)
         return None
 
     def _parse_active_hours(self, active_hours: str | None) -> tuple[time, time] | None:

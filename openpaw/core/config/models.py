@@ -93,7 +93,11 @@ class WorkspaceModelConfig(BaseModel):
 class WorkspaceChannelConfig(BaseModel):
     """Channel binding configuration for a workspace agent."""
 
-    type: str | None = Field(default=None, description="Channel type (telegram, slack, etc.)")
+    name: str | None = Field(
+        default=None,
+        description="Unique channel name (defaults to type). Required when multiple channels share a type.",
+    )
+    type: str | None = Field(default=None, description="Channel type (telegram, discord, etc.)")
     token: str | None = Field(default=None, description="Channel bot token")
     allowed_users: list[int] = Field(default_factory=list, description="Allowed user IDs")
     allowed_groups: list[int] = Field(default_factory=list, description="Allowed group IDs")
@@ -101,6 +105,13 @@ class WorkspaceChannelConfig(BaseModel):
     mention_required: bool = Field(
         default=False,
         description="Only respond in group chats when the bot is @mentioned. DMs always pass through.",
+    )
+    triggers: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Trigger keywords for group chat filtering. If set, messages must contain"
+            " at least one keyword (case-insensitive). Uses OR logic with mention_required."
+        ),
     )
     user_aliases: dict[int, str] = Field(
         default_factory=dict,
@@ -288,9 +299,10 @@ class HeartbeatConfig(BaseModel):
         description="Active hours window (e.g., '08:00-22:00'). None = always active",
     )
     suppress_ok: bool = Field(default=True, description="Suppress HEARTBEAT_OK responses from channel")
-    target_channel: str = Field(default="telegram", description="Channel to route heartbeat responses")
-    target_chat_id: int | None = Field(default=None, description="Telegram chat ID for heartbeat output")
-    target_channel_id: int | None = Field(default=None, description="Discord channel ID for heartbeat output")
+    target_channel: str = Field(default="telegram", description="Channel name to route heartbeat responses")
+    target_id: int | None = Field(default=None, description="Target ID for output routing (preferred)")
+    target_chat_id: int | None = Field(default=None, description="Telegram chat ID (deprecated, use target_id)")
+    target_channel_id: int | None = Field(default=None, description="Discord channel ID (deprecated, use target_id)")
     delivery: Literal["channel", "agent", "both"] = Field(
         default="channel",
         description="Where to deliver results: channel (direct), agent (queue injection), both",
@@ -402,10 +414,11 @@ class LifecycleConfig(BaseModel):
 class CronOutputConfig(BaseModel):
     """Output routing configuration for a cron job."""
 
-    channel: str = Field(description="Channel type (telegram, discord, etc.)")
-    chat_id: int | None = Field(default=None, description="Telegram chat ID")
+    channel: str = Field(description="Channel name (or type for backward compat)")
+    target_id: int | None = Field(default=None, description="Target ID for output routing (preferred)")
+    chat_id: int | None = Field(default=None, description="Telegram chat ID (deprecated, use target_id)")
     guild_id: int | None = Field(default=None, description="Discord guild ID")
-    channel_id: int | None = Field(default=None, description="Discord channel ID")
+    channel_id: int | None = Field(default=None, description="Discord channel ID (deprecated, use target_id)")
     delivery: str = Field(
         default="channel",
         description="Delivery mode: channel, agent, or both",
@@ -446,24 +459,58 @@ class WorkspaceConfig(BaseModel):
 
     Supports shorthand ``model: "provider:model_id"`` in agent.yaml, which is
     coerced to ``model: {provider: ..., model: ...}`` before validation.
+
+    Channels can be configured as a single ``channel:`` block (backward compat)
+    or as a ``channels:`` list for multi-channel workspaces. The model_validator
+    normalizes both forms into the ``channels`` list.
     """
 
     @model_validator(mode="before")
     @classmethod
-    def coerce_model_string(cls, data: Any) -> Any:
-        """Allow ``model: 'provider:model_id'`` shorthand in agent.yaml."""
-        if isinstance(data, dict) and isinstance(data.get("model"), str):
+    def normalize_channel_config(cls, data: Any) -> Any:
+        """Normalize channel/channels config and coerce model shorthand.
+
+        Handles:
+        - ``model: 'provider:model_id'`` shorthand → dict
+        - ``channel:`` (singular) → ``channels: [channel]``
+        - ``channels:`` (list) → used as-is
+        - Both present → ValueError
+        """
+        if not isinstance(data, dict):
+            return data
+
+        # Coerce model shorthand
+        if isinstance(data.get("model"), str):
             model_str = data["model"]
             if ":" in model_str:
                 p, _, m = model_str.partition(":")
                 data["model"] = {"provider": p, "model": m}
             else:
                 data["model"] = {"model": model_str}
+
+        # Normalize channel → channels
+        has_channel = "channel" in data and data["channel"]
+        has_channels = "channels" in data and data["channels"]
+
+        if has_channel and has_channels:
+            raise ValueError(
+                "Cannot specify both 'channel' and 'channels' in workspace config. "
+                "Use 'channels' (list) for multi-channel or 'channel' (dict) for single."
+            )
+
+        if has_channel:
+            data["channels"] = [data.pop("channel")]
+        else:
+            data.pop("channel", None)
+
         return data
 
     timezone: str = Field(default="UTC", description="Workspace timezone (e.g., 'America/Los_Angeles')")
     model: WorkspaceModelConfig = Field(default_factory=WorkspaceModelConfig, description="LLM configuration")
-    channel: WorkspaceChannelConfig = Field(default_factory=WorkspaceChannelConfig, description="Channel binding")
+    channels: list[WorkspaceChannelConfig] = Field(
+        default_factory=list,
+        description="Channel bindings (list). Use singular 'channel:' in YAML for backward compat.",
+    )
     queue: WorkspaceQueueConfig = Field(default_factory=WorkspaceQueueConfig, description="Queue overrides")
     builtins: WorkspaceBuiltinsConfig = Field(
         default_factory=WorkspaceBuiltinsConfig,

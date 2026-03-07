@@ -80,47 +80,67 @@ class LifecycleManager:
         """Initialize configured channels via factory.
 
         Returns:
-            Dictionary of initialized channels.
+            Dictionary of initialized channels keyed by channel name.
 
         Raises:
-            ValueError: If channel configuration is invalid.
+            ValueError: If channel configuration is invalid or names conflict.
         """
-        workspace_channel = self._merged_config.get("channel", {})
-        if not workspace_channel:
+        channel_configs: list[dict] = self._merged_config.get("channels", [])
+        if not channel_configs:
             raise ValueError(
-                f"Workspace '{self._workspace_name}' must define channel configuration in agent.yaml"
+                f"Workspace '{self._workspace_name}' must define at least one channel in agent.yaml"
             )
 
-        channel_type = workspace_channel.get("type", "telegram")
-        token = workspace_channel.get("token")
-        if not token:
-            raise ValueError(
-                f"Workspace '{self._workspace_name}' must define channel.token in agent.yaml"
+        seen_names: set[str] = set()
+
+        for channel_config in channel_configs:
+            channel_type = channel_config.get("type", "telegram")
+
+            # Resolve unique channel name (explicit name or type)
+            channel_name = channel_config.get("name") or channel_type
+            if channel_name in seen_names:
+                raise ValueError(
+                    f"Workspace '{self._workspace_name}': duplicate channel name '{channel_name}'. "
+                    f"Use the 'name' field to distinguish channels of the same type."
+                )
+            seen_names.add(channel_name)
+
+            token = channel_config.get("token")
+            if not token:
+                raise ValueError(
+                    f"Workspace '{self._workspace_name}': channel '{channel_name}' must define a token"
+                )
+
+            channel = create_channel(
+                channel_type, channel_config, self._workspace_name, channel_name=channel_name
             )
+            channel.on_message(self._message_handler)
+            self._channels[channel_name] = channel
+            await self._queue_manager.register_handler(channel_name, self._queue_handler)
 
-        channel = create_channel(channel_type, workspace_channel, self._workspace_name)
-        channel.on_message(self._message_handler)
-        self._channels[channel_type] = channel
-        await self._queue_manager.register_handler(channel_type, self._queue_handler)
+            # Log security mode
+            self._log_channel_security(channel_name, channel_config)
 
-        # Log security mode
-        allow_all = workspace_channel.get("allow_all", False)
-        allowed_users = workspace_channel.get("allowed_users", [])
-        allowed_groups = workspace_channel.get("allowed_groups", [])
+        self._logger.info(
+            f"Initialized {len(self._channels)} channel(s) for workspace: {self._workspace_name}"
+        )
+        return self._channels
+
+    def _log_channel_security(self, channel_name: str, config: dict) -> None:
+        """Log security mode for a channel."""
+        allow_all = config.get("allow_all", False)
+        allowed_users = config.get("allowed_users", [])
+        allowed_groups = config.get("allowed_groups", [])
+        prefix = f"Workspace '{self._workspace_name}' [{channel_name}]"
+
         if allow_all:
-            self._logger.warning(f"Workspace '{self._workspace_name}': allow_all=true (insecure mode)")
+            self._logger.warning(f"{prefix}: allow_all=true (insecure mode)")
         elif allowed_users or allowed_groups:
             self._logger.info(
-                f"Workspace '{self._workspace_name}': Allowlist mode "
-                f"({len(allowed_users)} users, {len(allowed_groups)} groups)"
+                f"{prefix}: Allowlist mode ({len(allowed_users)} users, {len(allowed_groups)} groups)"
             )
         else:
-            self._logger.warning(
-                f"Workspace '{self._workspace_name}': Empty allowlist - all requests will be denied"
-            )
-
-        self._logger.info(f"Initialized {channel_type} channel for workspace: {self._workspace_name}")
-        return self._channels
+            self._logger.warning(f"{prefix}: Empty allowlist - all requests will be denied")
 
     async def start_channels(self) -> None:
         """Start all configured channels."""

@@ -96,6 +96,7 @@ class DiscordChannel(ChannelAdapter):
         allowed_groups: list[int] | None = None,
         allow_all: bool = False,
         mention_required: bool = False,
+        triggers: list[str] | None = None,
         workspace_name: str = "unknown",
     ) -> None:
         """Initialize the Discord channel.
@@ -106,6 +107,7 @@ class DiscordChannel(ChannelAdapter):
             allowed_groups: List of allowed guild IDs.
             allow_all: If True, allow all users (insecure).
             mention_required: If True, only respond in guild channels when @mentioned.
+            triggers: Keyword triggers for group chat activation (OR with mention).
             workspace_name: Workspace name used in error/access-denied messages.
         """
         resolved_token = token or os.environ.get("DISCORD_BOT_TOKEN")
@@ -119,6 +121,7 @@ class DiscordChannel(ChannelAdapter):
         self.allowed_groups: set[int] = set(allowed_groups or [])
         self.allow_all = allow_all
         self.mention_required = mention_required
+        self.triggers: list[str] = triggers or []
         self.workspace_name = workspace_name
 
         self._client: discord.Client | None = None
@@ -210,7 +213,7 @@ class DiscordChannel(ChannelAdapter):
             await self._send_unauthorized_response(discord_message)
             return
 
-        if not self._passes_mention_filter(discord_message):
+        if not self._passes_activation_filter(discord_message):
             return
 
         message = await self._to_message(discord_message)
@@ -479,11 +482,15 @@ class DiscordChannel(ChannelAdapter):
 
         return True
 
-    def _passes_mention_filter(self, message: discord.Message) -> bool:
-        """Check whether the message passes the mention-required filter.
+    def _passes_activation_filter(self, message: discord.Message) -> bool:
+        """Check whether the message passes activation filters (mention OR trigger).
 
-        When mention_required is True, messages in guild channels are only
-        processed if the bot is @mentioned. DMs always pass through.
+        In guild channels, messages must pass at least one activation condition:
+        - Bot is @mentioned (when mention_required is True)
+        - Message contains a trigger keyword (when triggers are configured)
+
+        If neither mention_required nor triggers are configured, all messages pass.
+        DMs always pass through regardless.
 
         Args:
             message: The incoming discord.Message.
@@ -491,15 +498,20 @@ class DiscordChannel(ChannelAdapter):
         Returns:
             True if the message should be processed.
         """
-        if not self.mention_required:
+        # No activation filters configured — pass everything
+        if not self.mention_required and not self.triggers:
             return True
 
         # DMs always pass through
         if message.guild is None:
             return True
 
-        # In a guild channel, require @mention of the bot
-        if self._client and self._client.user in message.mentions:
+        # OR logic: either mention or trigger is sufficient
+        if self.mention_required and self._client and self._client.user in message.mentions:
+            return True
+
+        content = message.content or ""
+        if self._passes_trigger_filter(content, self.triggers):
             return True
 
         return False

@@ -97,3 +97,21 @@ def test_create_discord_channel_mention_required() -> None:
     channel = create_channel("discord", config, "test_workspace")
     assert isinstance(channel, DiscordChannel)
     assert channel.mention_required is True
+
+
+def test_create_telegram_with_triggers() -> None:
+    """Test that triggers list is passed through factory to TelegramChannel."""
+    config = {"token": "test_token", "triggers": ["!ask", "hey bot"]}
+    channel = create_channel("telegram", config, "test_workspace")
+    assert isinstance(channel, TelegramChannel)
+    assert channel.triggers == ["!ask", "hey bot"]
+
+
+def test_create_discord_with_triggers() -> None:
+    """Test that triggers list is passed through factory to DiscordChannel."""
+    from openpaw.channels.discord import DiscordChannel
+
+    config = {"token": "test_token", "triggers": ["!ask", "hey bot"]}
+    channel = create_channel("discord", config, "test_workspace")
+    assert isinstance(channel, DiscordChannel)
+    assert channel.triggers == ["!ask", "hey bot"]

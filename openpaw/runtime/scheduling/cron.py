@@ -189,19 +189,23 @@ class CronScheduler:
 
     @staticmethod
     def _resolve_session_key(channel: ChannelAdapter, output: CronOutputConfig) -> str | None:
-        """Resolve session key from cron output config, channel-agnostically.
+        """Resolve session key from cron output config.
+
+        Uses ``target_id`` (preferred) with fallback to legacy ``chat_id``/``channel_id``.
 
         Args:
             channel: The channel adapter instance to build the session key against.
-            output: The cron output config specifying channel type and target ID.
+            output: The cron output config specifying channel name and target ID.
 
         Returns:
             A session key string, or None if no supported routing config is found.
         """
-        if output.channel == "telegram" and output.chat_id:
-            return channel.build_session_key(output.chat_id)
-        if output.channel == "discord" and output.channel_id:
-            return channel.build_session_key(output.channel_id)
+        target = next(
+            (v for v in (output.target_id, output.chat_id, output.channel_id) if v is not None),
+            None,
+        )
+        if target:
+            return channel.build_session_key(target)
         return None
 
     def add_job(self, cron: CronDefinition) -> None:

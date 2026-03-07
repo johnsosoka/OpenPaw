@@ -50,6 +50,30 @@ class ChannelAdapter(ABC):
         """
         ...
 
+    @staticmethod
+    def _passes_trigger_filter(content: str, triggers: list[str]) -> bool:
+        """Check if message content matches any configured trigger keyword.
+
+        When triggers are empty (default), returns False (no trigger match).
+        When triggers are set, returns True if at least one keyword appears
+        in the content (case-insensitive substring match).
+
+        This is a shared utility — concrete adapters compose it with
+        mention filtering using OR logic.
+
+        Args:
+            content: The message text to check.
+            triggers: List of trigger keywords.
+
+        Returns:
+            True if any trigger keyword is found in content.
+        """
+        if not triggers:
+            return False
+
+        content_lower = content.lower()
+        return any(trigger.lower() in content_lower for trigger in triggers)
+
     async def register_commands(self, commands: list[Any]) -> None:
         """Register available commands with the channel platform.
 
