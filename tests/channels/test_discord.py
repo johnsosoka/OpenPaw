@@ -837,3 +837,118 @@ class TestOnMessageRouting:
         await channel._on_message(discord_msg)
 
         assert len(received) == 0
+
+
+# ---------------------------------------------------------------------------
+# 9. Mention Filter
+# ---------------------------------------------------------------------------
+
+
+class TestMentionFilter:
+    """Test mention_required filtering behavior."""
+
+    def test_mention_required_defaults_to_false(self) -> None:
+        """mention_required is False by default."""
+        channel = _make_discord_channel()
+        assert channel.mention_required is False
+
+    def test_mention_required_stored(self) -> None:
+        """mention_required is stored when passed."""
+        channel = _make_discord_channel(mention_required=True)
+        assert channel.mention_required is True
+
+    def test_filter_passes_when_disabled(self) -> None:
+        """All messages pass when mention_required is False."""
+        channel = _make_discord_channel(mention_required=False)
+        msg = _make_mock_discord_message(guild_id=123)
+        msg.mentions = []
+        assert channel._passes_mention_filter(msg) is True
+
+    def test_filter_passes_for_dm(self) -> None:
+        """DMs always pass even when mention_required is True."""
+        channel = _make_discord_channel(mention_required=True)
+        msg = _make_mock_discord_message()  # guild=None → DM
+        msg.mentions = []
+        assert channel._passes_mention_filter(msg) is True
+
+    def test_filter_blocks_guild_message_without_mention(self) -> None:
+        """Guild messages without @mention are blocked."""
+        channel = _make_discord_channel(mention_required=True)
+        channel._client = MagicMock()
+        bot_user = MagicMock()
+        channel._client.user = bot_user
+
+        msg = _make_mock_discord_message(guild_id=123)
+        msg.mentions = []
+        assert channel._passes_mention_filter(msg) is False
+
+    def test_filter_passes_guild_message_with_bot_mention(self) -> None:
+        """Guild messages with bot @mention pass through."""
+        channel = _make_discord_channel(mention_required=True)
+        channel._client = MagicMock()
+        bot_user = MagicMock()
+        channel._client.user = bot_user
+
+        msg = _make_mock_discord_message(guild_id=123)
+        msg.mentions = [bot_user]
+        assert channel._passes_mention_filter(msg) is True
+
+    def test_filter_blocks_guild_message_with_other_mention(self) -> None:
+        """Guild messages mentioning someone else are blocked."""
+        channel = _make_discord_channel(mention_required=True)
+        channel._client = MagicMock()
+        bot_user = MagicMock()
+        channel._client.user = bot_user
+
+        msg = _make_mock_discord_message(guild_id=123)
+        other_user = MagicMock()
+        msg.mentions = [other_user]
+        assert channel._passes_mention_filter(msg) is False
+
+    @pytest.mark.asyncio
+    async def test_on_message_skips_unmentioned_in_guild(self) -> None:
+        """With mention_required, guild messages without mention are silently ignored."""
+        channel = _make_discord_channel(allowed_users=[111], mention_required=True)
+
+        received: list[Message] = []
+
+        async def capture(msg: Message) -> None:
+            received.append(msg)
+
+        channel.on_message(capture)
+
+        bot_user = MagicMock()
+        client = MagicMock()
+        client.user = bot_user
+        client.user.__eq__ = lambda self, other: False
+        channel._client = client
+
+        msg = _make_mock_discord_message(user_id=111, guild_id=123)
+        msg.mentions = []
+
+        await channel._on_message(msg)
+        assert len(received) == 0
+
+    @pytest.mark.asyncio
+    async def test_on_message_processes_mentioned_in_guild(self) -> None:
+        """With mention_required, guild messages with bot @mention are processed."""
+        channel = _make_discord_channel(allowed_users=[111], mention_required=True)
+
+        received: list[Message] = []
+
+        async def capture(msg: Message) -> None:
+            received.append(msg)
+
+        channel.on_message(capture)
+
+        bot_user = MagicMock()
+        client = MagicMock()
+        client.user = bot_user
+        client.user.__eq__ = lambda self, other: False
+        channel._client = client
+
+        msg = _make_mock_discord_message(user_id=111, guild_id=123)
+        msg.mentions = [bot_user]
+
+        await channel._on_message(msg)
+        assert len(received) == 1

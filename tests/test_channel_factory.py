@@ -71,3 +71,29 @@ def test_create_channel_passes_workspace_name() -> None:
 
     assert isinstance(channel, TelegramChannel)
     assert channel.workspace_name == "my_custom_workspace"
+
+
+def test_create_telegram_channel_mention_required() -> None:
+    """Test that mention_required is passed through factory for Telegram."""
+    config = {"token": "test_token", "mention_required": True}
+    channel = create_channel("telegram", config, "test_workspace")
+    assert isinstance(channel, TelegramChannel)
+    assert channel.mention_required is True
+
+
+def test_create_telegram_channel_mention_required_defaults_false() -> None:
+    """Test that mention_required defaults to False for Telegram."""
+    config = {"token": "test_token"}
+    channel = create_channel("telegram", config, "test_workspace")
+    assert isinstance(channel, TelegramChannel)
+    assert channel.mention_required is False
+
+
+def test_create_discord_channel_mention_required() -> None:
+    """Test that mention_required is passed through factory for Discord."""
+    from openpaw.channels.discord import DiscordChannel
+
+    config = {"token": "test_token", "mention_required": True}
+    channel = create_channel("discord", config, "test_workspace")
+    assert isinstance(channel, DiscordChannel)
+    assert channel.mention_required is True

@@ -98,6 +98,10 @@ class WorkspaceChannelConfig(BaseModel):
     allowed_users: list[int] = Field(default_factory=list, description="Allowed user IDs")
     allowed_groups: list[int] = Field(default_factory=list, description="Allowed group IDs")
     allow_all: bool = Field(default=False, description="Allow all users (insecure, use with caution)")
+    mention_required: bool = Field(
+        default=False,
+        description="Only respond in group chats when the bot is @mentioned. DMs always pass through.",
+    )
     user_aliases: dict[int, str] = Field(
         default_factory=dict,
         description="Map user IDs to display names for message attribution",

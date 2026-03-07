@@ -34,6 +34,7 @@ def create_channel(
             allowed_users=config.get("allowed_users", []),
             allowed_groups=config.get("allowed_groups", []),
             allow_all=config.get("allow_all", False),
+            mention_required=config.get("mention_required", False),
             workspace_name=workspace_name,
         )
 
@@ -45,6 +46,7 @@ def create_channel(
             allowed_users=config.get("allowed_users", []),
             allowed_groups=config.get("allowed_groups", []),
             allow_all=config.get("allow_all", False),
+            mention_required=config.get("mention_required", False),
             workspace_name=workspace_name,
         )
 

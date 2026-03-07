@@ -95,6 +95,7 @@ class DiscordChannel(ChannelAdapter):
         allowed_users: list[int] | None = None,
         allowed_groups: list[int] | None = None,
         allow_all: bool = False,
+        mention_required: bool = False,
         workspace_name: str = "unknown",
     ) -> None:
         """Initialize the Discord channel.
@@ -104,6 +105,7 @@ class DiscordChannel(ChannelAdapter):
             allowed_users: List of allowed Discord user IDs (snowflakes).
             allowed_groups: List of allowed guild IDs.
             allow_all: If True, allow all users (insecure).
+            mention_required: If True, only respond in guild channels when @mentioned.
             workspace_name: Workspace name used in error/access-denied messages.
         """
         resolved_token = token or os.environ.get("DISCORD_BOT_TOKEN")
@@ -116,6 +118,7 @@ class DiscordChannel(ChannelAdapter):
         self.allowed_users: set[int] = set(allowed_users or [])
         self.allowed_groups: set[int] = set(allowed_groups or [])
         self.allow_all = allow_all
+        self.mention_required = mention_required
         self.workspace_name = workspace_name
 
         self._client: discord.Client | None = None
@@ -205,6 +208,9 @@ class DiscordChannel(ChannelAdapter):
 
         if not self._is_allowed(discord_message):
             await self._send_unauthorized_response(discord_message)
+            return
+
+        if not self._passes_mention_filter(discord_message):
             return
 
         message = await self._to_message(discord_message)
@@ -472,6 +478,31 @@ class DiscordChannel(ChannelAdapter):
                 return False
 
         return True
+
+    def _passes_mention_filter(self, message: discord.Message) -> bool:
+        """Check whether the message passes the mention-required filter.
+
+        When mention_required is True, messages in guild channels are only
+        processed if the bot is @mentioned. DMs always pass through.
+
+        Args:
+            message: The incoming discord.Message.
+
+        Returns:
+            True if the message should be processed.
+        """
+        if not self.mention_required:
+            return True
+
+        # DMs always pass through
+        if message.guild is None:
+            return True
+
+        # In a guild channel, require @mention of the bot
+        if self._client and self._client.user in message.mentions:
+            return True
+
+        return False
 
     async def _send_unauthorized_response(self, message: discord.Message) -> None:
         """Reply to an unauthorized user with their IDs and config instructions.

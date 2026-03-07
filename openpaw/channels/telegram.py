@@ -33,6 +33,7 @@ class TelegramChannel(ChannelAdapter):
         allowed_users: list[int] | None = None,
         allowed_groups: list[int] | None = None,
         allow_all: bool = False,
+        mention_required: bool = False,
         workspace_name: str = "unknown",
     ):
         """Initialize the Telegram channel.
@@ -42,6 +43,7 @@ class TelegramChannel(ChannelAdapter):
             allowed_users: List of allowed user IDs.
             allowed_groups: List of allowed group IDs.
             allow_all: If True, allow all users (insecure). If False, requires allowlists.
+            mention_required: If True, only respond in group chats when @mentioned.
             workspace_name: Name of the workspace (for error messages).
         """
         resolved_token = token or os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -52,7 +54,9 @@ class TelegramChannel(ChannelAdapter):
         self.allowed_users = set(allowed_users or [])
         self.allowed_groups = set(allowed_groups or [])
         self.allow_all = allow_all
+        self.mention_required = mention_required
         self.workspace_name = workspace_name
+        self._bot_username: str | None = None
         self._app: Application | None = None  # type: ignore[type-arg]
         self._message_callback: Callable[[Message], Coroutine[Any, Any, None]] | None = None
         self._approval_callback: Callable[[str, bool], Coroutine[Any, Any, None]] | None = None
@@ -74,6 +78,12 @@ class TelegramChannel(ChannelAdapter):
         await self._app.initialize()
         await self._app.start()
         await self._app.updater.start_polling()  # type: ignore[union-attr]
+
+        # Capture bot username for mention detection in group chats
+        if self._app.bot:
+            bot_info = await self._app.bot.get_me()
+            self._bot_username = bot_info.username
+            logger.debug("Bot username: @%s", self._bot_username)
 
         logger.info("Telegram channel started")
 
@@ -366,6 +376,41 @@ class TelegramChannel(ChannelAdapter):
 
         return True
 
+    def _passes_mention_filter(self, update: Update) -> bool:
+        """Check whether the message passes the mention-required filter.
+
+        When mention_required is True, messages in group chats are only
+        processed if the bot is @mentioned via a mention entity, or the
+        message is a command (commands always pass through). DMs always
+        pass through.
+
+        Args:
+            update: The Telegram Update object.
+
+        Returns:
+            True if the message should be processed.
+        """
+        if not self.mention_required:
+            return True
+
+        # DMs always pass through (positive chat IDs are private chats)
+        if update.effective_chat and update.effective_chat.id > 0:
+            return True
+
+        # Commands always pass through (they're routed via CommandRouter)
+        if update.message and update.message.text and update.message.text.startswith("/"):
+            return True
+
+        # Check for @mention in message entities
+        if update.message and update.message.entities and self._bot_username:
+            for entity in update.message.entities:
+                if entity.type == "mention":
+                    mention_text = update.message.text[entity.offset:entity.offset + entity.length]
+                    if mention_text.lower() == f"@{self._bot_username.lower()}":
+                        return True
+
+        return False
+
     def _to_message(self, update: Update) -> Message | None:
         """Convert Telegram update to unified Message format."""
         if not update.message or not update.effective_user or not update.effective_chat:
@@ -424,6 +469,8 @@ class TelegramChannel(ChannelAdapter):
         if not self._is_allowed(update):
             await self._send_unauthorized_response(update)
             return
+        if not self._passes_mention_filter(update):
+            return
 
         message = self._to_message(update)
         if message and self._message_callback:
@@ -444,6 +491,8 @@ class TelegramChannel(ChannelAdapter):
         if not self._is_allowed(update):
             await self._send_unauthorized_response(update)
             return
+        if not self._passes_mention_filter(update):
+            return
 
         message = await self._voice_to_message(update)
         if message and self._message_callback:
@@ -454,6 +503,8 @@ class TelegramChannel(ChannelAdapter):
         if not self._is_allowed(update):
             await self._send_unauthorized_response(update)
             return
+        if not self._passes_mention_filter(update):
+            return
 
         message = await self._document_to_message(update)
         if message and self._message_callback:
@@ -463,6 +514,8 @@ class TelegramChannel(ChannelAdapter):
         """Handle incoming photo messages."""
         if not self._is_allowed(update):
             await self._send_unauthorized_response(update)
+            return
+        if not self._passes_mention_filter(update):
             return
 
         message = await self._photo_to_message(update)
