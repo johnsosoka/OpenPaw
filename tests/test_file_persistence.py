@@ -540,7 +540,6 @@ async def test_timezone_aware_date_partition(temp_workspace, sample_message):
     If server is UTC, that's 06:30am UTC on Feb 8.
     File should land in 2026-02-07 folder (Mountain Time), not 2026-02-08.
     """
-    from openpaw.core.timezone import workspace_now
 
     # Create processor with Mountain Time timezone
     processor = FilePersistenceProcessor(

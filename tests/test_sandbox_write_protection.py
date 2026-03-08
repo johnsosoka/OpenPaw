@@ -19,7 +19,6 @@ from openpaw.core.paths import (
     WRITE_PROTECTED_DIRS,
 )
 
-
 # ---------------------------------------------------------------------------
 # Unit tests for _is_write_protected helper
 # ---------------------------------------------------------------------------

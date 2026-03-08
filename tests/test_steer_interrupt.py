@@ -1,16 +1,15 @@
 """Tests for steer/interrupt WorkspaceRunner integration."""
 
-import asyncio
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from openpaw.agent import AgentRunner
 from openpaw.agent.middleware import InterruptSignalError, QueueAwareToolMiddleware
-from openpaw.runtime.queue.lane import QueueMode
 from openpaw.core.workspace import AgentWorkspace
+from openpaw.runtime.queue.lane import QueueMode
 
 
 @pytest.fixture

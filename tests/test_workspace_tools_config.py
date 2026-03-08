@@ -208,8 +208,9 @@ class TestWorkspaceRunnerFilteringIntegration:
         # Simulate what happens in WorkspaceRunner when config is None
         # The guard `if self._workspace_tools and self._workspace.config:` prevents filtering
         # This tests the defensive isinstance check in the method itself
-        from openpaw.workspace.runner import WorkspaceRunner
         from unittest.mock import Mock
+
+        from openpaw.workspace.runner import WorkspaceRunner
 
         # Create a minimal mock for WorkspaceRunner
         runner = Mock(spec=WorkspaceRunner)

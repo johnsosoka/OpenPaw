@@ -283,6 +283,22 @@ SECTION_PLANNING = (
     "sessions, use create_task instead."
 )
 
+# Channel logs - conditional on channel logging being enabled
+SECTION_CHANNEL_LOGS = (
+    "\n\n## Channel Logs\n\n"
+    "Channel messages are logged to daily JSONL files at "
+    "`memory/logs/channel/{server}/{channel}/{YYYY-MM-DD}.jsonl`. "
+    "Each line is a JSON record with: ts, msg_id, user_id, display_name, "
+    "content, attachments.\n\n"
+    "Use these to review past conversations, track decisions, or find what "
+    "was discussed on a specific date:\n\n"
+    "- Search across all logs: "
+    "`grep_files('keyword', glob='memory/logs/channel/**/*.jsonl')`\n"
+    "- Read a specific day: "
+    "`read_file('memory/logs/channel/server-name/channel-name/2026-03-07.jsonl')`\n\n"
+    "Logs are read-only — the framework writes them, you read them."
+)
+
 
 def build_capability_summary(enabled_builtins: list[str] | None) -> str:
     """Build a concise summary of available framework capabilities.

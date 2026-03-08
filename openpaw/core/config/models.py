@@ -90,6 +90,21 @@ class WorkspaceModelConfig(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class ChannelLogConfig(BaseModel):
+    """Configuration for persistent channel message logging."""
+
+    enabled: bool = Field(default=True, description="Enable channel message logging to JSONL")
+    retention_days: int = Field(default=30, description="Days before logs are archived")
+
+    @field_validator("retention_days")
+    @classmethod
+    def validate_retention(cls, v: int) -> int:
+        """Validate retention_days is at least 1."""
+        if v < 1:
+            raise ValueError("retention_days must be at least 1")
+        return v
+
+
 class WorkspaceChannelConfig(BaseModel):
     """Channel binding configuration for a workspace agent."""
 
@@ -117,6 +132,25 @@ class WorkspaceChannelConfig(BaseModel):
         default_factory=dict,
         description="Map user IDs to display names for message attribution",
     )
+    context_messages: int = Field(
+        default=25,
+        description=(
+            "Number of recent channel messages to fetch as context on trigger"
+            " (0 = disabled, max 100)"
+        ),
+    )
+    channel_log: ChannelLogConfig = Field(
+        default_factory=ChannelLogConfig,
+        description="Persistent channel message logging configuration",
+    )
+
+    @field_validator("context_messages")
+    @classmethod
+    def validate_context_messages(cls, v: int) -> int:
+        """Validate context_messages is between 0 and 100."""
+        if v < 0 or v > 100:
+            raise ValueError("context_messages must be between 0 and 100")
+        return v
 
     model_config = {"extra": "allow"}
 
@@ -409,6 +443,7 @@ class LifecycleConfig(BaseModel):
     notify_startup: bool = Field(default=False, description="Send notification when workspace starts")
     notify_shutdown: bool = Field(default=True, description="Send notification when workspace stops")
     notify_auto_compact: bool = Field(default=True, description="Send notification on auto-compact")
+    notify_session_ttl: bool = Field(default=True, description="Send notification on session TTL expiry")
 
 
 class CronOutputConfig(BaseModel):
@@ -537,10 +572,21 @@ class WorkspaceConfig(BaseModel):
         default_factory=AutoCompactConfig,
         description="Auto-compact configuration",
     )
+    session_ttl_minutes: int = Field(
+        default=180,
+        description="Auto-reset conversation after N minutes of inactivity (0 to disable)",
+    )
     lifecycle: LifecycleConfig = Field(
         default_factory=LifecycleConfig,
         description="Lifecycle notification configuration",
     )
+
+    @field_validator("session_ttl_minutes")
+    @classmethod
+    def validate_session_ttl_minutes(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("session_ttl_minutes must be >= 0")
+        return v
 
     @field_validator("timezone")
     @classmethod

@@ -178,6 +178,9 @@ builtins:
 #   notify_shutdown: true         # Notify users when workspace stops
 #   notify_auto_compact: true     # Notify users when auto-compact fires
 
+# Session TTL — auto-reset conversations after inactivity
+# session_ttl_minutes: 180          # Default: 3 hours (0 to disable)
+
 # Heartbeat — periodic proactive agent check-ins (workspace-level only, in agent.yaml)
 # heartbeat:
 #   enabled: false
@@ -232,6 +235,10 @@ builtins:
 #   allow_all: false              # Insecure — allow any user; use only for testing
 #   mention_required: false       # Require @mention in group chats
 #   triggers: []                  # Keyword triggers for group chat activation (OR with mention)
+#   context_messages: 25          # Messages fetched on group chat trigger (0-100, default: 25)
+#   channel_log:
+#     enabled: true               # Log all visible messages to JSONL (default: true)
+#     retention_days: 30          # Days before archival (default: 30)
 #   user_aliases:                 # Map user IDs to display names for multi-user workspaces
 #     123456789: "John"
 #     987654321: "Sarah"

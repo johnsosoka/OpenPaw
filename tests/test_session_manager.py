@@ -1,10 +1,7 @@
 """Tests for SessionManager."""
 
-import json
 from datetime import UTC, datetime
 from pathlib import Path
-
-import pytest
 
 from openpaw.model.session import SessionState
 from openpaw.runtime.session.manager import SessionManager

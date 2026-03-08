@@ -1,11 +1,12 @@
 """Integration tests for AgentRunner token tracking."""
 
-import pytest
-from unittest.mock import Mock, AsyncMock, MagicMock
 from pathlib import Path
+from unittest.mock import Mock
 
-from openpaw.agent.runner import AgentRunner
+import pytest
+
 from openpaw.agent.metrics import InvocationMetrics
+from openpaw.agent.runner import AgentRunner
 from openpaw.core.workspace import AgentWorkspace
 
 

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from openpaw.core.paths import AGENT_MD, HEARTBEAT_MD, SOUL_MD, USER_MD
 from openpaw.core.prompts.framework import (
     SECTION_AUTONOMOUS_PLANNING,
+    SECTION_CHANNEL_LOGS,
     SECTION_CONVERSATION_MEMORY,
     SECTION_FILE_SHARING,
     SECTION_FILE_UPLOADS,
@@ -78,6 +79,7 @@ class AgentWorkspace:
         self,
         enabled_builtins: list[str] | None = None,
         current_datetime: str | None = None,
+        channel_logging_enabled: bool = False,
     ) -> str:
         """Stitch together workspace files into a system prompt.
 
@@ -91,6 +93,9 @@ class AgentWorkspace:
             current_datetime: Current date/time string to inject into the prompt.
                 Ensures agents always know the actual current date, even when the
                 workspace markdown files are cached from startup.
+            channel_logging_enabled: Whether persistent channel message logging is
+                active. When True, includes the Channel Logs section explaining how
+                to read and search logs at memory/logs/channel/.
 
         Returns:
             String containing workspace prompt sections and framework orientation.
@@ -107,7 +112,9 @@ class AgentWorkspace:
             sections.append(f"<user>\n{self.user_md.strip()}\n</user>")
 
         # Framework orientation comes before heartbeat
-        framework_context = self._build_framework_context(enabled_builtins)
+        framework_context = self._build_framework_context(
+            enabled_builtins, channel_logging_enabled=channel_logging_enabled
+        )
         if framework_context:
             sections.append(f"<framework>\n{framework_context}\n</framework>")
 
@@ -151,7 +158,11 @@ class AgentWorkspace:
 
         return "\n".join(lines)
 
-    def _build_framework_context(self, enabled_builtins: list[str] | None) -> str:
+    def _build_framework_context(
+        self,
+        enabled_builtins: list[str] | None,
+        channel_logging_enabled: bool = False,
+    ) -> str:
         """Build the framework orientation section for the system prompt.
 
         This explains how the agent exists within the OpenPaw framework and what
@@ -159,6 +170,8 @@ class AgentWorkspace:
 
         Args:
             enabled_builtins: List of enabled builtin names, or None to include all.
+            channel_logging_enabled: Whether persistent channel logging is active.
+                When True, includes the Channel Logs section.
 
         Returns:
             Formatted framework context with conditional capability descriptions.
@@ -237,6 +250,10 @@ class AgentWorkspace:
         # Memory search - include if memory_search is enabled
         if enabled_builtins is None or "memory_search" in enabled_builtins:
             sections.append(SECTION_MEMORY_SEARCH)
+
+        # Channel logs - include when persistent channel logging is active
+        if channel_logging_enabled:
+            sections.append(SECTION_CHANNEL_LOGS)
 
         # Conversation memory is always available (core feature, not a builtin)
         sections.append(SECTION_CONVERSATION_MEMORY)

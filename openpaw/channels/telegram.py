@@ -63,6 +63,7 @@ class TelegramChannel(ChannelAdapter):
         self._app: Application | None = None  # type: ignore[type-arg]
         self._message_callback: Callable[[Message], Coroutine[Any, Any, None]] | None = None
         self._approval_callback: Callable[[str, bool], Coroutine[Any, Any, None]] | None = None
+        self._channel_event_callback: Callable[..., Any] | None = None
 
     async def start(self) -> None:
         """Start the Telegram bot."""

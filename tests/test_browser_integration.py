@@ -32,6 +32,7 @@ class TestBrowserFrameworkPrompt:
     def test_browser_prompt_appears_when_enabled(self):
         """Browser framework prompt should appear when 'browser' is in enabled_builtins."""
         from pathlib import Path
+
         from openpaw.core.workspace import AgentWorkspace
 
         workspace = AgentWorkspace(
@@ -54,6 +55,7 @@ class TestBrowserFrameworkPrompt:
     def test_browser_prompt_absent_when_not_enabled(self):
         """Browser framework prompt should be absent when 'browser' not in enabled_builtins."""
         from pathlib import Path
+
         from openpaw.core.workspace import AgentWorkspace
 
         workspace = AgentWorkspace(
@@ -74,6 +76,7 @@ class TestBrowserFrameworkPrompt:
     def test_browser_prompt_key_concepts(self):
         """Browser prompt should mention key concepts."""
         from pathlib import Path
+
         from openpaw.core.workspace import AgentWorkspace
 
         workspace = AgentWorkspace(
@@ -106,8 +109,9 @@ class TestBrowserCleanupIntegration:
 
     def test_command_context_has_browser_builtin_field(self):
         """CommandContext should have a browser_builtin field."""
-        from openpaw.channels.commands.base import CommandContext
         import inspect
+
+        from openpaw.channels.commands.base import CommandContext
 
         # Check the field exists in the dataclass
         sig = inspect.signature(CommandContext)

@@ -42,6 +42,8 @@ class MessageProcessor:
         conversation_archiver: Any = None,
         auto_compact_config: Any = None,
         user_aliases: dict[int, str] | None = None,
+        session_ttl_minutes: int = 0,
+        lifecycle_config: Any = None,
     ):
         """Initialize message processor.
 
@@ -59,6 +61,9 @@ class MessageProcessor:
             conversation_archiver: ConversationArchiver instance.
             auto_compact_config: AutoCompactConfig instance.
             user_aliases: Optional mapping of user IDs to display names.
+            session_ttl_minutes: Auto-reset conversation after N minutes of
+                inactivity. 0 disables TTL checking.
+            lifecycle_config: LifecycleConfig instance for notification flags.
         """
         self._agent_runner = agent_runner
         self._session_manager = session_manager
@@ -73,6 +78,8 @@ class MessageProcessor:
         self._conversation_archiver = conversation_archiver
         self._auto_compact_config = auto_compact_config
         self._user_aliases = user_aliases or {}
+        self._session_ttl_minutes = session_ttl_minutes
+        self._lifecycle_config = lifecycle_config
 
     def update_agent_runner(self, runner: "AgentRunner") -> None:
         """Update the agent runner instance.
@@ -146,6 +153,11 @@ class MessageProcessor:
         thread_id = self._session_manager.get_thread_id(session_key)
         followup_depth = 0
         max_followup_depth = 5
+
+        # Check session TTL first — may rotate conversation before any further checks
+        ttl_thread_id = await self._check_session_ttl(session_key, thread_id, channel)
+        if ttl_thread_id:
+            thread_id = ttl_thread_id
 
         # Check if auto-compact should trigger
         new_thread_id = await self._check_auto_compact(session_key, thread_id, channel)
@@ -390,6 +402,62 @@ class MessageProcessor:
         followup_tool = self._builtin_loader.get_tool_instance("followup")
         if followup_tool:
             followup_tool.reset()
+
+    async def _check_session_ttl(
+        self,
+        session_key: str,
+        thread_id: str,
+        channel: ChannelAdapter | None,
+    ) -> str | None:
+        """Check if the session TTL has expired and rotate the conversation if so.
+
+        When TTL triggers, the current conversation is archived (tagged
+        "ttl_expired"), a fresh conversation is started, and an optional
+        notification is sent to the user.
+
+        Returns:
+            New thread_id if the conversation was rotated, None otherwise.
+        """
+        if self._session_ttl_minutes <= 0:
+            return None
+
+        if not self._session_manager.is_session_expired(session_key, self._session_ttl_minutes):
+            return None
+
+        # Retrieve current conversation metadata for archiving
+        old_state = self._session_manager.get_state(session_key)
+        old_conv_id = old_state.conversation_id if old_state else "unknown"
+
+        # Archive the expired conversation (best-effort)
+        if self._conversation_archiver and self._agent_runner.checkpointer:
+            try:
+                await self._conversation_archiver.archive(
+                    checkpointer=self._agent_runner.checkpointer,
+                    thread_id=thread_id,
+                    session_key=session_key,
+                    conversation_id=old_conv_id,
+                    tags=["ttl_expired"],
+                )
+            except Exception as e:
+                self._logger.warning(f"Failed to archive TTL-expired conversation: {e}")
+
+        # Rotate to a fresh conversation
+        self._session_manager.new_conversation(session_key)
+        new_thread_id = self._session_manager.get_thread_id(session_key)
+
+        # Notify user if channel is available and notifications are enabled
+        notify = getattr(self._lifecycle_config, "notify_session_ttl", True)
+        if channel and notify:
+            try:
+                await channel.send_message(
+                    session_key,
+                    "Session expired after inactivity — starting fresh conversation.",
+                )
+            except Exception as e:
+                self._logger.debug(f"Failed to send TTL notification for {session_key}: {e}")
+
+        self._logger.info(f"Session TTL expired for {session_key}, conversation rotated")
+        return new_thread_id
 
     async def _check_auto_compact(
         self,

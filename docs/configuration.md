@@ -389,7 +389,25 @@ channels:
 
 **name** — Explicit channel name (required when using two channels of the same type).
 
-See [Channels](channels.md) for full setup guides, multi-channel configuration, and trigger-based activation.
+**context_messages** — Number of recent channel messages to fetch as context when the bot is triggered in a group channel (default: `25`, set to `0` to disable). Only applies to group/server messages, not DMs.
+
+**channel_log** — Persistent JSONL logging of all visible channel messages (disabled by default):
+
+```yaml
+channels:
+  - type: discord
+    token: ${DISCORD_BOT_TOKEN}
+    allowed_groups: [111222333]
+    mention_required: true
+    context_messages: 25        # On-demand context fetch (default: 25)
+    channel_log:
+      enabled: true             # Opt-in, default: false
+      retention_days: 30        # Days before old logs are archived (default: 30)
+```
+
+Logs are written to `memory/logs/channel/{server}/{channel}/{YYYY-MM-DD}.jsonl` and are readable by the agent via `read_file()` and `grep_files()`. DMs are never logged. See [Channel History](channels.md#channel-history) for full details.
+
+See [Channels](channels.md) for full setup guides, multi-channel configuration, trigger-based activation, and channel history.
 
 ---
 
@@ -448,6 +466,20 @@ approval_gates:
     delete_task:
       require_approval: true
 ```
+
+---
+
+#### Session TTL
+
+```yaml
+# Conversation auto-reset after inactivity (default: 180 minutes, 0 to disable)
+session_ttl_minutes: 180
+
+lifecycle:
+  notify_session_ttl: true  # Notify user when session expires
+```
+
+**session_ttl_minutes** — Auto-resets the conversation (equivalent to `/new`) after the specified minutes of inactivity. The check is lazy — it only triggers when a new message arrives. Set to `0` to disable. Archives are tagged `["ttl_expired"]`.
 
 **enabled** — Enable human-in-the-loop authorization for dangerous tools.
 

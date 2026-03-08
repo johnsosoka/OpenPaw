@@ -44,7 +44,7 @@ When you run multiple workspaces with `--all`, OpenPaw launches each workspace c
 
 This isolation also applies to configuration. A workspace can override the global model, queue mode, and built-in configuration without affecting other workspaces. You define defaults globally in `config.yaml` and override only what differs in each workspace's `agent.yaml`. For example, you might run most workspaces on a cost-efficient model globally, but configure one specialized workspace to use a more capable model for demanding tasks.
 
-Each workspace also has its own channel connections — a Telegram bot, a Discord bot, or both. One workspace can listen on one bot token while another listens on a different token. A single workspace can even connect to multiple channels simultaneously, receiving messages from Telegram and Discord at the same time. Users who interact with each bot only see responses from the workspace connected to that bot. Channel access control (allowlisted user IDs or groups) and activation filters (mention requirements, keyword triggers) are configured per workspace in `agent.yaml`.
+Each workspace also has its own channel connections — a Telegram bot, a Discord bot, or both. One workspace can listen on one bot token while another listens on a different token. A single workspace can even connect to multiple channels simultaneously, receiving messages from Telegram and Discord at the same time. Users who interact with each bot only see responses from the workspace connected to that bot. Channel access control (allowlisted user IDs or groups) and activation filters (mention requirements, keyword triggers) are configured per workspace in `agent.yaml`. When an agent is triggered in a group channel, it can also receive recent channel history as context — the last 25 messages by default — so it understands the conversation it is joining.
 
 ### Custom Tools
 
@@ -344,6 +344,18 @@ auto_compact:
 ```
 
 Auto-compact uses the same mechanism as `/compact` — it summarizes, archives, and starts fresh. The only difference is that it happens automatically when the threshold is crossed, so you do not have to remember to compact long-running conversations manually.
+
+### Session TTL
+
+Conversations can also expire automatically based on inactivity. When `session_ttl_minutes` is configured (default: 180 minutes / 3 hours), the framework checks the time since the last message each time a new message arrives. If the gap exceeds the TTL, the current conversation is archived and a fresh thread starts — equivalent to what happens when you use `/new`. The user receives a brief notification that the session expired.
+
+This is especially useful for group chats where no one remembers to use `/new`, and conversations accumulate context indefinitely. Set to `0` to disable TTL for workspaces where long-lived conversations are desirable.
+
+The TTL check runs before auto-compact. If a session expires, auto-compact has nothing to do because the conversation was already rotated.
+
+```yaml
+session_ttl_minutes: 180    # 3 hours (default); 0 to disable
+```
 
 ### Conversation Archives
 

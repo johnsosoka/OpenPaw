@@ -10,7 +10,6 @@ from openpaw.core.config.models import (
     WorkspaceConfig,
 )
 
-
 # ---------------------------------------------------------------------------
 # Config normalization: channel → channels
 # ---------------------------------------------------------------------------
