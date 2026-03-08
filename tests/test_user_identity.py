@@ -1,11 +1,10 @@
 """Tests for user identity injection in MessageProcessor."""
 
-from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
 
-from openpaw.model.message import Message, MessageDirection
+from openpaw.model.message import Message
 from openpaw.workspace.message_processor import MessageProcessor
 
 

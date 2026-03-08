@@ -579,7 +579,142 @@ See [Concepts](concepts.md) for how approval gates work and [Configuration](conf
 
 ---
 
-## Adding New Channels
+## Channel History
+
+OpenPaw can give agents awareness of the conversation that preceded their activation in group channels. Two complementary features work together: on-demand context fetch (the last N messages injected when the bot is triggered) and persistent channel logging (a continuous JSONL record of all visible messages).
+
+Both features are per-channel and designed with privacy in mind. DMs are excluded from both. Persistent logging is enabled by default for group channels.
+
+---
+
+### On-Demand Context Fetch
+
+When an agent is @mentioned or triggered by a keyword in a server channel, it normally only sees the triggering message. On-demand context fetch grabs the last N messages from that channel and prepends them to the message the agent receives — giving it the conversational context to respond intelligently.
+
+**How it works:**
+
+The channel adapter fetches recent messages from the platform API when activated. The history is formatted as an XML block and prepended to the message content before it reaches the agent:
+
+```
+<channel_context source="discord" channel="#general" messages="25">
+[5m ago] Alice: Has anyone looked at the PR?
+[3m ago] Bob: Yeah I left some comments
+[2m ago] [BOT]: I can review it if you'd like
+[1m ago] Alice: @bot please review PR #42
+</channel_context>
+
+@bot please review PR #42
+```
+
+The agent can clearly distinguish the channel context from the actual user request. Relative timestamps are used to keep the output compact and timezone-neutral. The bot's own previous messages are marked with `[BOT]` so the agent has self-awareness of its prior contributions.
+
+**Configuration:**
+
+```yaml
+channel:
+  type: discord
+  token: ${DISCORD_BOT_TOKEN}
+  allowed_groups: [111222333]
+  mention_required: true
+  context_messages: 25    # Messages to fetch on trigger (default: 25, 0 to disable)
+```
+
+`context_messages` accepts values from `0` (disabled) to `100`. Set to `0` to turn off context fetch for a channel.
+
+**Notes:**
+
+- Context fetch only runs for group/server messages, not DMs.
+- The fetch is best-effort: if the platform API call fails or times out, the agent proceeds without context rather than blocking the message.
+- Currently implemented for Discord. Telegram's Bot API does not expose a channel history endpoint, so context fetch returns empty for Telegram channels.
+- Fetching history requires the `Read Message History` permission in Discord.
+
+---
+
+### Persistent Channel Logging
+
+Persistent channel logging captures all visible messages to daily JSONL files, giving the agent a long-term, searchable record of channel activity. The agent can use its existing filesystem tools (`read_file`, `grep_files`) to search history without any new tooling.
+
+**Enabling logging:**
+
+```yaml
+channel:
+  type: discord
+  token: ${DISCORD_BOT_TOKEN}
+  allowed_groups: [111222333]
+  channel_log:
+    enabled: true          # Enabled by default
+    retention_days: 30     # Days before old logs are archived (default: 30)
+```
+
+**Directory structure:**
+
+Logs are organized by server and channel under `memory/logs/channel/`:
+
+```
+{workspace}/
+└── memory/
+    └── logs/
+        └── channel/
+            └── {server-name}/
+                └── {channel-name}/
+                    ├── 2026-03-05.jsonl
+                    ├── 2026-03-06.jsonl
+                    └── 2026-03-07.jsonl
+```
+
+Server and channel names are sanitized for filesystem compatibility.
+
+**Log record format:**
+
+Each line in a daily log file is a JSON object:
+
+```json
+{
+  "ts": "2026-03-07T14:30:00+00:00",
+  "msg_id": "1234567890",
+  "user_id": "987654321",
+  "display_name": "Alice",
+  "content": "Has anyone tried the new deployment?",
+  "attachments": ["screenshot.png"],
+  "server_id": "111222333",
+  "channel_id": "444555666"
+}
+```
+
+Timestamps are stored in UTC, consistent with OpenPaw's "store in UTC, display in workspace timezone" convention.
+
+**Reading logs from the agent:**
+
+When channel logging is enabled, the agent is informed about the log location in its system prompt. It can read and search logs using filesystem tools:
+
+```
+# Read a specific day's log
+read_file("memory/logs/channel/my-server/general/2026-03-07.jsonl")
+
+# Search across all channel logs for a keyword
+grep_files("deploy", glob="memory/logs/channel/**/*.jsonl")
+
+# Search a specific channel for a user's messages
+grep_files("Alice", glob="memory/logs/channel/my-server/general/*.jsonl")
+```
+
+**Retention and archival:**
+
+Log files older than `retention_days` are moved to `memory/logs/channel/_archive/` rather than deleted. This preserves history for forensic or reference purposes while keeping the active log directory tidy. Archival runs automatically on workspace startup.
+
+**Privacy notes:**
+
+- Logging is **enabled by default** — set `channel_log.enabled: false` to disable.
+- **DMs are never logged**, regardless of configuration.
+- Only messages visible to the bot are captured (i.e., in channels the bot has access to).
+- The framework writes log files; agents can read them but cannot write or modify them.
+- Server operators deploying OpenPaw with logging enabled should inform their users.
+
+**Extensibility:**
+
+Channel logging uses an observer callback pattern on the channel adapter. Any channel adapter that implements the `on_channel_event` callback will automatically have its messages logged when the feature is enabled. Adding logging support to a new channel adapter requires a single callback invocation.
+
+---
 
 OpenPaw's channel system is extensible. To add a new platform:
 

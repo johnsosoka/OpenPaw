@@ -1,6 +1,5 @@
 """Tests for the SpawnToolBuiltin."""
 
-import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -9,9 +8,9 @@ import pytest
 
 from openpaw.builtins.registry import BuiltinRegistry
 from openpaw.builtins.tools.spawn import SpawnToolBuiltin
+from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
 from openpaw.runtime.subagent import SubAgentRunner
 from openpaw.stores.subagent import SubAgentStore
-from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
 
 
 @pytest.fixture

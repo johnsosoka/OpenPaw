@@ -31,6 +31,12 @@ Demonstrates the SOUL.md personality system with a distinctive mad-scientist voi
 ### Steer Queue Mode
 Configured with responsive message handling for long-running research tasks. Users can redirect the agent mid-research if needed.
 
+### Multi-Channel Support
+The `channels:` list format lets you run Telegram and Discord simultaneously. The commented-out Discord block in `agent.yaml` includes `triggers` and `context_messages` settings suited for group research channels.
+
+### Session TTL
+Conversations auto-reset after 2 hours of inactivity (`session_ttl_minutes: 120`). This keeps context fresh in shared or group settings where multiple users may interact with the agent.
+
 ## Prerequisites
 
 ### Required
@@ -84,11 +90,23 @@ TAVILY_API_KEY=tvly-your-real-key-here
 Edit `agent_workspaces/my-researcher/agent.yaml`:
 
 ```yaml
-channel:
-  type: telegram
-  token: ${TELEGRAM_BOT_TOKEN}  # Your bot token
-  allowed_users:
-    - 123456789  # Replace with YOUR Telegram user ID
+channels:
+  - type: telegram
+    token: ${TELEGRAM_BOT_TOKEN}  # Your bot token
+    allowed_users:
+      - 123456789  # Replace with YOUR Telegram user ID
+    context_messages: 25  # Fetch recent messages on group trigger
+
+  # Uncomment to also connect a Discord server:
+  # - type: discord
+  #   token: ${DISCORD_BOT_TOKEN}
+  #   allowed_users:
+  #     - 916552354470461470
+  #   allowed_groups:
+  #     - 111222333444555666
+  #   mention_required: true
+  #   triggers:
+  #     - "!research"
 
 heartbeat:
   enabled: true
@@ -97,7 +115,7 @@ heartbeat:
   suppress_ok: true
   output:
     channel: telegram
-    chat_id: 123456789  # Replace with YOUR Telegram chat ID
+    target_id: 123456789  # Replace with YOUR Telegram chat ID
 ```
 
 To find your Telegram user ID, message [@userinfobot](https://t.me/userinfobot) on Telegram.

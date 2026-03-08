@@ -483,3 +483,72 @@ class TestPlanningSection:
     def test_planning_section_present_when_all_builtins(self, mock_workspace: AgentWorkspace) -> None:
         prompt = mock_workspace.build_system_prompt(enabled_builtins=None)
         assert "## Planning" in prompt
+
+
+class TestChannelLogsSection:
+    """Test channel logs framework prompt section."""
+
+    def test_channel_logs_section_present_when_enabled(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """Channel logs section appears when channel_logging_enabled=True."""
+        prompt = mock_workspace.build_system_prompt(
+            enabled_builtins=["task_tracker"],
+            channel_logging_enabled=True,
+        )
+        assert "## Channel Logs" in prompt
+
+    def test_channel_logs_section_absent_by_default(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """Channel logs section is absent when channel_logging_enabled is not set."""
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=["task_tracker"])
+        assert "## Channel Logs" not in prompt
+
+    def test_channel_logs_section_absent_when_explicitly_disabled(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """Channel logs section is absent when channel_logging_enabled=False."""
+        prompt = mock_workspace.build_system_prompt(
+            enabled_builtins=None,
+            channel_logging_enabled=False,
+        )
+        assert "## Channel Logs" not in prompt
+
+    def test_channel_logs_section_contains_log_path(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """Channel logs section references the correct log directory."""
+        prompt = mock_workspace.build_system_prompt(channel_logging_enabled=True)
+        assert "memory/logs/channel" in prompt
+
+    def test_channel_logs_section_contains_grep_files_example(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """Channel logs section shows how to search logs with grep_files."""
+        prompt = mock_workspace.build_system_prompt(channel_logging_enabled=True)
+        assert "grep_files" in prompt
+
+    def test_channel_logs_section_contains_read_file_example(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """Channel logs section shows how to read a specific day's log."""
+        prompt = mock_workspace.build_system_prompt(channel_logging_enabled=True)
+        assert "read_file" in prompt
+
+    def test_channel_logs_section_read_only_note(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """Channel logs section clarifies logs are read-only."""
+        prompt = mock_workspace.build_system_prompt(channel_logging_enabled=True)
+        assert "read-only" in prompt
+
+    def test_channel_logs_section_not_affected_by_enabled_builtins_none(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """Channel logs section stays absent when enabled_builtins=None but flag is False."""
+        prompt = mock_workspace.build_system_prompt(
+            enabled_builtins=None,
+            channel_logging_enabled=False,
+        )
+        assert "## Channel Logs" not in prompt

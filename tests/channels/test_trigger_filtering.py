@@ -8,12 +8,9 @@ Covers:
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from openpaw.channels.base import ChannelAdapter
 from openpaw.channels.discord import DiscordChannel
 from openpaw.channels.telegram import TelegramChannel
-
 
 # ---------------------------------------------------------------------------
 # Helpers

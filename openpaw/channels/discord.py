@@ -12,6 +12,7 @@ import discord
 from discord import app_commands
 
 from openpaw.channels.base import ChannelAdapter
+from openpaw.model.channel import ChannelEvent, ChannelHistoryEntry
 from openpaw.model.message import Attachment, Message, MessageDirection
 
 logger = logging.getLogger(__name__)
@@ -131,6 +132,7 @@ class DiscordChannel(ChannelAdapter):
 
         self._message_callback: Callable[[Message], Coroutine[Any, Any, None]] | None = None
         self._approval_callback: Callable[[str, bool], Coroutine[Any, Any, None]] | None = None
+        self._channel_event_callback: Callable[..., Any] | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -209,6 +211,15 @@ class DiscordChannel(ChannelAdapter):
         if self._client and discord_message.author == self._client.user:
             return
 
+        # Emit channel event for persistent logging (before any filters).
+        # Only emit for guild messages — DMs are excluded for privacy.
+        if self._channel_event_callback and discord_message.guild:
+            try:
+                event = self._build_channel_event(discord_message)
+                await self._channel_event_callback(event)
+            except Exception:
+                logger.debug("Channel event callback failed", exc_info=True)
+
         if not self._is_allowed(discord_message):
             await self._send_unauthorized_response(discord_message)
             return
@@ -219,6 +230,32 @@ class DiscordChannel(ChannelAdapter):
         message = await self._to_message(discord_message)
         if message and self._message_callback:
             await self._message_callback(message)
+
+    def _build_channel_event(self, discord_message: discord.Message) -> ChannelEvent:
+        """Build a ChannelEvent from a discord.Message for persistent logging.
+
+        Args:
+            discord_message: The incoming discord.Message to convert.
+
+        Returns:
+            A ChannelEvent populated with message metadata.
+        """
+        attachment_names = [
+            a.filename for a in discord_message.attachments if a.filename
+        ]
+        return ChannelEvent(
+            timestamp=discord_message.created_at or datetime.now(UTC),
+            channel_name=self.name,
+            channel_id=str(discord_message.channel.id),
+            channel_label=getattr(discord_message.channel, "name", "unknown"),
+            server_name=discord_message.guild.name if discord_message.guild else None,
+            server_id=str(discord_message.guild.id) if discord_message.guild else None,
+            user_id=str(discord_message.author.id),
+            display_name=discord_message.author.display_name,
+            content=discord_message.content or "",
+            attachment_names=attachment_names,
+            message_id=str(discord_message.id),
+        )
 
     # ------------------------------------------------------------------
     # ChannelAdapter interface
@@ -583,6 +620,7 @@ class DiscordChannel(ChannelAdapter):
                 "guild_id": discord_message.guild.id if discord_message.guild else None,
                 "username": discord_message.author.name,
                 "display_name": discord_message.author.display_name,
+                "channel_label": getattr(discord_message.channel, "name", None),
             },
             attachments=attachments,
         )
@@ -732,3 +770,70 @@ class DiscordChannel(ChannelAdapter):
                 )
 
         return channel  # type: ignore[return-value]
+
+    # ------------------------------------------------------------------
+    # Channel history (context fetch for group messages)
+    # ------------------------------------------------------------------
+
+    async def fetch_channel_history(
+        self,
+        channel_id: str,
+        limit: int = 25,
+        before_message_id: str | None = None,
+    ) -> list[ChannelHistoryEntry]:
+        """Fetch recent messages from a Discord channel.
+
+        Retrieves up to `limit` messages in reverse-chronological order
+        from Discord's API, then returns them in chronological order (oldest
+        first) after filtering out the bot's own messages.
+
+        Args:
+            channel_id: Discord snowflake channel ID as a string.
+            limit: Maximum number of messages to fetch (before self-filtering).
+            before_message_id: When provided, fetch only messages sent before
+                this message ID (for pagination). Optional.
+
+        Returns:
+            List of ChannelHistoryEntry in chronological order (oldest first).
+            Returns an empty list on any error.
+        """
+        try:
+            channel = await self._resolve_channel(int(channel_id))
+
+            before_obj: discord.Object | None = None
+            if before_message_id is not None:
+                before_obj = discord.Object(id=int(before_message_id))
+
+            entries: list[ChannelHistoryEntry] = []
+            async for msg in channel.history(limit=limit, before=before_obj):  # type: ignore[union-attr]
+                # Skip the bot's own messages — they are not useful context
+                if self._client and msg.author == self._client.user:
+                    continue
+
+                attachments_summary: str | None = None
+                if msg.attachments:
+                    names = [a.filename for a in msg.attachments]
+                    count = len(names)
+                    label = "file" if count == 1 else "files"
+                    attachments_summary = f"[{count} {label}: {', '.join(names)}]"
+
+                entries.append(
+                    ChannelHistoryEntry(
+                        timestamp=msg.created_at,
+                        user_id=str(msg.author.id),
+                        display_name=msg.author.display_name,
+                        content=msg.content or "",
+                        is_bot=msg.author.bot,
+                        attachments_summary=attachments_summary,
+                    )
+                )
+
+            # Discord returns newest-first; reverse to chronological order
+            entries.reverse()
+            return entries
+
+        except Exception:
+            logger.warning(
+                "Failed to fetch channel history for channel %s", channel_id, exc_info=True
+            )
+            return []
