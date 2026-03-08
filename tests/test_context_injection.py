@@ -97,6 +97,8 @@ def _make_runner_stub(
     stub = MagicMock()
     stub._channel_context_limits = channel_context_limits if channel_context_limits is not None else {"discord": 25}
     stub._channels = channels or {}
+    stub._session_ttl_minutes = 0  # Disabled by default in tests
+    stub._session_manager = MagicMock()
     stub.logger = MagicMock()
     return stub
 
@@ -381,3 +383,51 @@ class TestMissingAdapter:
         result = await _inject(runner, msg)
 
         assert result.content == original
+
+
+# ---------------------------------------------------------------------------
+# 7. TTL-expired session skips context injection
+# ---------------------------------------------------------------------------
+
+
+class TestTTLExpiredSkip:
+    """Channel context is not injected when the session is about to be TTL-rotated."""
+
+    @pytest.mark.asyncio
+    async def test_expired_session_skips_context(self) -> None:
+        """When session TTL is expired, channel context is not injected."""
+        adapter = _make_mock_channel_adapter(history_entries=_make_history_entries())
+        runner = _make_runner_stub(channels={"discord": adapter})
+        runner._session_ttl_minutes = 60
+        runner._session_manager.is_session_expired.return_value = True
+
+        msg = _make_inbound_message()
+        result = await _inject(runner, msg)
+
+        assert "<channel_context" not in result.content
+        adapter.fetch_channel_history.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_non_expired_session_gets_context(self) -> None:
+        """When session TTL is configured but not expired, context is injected."""
+        adapter = _make_mock_channel_adapter(history_entries=_make_history_entries())
+        runner = _make_runner_stub(channels={"discord": adapter})
+        runner._session_ttl_minutes = 60
+        runner._session_manager.is_session_expired.return_value = False
+
+        msg = _make_inbound_message()
+        result = await _inject(runner, msg)
+
+        assert "<channel_context" in result.content
+
+    @pytest.mark.asyncio
+    async def test_ttl_disabled_does_not_check_expiry(self) -> None:
+        """When session_ttl_minutes is 0, expiry is never checked."""
+        adapter = _make_mock_channel_adapter(history_entries=_make_history_entries())
+        runner = _make_runner_stub(channels={"discord": adapter})
+        runner._session_ttl_minutes = 0
+
+        msg = _make_inbound_message()
+        await _inject(runner, msg)
+
+        runner._session_manager.is_session_expired.assert_not_called()

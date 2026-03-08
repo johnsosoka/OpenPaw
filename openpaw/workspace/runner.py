@@ -140,6 +140,10 @@ class WorkspaceRunner:
             result_callback=self._inject_system_event,
         )
 
+        # Session TTL config (used by _inject_channel_context to skip context
+        # for sessions that are about to be rotated)
+        self._session_ttl_minutes: int = self._merged_config.get("session_ttl_minutes", 180)
+
         # Build a channel-name → context_messages limit mapping so
         # _inject_channel_context() can look up the limit without re-parsing
         # the full merged config on every inbound message.
@@ -547,6 +551,17 @@ class WorkspaceRunner:
         """
         # Only fetch context for guild (group) messages
         if not message.metadata.get("guild_id"):
+            return message
+
+        # Skip channel context when the session is about to be TTL-rotated.
+        # Injecting old conversation history into a fresh thread is contradictory.
+        if self._session_ttl_minutes > 0 and self._session_manager.is_session_expired(
+            message.session_key, self._session_ttl_minutes
+        ):
+            self.logger.debug(
+                "Skipping channel context for %s (session TTL expired)",
+                message.session_key,
+            )
             return message
 
         # Look up the configured limit for this channel
