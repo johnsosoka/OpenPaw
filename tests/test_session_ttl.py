@@ -16,6 +16,7 @@ import pytest
 from pydantic import ValidationError
 
 from openpaw.core.config.models import LifecycleConfig, WorkspaceConfig
+from openpaw.model.message import Message
 from openpaw.runtime.session.manager import SessionManager
 from openpaw.workspace.message_processor import MessageProcessor
 
@@ -86,6 +87,48 @@ def _make_processor(
         session_ttl_minutes=session_ttl_minutes,
         lifecycle_config=lifecycle_config,
     )
+
+
+def _group_messages(session_key: str = "telegram:-100123:conv_1") -> list[Message]:
+    """Return a list with one group-chat message (Telegram supergroup)."""
+    return [
+        Message(
+            id="1",
+            channel="telegram",
+            session_key=session_key,
+            user_id="123",
+            content="hello",
+            metadata={"chat_type": "supergroup"},
+        )
+    ]
+
+
+def _dm_messages(session_key: str = "telegram:123") -> list[Message]:
+    """Return a list with one DM message (Telegram private)."""
+    return [
+        Message(
+            id="2",
+            channel="telegram",
+            session_key=session_key,
+            user_id="123",
+            content="hello",
+            metadata={"chat_type": "private"},
+        )
+    ]
+
+
+def _discord_group_messages(session_key: str = "discord:999") -> list[Message]:
+    """Return a list with one Discord guild (server) message."""
+    return [
+        Message(
+            id="3",
+            channel="discord",
+            session_key=session_key,
+            user_id="456",
+            content="hello",
+            metadata={"guild_id": 111222333},
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -247,9 +290,64 @@ class TestCheckSessionTtl:
             session_key="telegram:1",
             thread_id="telegram:1:conv_current",
             channel=None,
+            messages=_group_messages(),
         )
 
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_for_dm_session(self, tmp_path: Path) -> None:
+        """Returns None for DM sessions even when expired — TTL is group-only."""
+        manager = _make_manager(tmp_path)
+        _seed_session(manager, "telegram:123", timedelta(hours=-5))
+        processor = _make_processor(manager, session_ttl_minutes=60)
+
+        result = await processor._check_session_ttl(
+            session_key="telegram:123",
+            thread_id="telegram:123:conv_old",
+            channel=None,
+            messages=_dm_messages(),
+        )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_for_discord_dm(self, tmp_path: Path) -> None:
+        """Returns None for Discord DMs (no guild_id)."""
+        manager = _make_manager(tmp_path)
+        _seed_session(manager, "discord:999", timedelta(hours=-5))
+        processor = _make_processor(manager, session_ttl_minutes=60)
+
+        dm_msg = Message(
+            id="4", channel="discord", session_key="discord:999",
+            user_id="456", content="hi", metadata={"guild_id": None},
+        )
+        result = await processor._check_session_ttl(
+            session_key="discord:999",
+            thread_id="discord:999:conv_old",
+            channel=None,
+            messages=[dm_msg],
+        )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_fires_for_discord_guild(self, tmp_path: Path) -> None:
+        """TTL fires for Discord guild (server) messages."""
+        manager = _make_manager(tmp_path)
+        _seed_session(manager, "discord:999", timedelta(hours=-5))
+        old_thread = manager.get_thread_id("discord:999")
+        processor = _make_processor(manager, session_ttl_minutes=60)
+
+        result = await processor._check_session_ttl(
+            session_key="discord:999",
+            thread_id=old_thread,
+            channel=None,
+            messages=_discord_group_messages(),
+        )
+
+        assert result is not None
+        assert result != old_thread
 
     @pytest.mark.asyncio
     async def test_returns_new_thread_id_when_expired(self, tmp_path: Path) -> None:
@@ -264,6 +362,7 @@ class TestCheckSessionTtl:
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=None,
+            messages=_group_messages(),
         )
 
         assert result is not None
@@ -294,6 +393,7 @@ class TestCheckSessionTtl:
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=None,
+            messages=_group_messages(),
         )
 
         archiver.archive.assert_called_once()
@@ -319,6 +419,7 @@ class TestCheckSessionTtl:
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=None,
+            messages=_group_messages(),
         )
 
         # Rotation still happened
@@ -349,6 +450,7 @@ class TestCheckSessionTtl:
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=None,
+            messages=_group_messages(),
         )
 
         archiver.archive.assert_not_called()
@@ -372,6 +474,7 @@ class TestCheckSessionTtl:
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=channel,
+            messages=_group_messages(),
         )
 
         channel.send_message.assert_called_once()
@@ -403,6 +506,7 @@ class TestCheckSessionTtl:
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=channel,
+            messages=_group_messages(),
         )
 
         # Rotation still happened
@@ -432,6 +536,7 @@ class TestCheckSessionTtl:
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=channel,
+            messages=_group_messages(),
         )
 
         # Rotation still succeeded
@@ -452,6 +557,7 @@ class TestCheckSessionTtl:
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=None,
+            messages=_group_messages(),
         )
 
         mock_logger.info.assert_called()
@@ -485,6 +591,7 @@ class TestCheckSessionTtl:
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=None,
+            messages=_group_messages(),
         )
 
         # Rotation still succeeded despite archive failure
@@ -510,6 +617,7 @@ class TestCheckSessionTtl:
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=channel,
+            messages=_group_messages(),
         )
 
         # getattr(None, "notify_session_ttl", True) returns True
@@ -537,6 +645,7 @@ class TestCheckSessionTtl:
             session_key="telegram:1",
             thread_id=old_thread_a,
             channel=None,
+            messages=_group_messages(),
         )
 
         # Session B should be unchanged
@@ -544,6 +653,7 @@ class TestCheckSessionTtl:
             session_key="telegram:2",
             thread_id=thread_b_before,
             channel=None,
+            messages=_group_messages(),
         )
 
         assert result_a is not None  # A was rotated

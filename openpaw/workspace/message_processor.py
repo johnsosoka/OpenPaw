@@ -155,7 +155,8 @@ class MessageProcessor:
         max_followup_depth = 5
 
         # Check session TTL first — may rotate conversation before any further checks
-        ttl_thread_id = await self._check_session_ttl(session_key, thread_id, channel)
+        # TTL only applies to group sessions (not DMs)
+        ttl_thread_id = await self._check_session_ttl(session_key, thread_id, channel, messages)
         if ttl_thread_id:
             thread_id = ttl_thread_id
 
@@ -403,13 +404,39 @@ class MessageProcessor:
         if followup_tool:
             followup_tool.reset()
 
+    @staticmethod
+    def _is_group_session(messages: list[Message] | None) -> bool:
+        """Determine if the current session is a group chat (not a DM).
+
+        Checks message metadata for platform-specific group indicators:
+        - Telegram: ``chat_type`` is not ``"private"``
+        - Discord: ``guild_id`` is not None
+        """
+        if not messages:
+            return False
+        for msg in messages:
+            meta = msg.metadata or {}
+            # Discord: guild_id present means server (group) message
+            if meta.get("guild_id") is not None:
+                return True
+            # Telegram: chat_type "group" or "supergroup"
+            chat_type = meta.get("chat_type")
+            if chat_type and chat_type != "private":
+                return True
+        return False
+
     async def _check_session_ttl(
         self,
         session_key: str,
         thread_id: str,
         channel: ChannelAdapter | None,
+        messages: list[Message] | None = None,
     ) -> str | None:
         """Check if the session TTL has expired and rotate the conversation if so.
+
+        TTL only applies to group sessions (not DMs). A session is considered
+        a group session if any message has ``guild_id`` (Discord) or a
+        ``chat_type`` other than ``"private"`` (Telegram).
 
         When TTL triggers, the current conversation is archived (tagged
         "ttl_expired"), a fresh conversation is started, and an optional
@@ -419,6 +446,10 @@ class MessageProcessor:
             New thread_id if the conversation was rotated, None otherwise.
         """
         if self._session_ttl_minutes <= 0:
+            return None
+
+        # TTL only applies to group sessions — skip for DMs
+        if not self._is_group_session(messages):
             return None
 
         if not self._session_manager.is_session_expired(session_key, self._session_ttl_minutes):
