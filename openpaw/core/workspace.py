@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from openpaw.core.paths import AGENT_MD, HEARTBEAT_MD, SOUL_MD, USER_MD
 from openpaw.core.prompts.framework import (
     SECTION_AUTONOMOUS_PLANNING,
+    SECTION_CHANNEL_CONTEXT,
     SECTION_CHANNEL_LOGS,
     SECTION_CONVERSATION_MEMORY,
     SECTION_FILE_SHARING,
@@ -254,6 +255,9 @@ class AgentWorkspace:
         # Channel logs - include when persistent channel logging is active
         if channel_logging_enabled:
             sections.append(SECTION_CHANNEL_LOGS)
+
+        # Channel context is always available (group messages prepend recent history)
+        sections.append(SECTION_CHANNEL_CONTEXT)
 
         # Conversation memory is always available (core feature, not a builtin)
         sections.append(SECTION_CONVERSATION_MEMORY)
