@@ -349,7 +349,7 @@ Auto-compact uses the same mechanism as `/compact` — it summarizes, archives, 
 
 Conversations can also expire automatically based on inactivity. When `session_ttl_minutes` is configured (default: 180 minutes / 3 hours), the framework checks the time since the last message each time a new message arrives. If the gap exceeds the TTL, the current conversation is archived and a fresh thread starts — equivalent to what happens when you use `/new`. The user receives a brief notification that the session expired.
 
-This is especially useful for group chats where no one remembers to use `/new`, and conversations accumulate context indefinitely. Set to `0` to disable TTL for workspaces where long-lived conversations are desirable.
+**TTL only applies to group/server channels** — DMs are never auto-expired. This is designed for group chats where no one remembers to use `/new` and conversations accumulate context indefinitely. When TTL triggers, channel context history is not injected into the fresh thread to avoid contradicting the reset. Set to `0` to disable TTL for workspaces where long-lived conversations are desirable.
 
 The TTL check runs before auto-compact. If a session expires, auto-compact has nothing to do because the conversation was already rotated.
 

@@ -1204,7 +1204,9 @@ lifecycle:
 
 **Behavior**:
 - Default is 180 minutes (3 hours). Set to `0` to disable.
+- **Only applies to group/server channels** — DMs are never auto-expired (the bot has full DM context already, so TTL rotation would lose history without benefit). Detection uses message metadata: `chat_type` for Telegram, `guild_id` for Discord.
 - Action is equivalent to `/new` (archive + rotate) — not `/compact`. No LLM call is made.
 - Archives are tagged `["ttl_expired"]` for identification.
+- When TTL fires, channel context history is **not** injected into the fresh thread — prevents the agent from parroting stale conversation after a reset.
 - User receives a brief notification when TTL triggers a reset (controlled by `lifecycle.notify_session_ttl`).
 - TTL check runs **before** auto-compact — a fresh conversation never triggers compaction on the same message.

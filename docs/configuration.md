@@ -391,7 +391,7 @@ channels:
 
 **context_messages** — Number of recent channel messages to fetch as context when the bot is triggered in a group channel (default: `25`, set to `0` to disable). Only applies to group/server messages, not DMs.
 
-**channel_log** — Persistent JSONL logging of all visible channel messages (disabled by default):
+**channel_log** — Persistent JSONL logging of all visible channel messages (enabled by default):
 
 ```yaml
 channels:
@@ -401,7 +401,7 @@ channels:
     mention_required: true
     context_messages: 25        # On-demand context fetch (default: 25)
     channel_log:
-      enabled: true             # Opt-in, default: false
+      enabled: true             # Enabled by default; set false to disable
       retention_days: 30        # Days before old logs are archived (default: 30)
 ```
 
@@ -479,7 +479,7 @@ lifecycle:
   notify_session_ttl: true  # Notify user when session expires
 ```
 
-**session_ttl_minutes** — Auto-resets the conversation (equivalent to `/new`) after the specified minutes of inactivity. The check is lazy — it only triggers when a new message arrives. Set to `0` to disable. Archives are tagged `["ttl_expired"]`.
+**session_ttl_minutes** — Auto-resets the conversation (equivalent to `/new`) after the specified minutes of inactivity. Only applies to group/server channels — DMs are never auto-expired. The check is lazy — it only triggers when a new message arrives. When a session expires, channel context history is not injected into the fresh thread. Set to `0` to disable. Archives are tagged `["ttl_expired"]`.
 
 **enabled** — Enable human-in-the-loop authorization for dangerous tools.
 
