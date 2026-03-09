@@ -13,14 +13,11 @@ Changes tested:
 """
 
 import logging
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
-
-import pytest
+from unittest.mock import MagicMock, Mock, patch
 
 from openpaw.core.config.models import MemoryConfig
 from openpaw.workspace.agent_factory import AgentFactory
 from openpaw.workspace.runner import WorkspaceRunner
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

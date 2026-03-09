@@ -33,7 +33,9 @@ Agents can ingest documents, browse the web, search the internet, and manage the
 
 **Approval gates** -- Human-in-the-loop authorization for dangerous operations, with configurable timeouts and channel-native UI.
 
-**Multi-channel support** -- Connect agents to Telegram, Discord, or both simultaneously. Trigger-based activation lets agents respond to @mentions, keyword triggers, or both in group chats.
+**Multi-channel support** -- Connect agents to Telegram, Discord, or both simultaneously. Trigger-based activation lets agents respond to @mentions, keyword triggers, or both in group chats. On-demand context fetch gives agents awareness of recent channel history when triggered.
+
+**Session management** -- Conversations auto-reset after inactivity (default 3 hours). Auto-compact rotates context when the window fills. Persistent channel logs give agents searchable message history.
 
 **Workspace isolation** -- Each agent gets its own SOUL.md personality, tools directory, conversation history, channels, and sandboxed filesystem.
 
@@ -116,7 +118,9 @@ agent_workspaces/my_agent/
 │   └── ...             # Conversations DB, session state, token logs
 ├── memory/             # Archived conversations and session logs
 │   ├── conversations/  # Conversation exports (markdown + JSON)
-│   └── logs/           # Heartbeat, cron, and sub-agent session logs
+│   └── logs/           # Session logs and channel history
+│       ├── channel/    # Persistent channel message logs (JSONL)
+│       └── sessions/   # Heartbeat, cron, and sub-agent session logs
 └── workspace/          # Agent work area (default write target)
     ├── downloads/      # Browser-downloaded files
     └── screenshots/    # Browser screenshots

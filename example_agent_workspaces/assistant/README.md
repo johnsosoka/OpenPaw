@@ -12,6 +12,7 @@ A minimal OpenPaw workspace demonstrating the basic structure. Copy this to `age
 2. Edit `agent.yaml`:
    - Set your model provider and API key
    - Set your Telegram bot token and user ID
+   - Optionally uncomment the `channels:` block to add Discord alongside Telegram
 
 3. Customize the personality files:
    - `SOUL.md` — Who the agent *is* (personality, values, tone)
@@ -33,5 +34,7 @@ A minimal OpenPaw workspace demonstrating the basic structure. Copy this to `age
 | `HEARTBEAT.md` | Scratchpad for proactive check-ins |
 | `agent.yaml` | Model, channel, queue, builtin config |
 | `crons/` | Scheduled task definitions |
+
+Conversations auto-reset after 3 hours of inactivity (`session_ttl_minutes: 180`). Adjust or remove this to match your workflow.
 
 See the [Workspaces documentation](../../docs/workspaces.md) for the full reference.

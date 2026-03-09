@@ -23,6 +23,7 @@ from openpaw.channels.base import ChannelAdapter
 from openpaw.channels.commands.base import CommandContext
 from openpaw.channels.commands.handlers import get_framework_commands
 from openpaw.channels.commands.router import CommandRouter
+from openpaw.core.channel_context import format_channel_context
 from openpaw.core.config import Config, merge_configs
 from openpaw.core.config.models import ApprovalGatesConfig, ToolTimeoutsConfig
 from openpaw.core.logging import setup_workspace_logger
@@ -139,6 +140,20 @@ class WorkspaceRunner:
             result_callback=self._inject_system_event,
         )
 
+        # Session TTL config (used by _inject_channel_context to skip context
+        # for sessions that are about to be rotated)
+        self._session_ttl_minutes: int = self._merged_config.get("session_ttl_minutes", 180)
+
+        # Build a channel-name → context_messages limit mapping so
+        # _inject_channel_context() can look up the limit without re-parsing
+        # the full merged config on every inbound message.
+        self._channel_context_limits: dict[str, int] = {
+            (ch_cfg.get("name") or ch_cfg.get("type", "telegram")): ch_cfg.get(
+                "context_messages", 25
+            )
+            for ch_cfg in self._merged_config.get("channels", [])
+        }
+
         # Runtime state
         self._channels: dict[str, ChannelAdapter] = {}
         self._subagent_runner: SubAgentRunner | None = None
@@ -224,6 +239,12 @@ class WorkspaceRunner:
         self._processors: list[BaseBuiltinProcessor] = self._builtin_loader.load_processors()
         self._enabled_builtin_names = self._builtin_loader.get_loaded_tool_names()
 
+        # Determine if any channel has persistent logging enabled
+        self._channel_logging_enabled = any(
+            ch.get("channel_log", {}).get("enabled", False)
+            for ch in self._merged_config.get("channels", [])
+        )
+
         if self._builtin_tools:
             self.logger.info(
                 f"Loaded {len(self._builtin_tools)} builtin tools for workspace: {self.workspace_name}"
@@ -300,6 +321,7 @@ class WorkspaceRunner:
             middleware=middlewares,
             logger=self.logger,
             provider_catalog=self.config.providers,
+            channel_logging_enabled=self._channel_logging_enabled,
         )
         self._agent_runner = self._agent_factory.create_agent(checkpointer=None)
 
@@ -318,6 +340,8 @@ class WorkspaceRunner:
             conversation_archiver=self._conversation_archiver,
             auto_compact_config=self._workspace.config.auto_compact if self._workspace.config else None,
             user_aliases=self._user_aliases,
+            session_ttl_minutes=self._merged_config.get("session_ttl_minutes", 180),
+            lifecycle_config=self._workspace.config.lifecycle if self._workspace.config else None,
         )
 
     @property
@@ -493,6 +517,9 @@ class WorkspaceRunner:
             except Exception as e:
                 self.logger.error(f"Processor {processor.metadata.name} failed: {e}")
 
+        # Inject channel history context for group messages (best-effort)
+        processed_message = await self._inject_channel_context(processed_message)
+
         content_preview = processed_message.content[:50] if processed_message.content else "(empty)"
         self.logger.info(f"Received message from {processed_message.channel}: {content_preview}...")
 
@@ -501,6 +528,85 @@ class WorkspaceRunner:
             channel_name=processed_message.channel,
             message=processed_message,
         )
+
+    async def _inject_channel_context(self, message: Message) -> Message:
+        """Fetch and inject channel history context for group messages.
+
+        Only runs when:
+        - Message is from a guild/group (metadata has a non-None guild_id)
+        - The channel has context_messages > 0 configured
+        - The channel adapter supports fetch_channel_history()
+
+        The formatted XML block is prepended to message.content so the agent
+        sees recent conversation history before the triggering message.
+
+        Best-effort: any failure returns the original message unchanged.
+
+        Args:
+            message: The processed inbound message.
+
+        Returns:
+            The message with channel context prepended, or the original message
+            on failure or when context fetch is not applicable.
+        """
+        # Only fetch context for guild (group) messages
+        if not message.metadata.get("guild_id"):
+            return message
+
+        # Skip channel context when the session is about to be TTL-rotated.
+        # Injecting old conversation history into a fresh thread is contradictory.
+        if self._session_ttl_minutes > 0 and self._session_manager.is_session_expired(
+            message.session_key, self._session_ttl_minutes
+        ):
+            self.logger.debug(
+                "Skipping channel context for %s (session TTL expired)",
+                message.session_key,
+            )
+            return message
+
+        # Look up the configured limit for this channel
+        context_limit = self._channel_context_limits.get(message.channel, 25)
+        if context_limit <= 0:
+            return message
+
+        channel = self._channels.get(message.channel)
+        if channel is None:
+            return message
+
+        try:
+            # Extract the platform channel ID from the session key
+            # session_key format: "{channel_name}:{channel_id}" (channel_name may contain colons)
+            channel_id = message.session_key.split(":")[-1]
+
+            entries = await channel.fetch_channel_history(channel_id, limit=context_limit)
+            if not entries:
+                return message
+
+            channel_label = str(message.metadata.get("channel_label", "unknown"))
+            source = message.channel.split("-")[0] if "-" in message.channel else message.channel
+
+            context_xml = format_channel_context(
+                entries,
+                bot_user_id=None,
+                channel_name=channel_label,
+                source=source,
+            )
+
+            message.content = f"{context_xml}\n\n{message.content}"
+            self.logger.debug(
+                "Injected channel context (%d messages) for session %s",
+                len(entries),
+                message.session_key,
+            )
+
+        except Exception:
+            self.logger.debug(
+                "Channel context fetch failed for session %s, continuing without",
+                message.session_key,
+                exc_info=True,
+            )
+
+        return message
 
     async def _process_messages(self, session_key: str, messages: list[Message]) -> None:
         """Process collected messages for a session."""

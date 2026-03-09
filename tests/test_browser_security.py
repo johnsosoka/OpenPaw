@@ -1,6 +1,5 @@
 """Tests for browser domain security policy."""
 
-import pytest
 
 from openpaw.builtins.tools.browser.security import DomainPolicy
 

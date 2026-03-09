@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from openpaw.agent.metrics import InvocationMetrics
 from openpaw.agent.session_logger import SessionLogger, SessionRecord
-from openpaw.core.config.models import HeartbeatConfig
+from openpaw.core.config.models import CronDefinition, CronOutputConfig, HeartbeatConfig
 from openpaw.core.prompts.system_events import (
     CRON_RESULT_TEMPLATE,
     CRON_RESULT_TRUNCATED_TEMPLATE,
@@ -17,7 +17,6 @@ from openpaw.core.prompts.system_events import (
     HEARTBEAT_RESULT_TRUNCATED_TEMPLATE,
     INJECTION_TRUNCATION_LIMIT,
 )
-from openpaw.core.config.models import CronDefinition, CronOutputConfig
 from openpaw.model.subagent import SubAgentRequest
 from openpaw.runtime.scheduling.cron import CronScheduler
 from openpaw.runtime.scheduling.heartbeat import HeartbeatScheduler

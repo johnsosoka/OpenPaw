@@ -8,13 +8,10 @@ Covers:
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from openpaw.agent.runner import AgentRunner
 from openpaw.core.config.models import Config, ProviderDefinition, WorkspaceConfig
-from openpaw.core.config.providers import ResolvedProvider, resolve_provider
+from openpaw.core.config.providers import resolve_provider
 from openpaw.workspace.agent_factory import AgentFactory
-
 
 # ---------------------------------------------------------------------------
 # Helpers

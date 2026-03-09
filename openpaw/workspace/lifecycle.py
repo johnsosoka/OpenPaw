@@ -75,6 +75,7 @@ class LifecycleManager:
         self._channels: dict[str, ChannelAdapter] = {}
         self._cron_scheduler: Any = None
         self._heartbeat_scheduler: HeartbeatScheduler | None = None
+        self._channel_logger: Any = None
 
     async def setup_channels(self) -> dict[str, ChannelAdapter]:
         """Initialize configured channels via factory.
@@ -124,6 +125,10 @@ class LifecycleManager:
         self._logger.info(
             f"Initialized {len(self._channels)} channel(s) for workspace: {self._workspace_name}"
         )
+
+        # Wire ChannelLogger if any channel has channel_log.enabled=true.
+        self._setup_channel_logger(channel_configs)
+
         return self._channels
 
     def _log_channel_security(self, channel_name: str, config: dict) -> None:
@@ -141,6 +146,58 @@ class LifecycleManager:
             )
         else:
             self._logger.warning(f"{prefix}: Empty allowlist - all requests will be denied")
+
+    def _setup_channel_logger(self, channel_configs: list[dict[str, Any]]) -> None:
+        """Wire a ChannelLogger if any channel has channel_log.enabled=true.
+
+        Creates a single ChannelLogger instance for the workspace and registers
+        its log_event method as the on_channel_event observer on each channel
+        that has logging enabled. Runs archive_old_logs() at startup to move
+        files beyond the retention window into the _archive/ directory.
+
+        Args:
+            channel_configs: List of raw channel config dicts from merged_config.
+        """
+        # Collect channels that have logging enabled and their retention settings.
+        log_enabled: dict[str, int] = {}
+        for channel_config in channel_configs:
+            channel_name = channel_config.get("name") or channel_config.get("type", "telegram")
+            log_cfg = channel_config.get("channel_log", {})
+            # Support both raw dict (from merged_config) and Pydantic model instances.
+            if isinstance(log_cfg, dict):
+                enabled = log_cfg.get("enabled", True)
+                retention_days = log_cfg.get("retention_days", 30)
+            else:
+                enabled = getattr(log_cfg, "enabled", False)
+                retention_days = getattr(log_cfg, "retention_days", 30)
+
+            if enabled:
+                log_enabled[channel_name] = int(retention_days)
+
+        if not log_enabled:
+            return
+
+        from openpaw.runtime.channel_logger import ChannelLogger
+
+        # Use the maximum retention_days across all logging-enabled channels.
+        max_retention = max(log_enabled.values())
+        self._channel_logger = ChannelLogger(
+            workspace_path=self._workspace_path,
+            timezone=self._workspace_timezone,
+            retention_days=max_retention,
+        )
+
+        # Register the observer on each channel that has logging enabled.
+        for channel_name in log_enabled:
+            if channel_name in self._channels:
+                self._channels[channel_name].on_channel_event(
+                    self._channel_logger.log_event
+                )
+
+        # Move old logs to _archive/ at startup.
+        archived = self._channel_logger.archive_old_logs()
+        if archived > 0:
+            self._logger.info(f"Archived {archived} old channel log file(s)")
 
     async def start_channels(self) -> None:
         """Start all configured channels."""

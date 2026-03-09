@@ -1,7 +1,7 @@
 """Tests for token usage and invocation metrics tracking."""
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 

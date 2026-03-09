@@ -405,10 +405,9 @@ class TestImportPaths:
 
     def test_all_exports_are_importable(self) -> None:
         """All items in __all__ can be imported from openpaw.core.prompts."""
-        from openpaw.core.prompts import __all__
-
         # Verify we can import everything
         import openpaw.core.prompts
+        from openpaw.core.prompts import __all__
 
         for name in __all__:
             assert hasattr(openpaw.core.prompts, name), f"{name} not exported from openpaw.core.prompts"

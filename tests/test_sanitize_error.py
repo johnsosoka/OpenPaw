@@ -36,8 +36,7 @@ class TestSanitizeErrorForUser:
 
     def test_async_timeout_error(self):
         """asyncio.TimeoutError (subclass of TimeoutError) maps correctly."""
-        import asyncio
-        msg = sanitize_error_for_user(asyncio.TimeoutError())
+        msg = sanitize_error_for_user(TimeoutError())
         assert msg == "The request timed out. Please try again."
 
     def test_os_error_subclass_connection(self):

@@ -64,6 +64,7 @@ UPLOADS_DIR = DATA_DIR / "uploads"
 
 MEMORY_CONVERSATIONS_DIR = MEMORY_DIR / "conversations"
 MEMORY_LOGS_DIR = MEMORY_DIR / "logs"
+CHANNEL_LOGS_DIR = MEMORY_LOGS_DIR / "channel"
 
 # ---------------------------------------------------------------------------
 # Workspace (agent work area — default write root)

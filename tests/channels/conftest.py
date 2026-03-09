@@ -33,6 +33,14 @@ def _build_discord_stub() -> None:
     ):
         setattr(discord, name, type(name, (), {}))
 
+    # discord.Object is used in fetch_channel_history for pagination;
+    # it must accept an `id` keyword argument.
+    class _Object:
+        def __init__(self, *, id: int) -> None:
+            self.id = id
+
+    discord.Object = _Object  # type: ignore[attr-defined]
+
     # Intents.default() must return an instance
     discord.Intents.default = classmethod(lambda cls: cls())  # type: ignore[attr-defined]
 

@@ -73,7 +73,8 @@ openpaw/
 │   ├── task.py       # Task, TaskStatus
 │   ├── session.py    # SessionState
 │   ├── subagent.py   # SubAgentRequest, SubAgentStatus
-│   └── cron.py       # DynamicCronTask (pure dataclass)
+│   ├── cron.py       # DynamicCronTask (pure dataclass)
+│   └── channel.py    # ChannelHistoryEntry, ChannelEvent
 ├── core/             # Configuration, logging, timezone, utilities
 │   ├── config/       # Pydantic config models and loaders
 │   │   ├── models.py         # WorkspaceConfig, GlobalConfig, CronDefinition, CronOutputConfig
@@ -85,10 +86,11 @@ openpaw/
 │   │   ├── heartbeat.py      # Heartbeat prompt template
 │   │   ├── processors.py     # Processor notification text
 │   │   └── system_events.py  # System event messages
-│   ├── workspace.py  # AgentWorkspace dataclass (system prompt builder)
-│   ├── logging.py    # Structured logging
-│   ├── timezone.py   # Workspace timezone utilities
-│   └── utils.py      # Generic utilities (sanitization, deduplication, user name resolution)
+│   ├── workspace.py      # AgentWorkspace dataclass (system prompt builder)
+│   ├── logging.py        # Structured logging
+│   ├── timezone.py       # Workspace timezone utilities
+│   ├── channel_context.py  # format_channel_context() utility
+│   └── utils.py          # Generic utilities (sanitization, deduplication, user name resolution)
 ├── agent/            # Agent execution
 │   ├── runner.py     # AgentRunner (LangGraph wrapper)
 │   ├── metrics.py    # Token usage tracking
@@ -113,7 +115,8 @@ openpaw/
 │   │   ├── cron.py           # CronScheduler
 │   │   ├── heartbeat.py      # HeartbeatScheduler
 │   │   └── dynamic_cron.py   # DynamicCronStore
-│   ├── approval.py   # ApprovalGateManager (in-memory state machine)
+│   ├── approval.py        # ApprovalGateManager (in-memory state machine)
+│   ├── channel_logger.py  # ChannelLogger (JSONL persistence + archival)
 │   ├── session/      # Session management and archiving
 │   │   ├── manager.py        # SessionManager
 │   │   └── archiver.py       # ConversationArchiver
@@ -149,7 +152,7 @@ openpaw/
 
 **`openpaw/workspace/agent_factory.py`** - Agent creation with middleware wiring. Composes queue-aware and approval middleware, configures builtins, initializes checkpointer, and supports runtime model overrides via `RuntimeModelOverride`.
 
-**`openpaw/workspace/lifecycle.py`** - Startup and shutdown hooks. Handles AsyncSqliteSaver initialization, tool requirements, cron/heartbeat scheduling, and graceful cleanup.
+**`openpaw/workspace/lifecycle.py`** - Startup and shutdown hooks. Handles AsyncSqliteSaver initialization, tool requirements, cron/heartbeat scheduling, channel logger wiring, and graceful cleanup.
 
 **`openpaw/agent/runner.py`** - `AgentRunner` wraps LangGraph's `create_react_agent()`. It stitches workspace markdown files into a system prompt via `init_chat_model()` for multi-provider support, configures sandboxed filesystem tools for workspace access, and tracks per-invocation token usage via `UsageMetadataCallbackHandler`. Supports `extra_model_kwargs` for OpenAI-compatible API endpoints (e.g., `base_url`).
 
@@ -225,6 +228,12 @@ openpaw/
 
 **`openpaw/core/prompts/`** - Centralized prompt text modules. Separates presentation layer from business logic. Includes `framework.py` (dynamic framework orientation sections), `heartbeat.py` (heartbeat prompt template), `processors.py` (file processor notification text), `commands.py` (command response templates), and `system_events.py` (system event messages).
 
+**`openpaw/model/channel.py`** - Pure data models for channel history. `ChannelHistoryEntry` (on-demand context fetch — single history message with timestamp, user, content, and bot flag) and `ChannelEvent` (persistent logging — pre-filter event with server/channel metadata). No framework dependencies.
+
+**`openpaw/core/channel_context.py`** - `format_channel_context()` formats a list of `ChannelHistoryEntry` objects into an XML `<channel_context>` block prepended to triggered messages. Pure formatting utility — no I/O. Relative timestamps computed against the last entry's time; bot messages labelled `[BOT]`; individual message content truncated at 500 chars.
+
+**`openpaw/runtime/channel_logger.py`** - `ChannelLogger` writes all visible channel events to daily-rotated JSONL files at `memory/logs/channel/{server}/{channel}/{YYYY-MM-DD}.jsonl`. Thread-safe via per-file locks + `asyncio.to_thread()` for non-blocking writes. DMs silently skipped. `archive_old_logs()` moves files beyond `retention_days` to `memory/logs/channel/_archive/` at workspace startup. Best-effort — failures never propagate to the adapter.
+
 ### Agent Workspace Structure
 
 ```
@@ -253,10 +262,16 @@ agent_workspaces/<name>/
 │   ├── conversations/    # Archived conversation exports
 │   │   ├── conv_*.md     # Markdown archives (human-readable)
 │   │   └── conv_*.json   # JSON sidecars (machine-readable)
-│   └── sessions/         # Scheduled agent session logs
-│       ├── heartbeat/    # Heartbeat session JSONL files
-│       ├── cron/         # Cron session JSONL files
-│       └── subagent/     # Sub-agent session JSONL files
+│   ├── sessions/         # Scheduled agent session logs
+│   │   ├── heartbeat/    # Heartbeat session JSONL files
+│   │   ├── cron/         # Cron session JSONL files
+│   │   └── subagent/     # Sub-agent session JSONL files
+│   └── logs/
+│       └── channel/      # Persistent channel message logs (opt-in)
+│           ├── {server}/
+│           │   └── {channel}/
+│           │       └── {YYYY-MM-DD}.jsonl  # Daily JSONL (ts, msg_id, user_id, display_name, content, attachments)
+│           └── _archive/ # Logs moved here after retention_days
 ├── crons/        # Scheduled task definitions
 │   └── *.yaml / *.yml    # Individual cron job configurations
 ├── skills/       # LangChain skill directories (SKILL.md format)
@@ -311,6 +326,8 @@ channel:
 queue:
   mode: collect
   debounce_ms: 1000
+
+session_ttl_minutes: 180  # Auto-reset conversation after 3h inactivity (0 to disable)
 ```
 
 **Environment Variables**: Use `${VAR_NAME}` syntax for secrets and dynamic values. OpenPaw expands these from environment at load time. Unresolved `${VAR}` patterns cause a startup error naming the missing variable(s) and source file — set the variable or remove the reference.
@@ -380,6 +397,49 @@ channels:
 - DMs and slash commands always pass through regardless of filters
 
 **Implementation**: `ChannelAdapter._passes_trigger_filter()` (static helper in base class) + `_passes_activation_filter()` on each adapter.
+
+#### Channel History
+
+Two complementary features give agents awareness of group channel conversations: on-demand context fetch and persistent channel logging.
+
+**On-Demand Context Fetch**: When the bot is triggered in a guild/group channel, it fetches the last N messages via the platform API and prepends them to the user's message as a `<channel_context>` XML block — consistent with the framework's existing prompt conventions (`<framework>`, `<workspace_context>`, `<active_tasks>`). DMs are excluded (bot already has full DM context). Bot's own messages are filtered from history.
+
+```
+<channel_context source="discord" channel="general" messages="25">
+[5m ago] Alice: Has anyone looked at the PR?
+[3m ago] Bob: Yeah I left comments
+[1m ago] Alice: @bot please review PR #42
+</channel_context>
+
+@bot please review PR #42
+```
+
+Configuration per channel: `context_messages: 25` (default, `0` = disabled, max `100`). Fetch is best-effort — failures silently degrade (agent responds without context). Runner orchestrates fetch and injection; adapter only implements the raw `fetch_channel_history()` call. New channel types inherit the no-op base class default.
+
+**Persistent Channel Logging**: Opt-in per channel (`channel_log.enabled: false` by default). Logs ALL visible messages to daily JSONL files before the allowlist and activation filters run — the logger sees messages that never trigger the agent. DMs excluded for privacy.
+
+- Path: `memory/logs/channel/{server}/{channel}/{YYYY-MM-DD}.jsonl`
+- Format: short keys (`ts`, `msg_id`, `user_id`, `display_name`, `content`, `attachments`) — timestamps always UTC
+- Daily rotation is natural (date in filename). Files older than `retention_days` (default 30) are archived to `memory/logs/channel/_archive/` at startup — never deleted
+- Agent-readable via `read_file()` / `grep_files()`; agent-writable: NO (path is under `WRITE_PROTECTED_DIRS`)
+- When enabled, the framework prompt includes a `SECTION_CHANNEL_LOGS` block explaining log location and search usage
+- Observer pattern: `on_channel_event()` callback registered on the adapter; `ChannelLogger` in the runtime layer handles all I/O — adapter responsibility is one callback invocation
+
+```yaml
+channels:
+  - type: discord
+    token: ${DISCORD_BOT_TOKEN}
+    allowed_groups: [111222333]
+    mention_required: true
+    context_messages: 25        # Fetch last 25 messages as context (0 = disabled)
+    channel_log:
+      enabled: true             # Log all visible messages to JSONL
+      retention_days: 30        # Archive logs older than 30 days
+```
+
+**Pydantic models**: `ChannelLogConfig` (`enabled`, `retention_days`) in `openpaw/core/config/models.py`. `context_messages` validated 0–100 on `WorkspaceChannelConfig`.
+
+**Lifecycle wiring**: `LifecycleManager._setup_channel_logger()` creates a single `ChannelLogger` per workspace (using the maximum `retention_days` across all logging-enabled channels), registers its `log_event` method as the `on_channel_event` observer on each enabled channel, and calls `archive_old_logs()` at startup.
 
 #### Provider Catalog
 
@@ -573,6 +633,7 @@ lifecycle:
   notify_startup: false     # Default off
   notify_shutdown: true     # Default on
   notify_auto_compact: true # Default on
+  notify_session_ttl: true  # Default on
 ```
 
 **Implementation**: `WorkspaceRunner._notify_lifecycle(event, detail)` sends to the first allowed user in each channel. Notifications are best-effort — failures are logged at debug level and do not affect workspace operation.
@@ -1127,3 +1188,25 @@ Conversations persist across restarts via `AsyncSqliteSaver` (from `langgraph-ch
 **ConversationArchiver**: On `/new`, `/compact`, or shutdown, exports the conversation from the checkpointer to `memory/conversations/` as markdown + JSON. Agents can reference archived conversations for long-term context.
 
 **Storage**: All framework state lives in `{workspace}/.openpaw/` (protected from agent filesystem access). Archives go to `{workspace}/memory/conversations/` (readable by agents).
+
+#### Session TTL
+
+Conversations auto-reset after a configurable period of inactivity. The check is **lazy** — it only fires when a new inbound message arrives, not on a timer.
+
+**Configuration** (in `agent.yaml` or global config):
+
+```yaml
+session_ttl_minutes: 180  # Auto-reset after 3h inactivity (default: 180, 0 to disable)
+
+lifecycle:
+  notify_session_ttl: true  # Notify user when session expires (default: on)
+```
+
+**Behavior**:
+- Default is 180 minutes (3 hours). Set to `0` to disable.
+- **Only applies to group/server channels** — DMs are never auto-expired (the bot has full DM context already, so TTL rotation would lose history without benefit). Detection uses message metadata: `chat_type` for Telegram, `guild_id` for Discord.
+- Action is equivalent to `/new` (archive + rotate) — not `/compact`. No LLM call is made.
+- Archives are tagged `["ttl_expired"]` for identification.
+- When TTL fires, channel context history is **not** injected into the fresh thread — prevents the agent from parroting stale conversation after a reset.
+- User receives a brief notification when TTL triggers a reset (controlled by `lifecycle.notify_session_ttl`).
+- TTL check runs **before** auto-compact — a fresh conversation never triggers compaction on the same message.

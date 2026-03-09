@@ -9,7 +9,6 @@ import pytest
 from openpaw.channels.base import ChannelAdapter
 from openpaw.workspace.lifecycle import LifecycleManager
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

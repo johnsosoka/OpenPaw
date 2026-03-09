@@ -1,12 +1,11 @@
 """Tests for QueueManager peek_pending and consume_pending methods."""
 
 import asyncio
-from collections import deque
 
 import pytest
 
-from openpaw.runtime.queue.lane import LaneQueue, QueueMode
-from openpaw.runtime.queue.manager import QueueManager, SessionQueue
+from openpaw.runtime.queue.lane import LaneQueue
+from openpaw.runtime.queue.manager import QueueManager
 
 
 @pytest.fixture
