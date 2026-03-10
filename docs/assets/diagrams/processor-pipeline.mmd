@@ -1,0 +1,56 @@
+graph LR
+    U([User\nUploads File])
+
+    U --> FP
+
+    subgraph FP["FilePersistenceProcessor"]
+        FP1["Save to\nuploads/YYYY-MM-DD/"]
+        FP2["Set attachment\n.saved_path"]
+        FP1 --> FP2
+    end
+
+    FP --> WH
+
+    subgraph WH["WhisperProcessor\n(audio files only)"]
+        WH1["Transcribe\naudio content"]
+        WH2["Write .txt sibling\nvoice_123.ogg -> voice_123.txt"]
+        WH1 --> WH2
+    end
+
+    WH --> TS
+
+    subgraph TS["TimestampProcessor\n(all messages)"]
+        TS1["Prepend current\ndatetime to content"]
+    end
+
+    TS --> DL
+
+    subgraph DL["DoclingProcessor\n(documents only)"]
+        DL1["Convert PDF / DOCX\nto markdown"]
+        DL2["Write .md sibling\nreport.pdf -> report.md"]
+        DL1 --> DL2
+    end
+
+    DL --> AG([Agent Receives\nEnriched Message])
+
+    N1["Processing order is fixed at registration time.\nfile_persistence must run first to set saved_path\nbefore downstream processors read from disk."]
+
+    style U fill:#2d6a9f,color:#fff,stroke:#1a4a7f
+    style AG fill:#2d6a9f,color:#fff,stroke:#1a4a7f
+
+    style FP fill:#1e4d36,stroke:#2e7a54,stroke-width:2px,color:#a8ffd0
+    style FP1 fill:#163d2a,stroke:#2e7a54,color:#a8ffd0
+    style FP2 fill:#163d2a,stroke:#2e7a54,color:#a8ffd0
+
+    style WH fill:#3b2a5a,stroke:#6a4aaa,stroke-width:2px,color:#d0a8ff
+    style WH1 fill:#2d1e4a,stroke:#6a4aaa,color:#d0a8ff
+    style WH2 fill:#2d1e4a,stroke:#6a4aaa,color:#d0a8ff
+
+    style TS fill:#4a3a1e,stroke:#aa7a2e,stroke-width:2px,color:#ffd8a8
+    style TS1 fill:#3a2a10,stroke:#aa7a2e,color:#ffd8a8
+
+    style DL fill:#1e3a5f,stroke:#2e6aaf,stroke-width:2px,color:#a8d8ff
+    style DL1 fill:#142c4a,stroke:#2e6aaf,color:#a8d8ff
+    style DL2 fill:#142c4a,stroke:#2e6aaf,color:#a8d8ff
+
+    style N1 fill:#2a2a2a,stroke:#555,color:#aaa,stroke-dasharray:4 4

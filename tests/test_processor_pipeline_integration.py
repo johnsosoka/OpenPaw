@@ -179,7 +179,7 @@ async def test_pdf_pipeline_full(tmp_path, base_message, mock_docling):
 
     # Should have timestamp at the beginning
     assert "[Current time:" in content
-    assert "CST]" in content
+    assert "CST]" in content or "CDT]" in content
 
     # Should have file receipt info (after timestamp)
     assert "[File received: report.pdf" in content
@@ -274,7 +274,7 @@ async def test_audio_pipeline_full(tmp_path, base_message, mock_openai_client):
 
         # Should have timestamp at the beginning
         assert "[Current time:" in content
-        assert "CST]" in content
+        assert "CST]" in content or "CDT]" in content
 
         # Should have file receipt info
         assert "[File received: voice_123.ogg" in content
@@ -357,7 +357,7 @@ async def test_image_pipeline_no_conversion(tmp_path, base_message):
 
     # Should have timestamp at the beginning
     assert "[Current time:" in content
-    assert "CST]" in content
+    assert "CST]" in content or "CDT]" in content
 
     # Should have file receipt info
     assert "[File received: photo_123.jpg" in content

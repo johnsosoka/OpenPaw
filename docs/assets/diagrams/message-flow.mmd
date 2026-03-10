@@ -1,0 +1,73 @@
+graph TD
+    A([Platform\nTelegram / User]) -->|raw message| B
+
+    B[Channel Adapter\nConverts to unified Message format]
+
+    B --> C{Has\nAttachments?}
+    C -->|Yes| D[Inbound Processors]
+    C -->|No| E
+
+    D --> D1[file_persistence\nSave to uploads/YYYY-MM-DD/]
+    D1 --> D2{Audio?}
+    D2 -->|Yes| D3[whisper\nTranscribe to .txt sibling]
+    D2 -->|No| D4{Document?}
+    D3 --> D4
+    D4 -->|Yes| D5[docling\nConvert to .md sibling]
+    D4 -->|No| E
+    D5 --> E
+
+    E[Command Router\nCheck for slash command prefix]
+    E --> F{Is Slash\nCommand?}
+    F -->|Yes| G[Command Handler\n/new  /status  /model  /help ...]
+    F -->|No| H
+
+    G -->|direct reply| Z
+
+    H[QueueManager\nAssign to lane, debounce, apply queue mode]
+
+    H --> I{Queue\nMode?}
+    I -->|collect| J1[Buffer message\nWait for debounce window]
+    I -->|steer| J2[Pass through\nFlag pending for middleware]
+    I -->|interrupt| J3[Signal interrupt\nAbort current run]
+    I -->|followup| J4[Chain after\ncurrent run completes]
+
+    J1 --> K
+    J2 --> K
+    J3 --> K
+    J4 --> K
+
+    K[MessageProcessor\nDequeue, build combined context]
+
+    K --> L[AgentRunner\nInvoke LangGraph create_react_agent]
+
+    L --> M[Middleware Stack]
+    M --> M1[QueueAwareToolMiddleware\nCheck for pending messages per tool call]
+    M1 --> M2[ApprovalToolMiddleware\nGate dangerous tools for human approval]
+    M2 --> N
+
+    N[Agent Processing\nLangGraph ReAct loop]
+    N --> N1{Need\nTool?}
+    N1 -->|Yes| N2[Tool Execution\nFilesystem, search, browser, spawn ...]
+    N2 --> N3{Middleware\nSignal?}
+    N3 -->|steer: redirect| K
+    N3 -->|interrupt: abort| K
+    N3 -->|approval needed| O[Approval Gate\nSend inline keyboard to user]
+    O -->|approved| N2
+    O -->|denied| N
+    N3 -->|continue| N
+    N1 -->|No| P[Generate Response]
+
+    P --> Q[AgentRunner\nReturn final output]
+    Q --> Z
+
+    Z([Channel Adapter\nSend response to platform])
+
+    style A fill:#2d6a9f,color:#fff
+    style Z fill:#2d6a9f,color:#fff
+    style G fill:#5a3e8a,color:#fff
+    style O fill:#8a5a3e,color:#fff
+    style D1 fill:#2e6b4f,color:#fff
+    style D3 fill:#2e6b4f,color:#fff
+    style D5 fill:#2e6b4f,color:#fff
+    style N fill:#3e5a8a,color:#fff
+    style N2 fill:#3e5a8a,color:#fff

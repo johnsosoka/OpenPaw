@@ -1,17 +1,16 @@
 """Tests for SubAgentRunner lifecycle management."""
 
 import asyncio
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from openpaw.channels.base import ChannelAdapter
-from openpaw.agent.runner import AgentRunner
 from openpaw.agent.metrics import InvocationMetrics, TokenUsageLogger
-from openpaw.runtime.subagent.runner import SUBAGENT_EXCLUDED_TOOLS, SubAgentRunner
-from openpaw.stores.subagent import SubAgentStore, create_subagent_request
+from openpaw.agent.runner import AgentRunner
+from openpaw.channels.base import ChannelAdapter
 from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
+from openpaw.runtime.subagent.runner import SUBAGENT_EXCLUDED_TOOLS, SubAgentRunner
+from openpaw.stores.subagent import SubAgentStore
 
 
 @pytest.fixture

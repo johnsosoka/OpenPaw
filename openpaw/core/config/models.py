@@ -90,18 +90,67 @@ class WorkspaceModelConfig(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class ChannelLogConfig(BaseModel):
+    """Configuration for persistent channel message logging."""
+
+    enabled: bool = Field(default=True, description="Enable channel message logging to JSONL")
+    retention_days: int = Field(default=30, description="Days before logs are archived")
+
+    @field_validator("retention_days")
+    @classmethod
+    def validate_retention(cls, v: int) -> int:
+        """Validate retention_days is at least 1."""
+        if v < 1:
+            raise ValueError("retention_days must be at least 1")
+        return v
+
+
 class WorkspaceChannelConfig(BaseModel):
     """Channel binding configuration for a workspace agent."""
 
-    type: str | None = Field(default=None, description="Channel type (telegram, slack, etc.)")
+    name: str | None = Field(
+        default=None,
+        description="Unique channel name (defaults to type). Required when multiple channels share a type.",
+    )
+    type: str | None = Field(default=None, description="Channel type (telegram, discord, etc.)")
     token: str | None = Field(default=None, description="Channel bot token")
     allowed_users: list[int] = Field(default_factory=list, description="Allowed user IDs")
     allowed_groups: list[int] = Field(default_factory=list, description="Allowed group IDs")
     allow_all: bool = Field(default=False, description="Allow all users (insecure, use with caution)")
+    mention_required: bool = Field(
+        default=False,
+        description="Only respond in group chats when the bot is @mentioned. DMs always pass through.",
+    )
+    triggers: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Trigger keywords for group chat filtering. If set, messages must contain"
+            " at least one keyword (case-insensitive). Uses OR logic with mention_required."
+        ),
+    )
     user_aliases: dict[int, str] = Field(
         default_factory=dict,
         description="Map user IDs to display names for message attribution",
     )
+    context_messages: int = Field(
+        default=25,
+        description=(
+            "Number of recent channel messages to fetch as context on trigger"
+            " (0 = disabled, max 100)"
+        ),
+    )
+    channel_log: ChannelLogConfig = Field(
+        default_factory=ChannelLogConfig,
+        description="Persistent channel message logging configuration",
+    )
+
+    @field_validator("context_messages")
+    @classmethod
+    def validate_context_messages(cls, v: int) -> int:
+        """Validate context_messages is between 0 and 100."""
+        if v < 0 or v > 100:
+            raise ValueError("context_messages must be between 0 and 100")
+        return v
 
     model_config = {"extra": "allow"}
 
@@ -284,8 +333,10 @@ class HeartbeatConfig(BaseModel):
         description="Active hours window (e.g., '08:00-22:00'). None = always active",
     )
     suppress_ok: bool = Field(default=True, description="Suppress HEARTBEAT_OK responses from channel")
-    target_channel: str = Field(default="telegram", description="Channel to route heartbeat responses")
-    target_chat_id: int | None = Field(default=None, description="Default chat ID for heartbeat output")
+    target_channel: str = Field(default="telegram", description="Channel name to route heartbeat responses")
+    target_id: int | None = Field(default=None, description="Target ID for output routing (preferred)")
+    target_chat_id: int | None = Field(default=None, description="Telegram chat ID (deprecated, use target_id)")
+    target_channel_id: int | None = Field(default=None, description="Discord channel ID (deprecated, use target_id)")
     delivery: Literal["channel", "agent", "both"] = Field(
         default="channel",
         description="Where to deliver results: channel (direct), agent (queue injection), both",
@@ -392,15 +443,17 @@ class LifecycleConfig(BaseModel):
     notify_startup: bool = Field(default=False, description="Send notification when workspace starts")
     notify_shutdown: bool = Field(default=True, description="Send notification when workspace stops")
     notify_auto_compact: bool = Field(default=True, description="Send notification on auto-compact")
+    notify_session_ttl: bool = Field(default=True, description="Send notification on session TTL expiry")
 
 
 class CronOutputConfig(BaseModel):
     """Output routing configuration for a cron job."""
 
-    channel: str = Field(description="Channel type (telegram, discord, etc.)")
-    chat_id: int | None = Field(default=None, description="Telegram chat ID")
+    channel: str = Field(description="Channel name (or type for backward compat)")
+    target_id: int | None = Field(default=None, description="Target ID for output routing (preferred)")
+    chat_id: int | None = Field(default=None, description="Telegram chat ID (deprecated, use target_id)")
     guild_id: int | None = Field(default=None, description="Discord guild ID")
-    channel_id: int | None = Field(default=None, description="Discord channel ID")
+    channel_id: int | None = Field(default=None, description="Discord channel ID (deprecated, use target_id)")
     delivery: str = Field(
         default="channel",
         description="Delivery mode: channel, agent, or both",
@@ -441,24 +494,58 @@ class WorkspaceConfig(BaseModel):
 
     Supports shorthand ``model: "provider:model_id"`` in agent.yaml, which is
     coerced to ``model: {provider: ..., model: ...}`` before validation.
+
+    Channels can be configured as a single ``channel:`` block (backward compat)
+    or as a ``channels:`` list for multi-channel workspaces. The model_validator
+    normalizes both forms into the ``channels`` list.
     """
 
     @model_validator(mode="before")
     @classmethod
-    def coerce_model_string(cls, data: Any) -> Any:
-        """Allow ``model: 'provider:model_id'`` shorthand in agent.yaml."""
-        if isinstance(data, dict) and isinstance(data.get("model"), str):
+    def normalize_channel_config(cls, data: Any) -> Any:
+        """Normalize channel/channels config and coerce model shorthand.
+
+        Handles:
+        - ``model: 'provider:model_id'`` shorthand → dict
+        - ``channel:`` (singular) → ``channels: [channel]``
+        - ``channels:`` (list) → used as-is
+        - Both present → ValueError
+        """
+        if not isinstance(data, dict):
+            return data
+
+        # Coerce model shorthand
+        if isinstance(data.get("model"), str):
             model_str = data["model"]
             if ":" in model_str:
                 p, _, m = model_str.partition(":")
                 data["model"] = {"provider": p, "model": m}
             else:
                 data["model"] = {"model": model_str}
+
+        # Normalize channel → channels
+        has_channel = "channel" in data and data["channel"]
+        has_channels = "channels" in data and data["channels"]
+
+        if has_channel and has_channels:
+            raise ValueError(
+                "Cannot specify both 'channel' and 'channels' in workspace config. "
+                "Use 'channels' (list) for multi-channel or 'channel' (dict) for single."
+            )
+
+        if has_channel:
+            data["channels"] = [data.pop("channel")]
+        else:
+            data.pop("channel", None)
+
         return data
 
     timezone: str = Field(default="UTC", description="Workspace timezone (e.g., 'America/Los_Angeles')")
     model: WorkspaceModelConfig = Field(default_factory=WorkspaceModelConfig, description="LLM configuration")
-    channel: WorkspaceChannelConfig = Field(default_factory=WorkspaceChannelConfig, description="Channel binding")
+    channels: list[WorkspaceChannelConfig] = Field(
+        default_factory=list,
+        description="Channel bindings (list). Use singular 'channel:' in YAML for backward compat.",
+    )
     queue: WorkspaceQueueConfig = Field(default_factory=WorkspaceQueueConfig, description="Queue overrides")
     builtins: WorkspaceBuiltinsConfig = Field(
         default_factory=WorkspaceBuiltinsConfig,
@@ -485,10 +572,21 @@ class WorkspaceConfig(BaseModel):
         default_factory=AutoCompactConfig,
         description="Auto-compact configuration",
     )
+    session_ttl_minutes: int = Field(
+        default=180,
+        description="Auto-reset conversation after N minutes of inactivity (0 to disable)",
+    )
     lifecycle: LifecycleConfig = Field(
         default_factory=LifecycleConfig,
         description="Lifecycle notification configuration",
     )
+
+    @field_validator("session_ttl_minutes")
+    @classmethod
+    def validate_session_ttl_minutes(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("session_ttl_minutes must be >= 0")
+        return v
 
     @field_validator("timezone")
     @classmethod

@@ -213,6 +213,23 @@ class SessionManager:
             else:
                 logger.warning(f"Attempted to increment message count for unknown session: {session_key}")
 
+    def is_session_expired(self, session_key: str, ttl_minutes: int) -> bool:
+        """Check if a session has exceeded its TTL based on last_active_at.
+
+        Returns False if ttl_minutes is 0 (disabled), the session doesn't exist,
+        or the session has no last_active_at (first message, not yet active).
+        """
+        if ttl_minutes <= 0:
+            return False
+
+        with self._lock:
+            state = self._sessions.get(session_key)
+            if state is None or state.last_active_at is None:
+                return False
+
+            elapsed = (datetime.now(UTC) - state.last_active_at).total_seconds()
+            return elapsed > ttl_minutes * 60
+
     def list_sessions(self) -> dict[str, SessionState]:
         """List all active sessions.
 

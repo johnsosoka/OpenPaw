@@ -6,6 +6,8 @@
 
 Workspaces are isolated agent instances with their own personality, configuration, and capabilities. Each workspace represents a distinct AI agent with specific behavior patterns and access permissions.
 
+[![Workspace Structure](../assets/diagrams/workspace-structure.png)](../assets/diagrams/workspace-structure.png)
+
 ## Directory Structure
 
 ```
@@ -406,59 +408,25 @@ output:
 
 **Enable/Disable:** Set `enabled: false` to disable without deleting the file.
 
-See the main CLAUDE.md documentation for dynamic scheduling via the `cron` builtin.
+Agents can also schedule their own follow-up actions at runtime. See [Scheduling](scheduling.md) for the full scheduling reference including dynamic scheduling tools.
 
-## Heartbeat System
+## Heartbeats
 
-The heartbeat scheduler enables proactive agent check-ins on a configurable schedule.
+Heartbeats enable proactive agent check-ins on a configurable schedule. HEARTBEAT.md serves as the agent's scratchpad for tracking what to check during each heartbeat cycle — the agent reads and updates it during normal conversations.
 
-**Configuration in agent.yaml:**
+See [Scheduling](scheduling.md) for heartbeat configuration, the HEARTBEAT_OK protocol, active hours, and pre-flight skip behavior.
 
-```yaml
-heartbeat:
-  enabled: true
-  interval_minutes: 30           # How often to check in
-  active_hours: "09:00-17:00"    # Only run during these hours (workspace timezone)
-  suppress_ok: true              # Don't send message if agent responds "HEARTBEAT_OK"
-  output:
-    channel: telegram
-    chat_id: 123456789
-```
+## Conversation Memory
 
-**HEARTBEAT_OK Protocol:** If the agent determines there's nothing to report, it can respond with exactly "HEARTBEAT_OK" and no message will be sent (when `suppress_ok: true`).
+Conversations persist across restarts via durable checkpointing. The `memory/conversations/` directory stores archived conversations in dual format — markdown for human reading and JSON for machine processing.
 
-**Pre-flight Skip:** Before invoking the LLM, the scheduler checks HEARTBEAT.md and TASKS.yaml. If HEARTBEAT.md is empty/trivial and no active tasks exist, the heartbeat is skipped entirely — saving API costs for idle workspaces.
+Key commands:
 
-**Task Summary Injection:** When active tasks exist, a compact summary is automatically injected into the heartbeat prompt as `<active_tasks>` XML tags.
+- `/new` — Archive current conversation and start fresh
+- `/compact` — Summarize conversation, archive it, and start new with summary injected
+- Auto-compact triggers automatically when context window fills up
 
-**Event Logging:** Every heartbeat event is logged to `data/heartbeat_log.jsonl` with outcome, duration, token metrics, and active task count.
-
-## Conversation Persistence
-
-Conversations persist across restarts via `AsyncSqliteSaver` (from `langgraph-checkpoint-sqlite`).
-
-### Storage Locations
-
-- **Active conversations** - `data/conversations.db` (SQLite checkpoint database)
-- **Session state** - `data/sessions.json` (thread tracking)
-- **Archives** - `memory/conversations/` (dual-format exports: markdown + JSON)
-
-### Conversation Lifecycle
-
-1. Messages are stored in the checkpoint database with thread ID `"{session_key}:{conversation_id}"`
-2. Conversation IDs use format `conv_{ISO_timestamp_with_microseconds}`
-3. `/new` command archives the current conversation and starts fresh
-4. `/compact` command summarizes the conversation, archives it, and starts new with summary injected
-5. On workspace shutdown, all active conversations are automatically archived
-
-### Archived Conversations
-
-Archived conversations are exported to `memory/conversations/` in dual format:
-
-- **Markdown** (`conv_*.md`) - Human-readable format, agents can reference for long-term context
-- **JSON** (`conv_*.json`) - Machine-readable with full metadata, internal timestamps in UTC
-
-Agents can read archived conversations to maintain long-term memory across conversation resets.
+Agents can read archived conversations via `read_file()` to maintain long-term memory across conversation resets. See [Concepts](concepts.md) for a deeper look at how conversation memory works.
 
 ## Creating a New Workspace
 

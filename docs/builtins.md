@@ -504,6 +504,33 @@ Agent: "PDF created: reports/notes.pdf (3 Mermaid diagrams rendered, 1 repaired 
 
 ---
 
+### plan
+
+**Group:** `system`
+**Type:** Tool
+**Prerequisites:** None (always available)
+
+Session-scoped planning tool for multi-step work. Agents use `write_plan` to externalize their thinking into a structured plan and `read_plan` to retrieve it later. Plans persist for the current session and reset on `/new` or `/compact`.
+
+**Available tools:**
+
+- `write_plan(plan)` — Write or overwrite the session plan
+- `read_plan()` — Retrieve the current plan
+
+**When agents use this:**
+
+Agents create plans when tackling complex, multi-step tasks — especially when the work involves multiple tool calls, file operations, or research phases. The plan serves as working memory that survives across tool calls within a single session.
+
+**Usage Example:**
+
+```
+User: "Research the latest AI safety papers and write a summary report"
+Agent: [Calls write_plan("1. Search for recent AI safety papers\n2. Read top 5 results\n3. Synthesize findings\n4. Write summary to reports/ai-safety.md")]
+Agent: [Proceeds to execute each step, updating the plan as steps complete]
+```
+
+---
+
 ### elevenlabs
 
 **Group:** `voice`
@@ -536,6 +563,8 @@ To find voice IDs, visit the [ElevenLabs Voice Library](https://elevenlabs.io/vo
 ---
 
 ## Processors
+
+[![Processor Pipeline](../assets/diagrams/processor-pipeline.png)](../assets/diagrams/processor-pipeline.png)
 
 ### file_persistence
 

@@ -1,9 +1,13 @@
 """Base channel adapter interface."""
 
 from abc import ABC, abstractmethod
-from typing import Any
+from collections.abc import Callable, Coroutine
+from typing import TYPE_CHECKING, Any
 
 from openpaw.model.message import Message
+
+if TYPE_CHECKING:
+    from openpaw.model.channel import ChannelEvent, ChannelHistoryEntry
 
 
 class ChannelAdapter(ABC):
@@ -50,6 +54,30 @@ class ChannelAdapter(ABC):
         """
         ...
 
+    @staticmethod
+    def _passes_trigger_filter(content: str, triggers: list[str]) -> bool:
+        """Check if message content matches any configured trigger keyword.
+
+        When triggers are empty (default), returns False (no trigger match).
+        When triggers are set, returns True if at least one keyword appears
+        in the content (case-insensitive substring match).
+
+        This is a shared utility — concrete adapters compose it with
+        mention filtering using OR logic.
+
+        Args:
+            content: The message text to check.
+            triggers: List of trigger keywords.
+
+        Returns:
+            True if any trigger keyword is found in content.
+        """
+        if not triggers:
+            return False
+
+        content_lower = content.lower()
+        return any(trigger.lower() in content_lower for trigger in triggers)
+
     async def register_commands(self, commands: list[Any]) -> None:
         """Register available commands with the channel platform.
 
@@ -59,6 +87,46 @@ class ChannelAdapter(ABC):
         Default implementation is a no-op.
         """
         pass
+
+    def on_channel_event(
+        self, callback: Callable[["ChannelEvent"], Coroutine[Any, Any, None]]
+    ) -> None:
+        """Register a callback for all channel events (for logging).
+
+        Called for every visible message regardless of allowlist or activation
+        filters. Only skips the bot's own messages.
+
+        Concrete adapters invoke this callback in their _on_message flow before
+        any allowlist or activation checks, enabling persistent channel logging
+        via ChannelLogger.
+
+        Args:
+            callback: Async function receiving a ChannelEvent and returning None.
+        """
+        self._channel_event_callback = callback
+
+    async def fetch_channel_history(
+        self,
+        channel_id: str,
+        limit: int = 25,
+        before_message_id: str | None = None,
+    ) -> list["ChannelHistoryEntry"]:
+        """Fetch recent messages from a channel for context injection.
+
+        Override in implementations that support a channel history API
+        (e.g., Discord's channel.history()). Default returns an empty list
+        so callers degrade gracefully when the adapter has no history support.
+
+        Args:
+            channel_id: Platform-specific channel identifier.
+            limit: Maximum number of messages to fetch.
+            before_message_id: When provided, fetch messages sent before this
+                message ID (for pagination). Optional.
+
+        Returns:
+            List of history entries in chronological order (oldest first).
+        """
+        return []
 
     def build_session_key(self, *parts: str | int) -> str:
         """Build a session key from parts.

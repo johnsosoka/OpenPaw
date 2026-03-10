@@ -189,6 +189,7 @@ class AgentRunner:
         enabled_builtins: list[str] | None = None,
         extra_model_kwargs: dict[str, Any] | None = None,
         middleware: list[Any] | None = None,
+        channel_logging_enabled: bool = False,
     ):
         """Initialize the agent runner.
 
@@ -222,6 +223,7 @@ class AgentRunner:
         self.enabled_builtins = enabled_builtins
         self.extra_model_kwargs = extra_model_kwargs or {}
         self._middleware = middleware or []
+        self.channel_logging_enabled = channel_logging_enabled
 
         # Per-invocation tracking (populated after each run)
         self._last_metrics: InvocationMetrics | None = None
@@ -543,6 +545,7 @@ class AgentRunner:
         system_prompt = self.workspace.build_system_prompt(
             enabled_builtins=self.enabled_builtins,
             current_datetime=current_dt,
+            channel_logging_enabled=self.channel_logging_enabled,
         )
 
         # 6. Wire middleware in dependency order:

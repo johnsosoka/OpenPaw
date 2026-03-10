@@ -46,6 +46,7 @@ class AgentFactory:
         middleware: list[Any],
         logger: logging.Logger,
         provider_catalog: dict[str, ProviderDefinition] | None = None,
+        channel_logging_enabled: bool = False,
     ):
         """Initialize agent factory.
 
@@ -67,6 +68,7 @@ class AgentFactory:
                 provided, provider names are resolved before being passed to
                 LangChain so that catalog entries (e.g. ``moonshot``) map to
                 the correct LangChain type (e.g. ``openai``).
+            channel_logging_enabled: Whether persistent channel logging is active.
         """
         self._workspace = workspace
         self._configured_model = model
@@ -83,6 +85,7 @@ class AgentFactory:
         self._logger = logger
         self._provider_catalog: dict[str, ProviderDefinition] = provider_catalog or {}
         self._runtime_override: RuntimeModelOverride | None = None
+        self._channel_logging_enabled = channel_logging_enabled
 
     # ------------------------------------------------------------------
     # Public properties
@@ -258,6 +261,7 @@ class AgentFactory:
             enabled_builtins=self._enabled_builtin_names,
             extra_model_kwargs=merged_extra,
             middleware=self._middleware,
+            channel_logging_enabled=self._channel_logging_enabled,
         )
 
     def create_stateless_agent(self) -> AgentRunner:
@@ -288,6 +292,7 @@ class AgentFactory:
             enabled_builtins=self._enabled_builtin_names,
             extra_model_kwargs=merged_extra,
             middleware=[],  # No middleware for stateless agents
+            channel_logging_enabled=self._channel_logging_enabled,
         )
 
     # ------------------------------------------------------------------

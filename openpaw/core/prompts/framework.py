@@ -283,6 +283,43 @@ SECTION_PLANNING = (
     "sessions, use create_task instead."
 )
 
+# Channel context - always included (group messages prepend recent history)
+SECTION_CHANNEL_CONTEXT = (
+    "\n\n## Channel Context\n\n"
+    "When you receive a message from a group channel, the message may be "
+    "preceded by a `<channel_context>` XML block containing recent conversation "
+    "history from that channel. This gives you awareness of what was being "
+    "discussed before you were invoked.\n\n"
+    "Example:\n"
+    "```\n"
+    "<channel_context source=\"discord\" channel=\"general\" messages=\"5\">\n"
+    "[3m ago] Alice: Has anyone seen the deploy status?\n"
+    "[2m ago] Bob: Still running\n"
+    "[1m ago] Alice: @bot can you check?\n"
+    "</channel_context>\n"
+    "```\n\n"
+    "Use this context to understand the conversation flow and respond "
+    "appropriately. Do not repeat or summarize the channel context back to "
+    "users — they already saw those messages. Focus on the triggering message "
+    "while being informed by the surrounding conversation."
+)
+
+# Channel logs - conditional on channel logging being enabled
+SECTION_CHANNEL_LOGS = (
+    "\n\n## Channel Logs\n\n"
+    "Channel messages are logged to daily JSONL files at "
+    "`memory/logs/channel/{server}/{channel}/{YYYY-MM-DD}.jsonl`. "
+    "Each line is a JSON record with: ts, msg_id, user_id, display_name, "
+    "content, attachments.\n\n"
+    "Use these to review past conversations, track decisions, or find what "
+    "was discussed on a specific date:\n\n"
+    "- Search across all logs: "
+    "`grep_files('keyword', glob='memory/logs/channel/**/*.jsonl')`\n"
+    "- Read a specific day: "
+    "`read_file('memory/logs/channel/server-name/channel-name/2026-03-07.jsonl')`\n\n"
+    "Logs are read-only — the framework writes them, you read them."
+)
+
 
 def build_capability_summary(enabled_builtins: list[str] | None) -> str:
     """Build a concise summary of available framework capabilities.

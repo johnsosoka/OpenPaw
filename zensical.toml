@@ -5,18 +5,19 @@ site_author = "John Sosoka"
 site_url = "https://johnsosoka.github.io/OpenPaw/"
 repo_url = "https://github.com/johnsosoka/OpenPaw"
 repo_name = "OpenPaw"
-copyright = "Copyright &copy; 2025 John Sosoka"
+copyright = "Copyright &copy; 2026 John Sosoka"
 
 nav = [
   { "Home" = "index.md" },
   { "Getting Started" = "getting-started.md" },
-  { "Architecture" = "architecture.md" },
+  { "Concepts" = "concepts.md" },
   { "Configuration" = "configuration.md" },
   { "Workspaces" = "workspaces.md" },
+  { "Scheduling" = "scheduling.md" },
+  { "Built-ins" = "builtins.md" },
   { "Channels" = "channels.md" },
   { "Queue System" = "queue-system.md" },
-  { "Cron Scheduler" = "cron-scheduler.md" },
-  { "Built-ins" = "builtins.md" },
+  { "Architecture" = "architecture.md" },
 ]
 
 [project.theme]

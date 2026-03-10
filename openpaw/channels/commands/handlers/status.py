@@ -40,6 +40,11 @@ class StatusCommand(CommandHandler):
         lines = [f"Workspace: {context.workspace_name}"]
         lines.append(f"Model: {context.agent_runner.model_id}")
 
+        # Active channels
+        if context.channels and len(context.channels) > 1:
+            channel_names = ", ".join(sorted(context.channels.keys()))
+            lines.append(f"Channels: {channel_names}")
+
         # Model override indicator
         try:
             factory = context.agent_factory

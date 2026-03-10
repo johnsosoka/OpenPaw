@@ -33,6 +33,8 @@ class TelegramChannel(ChannelAdapter):
         allowed_users: list[int] | None = None,
         allowed_groups: list[int] | None = None,
         allow_all: bool = False,
+        mention_required: bool = False,
+        triggers: list[str] | None = None,
         workspace_name: str = "unknown",
     ):
         """Initialize the Telegram channel.
@@ -42,6 +44,8 @@ class TelegramChannel(ChannelAdapter):
             allowed_users: List of allowed user IDs.
             allowed_groups: List of allowed group IDs.
             allow_all: If True, allow all users (insecure). If False, requires allowlists.
+            mention_required: If True, only respond in group chats when @mentioned.
+            triggers: Keyword triggers for group chat activation (OR with mention).
             workspace_name: Name of the workspace (for error messages).
         """
         resolved_token = token or os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -52,10 +56,14 @@ class TelegramChannel(ChannelAdapter):
         self.allowed_users = set(allowed_users or [])
         self.allowed_groups = set(allowed_groups or [])
         self.allow_all = allow_all
+        self.mention_required = mention_required
+        self.triggers: list[str] = triggers or []
         self.workspace_name = workspace_name
+        self._bot_username: str | None = None
         self._app: Application | None = None  # type: ignore[type-arg]
         self._message_callback: Callable[[Message], Coroutine[Any, Any, None]] | None = None
         self._approval_callback: Callable[[str, bool], Coroutine[Any, Any, None]] | None = None
+        self._channel_event_callback: Callable[..., Any] | None = None
 
     async def start(self) -> None:
         """Start the Telegram bot."""
@@ -74,6 +82,12 @@ class TelegramChannel(ChannelAdapter):
         await self._app.initialize()
         await self._app.start()
         await self._app.updater.start_polling()  # type: ignore[union-attr]
+
+        # Capture bot username for mention detection in group chats
+        if self._app.bot:
+            bot_info = await self._app.bot.get_me()
+            self._bot_username = bot_info.username
+            logger.debug("Bot username: @%s", self._bot_username)
 
         logger.info("Telegram channel started")
 
@@ -366,6 +380,57 @@ class TelegramChannel(ChannelAdapter):
 
         return True
 
+    def _passes_activation_filter(self, update: Update) -> bool:
+        """Check whether the message passes activation filters (mention OR trigger).
+
+        In group chats, messages must pass at least one activation condition:
+        - Bot is @mentioned (when mention_required is True)
+        - Message contains a trigger keyword (when triggers are configured)
+
+        If neither mention_required nor triggers are configured, all messages pass.
+        DMs and commands always pass through regardless.
+
+        Args:
+            update: The Telegram Update object.
+
+        Returns:
+            True if the message should be processed.
+        """
+        # No activation filters configured — pass everything
+        if not self.mention_required and not self.triggers:
+            return True
+
+        # DMs always pass through (positive chat IDs are private chats)
+        if update.effective_chat and update.effective_chat.id > 0:
+            return True
+
+        # Commands always pass through (they're routed via CommandRouter)
+        if update.message and update.message.text and update.message.text.startswith("/"):
+            return True
+
+        # OR logic: either mention or trigger is sufficient
+        if self.mention_required and self._has_bot_mention(update):
+            return True
+
+        content = (update.message.text or update.message.caption or "") if update.message else ""
+        if self._passes_trigger_filter(content, self.triggers):
+            return True
+
+        return False
+
+    def _has_bot_mention(self, update: Update) -> bool:
+        """Check if the message contains an @mention of this bot."""
+        if not update.message or not update.message.entities or not self._bot_username:
+            return False
+
+        text = update.message.text or ""
+        for entity in update.message.entities:
+            if entity.type == "mention":
+                mention_text = text[entity.offset:entity.offset + entity.length]
+                if mention_text.lower() == f"@{self._bot_username.lower()}":
+                    return True
+        return False
+
     def _to_message(self, update: Update) -> Message | None:
         """Convert Telegram update to unified Message format."""
         if not update.message or not update.effective_user or not update.effective_chat:
@@ -424,6 +489,8 @@ class TelegramChannel(ChannelAdapter):
         if not self._is_allowed(update):
             await self._send_unauthorized_response(update)
             return
+        if not self._passes_activation_filter(update):
+            return
 
         message = self._to_message(update)
         if message and self._message_callback:
@@ -444,6 +511,8 @@ class TelegramChannel(ChannelAdapter):
         if not self._is_allowed(update):
             await self._send_unauthorized_response(update)
             return
+        if not self._passes_activation_filter(update):
+            return
 
         message = await self._voice_to_message(update)
         if message and self._message_callback:
@@ -454,6 +523,8 @@ class TelegramChannel(ChannelAdapter):
         if not self._is_allowed(update):
             await self._send_unauthorized_response(update)
             return
+        if not self._passes_activation_filter(update):
+            return
 
         message = await self._document_to_message(update)
         if message and self._message_callback:
@@ -463,6 +534,8 @@ class TelegramChannel(ChannelAdapter):
         """Handle incoming photo messages."""
         if not self._is_allowed(update):
             await self._send_unauthorized_response(update)
+            return
+        if not self._passes_activation_filter(update):
             return
 
         message = await self._photo_to_message(update)

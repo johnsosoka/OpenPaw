@@ -4,13 +4,15 @@
   <img src="../assets/images/openpaw-golden.png" alt="Getting Started with OpenPaw" width="500">
 </div>
 
-This guide walks through installing OpenPaw, creating your first agent workspace, and running it with a Telegram channel.
+This guide walks through installing OpenPaw, creating your first agent workspace, and running it. Examples use Telegram, but Discord is also supported — see [Channels](channels.md) for Discord setup and multi-channel configuration.
 
 ## Prerequisites
 
 - **Python 3.11+**
 - **Poetry 2.0+** for dependency management ([installation guide](https://python-poetry.org/docs/#installation))
-- **A Telegram bot token** ([create one via BotFather](https://core.telegram.org/bots#botfather))
+- **At least one channel bot token:**
+  - Telegram ([create via BotFather](https://core.telegram.org/bots#botfather))
+  - Discord ([create via Developer Portal](https://discord.com/developers/applications))
 - **At least one model provider credential:**
   - Anthropic API key ([get one here](https://console.anthropic.com/))
   - OpenAI API key ([get one here](https://platform.openai.com/api-keys))
@@ -69,8 +71,9 @@ poetry install -E all-builtins
 Create a `.env` file or export variables:
 
 ```bash
-# Required: Channel
+# Required: Channel (at least one)
 export TELEGRAM_BOT_TOKEN="your-telegram-bot-token"
+export DISCORD_BOT_TOKEN="your-discord-bot-token"
 
 # Required: Model provider (choose at least one)
 export ANTHROPIC_API_KEY="your-anthropic-key"        # Anthropic Claude
@@ -253,7 +256,7 @@ output:
   chat_id: 123456789  # Your Telegram user ID
 ```
 
-See [cron-scheduler.md](cron-scheduler.md) for detailed configuration.
+See [scheduling.md](scheduling.md) for detailed configuration.
 
 ## Running Your Agent
 
@@ -313,7 +316,7 @@ Now that you have a working agent, explore advanced features:
 
 - **[Configuration](configuration.md)** - Deep-dive into global and workspace config options
 - **[Queue System](queue-system.md)** - Understand queue modes (collect, steer, interrupt, followup)
-- **[Cron Scheduler](cron-scheduler.md)** - Set up scheduled tasks and heartbeats
+- **[Scheduling](scheduling.md)** - Set up scheduled tasks and heartbeats
 - **[Builtins](builtins.md)** - Enable web search, voice, browser automation, sub-agents
 - **[Workspaces](workspaces.md)** - Advanced workspace organization and custom tools
 - **[Channels](channels.md)** - Channel system details and access control
@@ -326,12 +329,12 @@ Now that you have a working agent, explore advanced features:
 **Check environment variables:**
 ```bash
 # Verify variables are set
-echo $TELEGRAM_BOT_TOKEN
-echo $ANTHROPIC_API_KEY  # or OPENAI_API_KEY
+echo $TELEGRAM_BOT_TOKEN   # or DISCORD_BOT_TOKEN
+echo $ANTHROPIC_API_KEY    # or OPENAI_API_KEY
 ```
 
 **Check allowed_users list:**
-If you configured `allowed_users` in `agent.yaml`, ensure your Telegram user ID is in the list. To find your user ID, temporarily set `allowed_users: []` and check the logs when you send a message.
+If you configured `allowed_users` in `agent.yaml`, ensure your user ID is in the list. To find your user ID, temporarily set `allowed_users: []` and check the logs when you send a message.
 
 **Check logs:**
 ```bash
