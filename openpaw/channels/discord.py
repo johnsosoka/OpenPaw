@@ -134,6 +134,11 @@ class DiscordChannel(ChannelAdapter):
         self._approval_callback: Callable[[str, bool], Coroutine[Any, Any, None]] | None = None
         self._channel_event_callback: Callable[..., Any] | None = None
 
+    @property
+    def supports_history_browsing(self) -> bool:
+        """Discord supports full channel history via the channel.history() API."""
+        return True
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -825,6 +830,7 @@ class DiscordChannel(ChannelAdapter):
                         content=msg.content or "",
                         is_bot=msg.author.bot,
                         attachments_summary=attachments_summary,
+                        message_id=str(msg.id),
                     )
                 )
 

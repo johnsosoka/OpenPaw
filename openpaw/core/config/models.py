@@ -246,6 +246,19 @@ class Md2pdfBuiltinConfig(BuiltinItemConfig):
     max_heal_iterations: int = Field(default=3, description="Maximum repair attempts per broken diagram")
 
 
+class ChannelHistoryBuiltinConfig(BuiltinItemConfig):
+    """Configuration for the channel history browsing tool."""
+
+    max_messages_per_request: int = Field(
+        default=100,
+        description="Hard cap on messages returned per request (default: 100)",
+    )
+    content_truncation: int = Field(
+        default=500,
+        description="Per-message content character truncation limit (default: 500)",
+    )
+
+
 class FilePersistenceBuiltinConfig(BuiltinItemConfig):
     """Configuration for the file persistence processor."""
 
@@ -284,6 +297,7 @@ class BuiltinsConfig(BaseModel):
     spawn: SpawnBuiltinConfig = Field(default_factory=SpawnBuiltinConfig)
     file_persistence: FilePersistenceBuiltinConfig = Field(default_factory=FilePersistenceBuiltinConfig)
     md2pdf: Md2pdfBuiltinConfig = Field(default_factory=Md2pdfBuiltinConfig)
+    channel_history: ChannelHistoryBuiltinConfig = Field(default_factory=ChannelHistoryBuiltinConfig)
 
     model_config = {"extra": "allow"}
 
@@ -312,6 +326,7 @@ class WorkspaceBuiltinsConfig(BaseModel):
     spawn: SpawnBuiltinConfig | None = None
     file_persistence: FilePersistenceBuiltinConfig | None = None
     md2pdf: Md2pdfBuiltinConfig | None = None
+    channel_history: ChannelHistoryBuiltinConfig | None = None
 
     model_config = {"extra": "allow"}
 

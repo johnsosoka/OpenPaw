@@ -27,6 +27,7 @@ class ChannelHistoryEntry:
     content: str
     is_bot: bool = False
     attachments_summary: str | None = None
+    message_id: str = ""  # Platform-specific message ID for pagination cursors
 
 
 @dataclass
