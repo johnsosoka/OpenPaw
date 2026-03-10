@@ -379,9 +379,9 @@ channels:
 
 **token** — Channel-specific bot token.
 
-**allowed_users** — List of allowed user IDs for this workspace.
+**allowed_users** — List of allowed user IDs. Controls who can DM the bot and serves as a fallback for messages from non-allowed groups.
 
-**allowed_groups** — List of allowed group/guild IDs for this workspace.
+**allowed_groups** — List of allowed group/guild IDs. When a group is allowed, **any user** in that group can interact with the bot without being individually listed in `allowed_users`.
 
 **mention_required** — Only respond in group channels when @mentioned (default: `false`).
 
