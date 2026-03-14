@@ -693,6 +693,7 @@ class WorkspaceRunner:
             session_logger=subagent_session_logger,
         )
         self._connect_spawn_tool_to_runner()
+        self._connect_channel_history_tool()
 
         self._running = True
         self._queue_processor_task = asyncio.create_task(self._queue_processor())
@@ -716,6 +717,50 @@ class WorkspaceRunner:
                 self.logger.debug("SpawnTool not loaded for this workspace")
         except Exception as e:
             self.logger.warning(f"Failed to connect SpawnTool to runner: {e}")
+
+    def _connect_channel_history_tool(self) -> None:
+        """Connect ChannelHistoryTool to live channel adapters.
+
+        Checks whether any channel supports history browsing. If none do,
+        removes the tool from the agent to avoid presenting a broken
+        capability to the LLM. If at least one does, wires the adapter
+        references into the tool instance.
+        """
+        try:
+            history_tool = self._builtin_loader.get_tool_instance("channel_history")
+            if not history_tool:
+                self.logger.debug("ChannelHistoryTool not loaded for this workspace")
+                return
+
+            # Find channels that support history browsing
+            history_channels = {
+                name: ch
+                for name, ch in self._channels.items()
+                if ch.supports_history_browsing
+            }
+
+            if not history_channels:
+                # No history-capable channels — remove the tool so the LLM never
+                # sees a broken capability
+                self._agent_factory.remove_builtin_tools({"browse_channel_history"})
+                self._agent_factory.remove_enabled_builtin("channel_history")
+                self._agent_runner = self._agent_factory.create_agent(
+                    checkpointer=self._checkpointer
+                )
+                self._message_processor.update_agent_runner(self._agent_runner)
+                self.logger.info(
+                    "Removed channel_history tool (no history-capable channels)"
+                )
+                return
+
+            history_tool.set_channels(history_channels)
+            self.logger.info(
+                "Connected ChannelHistoryTool to %d channel(s): %s",
+                len(history_channels),
+                list(history_channels.keys()),
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to connect ChannelHistoryTool: {e}")
 
     def _connect_memory_search_tool(self) -> None:
         """Connect MemorySearchTool builtin to vector store and embedding provider.

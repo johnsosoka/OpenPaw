@@ -54,6 +54,18 @@ class ChannelAdapter(ABC):
         """
         ...
 
+    @property
+    def supports_history_browsing(self) -> bool:
+        """Whether this adapter supports on-demand history browsing.
+
+        Adapters that implement fetch_channel_history() with full historical
+        access (not just recent cached messages) should override this to True.
+
+        Returns:
+            True if the adapter supports browsing arbitrary channel history.
+        """
+        return False
+
     @staticmethod
     def _passes_trigger_filter(content: str, triggers: list[str]) -> bool:
         """Check if message content matches any configured trigger keyword.
