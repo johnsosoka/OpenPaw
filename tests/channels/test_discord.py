@@ -171,14 +171,33 @@ class TestAllowlist:
         msg = _make_mock_discord_message(user_id=111)
         assert channel._is_allowed(msg) is False
 
-    def test_guild_allowlist_blocks_wrong_guild(self) -> None:
-        """User is allowed but sending from a guild not in allowed_groups → denied."""
+    def test_allowed_guild_permits_any_user(self) -> None:
+        """Any user in an allowed guild is permitted, even without being in allowed_users."""
         channel = _make_discord_channel(
             allowed_users=[111],
             allowed_groups=[500],
         )
-        # Guild 999 is not in allowed_groups
+        # User 999 is NOT in allowed_users, but guild 500 is allowed
+        msg = _make_mock_discord_message(user_id=999, guild_id=500)
+        assert channel._is_allowed(msg) is True
+
+    def test_allowed_user_in_non_allowed_guild(self) -> None:
+        """User in allowed_users is permitted even from a non-allowed guild."""
+        channel = _make_discord_channel(
+            allowed_users=[111],
+            allowed_groups=[500],
+        )
+        # Guild 999 is not in allowed_groups, but user 111 is individually allowed
         msg = _make_mock_discord_message(user_id=111, guild_id=999)
+        assert channel._is_allowed(msg) is True
+
+    def test_unknown_user_in_non_allowed_guild_denied(self) -> None:
+        """User not in allowed_users and guild not in allowed_groups → denied."""
+        channel = _make_discord_channel(
+            allowed_users=[111],
+            allowed_groups=[500],
+        )
+        msg = _make_mock_discord_message(user_id=999, guild_id=999)
         assert channel._is_allowed(msg) is False
 
     def test_guild_allowlist_allows_correct_guild(self) -> None:
@@ -209,6 +228,24 @@ class TestAllowlist:
         )
         msg = _make_mock_discord_message(user_id=111, guild_id=12345)
         assert channel._is_allowed(msg) is True
+
+    def test_only_guild_allowlist_no_user_allowlist(self) -> None:
+        """When only allowed_groups is set (no allowed_users), guild members are allowed."""
+        channel = _make_discord_channel(
+            allowed_users=[],
+            allowed_groups=[500],
+        )
+        msg = _make_mock_discord_message(user_id=999, guild_id=500)
+        assert channel._is_allowed(msg) is True
+
+    def test_only_guild_allowlist_dm_denied(self) -> None:
+        """When only allowed_groups is set, DMs are denied (no user allowlist to match)."""
+        channel = _make_discord_channel(
+            allowed_users=[],
+            allowed_groups=[500],
+        )
+        msg = _make_mock_discord_message(user_id=999, guild_id=None)
+        assert channel._is_allowed(msg) is False
 
 
 # ---------------------------------------------------------------------------

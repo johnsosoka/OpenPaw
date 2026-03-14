@@ -14,6 +14,7 @@ from openpaw.core.paths import AGENT_MD, HEARTBEAT_MD, SOUL_MD, USER_MD
 from openpaw.core.prompts.framework import (
     SECTION_AUTONOMOUS_PLANNING,
     SECTION_CHANNEL_CONTEXT,
+    SECTION_CHANNEL_HISTORY,
     SECTION_CHANNEL_LOGS,
     SECTION_CONVERSATION_MEMORY,
     SECTION_FILE_SHARING,
@@ -251,6 +252,10 @@ class AgentWorkspace:
         # Memory search - include if memory_search is enabled
         if enabled_builtins is None or "memory_search" in enabled_builtins:
             sections.append(SECTION_MEMORY_SEARCH)
+
+        # Channel history browsing - include if channel_history builtin is loaded
+        if enabled_builtins is None or "channel_history" in enabled_builtins:
+            sections.append(SECTION_CHANNEL_HISTORY)
 
         # Channel logs - include when persistent channel logging is active
         if channel_logging_enabled:
