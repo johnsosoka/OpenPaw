@@ -75,10 +75,18 @@ class CronScheduler:
         self._jobs: dict[str, Any] = {}
         self._dynamic_store = DynamicCronStore(workspace_path)
         self._dynamic_jobs: dict[str, Any] = {}
+        self._running_jobs: set[str] = set()
 
     async def start(self) -> None:
         """Start the scheduler and register all cron jobs."""
-        self._scheduler = AsyncIOScheduler(timezone=self._tz)
+        self._scheduler = AsyncIOScheduler(
+            timezone=self._tz,
+            job_defaults={
+                "max_instances": 1,
+                "coalesce": True,
+                "misfire_grace_time": 300,
+            },
+        )
 
         # Load and schedule YAML-defined cron jobs
         loader = CronLoader(self.workspace_path)
@@ -111,6 +119,12 @@ class CronScheduler:
         Args:
             cron: The cron definition to execute.
         """
+        job_id = cron.name
+        if job_id in self._running_jobs:
+            logger.warning(f"Skipping cron job {cron.name}: previous execution still running")
+            return
+
+        self._running_jobs.add(job_id)
         logger.info(f"Executing cron job: {cron.name}")
         set_invocation_origin(f"cron:{cron.name}")
 
@@ -185,6 +199,7 @@ class CronScheduler:
         except Exception as e:
             logger.error(f"Failed to execute cron job {cron.name}: {e}", exc_info=True)
         finally:
+            self._running_jobs.discard(job_id)
             set_invocation_origin(None)
 
     @staticmethod
@@ -305,6 +320,12 @@ class CronScheduler:
         Args:
             task: DynamicCronTask to execute.
         """
+        job_id = f"dynamic_{task.id}"
+        if job_id in self._running_jobs:
+            logger.warning(f"Skipping dynamic task {task.id}: previous execution still running")
+            return
+
+        self._running_jobs.add(job_id)
         logger.info(f"Executing dynamic task: {task.id}")
         set_invocation_origin(f"dynamic_cron:{task.id[:8]}")
 
@@ -371,6 +392,7 @@ class CronScheduler:
         except Exception as e:
             logger.error(f"Dynamic task {task.id} failed: {e}", exc_info=True)
         finally:
+            self._running_jobs.discard(job_id)
             set_invocation_origin(None)
 
     def _prune_expired_tasks(self, tasks: list[DynamicCronTask]) -> list[DynamicCronTask]:
