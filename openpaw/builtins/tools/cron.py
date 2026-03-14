@@ -337,10 +337,15 @@ class CronToolBuiltin(BaseBuiltinTool):
             """
             tasks = self.store.list_tasks()
 
+            # Filter out expired one-shot tasks (defense against stale entries)
+            now = datetime.now(UTC)
+            tasks = [
+                t for t in tasks
+                if not (t.task_type == "once" and t.run_at and t.run_at < now)
+            ]
+
             if not tasks:
                 return "No scheduled tasks."
-
-            now = datetime.now(UTC)
             lines = ["Scheduled tasks:\n"]
 
             for task in tasks:

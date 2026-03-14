@@ -21,6 +21,8 @@ from openpaw.core.config.models import CronDefinition, CronOutputConfig
 from openpaw.core.prompts.system_events import (
     CRON_RESULT_TEMPLATE,
     CRON_RESULT_TRUNCATED_TEMPLATE,
+    DYNAMIC_TASK_RESULT_TEMPLATE,
+    DYNAMIC_TASK_RESULT_TRUNCATED_TEMPLATE,
     INJECTION_TRUNCATION_LIMIT,
 )
 from openpaw.model.cron import DynamicCronTask
@@ -326,6 +328,15 @@ class CronScheduler:
             return
 
         self._running_jobs.add(job_id)
+
+        # Remove one-shot tasks from store before execution.
+        # APScheduler DateTrigger guarantees single fire, so this is safe.
+        # Prevents list_scheduled() from showing ghost entries during execution.
+        if task.task_type == "once":
+            self._dynamic_store.remove_task(task.id)
+            if task.id in self._dynamic_jobs:
+                del self._dynamic_jobs[task.id]
+
         logger.info(f"Executing dynamic task: {task.id}")
         set_invocation_origin(f"dynamic_cron:{task.id[:8]}")
 
@@ -335,10 +346,11 @@ class CronScheduler:
             response = await agent_runner.run(message=task.prompt)
             duration_ms = (time_module.monotonic() - start_time) * 1000
 
-            # Write session log (audit only, no delivery routing for dynamic tasks)
+            # Write session log
+            session_path: str | None = None
             if self._session_logger:
                 try:
-                    self._session_logger.write_session(
+                    session_path = self._session_logger.write_session(
                         name=f"dynamic_{task.id}",
                         prompt=task.prompt,
                         response=response,
@@ -380,12 +392,32 @@ class CronScheduler:
                     f"Response ({len(response) if response else 0} chars) not sent."
                 )
 
-            # Clean up one-shot tasks after execution
-            if task.task_type == "once":
-                # Remove from storage (APScheduler auto-removes DateTrigger jobs)
-                if task.id in self._dynamic_jobs:
-                    del self._dynamic_jobs[task.id]
-                self._dynamic_store.remove_task(task.id)
+            # Inject result into agent queue (dynamic tasks always notify the main agent)
+            if self._result_callback and session_path and task.channel and task.chat_id:
+                try:
+                    channel = self.channels.get(task.channel)
+                    if channel:
+                        session_key = channel.build_session_key(task.chat_id)
+                        output = response
+                        if len(output) > INJECTION_TRUNCATION_LIMIT:
+                            output = output[:INJECTION_TRUNCATION_LIMIT]
+                            injection_content = DYNAMIC_TASK_RESULT_TRUNCATED_TEMPLATE.format(
+                                task_id=task.id[:8],
+                                prompt_preview=task.prompt[:80],
+                                output=output,
+                                session_path=session_path,
+                            )
+                        else:
+                            injection_content = DYNAMIC_TASK_RESULT_TEMPLATE.format(
+                                task_id=task.id[:8],
+                                prompt_preview=task.prompt[:80],
+                                output=output,
+                                session_path=session_path,
+                            )
+                        await self._result_callback(session_key, injection_content)
+                        logger.info(f"Dynamic task {task.id} result injected into agent queue")
+                except Exception as e:
+                    logger.warning(f"Failed to inject dynamic task result for {task.id}: {e}")
 
             logger.info(f"Dynamic task {task.id} completed successfully")
 
