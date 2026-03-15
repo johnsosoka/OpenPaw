@@ -125,7 +125,7 @@ To get your Telegram user ID:
 - Message [@userinfobot](https://t.me/userinfobot)
 - It will reply with your user ID
 
-Only listed users can message the bot. Messages from other users are silently ignored.
+Only listed users can DM the bot. Messages from other users are silently ignored.
 
 #### Group Allowlist
 
@@ -140,7 +140,7 @@ To get a group ID:
 2. It will post the group's chat ID (negative number for groups)
 3. Remove the bot after getting the ID
 
-Only messages from listed groups are processed.
+When a group is in `allowed_groups`, **any user** in that group can interact with the bot — they do not need to be individually listed in `allowed_users`. The `allowed_users` list controls who can DM the bot directly.
 
 ### Supported Message Types
 
@@ -310,7 +310,7 @@ channel:
   allowed_groups: [123456789012345678]  # Guild IDs
 ```
 
-When `allowed_groups` is set, messages from other servers are rejected even if the user is in `allowed_users`.
+When a guild is in `allowed_groups`, **any user** in that guild can interact with the bot — they do not need to be individually listed in `allowed_users`. The `allowed_users` list controls who can DM the bot directly. Messages from guilds not in the allowlist are rejected unless the sender is individually allowlisted.
 
 ### Activation Filters
 

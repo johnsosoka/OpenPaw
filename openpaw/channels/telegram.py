@@ -351,9 +351,9 @@ class TelegramChannel(ChannelAdapter):
 
         Security model:
         - If allow_all is True, all users are allowed (insecure)
-        - If allowed_users is set, user must be in the list
-        - If in a group chat and allowed_groups is set, group must be in the list
-        - If neither allow_all nor allowlists are set, deny by default (secure)
+        - If in a group chat and allowed_groups contains the group → allowed (any user)
+        - If allowed_users is set, user must be in the list (DMs and non-allowed groups)
+        - If neither allow_all nor allowlists match, deny by default (secure)
         """
         if not update.effective_user:
             return False
@@ -362,23 +362,23 @@ class TelegramChannel(ChannelAdapter):
         if self.allow_all:
             return True
 
-        user_id = update.effective_user.id
         chat_id = update.effective_chat.id if update.effective_chat else None
 
-        # Check user allowlist
+        # Group allowlist: if the message is from an allowed group, permit it
+        # without requiring the user to be individually allowlisted.
+        if chat_id and chat_id < 0 and self.allowed_groups:
+            if chat_id in self.allowed_groups:
+                return True
+
+        # User allowlist check (DMs and non-allowed groups)
+        user_id = update.effective_user.id
         if self.allowed_users:
             if user_id not in self.allowed_users:
                 return False
-        else:
-            # No user allowlist and not allow_all = deny
-            return False
+            return True
 
-        # Check group allowlist for group chats
-        if chat_id and chat_id < 0:
-            if self.allowed_groups and chat_id not in self.allowed_groups:
-                return False
-
-        return True
+        # No allowlists matched — deny
+        return False
 
     def _passes_activation_filter(self, update: Update) -> bool:
         """Check whether the message passes activation filters (mention OR trigger).

@@ -139,3 +139,27 @@ CRON_RESULT_TRUNCATED_TEMPLATE = PromptTemplate(
     ),
     input_variables=["cron_name", "output", "session_path"],
 )
+
+# Dynamic task result (fits within truncation limit)
+DYNAMIC_TASK_RESULT_TEMPLATE = PromptTemplate(
+    template=(
+        "[SYSTEM] Your scheduled task [{task_id}] completed.\n"
+        "Original prompt: {prompt_preview}\n\n"
+        "{output}\n\n"
+        "Full session log: {session_path}\n"
+        "Review and take action if needed."
+    ),
+    input_variables=["task_id", "prompt_preview", "output", "session_path"],
+)
+
+# Dynamic task result (output was truncated)
+DYNAMIC_TASK_RESULT_TRUNCATED_TEMPLATE = PromptTemplate(
+    template=(
+        "[SYSTEM] Your scheduled task [{task_id}] completed (truncated).\n"
+        "Original prompt: {prompt_preview}\n\n"
+        "{output}\n\n"
+        "Full session log: {session_path}\n"
+        'Use read_file("{session_path}") for full context.'
+    ),
+    input_variables=["task_id", "prompt_preview", "output", "session_path"],
+)

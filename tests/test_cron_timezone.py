@@ -83,8 +83,11 @@ class TestCronSchedulerTimezone:
 
             await scheduler.start()
 
-            # Verify AsyncIOScheduler was called with the timezone
-            mock_scheduler_class.assert_called_once_with(timezone=ZoneInfo("America/Chicago"))
+            # Verify AsyncIOScheduler was called with the timezone and safe job defaults
+            mock_scheduler_class.assert_called_once_with(
+                timezone=ZoneInfo("America/Chicago"),
+                job_defaults={"max_instances": 1, "coalesce": True, "misfire_grace_time": 300},
+            )
 
     @pytest.mark.asyncio
     async def test_cron_trigger_receives_timezone(

@@ -134,6 +134,11 @@ class DiscordChannel(ChannelAdapter):
         self._approval_callback: Callable[[str, bool], Coroutine[Any, Any, None]] | None = None
         self._channel_event_callback: Callable[..., Any] | None = None
 
+    @property
+    def supports_history_browsing(self) -> bool:
+        """Discord supports full channel history via the channel.history() API."""
+        return True
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -487,11 +492,11 @@ class DiscordChannel(ChannelAdapter):
     def _is_allowed(self, message: discord.Message) -> bool:
         """Check whether the message sender is permitted to use this workspace.
 
-        Security model (mirrors TelegramChannel):
+        Security model:
         - allow_all=True  → everyone is allowed (insecure, use with caution)
-        - allowed_users non-empty → user.id must be in the set
-        - No allowed_users → deny all (secure default)
-        - In a guild + allowed_groups non-empty → guild.id must be in the set
+        - In a guild + allowed_groups contains the guild → allowed (any user in that guild)
+        - allowed_users non-empty → user.id must be in the set (DMs and non-allowed guilds)
+        - No allowlists match → deny (secure default)
 
         Args:
             message: The incoming discord.Message.
@@ -502,22 +507,23 @@ class DiscordChannel(ChannelAdapter):
         if self.allow_all:
             return True
 
-        user_id = message.author.id
+        # Guild allowlist: if the message is from an allowed guild, permit it
+        # without requiring the user to be individually allowlisted.
+        if message.guild and self.allowed_groups:
+            if message.guild.id in self.allowed_groups:
+                return True
+            # Message is from a guild not in the allowlist — fall through to
+            # user check (user might be individually allowed for DMs).
 
-        # User allowlist check
+        # User allowlist check (DMs and non-allowed guilds)
+        user_id = message.author.id
         if self.allowed_users:
             if user_id not in self.allowed_users:
                 return False
-        else:
-            # No user allowlist configured and allow_all is False — deny
-            return False
+            return True
 
-        # Guild allowlist check for server messages
-        if message.guild and self.allowed_groups:
-            if message.guild.id not in self.allowed_groups:
-                return False
-
-        return True
+        # No allowlists matched — deny
+        return False
 
     def _passes_activation_filter(self, message: discord.Message) -> bool:
         """Check whether the message passes activation filters (mention OR trigger).
@@ -825,6 +831,7 @@ class DiscordChannel(ChannelAdapter):
                         content=msg.content or "",
                         is_bot=msg.author.bot,
                         attachments_summary=attachments_summary,
+                        message_id=str(msg.id),
                     )
                 )
 

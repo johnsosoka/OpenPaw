@@ -139,6 +139,13 @@ class BuiltinRegistry:
         except ImportError as e:
             logger.debug(f"md2pdf tool not available: {e}")
 
+        try:
+            from openpaw.builtins.tools.channel_history import ChannelHistoryToolBuiltin
+
+            self.register_tool(ChannelHistoryToolBuiltin)
+        except ImportError as e:
+            logger.debug(f"Channel history tool not available: {e}")
+
         # Processors (sorted by metadata.priority in BuiltinLoader.load_processors)
         try:
             from openpaw.builtins.processors.file_persistence import FilePersistenceProcessor

@@ -304,6 +304,19 @@ SECTION_CHANNEL_CONTEXT = (
     "while being informed by the surrounding conversation."
 )
 
+# Channel history browsing - conditional on channel_history builtin
+SECTION_CHANNEL_HISTORY = (
+    "\n\n## Channel History Browsing\n\n"
+    "You can browse message history from channels that support it (e.g., Discord) "
+    "using the `browse_channel_history` tool. This gives you access to messages "
+    "beyond the initial context window, including messages sent while you were offline.\n\n"
+    "- Use pagination (`before` parameter) to navigate further back in time\n"
+    "- Filter by keyword, user, or exclude bot messages\n"
+    "- Message IDs in the output can be used as pagination cursors\n"
+    "- Channel logs at `memory/logs/channel/` only contain real-time witnessed messages; "
+    "this tool accesses the full platform history"
+)
+
 # Channel logs - conditional on channel logging being enabled
 SECTION_CHANNEL_LOGS = (
     "\n\n## Channel Logs\n\n"
@@ -363,6 +376,10 @@ def build_capability_summary(enabled_builtins: list[str] | None) -> str:
         capabilities.append("- **File Sharing**: Send workspace files to users")
     if _is_enabled("memory_search"):
         capabilities.append("- **Memory Search**: Semantic search over past conversations")
+    if _is_enabled("channel_history"):
+        capabilities.append(
+            "- **Channel History**: Browse and search message history from supported channels"
+        )
     if _is_enabled("elevenlabs"):
         capabilities.append("- **Text-to-Speech**: Voice response generation")
 

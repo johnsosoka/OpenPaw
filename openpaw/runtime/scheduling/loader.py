@@ -32,6 +32,7 @@ class CronLoader:
             return []
 
         cron_definitions: list[CronDefinition] = []
+        seen_names: dict[str, str] = {}  # name -> source filename
 
         for cron_file in sorted(
             list(self.crons_path.glob("*.yaml")) + list(self.crons_path.glob("*.yml"))
@@ -47,6 +48,14 @@ class CronLoader:
                 )
 
                 cron_def = CronDefinition(**expanded_data)
+
+                if cron_def.name in seen_names:
+                    raise ValueError(
+                        f"Duplicate cron name '{cron_def.name}' "
+                        f"(already defined in {seen_names[cron_def.name]})"
+                    )
+                seen_names[cron_def.name] = cron_file.name
+
                 cron_definitions.append(cron_def)
             except Exception as e:
                 raise ValueError(f"Failed to load cron definition from {cron_file}: {e}") from e
