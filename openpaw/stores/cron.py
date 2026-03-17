@@ -127,27 +127,67 @@ class DynamicCronStore:
             self._save_unlocked(tasks)
         logger.info(f"Added dynamic cron task: {task.id} ({task.task_type})")
 
-    def remove_task(self, task_id: str) -> bool:
-        """Remove a task by ID and persist immediately.
+    @staticmethod
+    def _resolve_task_id(
+        tasks: list[DynamicCronTask], task_id: str
+    ) -> str | None:
+        """Resolve a full or prefix task ID to the canonical full UUID.
+
+        Pure function over an already-loaded task list. Supports both exact
+        UUID matches and short prefix lookups (as shown by list_scheduled()).
 
         Args:
-            task_id: Unique task ID to remove.
+            tasks: Pre-loaded list of tasks to search.
+            task_id: Full UUID or short prefix string.
 
         Returns:
-            True if task was found and removed, False otherwise.
+            The full UUID string if exactly one task matches, or None if no
+            task matches.
+
+        Raises:
+            ValueError: If the prefix is ambiguous (multiple tasks match).
+        """
+        matches = [t for t in tasks if t.id == task_id or t.id.startswith(task_id)]
+
+        if len(matches) == 1:
+            return matches[0].id
+
+        if len(matches) > 1:
+            conflicting = ", ".join(t.id[:8] for t in matches)
+            raise ValueError(
+                f"Ambiguous task ID prefix '{task_id}' matches {len(matches)} tasks: "
+                f"{conflicting}. Provide more characters to disambiguate."
+            )
+
+        return None
+
+    def remove_task(self, task_id: str) -> str | None:
+        """Remove a task by ID or short prefix and persist immediately.
+
+        Supports prefix lookups so agents can cancel tasks using the short IDs
+        shown by list_scheduled() without needing the full UUID.
+
+        Args:
+            task_id: Full UUID or short prefix of the task to remove.
+
+        Returns:
+            The resolved full task UUID on successful removal, or None if no
+            matching task was found.
+
+        Raises:
+            ValueError: If the prefix is ambiguous (multiple tasks match).
         """
         with self._lock:
             tasks = self._load_unlocked()
-            initial_count = len(tasks)
-            tasks = [t for t in tasks if t.id != task_id]
+            full_id = self._resolve_task_id(tasks, task_id)
+            if full_id is None:
+                logger.warning(f"Task not found for removal: {task_id}")
+                return None
 
-            if len(tasks) < initial_count:
-                self._save_unlocked(tasks)
-                logger.info(f"Removed dynamic cron task: {task_id}")
-                return True
-
-        logger.warning(f"Task not found for removal: {task_id}")
-        return False
+            tasks = [t for t in tasks if t.id != full_id]
+            self._save_unlocked(tasks)
+            logger.info(f"Removed dynamic cron task: {full_id}")
+            return full_id
 
     def list_tasks(self) -> list[DynamicCronTask]:
         """Return all tasks from storage.
@@ -158,19 +198,29 @@ class DynamicCronStore:
         return self.load()
 
     def get_task(self, task_id: str) -> DynamicCronTask | None:
-        """Get a single task by ID.
+        """Get a single task by full ID or short prefix.
+
+        Supports prefix lookups so agents can retrieve tasks using the short
+        IDs shown by list_scheduled() without needing the full UUID.
 
         Args:
-            task_id: Unique task ID to retrieve.
+            task_id: Full UUID or short prefix of the task to retrieve.
 
         Returns:
-            DynamicCronTask if found, None otherwise.
+            DynamicCronTask if exactly one match is found, None otherwise.
+
+        Raises:
+            ValueError: If the prefix is ambiguous (multiple tasks match).
         """
-        tasks = self.load()
-        for task in tasks:
-            if task.id == task_id:
-                return task
-        return None
+        with self._lock:
+            tasks = self._load_unlocked()
+            full_id = self._resolve_task_id(tasks, task_id)
+            if full_id is None:
+                return None
+            for task in tasks:
+                if task.id == full_id:
+                    return task
+            return None
 
     def update_task(self, task: DynamicCronTask) -> bool:
         """Update an existing task and persist immediately.

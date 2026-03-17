@@ -293,8 +293,12 @@ class CronScheduler:
     def remove_dynamic_job(self, task_id: str) -> bool:
         """Remove a dynamic task from the scheduler.
 
+        Note: This method expects a full UUID (used internally). For prefix-based
+        cancellation, use the CronTool's cancel_scheduled which resolves prefixes
+        via DynamicCronStore before calling _remove_from_live_scheduler.
+
         Args:
-            task_id: Unique task ID to remove.
+            task_id: Full UUID of the task to remove.
 
         Returns:
             True if removed, False if not found.

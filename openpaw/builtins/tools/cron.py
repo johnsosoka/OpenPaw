@@ -78,7 +78,7 @@ class ScheduleEveryInput(BaseModel):
 class CancelScheduledInput(BaseModel):
     """Input schema for canceling a scheduled task."""
 
-    task_id: str = Field(description="The unique ID of the task to cancel")
+    task_id: str = Field(description="The task ID or short prefix as shown by list_scheduled")
 
 
 class CronToolBuiltin(BaseBuiltinTool):
@@ -394,22 +394,25 @@ class CronToolBuiltin(BaseBuiltinTool):
         """Create the cancel_scheduled tool."""
 
         def cancel_scheduled(task_id: str) -> str:
-            """Cancel a scheduled task by ID.
+            """Cancel a scheduled task by ID or short prefix.
 
             Args:
-                task_id: The unique task ID to cancel.
+                task_id: The unique task ID or short prefix as shown by list_scheduled.
 
             Returns:
                 Confirmation message or error.
             """
-            success = self.store.remove_task(task_id)
+            try:
+                full_id = self.store.remove_task(task_id)
+            except ValueError as e:
+                return f"[Error: {e}]"
 
-            if success:
-                # Remove from live scheduler if available
-                self._remove_from_live_scheduler(task_id)
+            if full_id is not None:
+                # Remove from live scheduler using the resolved full UUID
+                self._remove_from_live_scheduler(full_id)
 
-                logger.info(f"Cancelled scheduled task: {task_id}")
-                return f"Successfully cancelled task {task_id}."
+                logger.info(f"Cancelled scheduled task: {full_id}")
+                return f"Successfully cancelled task {full_id}."
             else:
                 return f"[Error: Task {task_id} not found]"
 
