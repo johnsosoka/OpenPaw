@@ -39,6 +39,10 @@ if TYPE_CHECKING:
     from openpaw.core.config import WorkspaceConfig
     from openpaw.core.config.models import CronDefinition
 
+# Import SkillInfo at runtime (not TYPE_CHECKING) — it's a pure dataclass with
+# no framework dependencies, so it's safe to import in core/.
+from openpaw.model.skill import SkillInfo
+
 logger = logging.getLogger(__name__)
 
 
@@ -56,6 +60,7 @@ class AgentWorkspace:
     tools_path: Path
     config: "WorkspaceConfig | None" = None
     crons: "list[CronDefinition]" = field(default_factory=list)
+    skills: list[SkillInfo] = field(default_factory=list)
 
     def reload_files(self) -> None:
         """Re-read workspace markdown files from disk.
@@ -120,6 +125,11 @@ class AgentWorkspace:
         if framework_context:
             sections.append(f"<framework>\n{framework_context}\n</framework>")
 
+        # Skills — injected before workspace context so agents know what's available
+        if self.skills:
+            skills_section = self._build_skills_section()
+            sections.append(f"<skills>\n{skills_section}\n</skills>")
+
         # Workspace context — tells the agent its workspace name and top-level contents
         workspace_context = self._build_workspace_context()
         sections.append(f"<workspace_context>\n{workspace_context}\n</workspace_context>")
@@ -157,6 +167,30 @@ class AgentWorkspace:
                     lines.append(f"  {name}")
         except OSError:
             lines.append("  (unable to list contents)")
+
+        return "\n".join(lines)
+
+    def _build_skills_section(self) -> str:
+        """Build the skills section of the system prompt.
+
+        Formats each skill's name, description, and full content into a
+        structured block. Skills without descriptions omit the description line.
+
+        Returns:
+            Formatted skills section string, ready to wrap in ``<skills>`` tags.
+        """
+        lines = ["## Available Skills"]
+
+        for skill in self.skills:
+            lines.append("")
+            lines.append(f"### {skill.name}")
+
+            if skill.description:
+                lines.append(skill.description)
+
+            lines.append("")
+            lines.append("---")
+            lines.append(skill.content.strip())
 
         return "\n".join(lines)
 

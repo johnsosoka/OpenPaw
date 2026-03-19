@@ -261,6 +261,42 @@ class CronScheduler:
             del self._jobs[name]
             logger.info(f"Removed cron job: {name}")
 
+    def reload_cron(self, cron_def: CronDefinition) -> None:
+        """Remove the old job (if present) and re-add it from the updated definition.
+
+        Used by CronManagerBuiltin to apply in-place changes to YAML cron jobs
+        without requiring a workspace restart.
+
+        If the definition has ``enabled=False``, the job is removed and not
+        re-added, effectively pausing it.
+
+        Args:
+            cron_def: Updated cron definition to register.
+        """
+        if cron_def.name in self._jobs:
+            self.remove_job(cron_def.name)
+
+        if cron_def.enabled:
+            self.add_job(cron_def)
+            logger.info(f"Reloaded cron job: {cron_def.name} ({cron_def.schedule})")
+        else:
+            logger.info(f"Cron job '{cron_def.name}' is disabled — skipped re-registration")
+
+    def remove_cron(self, name: str) -> None:
+        """Remove a YAML-defined cron job from the live scheduler.
+
+        Public wrapper around :meth:`remove_job` for use by CronManagerBuiltin.
+        Silently does nothing if the job is not currently registered (e.g., it
+        was disabled and never added to the APScheduler instance) or if the
+        scheduler has not been started yet.
+
+        Args:
+            name: The cron job name to remove.
+        """
+        if not self._scheduler or name not in self._jobs:
+            return
+        self.remove_job(name)
+
     def add_dynamic_job(self, task: DynamicCronTask) -> None:
         """Add a dynamic task to the scheduler.
 

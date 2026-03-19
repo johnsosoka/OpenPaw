@@ -182,6 +182,10 @@ class CronBuiltinConfig(BuiltinItemConfig):
     )
 
 
+class CronManagerBuiltinConfig(BuiltinItemConfig):
+    """Configuration for the persistent cron management builtin."""
+
+
 class SendFileBuiltinConfig(BuiltinItemConfig):
     """Configuration for the send_file tool."""
 
@@ -291,6 +295,7 @@ class BuiltinsConfig(BaseModel):
     elevenlabs: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
     shell: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
     cron: CronBuiltinConfig = Field(default_factory=CronBuiltinConfig)
+    cron_manager: CronManagerBuiltinConfig = Field(default_factory=CronManagerBuiltinConfig)
     send_file: SendFileBuiltinConfig = Field(default_factory=SendFileBuiltinConfig)
     docling: DoclingBuiltinConfig = Field(default_factory=DoclingBuiltinConfig)
     browser: BrowserBuiltinConfig = Field(default_factory=BrowserBuiltinConfig)
@@ -320,6 +325,7 @@ class WorkspaceBuiltinsConfig(BaseModel):
     elevenlabs: BuiltinItemConfig | None = None
     shell: BuiltinItemConfig | None = None
     cron: CronBuiltinConfig | None = None
+    cron_manager: CronManagerBuiltinConfig | None = None
     send_file: SendFileBuiltinConfig | None = None
     docling: DoclingBuiltinConfig | None = None
     browser: BrowserBuiltinConfig | None = None

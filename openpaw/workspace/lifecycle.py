@@ -249,6 +249,8 @@ class LifecycleManager:
 
             # Connect CronTool to live scheduler for dynamic task scheduling
             self._connect_cron_tool_to_scheduler()
+            # Connect CronManager to live scheduler for persistent cron hot-reload
+            self._connect_cron_manager_to_scheduler()
 
         except ImportError as e:
             self._logger.warning(f"Cron scheduler not available: {e}")
@@ -319,6 +321,18 @@ class LifecycleManager:
                 self._logger.debug("CronTool not loaded for this workspace")
         except Exception as e:
             self._logger.warning(f"Failed to connect CronTool to scheduler: {e}")
+
+    def _connect_cron_manager_to_scheduler(self) -> None:
+        """Connect CronManagerBuiltin to the live CronScheduler for hot-reload support."""
+        try:
+            cron_manager = self._builtin_loader.get_tool_instance("cron_manager")
+            if cron_manager:
+                cron_manager.set_scheduler(self._cron_scheduler)
+                self._logger.info("Connected CronManager to live scheduler")
+            else:
+                self._logger.debug("CronManager not loaded for this workspace")
+        except Exception as e:
+            self._logger.warning(f"Failed to connect CronManager to scheduler: {e}")
 
     def get_channels(self) -> dict[str, ChannelAdapter]:
         """Get the initialized channels.

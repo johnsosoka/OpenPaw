@@ -74,7 +74,8 @@ openpaw/
 │   ├── session.py    # SessionState
 │   ├── subagent.py   # SubAgentRequest, SubAgentStatus
 │   ├── cron.py       # DynamicCronTask (pure dataclass)
-│   └── channel.py    # ChannelHistoryEntry, ChannelEvent
+│   ├── channel.py    # ChannelHistoryEntry, ChannelEvent
+│   └── skill.py      # SkillInfo (loaded skill metadata + content)
 ├── core/             # Configuration, logging, timezone, utilities
 │   ├── config/       # Pydantic config models and loaders
 │   │   ├── models.py         # WorkspaceConfig, GlobalConfig, CronDefinition, CronOutputConfig
@@ -105,7 +106,8 @@ openpaw/
 │   ├── message_processor.py  # Message processing loop
 │   ├── agent_factory.py      # Agent creation with middleware
 │   ├── lifecycle.py          # Startup/shutdown hooks
-│   └── tool_loader.py        # Custom tool loading
+│   ├── tool_loader.py        # Custom tool loading
+│   └── skill_loader.py       # SKILL.md loading from agent/skills/
 ├── runtime/          # Runtime services
 │   ├── orchestrator.py       # OpenPawOrchestrator
 │   ├── queue/        # Message queueing
@@ -167,6 +169,8 @@ openpaw/
 **`openpaw/workspace/loader.py`** - `WorkspaceLoader` loads agent workspaces from `agent_workspaces/<name>/`. Returns an `AgentWorkspace` instance from `core/`. Each workspace requires: `AGENT.md`, `USER.md`, `SOUL.md`, `HEARTBEAT.md`. Optional `agent.yaml` and `crons/*.yaml` are loaded if present.
 
 **`openpaw/workspace/tool_loader.py`** - Dynamically loads LangChain tools from workspace `tools/` directories. Imports Python files and extracts `@tool` decorated functions (BaseTool instances).
+
+**`openpaw/workspace/skill_loader.py`** - Loads skills from workspace `agent/skills/` directories. Parses SKILL.md files with optional YAML frontmatter, returns `list[SkillInfo]`. Follows the same conventions as `tool_loader.py` (sorted glob, `_` prefix skipping, logging).
 
 **`openpaw/runtime/queue/lane.py`** - Lane-based FIFO queue with configurable concurrency per lane (main, subagent, cron). Supports OpenClaw-style queue modes: `collect`, `steer`, `followup`, `interrupt`.
 
@@ -738,6 +742,55 @@ builtins:
 - Agent calls `schedule_at` with timestamp 10 minutes from now
 - Task fires, agent sends reminder to user's chat
 
+### Persistent Cron Management (CronManager)
+
+Agents can create, list, update, and delete persistent YAML cron jobs via the `cron_manager` builtin. Unlike dynamic scheduling (`schedule_at`/`schedule_every`) which uses in-memory task scheduling, cron manager writes YAML files to `config/crons/` that persist across restarts and are loaded by the cron scheduler at startup.
+
+**Available Tools**:
+- `create_cron` — Create a new persistent cron job (validates expression, writes YAML, hot-adds to scheduler)
+- `list_crons` — List all YAML crons with name, schedule, enabled status, and next run time
+- `update_cron` — Update fields on an existing cron job (hot-reloads in scheduler)
+- `delete_cron` — Remove a cron job file and unregister from scheduler
+
+**Difference from Dynamic Scheduling**:
+| Feature | Dynamic (`schedule_at`/`schedule_every`) | Persistent (`create_cron`/`update_cron`) |
+|---------|------------------------------------------|------------------------------------------|
+| Storage | `data/dynamic_crons.json` | `config/crons/{name}.yaml` |
+| Scheduling | One-time or interval-based | Standard cron expressions |
+| Lifecycle | Auto-cleaned after execution (one-time) | Permanent until deleted |
+| Restarts | Loaded from JSON on restart | Loaded from YAML on restart |
+| Use case | "Remind me in 10 minutes" | "Daily summary at 9am" |
+
+**Hot-Reload**: Changes are applied to the live scheduler immediately via `CronScheduler.reload_cron()`. No workspace restart required. If the scheduler is unavailable, changes are persisted to disk and take effect on next startup.
+
+**Name Validation**: Cron names must be lowercase alphanumeric with hyphens only (regex: `^[a-z0-9][a-z0-9-]*$`). Names become filenames (`{name}.yaml`), so path traversal is inherently prevented.
+
+**YAML Output Format** (matches `CronDefinition` schema):
+```yaml
+name: morning-check
+schedule: "0 7 * * *"
+enabled: true
+prompt: |
+  Check system health and report any issues.
+output:
+  channel: telegram
+  target_id: 8480590125
+  delivery: channel
+```
+
+**Configuration** (optional, in `agent.yaml` or global config):
+```yaml
+builtins:
+  cron_manager:
+    enabled: true
+```
+
+**Components**:
+- `CronManagerBuiltin` in `openpaw/builtins/tools/cron_manager.py` — tool implementation
+- `CronScheduler.reload_cron()` / `remove_cron()` in `openpaw/runtime/scheduling/cron.py` — hot-reload support
+- `CronManagerBuiltinConfig` in `openpaw/core/config/models.py` — typed config
+- Wired via `lifecycle.py._connect_cron_manager_to_scheduler()` (same pattern as CronTool)
+
 ### Web Browsing
 
 Agents can interact with websites via Playwright-based browser automation. The browser builtin provides accessibility tree snapshots where elements are numbered, allowing agents to reference elements by numeric ID instead of writing CSS selectors.
@@ -1009,6 +1062,55 @@ Missing dependencies are auto-installed at workspace startup.
 
 **Loading**: Tools are dynamically imported at workspace startup. The tool loader checks requirements.txt first, installs missing packages, then extracts all `BaseTool` instances from each Python file in the tools directory.
 
+### Skills System
+
+Workspaces can define reusable knowledge or behavioral patterns as skills. Each skill lives in its own subdirectory under `agent/skills/` and is defined by a `SKILL.md` file.
+
+**Directory Structure**:
+
+```
+agent/skills/
+├── research-patterns/
+│   └── SKILL.md
+├── code-review/
+│   └── SKILL.md
+└── _disabled-skill/     # Skipped (underscore prefix)
+    └── SKILL.md
+```
+
+**SKILL.md Format** — Optional YAML frontmatter followed by content:
+
+```markdown
+---
+name: research-patterns
+description: Patterns for conducting technical research across multiple sources
+version: "1.0"
+---
+
+# Research Patterns
+
+(full skill content — instructions, examples, templates)
+```
+
+**Frontmatter Fields**:
+- `name` — Skill display name (falls back to directory name if omitted)
+- `description` — Short description, truncated to 1024 chars (empty if omitted)
+- `version` — Optional, not used by the framework
+
+**Behavior**:
+- Skills are loaded at workspace startup by `WorkspaceLoader` via `load_workspace_skills()`
+- Full content is injected into the system prompt as a `<skills>` XML block between `</framework>` and `<workspace_context>`
+- Directories prefixed with `_` are skipped
+- If no frontmatter is present, the entire file becomes the content with directory name as the skill name
+- Invalid YAML frontmatter degrades gracefully (logged warning, falls back to directory name)
+- Empty or missing `agent/skills/` directory is silently ignored
+
+**Components**:
+- `SkillInfo` dataclass in `openpaw/model/skill.py` — pure data model (name, description, content, path)
+- `load_workspace_skills()` in `openpaw/workspace/skill_loader.py` — scans directories, parses frontmatter
+- `AgentWorkspace.skills` field in `openpaw/core/workspace.py` — stores loaded skills
+- `AgentWorkspace._build_skills_section()` — formats skills for system prompt injection
+
 ### Builtins System
 
 OpenPaw provides optional built-in capabilities that are conditionally available based on API keys. Builtins come in two types:
@@ -1017,6 +1119,7 @@ OpenPaw provides optional built-in capabilities that are conditionally available
 - `brave_search` - Web search via Brave API (requires `BRAVE_API_KEY`)
 - `elevenlabs` - Text-to-speech for voice responses (requires `ELEVENLABS_API_KEY`)
 - `cron` - Agent self-scheduling (no API key required, see "Dynamic Scheduling" section)
+- `cron_manager` - Persistent YAML cron management (no API key required, see "Persistent Cron Management" section)
 - `send_message` - Mid-execution messaging to keep users informed during long operations (no API key required)
 - `followup` - Self-continuation for multi-step autonomous workflows with depth limiting (no API key required)
 - `task_tracker` - Task management via TASKS.yaml for persistent cross-session work tracking (no API key required)
@@ -1040,6 +1143,7 @@ builtins/
 │   ├── brave_search.py
 │   ├── elevenlabs_tts.py
 │   ├── cron.py       # Agent self-scheduling
+│   ├── cron_manager.py  # Persistent YAML cron management (create/list/update/delete)
 │   ├── spawn.py      # Sub-agent spawning (spawn_agent, list, get_result, cancel)
 │   ├── browser.py    # Web automation with Playwright + accessibility tree
 │   ├── _channel_context.py # Shared contextvars for channel/session state
