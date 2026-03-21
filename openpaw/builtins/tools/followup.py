@@ -1,7 +1,7 @@
 """Agent self-continuation tool for multi-step autonomous workflows."""
 
-import contextvars
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,15 +24,6 @@ class FollowupRequest:
 
     prompt: str
     delay_seconds: int
-
-
-# Per-session context variables for thread-safe state isolation
-_pending_followup: contextvars.ContextVar[FollowupRequest | None] = contextvars.ContextVar(
-    '_pending_followup', default=None
-)
-_current_depth: contextvars.ContextVar[int] = contextvars.ContextVar(
-    '_current_depth', default=0
-)
 
 
 class RequestFollowupInput(BaseModel):
@@ -63,6 +54,10 @@ class FollowupTool(BaseBuiltinTool):
 
     This enables multi-step autonomous workflows where the agent can
     chain actions without requiring user intervention.
+
+    Uses instance attributes instead of contextvars because LangGraph's
+    astream() executes tools in child asyncio.Tasks whose contextvar
+    writes are not visible to the parent coroutine.
     """
 
     metadata = BuiltinMetadata(
@@ -77,6 +72,9 @@ class FollowupTool(BaseBuiltinTool):
     def __init__(self, config: dict[str, Any] | None = None):
         super().__init__(config)
         self._max_chain_depth = self.config.get("max_chain_depth", 5)
+        self._pending_followup: FollowupRequest | None = None
+        self._current_depth: int = 0
+        self._lock = threading.Lock()
 
     def get_pending_followup(self) -> FollowupRequest | None:
         """Get and clear the pending followup request.
@@ -86,18 +84,21 @@ class FollowupTool(BaseBuiltinTool):
         Returns:
             FollowupRequest if one was set, None otherwise.
         """
-        followup = _pending_followup.get()
-        _pending_followup.set(None)
-        return followup
+        with self._lock:
+            followup = self._pending_followup
+            self._pending_followup = None
+            return followup
 
     def set_chain_depth(self, depth: int) -> None:
         """Set current followup chain depth (0 = original invocation)."""
-        _current_depth.set(depth)
+        with self._lock:
+            self._current_depth = depth
 
     def reset(self) -> None:
         """Reset tool state between sessions."""
-        _pending_followup.set(None)
-        _current_depth.set(0)
+        with self._lock:
+            self._pending_followup = None
+            self._current_depth = 0
 
     def get_langchain_tool(self) -> Any:
         """Return the request_followup LangChain tool."""
@@ -122,27 +123,27 @@ class FollowupTool(BaseBuiltinTool):
             Returns:
                 Confirmation message.
             """
-            current_depth = _current_depth.get()
-            pending = _pending_followup.get()
+            with tool_instance._lock:
+                current_depth = tool_instance._current_depth
+                pending = tool_instance._pending_followup
 
-            if current_depth >= tool_instance._max_chain_depth:
-                return (
-                    f"Error: Maximum followup chain depth reached "
-                    f"({tool_instance._max_chain_depth}). "
-                    f"Use schedule_at for delayed actions instead."
+                if current_depth >= tool_instance._max_chain_depth:
+                    return (
+                        f"Error: Maximum followup chain depth reached "
+                        f"({tool_instance._max_chain_depth}). "
+                        f"Use schedule_at for delayed actions instead."
+                    )
+
+                if pending is not None:
+                    return (
+                        "Error: A followup is already pending for this invocation. "
+                        "Only one followup per response is allowed."
+                    )
+
+                tool_instance._pending_followup = FollowupRequest(
+                    prompt=prompt,
+                    delay_seconds=delay_seconds,
                 )
-
-            if pending is not None:
-                return (
-                    "Error: A followup is already pending for this invocation. "
-                    "Only one followup per response is allowed."
-                )
-
-            followup_request = FollowupRequest(
-                prompt=prompt,
-                delay_seconds=delay_seconds,
-            )
-            _pending_followup.set(followup_request)
 
             logger.info(
                 f"Followup requested (depth={current_depth}, "
