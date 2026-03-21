@@ -28,7 +28,8 @@ If you found items needing attention:
 - Update agent/HEARTBEAT.md with completed items
 - Update task statuses with progress notes
 
-If nothing requires immediate attention, respond exactly: HEARTBEAT_OK
+If nothing requires immediate attention, call acknowledge_event(reason) to suppress delivery.
+Fallback: if acknowledge_event is unavailable, respond exactly: HEARTBEAT_OK
 
 Do NOT repeat previously completed tasks or invent new ones.
 """,

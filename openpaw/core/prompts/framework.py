@@ -57,10 +57,13 @@ def build_framework_orientation(workspace_name: str) -> str:
 SECTION_HEARTBEAT = (
     "\n\n## Heartbeat System\n\n"
     "You receive periodic wake-up calls to check on ongoing work. Use these "
-    "heartbeats to review tasks, monitor long-running operations, and send "
-    "proactive updates. agent/HEARTBEAT.md is your scratchpad for things to check "
-    "on next time you wake up. If there's nothing requiring attention, respond "
-    "with exactly 'HEARTBEAT_OK' to avoid sending unnecessary messages."
+    "heartbeats to review tasks, monitor long-running operations, and take "
+    "proactive action. agent/HEARTBEAT.md is your scratchpad — write notes, "
+    "reminders, and items to check on next time you wake up. Update it as you "
+    "complete items.\n\n"
+    "During heartbeats you can do real work (run commands, update files, create "
+    "tasks) or flag items for the main agent. If nothing requires attention, "
+    "call `acknowledge_event(reason)` to suppress delivery."
 )
 
 # Task management - conditional on task_tracker builtin
