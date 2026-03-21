@@ -15,7 +15,11 @@ logger = logging.getLogger(__name__)
 REQUIREMENTS_FILE = "requirements.txt"
 
 
-def load_workspace_tools(tools_path: Path, auto_install: bool = True) -> list[BaseTool]:
+def load_workspace_tools(
+    tools_path: Path,
+    workspace_root: Path | None = None,
+    auto_install: bool = True,
+) -> list[BaseTool]:
     """Load LangChain tools from a workspace's tools/ directory.
 
     Dynamically imports Python files from the tools directory and collects
@@ -27,6 +31,9 @@ def load_workspace_tools(tools_path: Path, auto_install: bool = True) -> list[Ba
 
     Args:
         tools_path: Path to the workspace's tools/ directory.
+        workspace_root: Path to the workspace root directory. If not provided,
+            derived from tools_path using TOOLS_DIR depth. Exposed as the
+            OPENPAW_WORKSPACE_PATH environment variable for tools to use.
         auto_install: If True, automatically install missing dependencies
             from requirements.txt. If False, just warn about missing deps.
 
@@ -65,7 +72,13 @@ def load_workspace_tools(tools_path: Path, auto_install: bool = True) -> list[Ba
     # Tools capture this at import time via module-level constant.
     # NOTE: This relies on sequential workspace initialization. If parallel
     # workspace loading is introduced, switch to a factory/injection pattern.
-    workspace_root = tools_path.parent
+    if workspace_root is None:
+        # Derive from tools_path: tools are at {root}/agent/tools/
+        from openpaw.core.paths import TOOLS_DIR
+
+        workspace_root = tools_path
+        for _ in range(len(TOOLS_DIR.parts)):
+            workspace_root = workspace_root.parent
     os.environ["OPENPAW_WORKSPACE_PATH"] = str(workspace_root.resolve())
 
     for py_file in sorted(tools_path.glob("*.py")):
