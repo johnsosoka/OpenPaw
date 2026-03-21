@@ -439,12 +439,12 @@ class HeartbeatScheduler:
                 delivery = self.config.delivery
 
                 # Channel delivery
-                if delivery in ("channel", "both"):
+                if delivery == "channel":
                     await channel.send_message(session_key=session_key, content=response)
                     logger.info(f"Heartbeat notification sent to {self.config.target_channel}/{session_key}")
 
                 # Agent queue injection
-                if delivery in ("agent", "both") and self._result_callback and session_path:
+                elif delivery == "agent" and self._result_callback and session_path:
                     try:
                         # Build injection content with truncation
                         output = response
@@ -485,7 +485,7 @@ class HeartbeatScheduler:
             else:
                 # No routing configured (no target ID or unsupported channel)
                 delivery = self.config.delivery
-                if delivery in ("agent", "both") and self._result_callback:
+                if delivery == "agent" and self._result_callback:
                     logger.warning(
                         f"Heartbeat delivery configured for agent injection but no session_key available "
                         f"(workspace: {self.workspace_name}, delivery: {delivery})"

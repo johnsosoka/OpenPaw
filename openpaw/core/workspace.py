@@ -27,11 +27,13 @@ from openpaw.core.prompts.framework import (
     SECTION_SELF_SCHEDULING,
     SECTION_SHELL_HYGIENE,
     SECTION_SUB_AGENT_SPAWNING,
+    SECTION_SYSTEM_EVENTS,
     SECTION_TASK_MANAGEMENT,
     SECTION_WEB_BROWSING,
     SECTION_WORK_ETHIC,
     SECTION_WORKSPACE_FILESYSTEM,
     build_capability_summary,
+    build_cron_context,
     build_framework_orientation,
 )
 
@@ -261,6 +263,12 @@ class AgentWorkspace:
         if enabled_builtins is None or "cron" in enabled_builtins:
             sections.append(SECTION_SELF_SCHEDULING)
 
+        # Scheduled tasks context - include when workspace has configured crons
+        if self.crons:
+            cron_context = build_cron_context(self.crons)
+            if cron_context:
+                sections.append(cron_context)
+
         # Shell hygiene - include if shell tool is enabled
         if enabled_builtins is None or "shell" in enabled_builtins:
             sections.append(SECTION_SHELL_HYGIENE)
@@ -282,6 +290,23 @@ class AgentWorkspace:
         )
         if has_multiple_capabilities:
             sections.append(SECTION_AUTONOMOUS_PLANNING)
+
+        # System events - include when any system event source is active:
+        # spawn builtin (sub-agent completions), cron with delivery: agent,
+        # or heartbeat with delivery: agent
+        heartbeat_agent_delivery = (
+            self.config is not None
+            and self.config.heartbeat is not None
+            and self.config.heartbeat.delivery == "agent"
+        )
+        cron_agent_delivery = any(
+            cron.output.delivery == "agent"
+            for cron in self.crons
+            if cron.output is not None
+        )
+        has_spawn = enabled_builtins is None or "spawn" in enabled_builtins
+        if heartbeat_agent_delivery or cron_agent_delivery or has_spawn:
+            sections.append(SECTION_SYSTEM_EVENTS)
 
         # Memory search - include if memory_search is enabled
         if enabled_builtins is None or "memory_search" in enabled_builtins:

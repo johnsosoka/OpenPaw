@@ -392,12 +392,12 @@ class TestUpdateCron:
         """Updating delivery mode should be persisted to the output section."""
         self._write_cron(crons_dir)
         tool = _get_tool(builtin, "update_cron")
-        tool.invoke({"name": "existing-job", "delivery": "both"})
+        tool.invoke({"name": "existing-job", "delivery": "agent"})
 
         with (crons_dir / "existing-job.yaml").open() as f:
             data = yaml.safe_load(f)
 
-        assert data["output"]["delivery"] == "both"
+        assert data["output"]["delivery"] == "agent"
 
     def test_update_nonexistent_cron_returns_error(
         self, builtin: CronManagerBuiltin

@@ -283,6 +283,32 @@ SECTION_PLANNING = (
     "sessions, use create_task instead."
 )
 
+# System events - conditional on any system event source being active
+# (spawn builtin, cron with delivery: agent, or heartbeat with delivery: agent)
+SECTION_SYSTEM_EVENTS = (
+    "\n\n## System Events\n\n"
+    "You may receive `[SYSTEM]` messages from the framework. These are injected "
+    "by scheduled tasks (cron jobs, heartbeats) or background workers (sub-agents). "
+    "They are NOT from the user.\n\n"
+    "**Default behavior: silence.** Most system events are routine. Your default "
+    "response should be to call `acknowledge_event(reason)` to suppress message "
+    "delivery. Only message the user when the event contains something that "
+    "genuinely requires their attention or action.\n\n"
+    "**When you receive a system event:**\n"
+    "1. Read and process the information\n"
+    "2. Call `acknowledge_event(reason)` — this is the default. Use it when:\n"
+    "   - The result is routine (all checks passed, no issues found)\n"
+    "   - There is nothing the user needs to act on\n"
+    "   - You already reported this information to the user\n"
+    "3. Only respond normally (without calling `acknowledge_event`) when:\n"
+    "   - Something requires the user's attention or decision\n"
+    "   - An error, failure, or unexpected condition was detected\n"
+    "   - The user explicitly asked to be notified about this topic\n\n"
+    "Everything is still recorded in conversation history and logs regardless "
+    "of whether you acknowledge silently or respond. The tool only suppresses "
+    "channel delivery for system-originated events — it has no effect on user messages."
+)
+
 # Channel context - always included (group messages prepend recent history)
 SECTION_CHANNEL_CONTEXT = (
     "\n\n## Channel Context\n\n"
@@ -332,6 +358,44 @@ SECTION_CHANNEL_LOGS = (
     "`read_file('memory/logs/channel/server-name/channel-name/2026-03-07.jsonl')`\n\n"
     "Logs are read-only — the framework writes them, you read them."
 )
+
+
+SECTION_SCHEDULED_TASKS_HEADER = (
+    "\n\n## Scheduled Tasks\n\n"
+    "The following cron jobs are configured in your workspace. These run "
+    "automatically on their defined schedules. When a cron job uses "
+    "`delivery: agent`, you will receive its output as a [SYSTEM] event.\n\n"
+)
+
+
+def build_cron_context(crons: list) -> str:
+    """Build a summary of configured cron jobs for the framework prompt.
+
+    Args:
+        crons: List of CronDefinition objects from workspace config.
+
+    Returns:
+        Formatted cron context section, or empty string if no crons.
+    """
+    if not crons:
+        return ""
+
+    lines = [SECTION_SCHEDULED_TASKS_HEADER.strip(), ""]
+    for cron in crons:
+        status = "enabled" if cron.enabled else "disabled"
+        delivery = cron.output.delivery if cron.output else "channel"
+        lines.append(f"- **{cron.name}** (`{cron.schedule}`, {status}, delivery: {delivery})")
+        # Add first line of prompt as description
+        prompt_preview = cron.prompt.strip().split("\n")[0][:80]
+        lines.append(f"  {prompt_preview}")
+
+    lines.append("")
+    lines.append(
+        "Cron execution logs are at `data/cron_log.jsonl`. "
+        "Session details are at `memory/sessions/cron/`."
+    )
+
+    return "\n".join(lines)
 
 
 def build_capability_summary(enabled_builtins: list[str] | None) -> str:

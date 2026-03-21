@@ -153,6 +153,7 @@ class MessageProcessor:
         thread_id = self._session_manager.get_thread_id(session_key)
         followup_depth = 0
         max_followup_depth = 5
+        is_system_batch = self._is_system_event_batch(messages)
 
         # Check session TTL first — may rotate conversation before any further checks
         # TTL only applies to group sessions (not DMs)
@@ -257,7 +258,17 @@ class MessageProcessor:
 
                 # Send response if not steered
                 if not steered and channel:
-                    if response and response.strip():
+                    # Check for silent acknowledgment on system events
+                    ack_tool = self._builtin_loader.get_tool_instance("acknowledge")
+                    ack = ack_tool.get_pending_ack() if ack_tool else None
+
+                    if is_system_batch and ack:
+                        self._logger.info(
+                            f"System event acknowledged for {session_key}: {ack.reason} "
+                            f"(suppressing channel delivery, {len(response or '')} chars)"
+                        )
+                        self._session_manager.increment_message_count(session_key)
+                    elif response and response.strip():
                         resp_preview = response[:120].replace("\n", " ")
                         self._logger.info(
                             f"Sending response ({len(response)} chars): {resp_preview}..."
@@ -266,7 +277,9 @@ class MessageProcessor:
                         self._session_manager.increment_message_count(session_key)
                         await self._send_pending_audio(channel, session_key)
                     else:
-                        self._logger.warning(f"Agent produced empty response for {session_key}, sending fallback")
+                        self._logger.warning(
+                            f"Agent produced empty response for {session_key}, sending fallback"
+                        )
                         fallback = "I processed your message but my response was empty. Please try again."
                         await channel.send_message(session_key, fallback)
 
@@ -403,6 +416,30 @@ class MessageProcessor:
         followup_tool = self._builtin_loader.get_tool_instance("followup")
         if followup_tool:
             followup_tool.reset()
+
+        # Reset acknowledge state after loop exits
+        ack_tool = self._builtin_loader.get_tool_instance("acknowledge")
+        if ack_tool:
+            ack_tool.reset()
+
+    @staticmethod
+    def _is_system_event_batch(messages: list[Message]) -> bool:
+        """Check if all messages in the batch are system events.
+
+        System events have user_id == "system" and are injected by the
+        framework (cron results, heartbeat injections, sub-agent completions).
+        Only a system-only batch allows acknowledge_event to suppress delivery —
+        this prevents user messages from ever being silently swallowed.
+
+        Args:
+            messages: The message batch to inspect.
+
+        Returns:
+            True only if the list is non-empty and every message has user_id "system".
+        """
+        if not messages:
+            return False
+        return all(msg.user_id == "system" for msg in messages)
 
     @staticmethod
     def _is_group_session(messages: list[Message] | None) -> bool:
