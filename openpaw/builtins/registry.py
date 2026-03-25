@@ -146,6 +146,20 @@ class BuiltinRegistry:
         except ImportError as e:
             logger.debug(f"Channel history tool not available: {e}")
 
+        try:
+            from openpaw.builtins.tools.cron_manager import CronManagerBuiltin
+
+            self.register_tool(CronManagerBuiltin)
+        except ImportError as e:
+            logger.debug(f"Cron manager not available: {e}")
+
+        try:
+            from openpaw.builtins.tools.acknowledge import AcknowledgeTool
+
+            self.register_tool(AcknowledgeTool)
+        except ImportError as e:
+            logger.debug(f"Acknowledge tool not available: {e}")
+
         # Processors (sorted by metadata.priority in BuiltinLoader.load_processors)
         try:
             from openpaw.builtins.processors.file_persistence import FilePersistenceProcessor

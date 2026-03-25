@@ -18,6 +18,7 @@ from openpaw.core.paths import (
     USER_MD,
 )
 from openpaw.core.workspace import AgentWorkspace
+from openpaw.workspace.skill_loader import load_workspace_skills
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +84,10 @@ class WorkspaceLoader:
         skills_path = workspace_path / str(SKILLS_DIR)
         tools_path = workspace_path / str(TOOLS_DIR)
 
-        # Load optional workspace config and crons
+        # Load optional workspace config, crons, and skills
         workspace_config = self._load_workspace_config(workspace_path)
         crons = self._load_crons(workspace_path)
+        skills = load_workspace_skills(skills_path)
 
         return AgentWorkspace(
             name=workspace_name,
@@ -98,6 +100,7 @@ class WorkspaceLoader:
             tools_path=tools_path,
             config=workspace_config,
             crons=crons,
+            skills=skills,
         )
 
     def _read_file(self, path: Path) -> str:

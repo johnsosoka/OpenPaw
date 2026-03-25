@@ -1,5 +1,6 @@
 """APScheduler-based cron execution for OpenPaw."""
 
+import json
 import logging
 import time as time_module
 from collections.abc import Awaitable, Callable, Mapping
@@ -18,6 +19,7 @@ from openpaw.agent.session_logger import SessionLogger
 from openpaw.builtins.tools._channel_context import set_invocation_origin
 from openpaw.channels.base import ChannelAdapter
 from openpaw.core.config.models import CronDefinition, CronOutputConfig
+from openpaw.core.paths import CRON_LOG_JSONL
 from openpaw.core.prompts.system_events import (
     CRON_RESULT_TEMPLATE,
     CRON_RESULT_TRUNCATED_TEMPLATE,
@@ -115,6 +117,68 @@ class CronScheduler:
             self._scheduler.shutdown(wait=True)
             logger.info("Cron scheduler stopped")
 
+    def _log_cron_event(
+        self,
+        cron_name: str,
+        outcome: str,
+        duration_ms: float | None = None,
+        error: str | None = None,
+        input_tokens: int | None = None,
+        output_tokens: int | None = None,
+        total_tokens: int | None = None,
+        llm_calls: int | None = None,
+        session_path: str | None = None,
+        delivery: str | None = None,
+        tools_used: list[str] | None = None,
+    ) -> None:
+        """Append cron execution event to workspace JSONL log.
+
+        Args:
+            cron_name: Name of the cron job (or "dynamic_<id[:8]>" for dynamic tasks).
+            outcome: Execution outcome: "completed", "error", or "skipped".
+            duration_ms: Execution duration in milliseconds.
+            error: Error message if outcome is "error".
+            input_tokens: Input token count from the agent invocation.
+            output_tokens: Output token count from the agent invocation.
+            total_tokens: Total token count from the agent invocation.
+            llm_calls: Number of LLM calls made during execution.
+            session_path: Relative path to the session log file, if written.
+            delivery: Delivery mode used ("channel" or "agent").
+            tools_used: List of tool names invoked during execution.
+        """
+        log_path = self.workspace_path / str(CRON_LOG_JSONL)
+        event: dict[str, Any] = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "workspace": self._workspace_name,
+            "cron_name": cron_name,
+            "outcome": outcome,
+        }
+        if duration_ms is not None:
+            event["duration_ms"] = round(duration_ms, 1)
+        if error:
+            event["error"] = error
+        if input_tokens is not None:
+            event["input_tokens"] = input_tokens
+        if output_tokens is not None:
+            event["output_tokens"] = output_tokens
+        if total_tokens is not None:
+            event["total_tokens"] = total_tokens
+        if llm_calls is not None:
+            event["llm_calls"] = llm_calls
+        if session_path:
+            event["session_path"] = session_path
+        if delivery:
+            event["delivery"] = delivery
+        if tools_used:
+            event["tools_used"] = tools_used
+
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with log_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(event) + "\n")
+        except OSError as e:
+            logger.warning(f"Failed to write cron log: {e}")
+
     async def _execute_cron(self, cron: CronDefinition) -> None:
         """Execute a cron job.
 
@@ -155,7 +219,7 @@ class CronScheduler:
             delivery = cron.output.delivery
 
             # Channel delivery
-            if delivery in ("channel", "both"):
+            if delivery == "channel":
                 channel = self.channels.get(cron.output.channel)
                 if not channel:
                     logger.error(f"Channel not found for cron {cron.name}: {cron.output.channel}")
@@ -167,7 +231,7 @@ class CronScheduler:
                         logger.warning(f"Unsupported output config for cron {cron.name}: {cron.output}")
 
             # Agent queue injection
-            if delivery in ("agent", "both") and self._result_callback and session_path:
+            elif delivery == "agent" and self._result_callback and session_path:
                 try:
                     channel = self.channels.get(cron.output.channel)
                     session_key = self._resolve_session_key(channel, cron.output) if channel else None
@@ -188,18 +252,37 @@ class CronScheduler:
                     logger.warning(f"Failed to inject cron result for {cron.name}: {e}")
 
             # Log token usage for cron invocation
-            if self._token_logger and self._workspace_name and agent_runner.last_metrics:
+            metrics = agent_runner.last_metrics
+            if self._token_logger and self._workspace_name and metrics:
                 self._token_logger.log(
-                    metrics=agent_runner.last_metrics,
+                    metrics=metrics,
                     workspace=self._workspace_name,
                     invocation_type="cron",
                     session_key=None,
                 )
 
+            self._log_cron_event(
+                cron_name=cron.name,
+                outcome="completed",
+                duration_ms=duration_ms,
+                input_tokens=metrics.input_tokens if metrics else None,
+                output_tokens=metrics.output_tokens if metrics else None,
+                total_tokens=metrics.total_tokens if metrics else None,
+                llm_calls=metrics.llm_calls if metrics else None,
+                session_path=session_path,
+                delivery=delivery,
+                tools_used=agent_runner.last_tools_used or None,
+            )
+
             logger.info(f"Cron job {cron.name} completed successfully")
 
         except Exception as e:
             logger.error(f"Failed to execute cron job {cron.name}: {e}", exc_info=True)
+            self._log_cron_event(
+                cron_name=cron.name,
+                outcome="error",
+                error=str(e),
+            )
         finally:
             self._running_jobs.discard(job_id)
             set_invocation_origin(None)
@@ -261,6 +344,42 @@ class CronScheduler:
             del self._jobs[name]
             logger.info(f"Removed cron job: {name}")
 
+    def reload_cron(self, cron_def: CronDefinition) -> None:
+        """Remove the old job (if present) and re-add it from the updated definition.
+
+        Used by CronManagerBuiltin to apply in-place changes to YAML cron jobs
+        without requiring a workspace restart.
+
+        If the definition has ``enabled=False``, the job is removed and not
+        re-added, effectively pausing it.
+
+        Args:
+            cron_def: Updated cron definition to register.
+        """
+        if cron_def.name in self._jobs:
+            self.remove_job(cron_def.name)
+
+        if cron_def.enabled:
+            self.add_job(cron_def)
+            logger.info(f"Reloaded cron job: {cron_def.name} ({cron_def.schedule})")
+        else:
+            logger.info(f"Cron job '{cron_def.name}' is disabled — skipped re-registration")
+
+    def remove_cron(self, name: str) -> None:
+        """Remove a YAML-defined cron job from the live scheduler.
+
+        Public wrapper around :meth:`remove_job` for use by CronManagerBuiltin.
+        Silently does nothing if the job is not currently registered (e.g., it
+        was disabled and never added to the APScheduler instance) or if the
+        scheduler has not been started yet.
+
+        Args:
+            name: The cron job name to remove.
+        """
+        if not self._scheduler or name not in self._jobs:
+            return
+        self.remove_job(name)
+
     def add_dynamic_job(self, task: DynamicCronTask) -> None:
         """Add a dynamic task to the scheduler.
 
@@ -293,8 +412,12 @@ class CronScheduler:
     def remove_dynamic_job(self, task_id: str) -> bool:
         """Remove a dynamic task from the scheduler.
 
+        Note: This method expects a full UUID (used internally). For prefix-based
+        cancellation, use the CronTool's cancel_scheduled which resolves prefixes
+        via DynamicCronStore before calling _remove_from_live_scheduler.
+
         Args:
-            task_id: Unique task ID to remove.
+            task_id: Full UUID of the task to remove.
 
         Returns:
             True if removed, False if not found.
@@ -362,9 +485,10 @@ class CronScheduler:
                     logger.warning(f"Failed to write session log for dynamic task {task.id}: {e}")
 
             # Log token usage for dynamic cron invocation
-            if self._token_logger and self._workspace_name and agent_runner.last_metrics:
+            dyn_metrics = agent_runner.last_metrics
+            if self._token_logger and self._workspace_name and dyn_metrics:
                 self._token_logger.log(
-                    metrics=agent_runner.last_metrics,
+                    metrics=dyn_metrics,
                     workspace=self._workspace_name,
                     invocation_type="cron",
                     session_key=None,
@@ -419,10 +543,27 @@ class CronScheduler:
                 except Exception as e:
                     logger.warning(f"Failed to inject dynamic task result for {task.id}: {e}")
 
+            self._log_cron_event(
+                cron_name=f"dynamic_{task.id[:8]}",
+                outcome="completed",
+                duration_ms=duration_ms,
+                input_tokens=dyn_metrics.input_tokens if dyn_metrics else None,
+                output_tokens=dyn_metrics.output_tokens if dyn_metrics else None,
+                total_tokens=dyn_metrics.total_tokens if dyn_metrics else None,
+                llm_calls=dyn_metrics.llm_calls if dyn_metrics else None,
+                session_path=session_path,
+                tools_used=agent_runner.last_tools_used or None,
+            )
+
             logger.info(f"Dynamic task {task.id} completed successfully")
 
         except Exception as e:
             logger.error(f"Dynamic task {task.id} failed: {e}", exc_info=True)
+            self._log_cron_event(
+                cron_name=f"dynamic_{task.id[:8]}",
+                outcome="error",
+                error=str(e),
+            )
         finally:
             self._running_jobs.discard(job_id)
             set_invocation_origin(None)

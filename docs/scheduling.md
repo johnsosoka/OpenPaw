@@ -42,7 +42,7 @@ prompt: |
 output:
   channel: telegram
   chat_id: 123456789
-  delivery: channel  # channel (default), agent, or both
+  delivery: channel  # channel (default) or agent
 ```
 
 #### Field Reference
@@ -55,7 +55,7 @@ output:
 | `prompt` | Yes | The prompt sent to the agent at execution time |
 | `output.channel` | Yes | Channel type to deliver output to |
 | `output.chat_id` | Yes | Channel-specific destination (e.g., Telegram user or group ID) |
-| `output.delivery` | No | Where to send results: `channel` (default), `agent`, or `both` |
+| `output.delivery` | No | Where to send results: `channel` (default) or `agent` |
 
 Both `.yaml` and `.yml` file extensions are supported.
 
@@ -91,7 +91,9 @@ The `delivery` field controls where cron results go:
 
 - **`channel`** (default) — Sends the agent's response directly to the configured channel
 - **`agent`** — Injects the cron output into the main agent's message queue as a `[SYSTEM]` event. The main agent receives a notification with the session log path so it can read the full output.
-- **`both`** — Sends to channel AND injects into the agent queue
+
+!!! note "The `both` option was removed"
+    Previous versions supported `delivery: both`. Use `delivery: channel` for direct output, or `delivery: agent` to inject results into the main agent's queue as a `[SYSTEM]` event. When using `agent` delivery, the main agent can call `acknowledge_event` to silently acknowledge routine results without messaging the user.
 
 ```yaml
 # Route output to the main agent instead of the channel
@@ -360,7 +362,7 @@ heartbeat:
   interval_minutes: 30           # How often to check in
   active_hours: "09:00-17:00"    # Only fire during these hours (workspace timezone)
   suppress_ok: true              # Suppress output when nothing to report
-  delivery: channel              # channel (default), agent, or both
+  delivery: channel              # channel (default) or agent
   output:
     channel: telegram
     chat_id: 123456789
@@ -374,7 +376,7 @@ heartbeat:
 | `interval_minutes` | Yes | How often to fire (in minutes) |
 | `active_hours` | No | Time window to fire within, e.g. `"09:00-17:00"` (workspace timezone) |
 | `suppress_ok` | No | When `true`, suppress output if the agent responds `HEARTBEAT_OK` |
-| `delivery` | No | Where to send results: `channel` (default), `agent`, or `both` |
+| `delivery` | No | Where to send results: `channel` (default) or `agent` |
 | `output.channel` | Yes | Channel type to deliver output to |
 | `output.chat_id` | Yes | Channel-specific destination |
 
@@ -452,7 +454,9 @@ The `delivery` field controls where heartbeat results go:
 
 - **`channel`** (default) — Sends the agent's response directly to the configured channel
 - **`agent`** — Injects the heartbeat output into the main agent's message queue as a `[SYSTEM]` event, with a reference to the full session log file
-- **`both`** — Sends to channel AND injects into the agent queue
+
+!!! note "The `both` option was removed"
+    Previous versions supported `delivery: both`. Use `delivery: channel` for direct output, or `delivery: agent` to inject results into the main agent's queue as a `[SYSTEM]` event. When using `agent` delivery, the main agent can call `acknowledge_event` to silently acknowledge routine results without messaging the user.
 
 ```yaml
 # Deliver heartbeat output to the main agent's queue
@@ -463,7 +467,7 @@ heartbeat:
     chat_id: 123456789
 ```
 
-When using `agent` or `both` delivery, the injected message includes the session log path so the main agent can call `read_file()` to access the full heartbeat output.
+When using `agent` delivery, the injected message includes the session log path so the main agent can call `read_file()` to access the full heartbeat output.
 
 ### Heartbeat Execution Model
 
@@ -573,7 +577,7 @@ prompt: |
   If everything is normal, do not send a message.
 ```
 
-For heartbeats, the `HEARTBEAT_OK` protocol handles this automatically when `suppress_ok: true`.
+For heartbeats, the `HEARTBEAT_OK` protocol handles this automatically when `suppress_ok: true`. When using `delivery: agent`, the main agent can call `acknowledge_event` to suppress channel delivery for routine injections without needing `HEARTBEAT_OK`.
 
 ### Use filesystem for shared state
 

@@ -182,6 +182,14 @@ class CronBuiltinConfig(BuiltinItemConfig):
     )
 
 
+class CronManagerBuiltinConfig(BuiltinItemConfig):
+    """Configuration for the persistent cron management builtin."""
+
+
+class AcknowledgeBuiltinConfig(BuiltinItemConfig):
+    """Configuration for the acknowledge_event tool."""
+
+
 class SendFileBuiltinConfig(BuiltinItemConfig):
     """Configuration for the send_file tool."""
 
@@ -291,6 +299,8 @@ class BuiltinsConfig(BaseModel):
     elevenlabs: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
     shell: BuiltinItemConfig = Field(default_factory=BuiltinItemConfig)
     cron: CronBuiltinConfig = Field(default_factory=CronBuiltinConfig)
+    cron_manager: CronManagerBuiltinConfig = Field(default_factory=CronManagerBuiltinConfig)
+    acknowledge: AcknowledgeBuiltinConfig = Field(default_factory=AcknowledgeBuiltinConfig)
     send_file: SendFileBuiltinConfig = Field(default_factory=SendFileBuiltinConfig)
     docling: DoclingBuiltinConfig = Field(default_factory=DoclingBuiltinConfig)
     browser: BrowserBuiltinConfig = Field(default_factory=BrowserBuiltinConfig)
@@ -320,6 +330,8 @@ class WorkspaceBuiltinsConfig(BaseModel):
     elevenlabs: BuiltinItemConfig | None = None
     shell: BuiltinItemConfig | None = None
     cron: CronBuiltinConfig | None = None
+    cron_manager: CronManagerBuiltinConfig | None = None
+    acknowledge: AcknowledgeBuiltinConfig | None = None
     send_file: SendFileBuiltinConfig | None = None
     docling: DoclingBuiltinConfig | None = None
     browser: BrowserBuiltinConfig | None = None
@@ -352,10 +364,22 @@ class HeartbeatConfig(BaseModel):
     target_id: int | None = Field(default=None, description="Target ID for output routing (preferred)")
     target_chat_id: int | None = Field(default=None, description="Telegram chat ID (deprecated, use target_id)")
     target_channel_id: int | None = Field(default=None, description="Discord channel ID (deprecated, use target_id)")
-    delivery: Literal["channel", "agent", "both"] = Field(
+    delivery: Literal["channel", "agent"] = Field(
         default="channel",
-        description="Where to deliver results: channel (direct), agent (queue injection), both",
+        description="Where to deliver results: channel (direct) or agent (queue injection)",
     )
+
+    @field_validator("delivery", mode="before")
+    @classmethod
+    def validate_delivery(cls, v: str) -> str:
+        """Validate delivery mode and reject removed 'both' option."""
+        if v == "both":
+            raise ValueError(
+                "delivery: 'both' has been removed. Use 'agent' to have the main agent "
+                "process heartbeat results (it can use acknowledge_event to suppress "
+                "routine output), or 'channel' for direct delivery."
+            )
+        return v
 
 
 class ToolApprovalConfig(BaseModel):
@@ -469,18 +493,21 @@ class CronOutputConfig(BaseModel):
     chat_id: int | None = Field(default=None, description="Telegram chat ID (deprecated, use target_id)")
     guild_id: int | None = Field(default=None, description="Discord guild ID")
     channel_id: int | None = Field(default=None, description="Discord channel ID (deprecated, use target_id)")
-    delivery: str = Field(
+    delivery: Literal["channel", "agent"] = Field(
         default="channel",
-        description="Delivery mode: channel, agent, or both",
+        description="Delivery mode: channel (direct) or agent (queue injection)",
     )
 
-    @field_validator("delivery")
+    @field_validator("delivery", mode="before")
     @classmethod
     def validate_delivery(cls, v: str) -> str:
-        """Validate delivery mode is one of the allowed values."""
-        allowed = {"channel", "agent", "both"}
-        if v not in allowed:
-            raise ValueError(f"Invalid delivery mode '{v}'. Must be one of: {allowed}")
+        """Validate delivery mode and reject removed 'both' option."""
+        if v == "both":
+            raise ValueError(
+                "delivery: 'both' has been removed. Use 'agent' to have the main agent "
+                "process cron results (it can use acknowledge_event to suppress routine "
+                "output), or 'channel' for direct delivery."
+            )
         return v
 
 

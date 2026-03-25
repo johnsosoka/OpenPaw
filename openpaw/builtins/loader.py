@@ -186,6 +186,18 @@ class BuiltinLoader:
             if user_aliases:
                 config["user_aliases"] = user_aliases
 
+        # Inject channel routing config for cron_manager tool
+        if name == "cron_manager":
+            if self.workspace_path:
+                from openpaw.core.paths import CRONS_DIR
+                config["crons_dir"] = str(self.workspace_path / str(CRONS_DIR))
+            if self.channel_config:
+                channel_type = self.channel_config.get("type", "telegram")
+                config["default_channel"] = channel_type
+                allowed_users = self.channel_config.get("allowed_users", [])
+                if allowed_users:
+                    config["default_target_id"] = allowed_users[0]
+
         # Inject channel routing config for send_message tool
         if name == "send_message" and self.channel_config:
             channel_type = self.channel_config.get("type", "telegram")

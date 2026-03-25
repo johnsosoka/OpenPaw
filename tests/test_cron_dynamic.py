@@ -179,7 +179,7 @@ class TestDynamicCronStore:
         assert tasks[1].id == "task-2"
 
     def test_remove_task(self, tmp_path: Any) -> None:
-        """Test removing a task by ID."""
+        """Test removing a task by full ID returns the resolved UUID."""
         store = DynamicCronStore(tmp_path)
 
         task = DynamicCronTask(
@@ -193,18 +193,112 @@ class TestDynamicCronStore:
         store.add_task(task)
         assert len(store.list_tasks()) == 1
 
-        success = store.remove_task("removable")
+        full_id = store.remove_task("removable")
 
-        assert success is True
+        assert full_id == "removable"
         assert len(store.list_tasks()) == 0
 
     def test_remove_nonexistent_task(self, tmp_path: Any) -> None:
-        """Test removing a task that doesn't exist returns False."""
+        """Test removing a task that doesn't exist returns None."""
         store = DynamicCronStore(tmp_path)
 
-        success = store.remove_task("nonexistent-id")
+        result = store.remove_task("nonexistent-id")
 
-        assert success is False
+        assert result is None
+
+    def test_remove_task_by_prefix(self, tmp_path: Any) -> None:
+        """Test removing a task using its 8-character ID prefix."""
+        store = DynamicCronStore(tmp_path)
+
+        # Use a well-known UUID so the prefix is deterministic
+        known_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        task = DynamicCronTask(
+            id=known_uuid,
+            task_type="once",
+            prompt="Remove via prefix",
+            created_at=datetime.now(UTC),
+            run_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+        store.add_task(task)
+        assert len(store.list_tasks()) == 1
+
+        # Remove using the 8-character prefix shown by list_scheduled()
+        full_id = store.remove_task(known_uuid[:8])
+
+        assert full_id == known_uuid
+        assert len(store.list_tasks()) == 0
+
+    def test_get_task_by_prefix(self, tmp_path: Any) -> None:
+        """Test retrieving a task using its 8-character ID prefix."""
+        store = DynamicCronStore(tmp_path)
+
+        known_uuid = "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+        task = DynamicCronTask(
+            id=known_uuid,
+            task_type="interval",
+            prompt="Find via prefix",
+            created_at=datetime.now(UTC),
+            interval_seconds=300,
+            next_run=datetime.now(UTC) + timedelta(minutes=5),
+        )
+        store.add_task(task)
+
+        retrieved = store.get_task(known_uuid[:8])
+
+        assert retrieved is not None
+        assert retrieved.id == known_uuid
+        assert retrieved.prompt == "Find via prefix"
+
+    def test_remove_task_ambiguous_prefix(self, tmp_path: Any) -> None:
+        """Test that an ambiguous prefix raises ValueError."""
+        store = DynamicCronStore(tmp_path)
+
+        # Two UUIDs that share the same first 8 characters
+        shared_prefix = "ffffffff"
+        task1 = DynamicCronTask(
+            id=f"{shared_prefix}-0000-0000-0000-000000000001",
+            task_type="once",
+            prompt="First task",
+            created_at=datetime.now(UTC),
+            run_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+        task2 = DynamicCronTask(
+            id=f"{shared_prefix}-0000-0000-0000-000000000002",
+            task_type="once",
+            prompt="Second task",
+            created_at=datetime.now(UTC),
+            run_at=datetime.now(UTC) + timedelta(hours=2),
+        )
+        store.add_task(task1)
+        store.add_task(task2)
+
+        with pytest.raises(ValueError, match="Ambiguous task ID prefix"):
+            store.remove_task(shared_prefix)
+
+    def test_get_task_ambiguous_prefix(self, tmp_path: Any) -> None:
+        """Test that get_task with ambiguous prefix raises ValueError."""
+        store = DynamicCronStore(tmp_path)
+
+        shared_prefix = "eeeeeeee"
+        task1 = DynamicCronTask(
+            id=f"{shared_prefix}-0000-0000-0000-000000000001",
+            task_type="once",
+            prompt="First task",
+            created_at=datetime.now(UTC),
+            run_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+        task2 = DynamicCronTask(
+            id=f"{shared_prefix}-0000-0000-0000-000000000002",
+            task_type="once",
+            prompt="Second task",
+            created_at=datetime.now(UTC),
+            run_at=datetime.now(UTC) + timedelta(hours=2),
+        )
+        store.add_task(task1)
+        store.add_task(task2)
+
+        with pytest.raises(ValueError, match="Ambiguous task ID prefix"):
+            store.get_task(shared_prefix)
 
     def test_get_task_by_id(self, tmp_path: Any) -> None:
         """Test retrieving a specific task by ID."""
@@ -655,6 +749,40 @@ class TestCronToolBuiltin:
 
         assert "[Error:" in result
         assert "not found" in result
+
+    @pytest.mark.asyncio
+    async def test_cancel_scheduled_by_prefix(self, tmp_path: Any) -> None:
+        """Test cancel_scheduled succeeds when given an 8-character prefix ID.
+
+        This is the real-world scenario: the agent calls list_scheduled() and
+        sees short IDs like [a1b2c3d4], then passes that prefix to
+        cancel_scheduled(). Without prefix matching the cancellation silently
+        fails because the store does exact UUID comparison.
+        """
+        config = {"workspace_path": str(tmp_path)}
+        tool = CronToolBuiltin(config)
+        tools = tool.get_langchain_tool()
+        cancel_tool = next(t for t in tools if t.name == "cancel_scheduled")
+
+        # Add a task with a known UUID
+        known_uuid = "c3d4e5f6-a7b8-9012-cdef-123456789012"
+        future_time = datetime.now(UTC) + timedelta(hours=1)
+        task = DynamicCronTask(
+            id=known_uuid,
+            task_type="once",
+            prompt="Cancel me by prefix",
+            created_at=datetime.now(UTC),
+            run_at=future_time,
+        )
+        tool.store.add_task(task)
+        assert len(tool.store.list_tasks()) == 1
+
+        # Cancel using only the 8-char prefix (as the agent would, from list_scheduled)
+        result = await cancel_tool.ainvoke({"task_id": known_uuid[:8]})
+
+        assert "Successfully cancelled" in result
+        assert known_uuid in result  # confirmation should echo the full UUID
+        assert len(tool.store.list_tasks()) == 0
 
     @pytest.mark.asyncio
     async def test_max_tasks_limit_enforced(self, tmp_path: Any) -> None:
