@@ -52,6 +52,7 @@ class HeartbeatScheduler:
         token_logger: Any | None = None,
         result_callback: Callable[[str, str], Awaitable[None]] | None = None,
         session_logger: SessionLogger | None = None,
+        ack_tool: Any | None = None,
     ):
         """Initialize the heartbeat scheduler.
 
@@ -65,6 +66,9 @@ class HeartbeatScheduler:
             token_logger: Optional TokenUsageLogger for logging token metrics.
             result_callback: Optional callback for queue injection of results.
             session_logger: Optional SessionLogger for writing session logs.
+            ack_tool: Optional AcknowledgeTool instance for unified silence. When the
+                heartbeat agent calls acknowledge_event(), this takes precedence over
+                the HEARTBEAT_OK magic string.
         """
         self.workspace_name = workspace_name
         self.workspace_path = workspace_path
@@ -75,6 +79,7 @@ class HeartbeatScheduler:
         self._token_logger = token_logger
         self._result_callback = result_callback
         self._session_logger = session_logger
+        self._ack_tool = ack_tool
         self._scheduler: AsyncIOScheduler | None = None
         self._job: Any = None
 
@@ -379,6 +384,34 @@ class HeartbeatScheduler:
                 except Exception as e:
                     logger.warning(f"Failed to write heartbeat session log: {e}")
 
+            # Check for acknowledge_event tool call (takes precedence over HEARTBEAT_OK)
+            if self._ack_tool:
+                ack = self._ack_tool.get_pending_ack()
+                if ack:
+                    logger.info(
+                        f"Heartbeat acknowledged for '{self.workspace_name}': {ack.reason}"
+                    )
+                    self._record_heartbeat_event(
+                        "acknowledged",
+                        reason=ack.reason,
+                        duration_ms=duration_ms,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        total_tokens=total_tokens,
+                        llm_calls=llm_calls,
+                        task_count=task_count,
+                        response=response,
+                        tools_used=tools_used,
+                    )
+                    if self._token_logger and metrics:
+                        self._token_logger.log(
+                            metrics=metrics,
+                            workspace=self.workspace_name,
+                            invocation_type="heartbeat",
+                            session_key=None,
+                        )
+                    return
+
             if self.config.suppress_ok and self._is_heartbeat_ok(response):
                 logger.debug(f"Heartbeat OK for workspace: {self.workspace_name} (suppressed)")
                 self._record_heartbeat_event(
@@ -439,12 +472,12 @@ class HeartbeatScheduler:
                 delivery = self.config.delivery
 
                 # Channel delivery
-                if delivery in ("channel", "both"):
+                if delivery == "channel":
                     await channel.send_message(session_key=session_key, content=response)
                     logger.info(f"Heartbeat notification sent to {self.config.target_channel}/{session_key}")
 
                 # Agent queue injection
-                if delivery in ("agent", "both") and self._result_callback and session_path:
+                elif delivery == "agent" and self._result_callback and session_path:
                     try:
                         # Build injection content with truncation
                         output = response
@@ -485,7 +518,7 @@ class HeartbeatScheduler:
             else:
                 # No routing configured (no target ID or unsupported channel)
                 delivery = self.config.delivery
-                if delivery in ("agent", "both") and self._result_callback:
+                if delivery == "agent" and self._result_callback:
                     logger.warning(
                         f"Heartbeat delivery configured for agent injection but no session_key available "
                         f"(workspace: {self.workspace_name}, delivery: {delivery})"
@@ -530,3 +563,8 @@ class HeartbeatScheduler:
                 duration_ms=duration_ms,
                 task_count=task_count,
             )
+        finally:
+            # Clear any stale acknowledge state so a failed run cannot bleed
+            # into the next heartbeat cycle.
+            if self._ack_tool:
+                self._ack_tool.reset()

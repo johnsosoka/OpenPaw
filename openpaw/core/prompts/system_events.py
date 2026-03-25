@@ -102,7 +102,7 @@ HEARTBEAT_RESULT_TEMPLATE = PromptTemplate(
         "[SYSTEM] Heartbeat completed.\n\n"
         "{output}\n\n"
         "Full session log: {session_path}\n"
-        "Review and take action if needed."
+        "Call acknowledge_event(reason) if this is routine and the user does not need to be notified."
     ),
     input_variables=["output", "session_path"],
 )
@@ -113,7 +113,8 @@ HEARTBEAT_RESULT_TRUNCATED_TEMPLATE = PromptTemplate(
         "[SYSTEM] Heartbeat completed (truncated).\n\n"
         "{output}\n\n"
         "Full session log: {session_path}\n"
-        'Use read_file("{session_path}") for full context.'
+        'Use read_file("{session_path}") for full context.\n'
+        "Call acknowledge_event(reason) if this is routine and the user does not need to be notified."
     ),
     input_variables=["output", "session_path"],
 )
@@ -124,7 +125,7 @@ CRON_RESULT_TEMPLATE = PromptTemplate(
         "[SYSTEM] Scheduled task '{cron_name}' completed.\n\n"
         "{output}\n\n"
         "Full session log: {session_path}\n"
-        "Review and take action if needed."
+        "Call acknowledge_event(reason) if this is routine and the user does not need to be notified."
     ),
     input_variables=["cron_name", "output", "session_path"],
 )
@@ -135,7 +136,8 @@ CRON_RESULT_TRUNCATED_TEMPLATE = PromptTemplate(
         "[SYSTEM] Scheduled task '{cron_name}' completed (truncated).\n\n"
         "{output}\n\n"
         "Full session log: {session_path}\n"
-        'Use read_file("{session_path}") for full context.'
+        'Use read_file("{session_path}") for full context.\n'
+        "Call acknowledge_event(reason) if this is routine and the user does not need to be notified."
     ),
     input_variables=["cron_name", "output", "session_path"],
 )

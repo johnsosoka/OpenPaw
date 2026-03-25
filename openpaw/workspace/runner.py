@@ -254,7 +254,9 @@ class WorkspaceRunner:
                 f"Loaded {len(self._processors)} builtin processors for workspace: {self.workspace_name}"
             )
 
-        self._workspace_tools = load_workspace_tools(self._workspace.tools_path)
+        self._workspace_tools = load_workspace_tools(
+            self._workspace.tools_path, workspace_root=self._workspace.path
+        )
         if self._workspace_tools:
             tool_names = [t.name for t in self._workspace_tools]
             self.logger.info(f"Loaded {len(self._workspace_tools)} workspace tools: {tool_names}")

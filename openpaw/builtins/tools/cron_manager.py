@@ -58,8 +58,8 @@ class CreateCronInput(BaseModel):
     delivery: str = Field(
         default="channel",
         description=(
-            "Where to deliver results: 'channel' (send to user), "
-            "'agent' (inject into main agent queue), or 'both'."
+            "Where to deliver results: 'channel' (send to user) "
+            "or 'agent' (inject into main agent queue)."
         ),
     )
 
@@ -88,7 +88,7 @@ class UpdateCronInput(BaseModel):
     delivery: str | None = Field(
         default=None,
         description=(
-            "New delivery mode: 'channel', 'agent', or 'both'. "
+            "New delivery mode: 'channel' or 'agent'. "
             "Leave unset to keep the current delivery mode."
         ),
     )
@@ -200,7 +200,7 @@ class CronManagerBuiltin(BaseBuiltinTool):
 
     def _validate_delivery(self, delivery: str) -> str | None:
         """Return an error message if the delivery mode is invalid, otherwise None."""
-        allowed = {"channel", "agent", "both"}
+        allowed = {"channel", "agent"}
         if delivery not in allowed:
             return f"Invalid delivery mode '{delivery}'. Must be one of: {allowed}"
         return None
@@ -303,7 +303,7 @@ class CronManagerBuiltin(BaseBuiltinTool):
                 schedule: Standard cron expression (e.g., '0 9 * * *').
                 prompt: Instruction executed by the agent when the cron fires.
                 enabled: Whether the job starts active (default: True).
-                delivery: Output routing mode (channel/agent/both).
+                delivery: Output routing mode (channel/agent).
 
             Returns:
                 Confirmation message or error string.

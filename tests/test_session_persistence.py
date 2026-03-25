@@ -212,15 +212,20 @@ class TestConfigModels:
         assert config.delivery == "channel"
 
     def test_heartbeat_config_delivery_values(self):
-        """Test 'channel', 'agent', 'both' all valid."""
+        """Test 'channel' and 'agent' are valid; 'both' is rejected."""
         config1 = HeartbeatConfig(delivery="channel")
         assert config1.delivery == "channel"
 
         config2 = HeartbeatConfig(delivery="agent")
         assert config2.delivery == "agent"
 
-        config3 = HeartbeatConfig(delivery="both")
-        assert config3.delivery == "both"
+    def test_heartbeat_config_delivery_both_rejected(self):
+        """delivery='both' raises ValidationError with migration message."""
+        with pytest.raises(ValidationError) as exc_info:
+            HeartbeatConfig(delivery="both")
+
+        error_text = str(exc_info.value)
+        assert "delivery: 'both' has been removed" in error_text
 
     def test_cron_output_delivery_default(self):
         """Verify default is 'channel'."""
@@ -229,10 +234,16 @@ class TestConfigModels:
 
     def test_cron_output_delivery_validator(self):
         """Verify 'invalid' raises ValidationError."""
-        with pytest.raises(ValidationError) as exc_info:
+        with pytest.raises(ValidationError):
             CronOutputConfig(channel="telegram", chat_id=123, delivery="invalid")
 
-        assert "Invalid delivery mode" in str(exc_info.value)
+    def test_cron_output_delivery_both_rejected(self):
+        """delivery='both' raises ValidationError with migration message."""
+        with pytest.raises(ValidationError) as exc_info:
+            CronOutputConfig(channel="telegram", chat_id=123, delivery="both")
+
+        error_text = str(exc_info.value)
+        assert "delivery: 'both' has been removed" in error_text
 
 
 # --- System Event Template Tests ---
@@ -249,7 +260,7 @@ class TestSystemEventTemplates:
         assert "[SYSTEM] Heartbeat completed." in result
         assert "Test output" in result
         assert "memory/sessions/heartbeat/test.jsonl" in result
-        assert "Review and take action if needed." in result
+        assert "acknowledge_event" in result
 
     def test_heartbeat_result_truncated_template_format(self):
         """Verify truncated template includes read_file hint."""
@@ -395,14 +406,14 @@ class TestHeartbeatDeliveryRouting:
         assert "Test response" in call_args[1]
 
     @pytest.mark.asyncio
-    async def test_heartbeat_delivery_both(self, workspace, mock_agent_runner, mock_channel):
-        """delivery='both': both called."""
+    async def test_heartbeat_delivery_agent(self, workspace, mock_agent_runner, mock_channel):
+        """delivery='agent': result_callback called, channel send_message not called."""
         config = HeartbeatConfig(
             enabled=True,
             interval_minutes=30,
             target_channel="telegram",
             target_chat_id=123456,
-            delivery="both",
+            delivery="agent",
         )
 
         result_callback = AsyncMock()
@@ -422,8 +433,8 @@ class TestHeartbeatDeliveryRouting:
         with patch.object(scheduler, "_should_skip_heartbeat", return_value=(False, "test", None, 0)):
             await scheduler._run_heartbeat()
 
-        # Both should be called
-        mock_channel.send_message.assert_called_once()
+        # Only agent injection, not direct channel send
+        mock_channel.send_message.assert_not_called()
         result_callback.assert_called_once()
 
     @pytest.mark.asyncio
@@ -437,7 +448,7 @@ class TestHeartbeatDeliveryRouting:
             interval_minutes=30,
             target_channel="telegram",
             target_chat_id=123456,
-            delivery="both",  # Even with 'both', should suppress
+            delivery="agent",  # Even with 'agent', should suppress
             suppress_ok=True,
         )
 
@@ -630,13 +641,13 @@ class TestCronDeliveryRouting:
         assert "[SYSTEM] Scheduled task 'test-cron' completed." in call_args[1]
 
     @pytest.mark.asyncio
-    async def test_cron_delivery_both(self, workspace, mock_agent_runner, mock_channel):
-        """delivery='both': both called."""
+    async def test_cron_delivery_agent(self, workspace, mock_agent_runner, mock_channel):
+        """delivery='agent': result_callback called, channel send_message not called."""
         cron = CronDefinition(
             name="test-cron",
             schedule="0 9 * * *",
             prompt="Test prompt",
-            output=CronOutputConfig(channel="telegram", chat_id=789, delivery="both"),
+            output=CronOutputConfig(channel="telegram", chat_id=789, delivery="agent"),
         )
 
         result_callback = AsyncMock()
@@ -654,8 +665,8 @@ class TestCronDeliveryRouting:
 
         await scheduler._execute_cron(cron)
 
-        # Both should be called
-        mock_channel.send_message.assert_called_once()
+        # Only agent injection, not direct channel send
+        mock_channel.send_message.assert_not_called()
         result_callback.assert_called_once()
 
     @pytest.mark.asyncio

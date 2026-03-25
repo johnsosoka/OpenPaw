@@ -284,6 +284,7 @@ class LifecycleManager:
 
         try:
             session_logger = SessionLogger(self._workspace_path, session_type="heartbeat")
+            ack_tool = self._builtin_loader.get_tool_instance("acknowledge")
             self._heartbeat_scheduler = HeartbeatScheduler(
                 workspace_name=self._workspace_name,
                 workspace_path=self._workspace_path,
@@ -294,6 +295,7 @@ class LifecycleManager:
                 token_logger=token_logger,
                 result_callback=self._result_callback,
                 session_logger=session_logger,
+                ack_tool=ack_tool,
             )
 
             await self._heartbeat_scheduler.start()

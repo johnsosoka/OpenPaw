@@ -55,6 +55,7 @@ VECTORS_DB = DATA_DIR / "vectors.db"
 BROWSER_COOKIES_JSON = DATA_DIR / "browser_cookies.json"
 DYNAMIC_CRONS_JSON = DATA_DIR / "dynamic_crons.json"
 HEARTBEAT_LOG_JSONL = DATA_DIR / "heartbeat_log.jsonl"
+CRON_LOG_JSONL = DATA_DIR / "cron_log.jsonl"
 TASKS_YAML = DATA_DIR / "TASKS.yaml"
 UPLOADS_DIR = DATA_DIR / "uploads"
 
