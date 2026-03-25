@@ -20,7 +20,9 @@ agent_workspaces/<name>/
 │   ├── tools/              # Custom LangChain @tool functions
 │   │   ├── *.py
 │   │   └── requirements.txt
-│   └── skills/             # Skill directories
+│   └── skills/             # Reusable knowledge and behavior patterns
+│       └── <skill-name>/
+│           └── SKILL.md
 ├── config/                 # Configuration (write-protected from agent)
 │   ├── agent.yaml          # Per-workspace settings (model, channel, queue)
 │   ├── .env                # API keys and secrets
@@ -373,6 +375,81 @@ Missing dependencies are automatically installed at workspace startup.
 5. **Focused functionality** - Each tool should have a single, clear purpose
 6. **Examples in docstring** - Help the agent understand when to use the tool
 
+## Skills
+
+Skills are reusable knowledge documents or behavioral patterns. Each skill lives in its own subdirectory under `agent/skills/` and is defined by a `SKILL.md` file. Skills are loaded at workspace startup and injected into the agent's system prompt as a `<skills>` XML block.
+
+### Directory Structure
+
+```
+agent/skills/
+├── research-patterns/
+│   └── SKILL.md
+├── code-review/
+│   └── SKILL.md
+└── _disabled-skill/     # Skipped (underscore prefix)
+    └── SKILL.md
+```
+
+### SKILL.md Format
+
+Skills support optional YAML frontmatter followed by markdown content:
+
+```markdown
+---
+name: research-patterns
+description: Patterns for conducting technical research across multiple sources
+version: "1.0"
+---
+
+# Research Patterns
+
+When conducting research, follow these steps:
+1. Identify primary sources...
+2. Cross-reference findings across at least three independent sources...
+3. Summarize findings with citations...
+```
+
+**Frontmatter fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | No | Display name (falls back to directory name) |
+| `description` | No | Short description, truncated to 1024 chars |
+| `version` | No | Optional version string (not used by framework) |
+
+### Key Behaviors
+
+- Skills are loaded at workspace startup
+- Full content is injected into the system prompt as a `<skills>` XML block
+- Directories prefixed with `_` are skipped (useful for disabling a skill without deleting it)
+- If no frontmatter is present, the entire file becomes the content with the directory name as skill name
+- Invalid YAML frontmatter degrades gracefully (logged warning, falls back to directory name)
+- Empty or missing `agent/skills/` directory is silently ignored
+
+### Example: Writing Style Skill
+
+**`agent/skills/writing-style/SKILL.md`:**
+
+```markdown
+---
+name: writing-style
+description: House style guide for all written output
+---
+
+# Writing Style Guide
+
+## Tone
+- Direct and professional — no filler phrases ("Certainly!", "Great question!")
+- Use active voice; avoid passive constructions where possible
+- Prefer concrete nouns and specific verbs over vague generalities
+
+## Formatting
+- Use bullet points for lists of three or more items
+- Code examples belong in fenced code blocks with language tags
+- Section headers use title case
+```
+
 ## Scheduled Tasks (Crons)
 
 Define scheduled tasks in the `config/crons/` directory using YAML files.
@@ -451,7 +528,8 @@ This creates the workspace directory with the full 5-directory structure (`agent
 2. Add API keys to `config/.env`
 3. Customize `agent/AGENT.md`, `agent/USER.md`, and `agent/SOUL.md` to define personality
 4. Optionally add custom tools in `agent/tools/` and cron jobs in `config/crons/`
-5. Run the workspace:
+5. Optionally add skills in `agent/skills/` for reusable knowledge patterns
+6. Run the workspace:
 
 ```bash
 poetry run openpaw -c config.yaml -w my_agent

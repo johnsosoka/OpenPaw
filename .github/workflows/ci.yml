@@ -5,50 +5,71 @@ on:
     branches:
       - main
       - develop
-    paths-ignore:
-      - "*.md"
-      - "docs/**"
-      - "LICENSE"
   push:
     branches:
       - develop
-    paths-ignore:
-      - "*.md"
-      - "docs/**"
-      - "LICENSE"
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'openpaw/**'
+              - 'tests/**'
+              - 'pyproject.toml'
+              - 'poetry.lock'
+
   lint:
     name: Lint & Type Check
+    needs: changes
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.code == 'true'
 
       - name: Set up Python 3.12
+        if: needs.changes.outputs.code == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install Poetry
+        if: needs.changes.outputs.code == 'true'
         run: pipx install poetry
 
       - name: Install dependencies
+        if: needs.changes.outputs.code == 'true'
         run: poetry install --only main,dev
 
       - name: Ruff lint
+        if: needs.changes.outputs.code == 'true'
         run: poetry run ruff check openpaw/
 
       - name: Mypy type check
+        if: needs.changes.outputs.code == 'true'
         continue-on-error: true
         run: poetry run mypy openpaw/
 
+      - name: No code changes
+        if: needs.changes.outputs.code != 'true'
+        run: echo "No code changes detected — skipping lint"
+
   test:
     name: Test (Python ${{ matrix.python-version }})
+    needs: changes
     runs-on: ubuntu-latest
 
     strategy:
@@ -60,17 +81,26 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        if: needs.changes.outputs.code == 'true'
 
       - name: Set up Python ${{ matrix.python-version }}
+        if: needs.changes.outputs.code == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Install Poetry
+        if: needs.changes.outputs.code == 'true'
         run: pipx install poetry
 
       - name: Install dependencies
+        if: needs.changes.outputs.code == 'true'
         run: poetry install
 
       - name: Run tests
+        if: needs.changes.outputs.code == 'true'
         run: poetry run pytest
+
+      - name: No code changes
+        if: needs.changes.outputs.code != 'true'
+        run: echo "No code changes detected — skipping tests"
