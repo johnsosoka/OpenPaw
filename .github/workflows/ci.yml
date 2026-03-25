@@ -5,25 +5,36 @@ on:
     branches:
       - main
       - develop
-    paths-ignore:
-      - "*.md"
-      - "docs/**"
-      - "LICENSE"
   push:
     branches:
       - develop
-    paths-ignore:
-      - "*.md"
-      - "docs/**"
-      - "LICENSE"
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'openpaw/**'
+              - 'tests/**'
+              - 'pyproject.toml'
+              - 'poetry.lock'
+
   lint:
     name: Lint & Type Check
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -49,6 +60,8 @@ jobs:
 
   test:
     name: Test (Python ${{ matrix.python-version }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
 
     strategy:
