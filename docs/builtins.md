@@ -8,21 +8,25 @@ Builtins are optional capabilities conditionally loaded based on API key availab
 
 ## Overview
 
-OpenPaw ships with 13 built-in tools and 4 message processors. Builtins are discovered at runtime — if prerequisites (API keys, packages) are missing, the builtin is unavailable. The allow/deny system provides fine-grained control over which capabilities are active in each workspace.
+OpenPaw ships with 15 built-in tools and 4 message processors. Builtins are discovered at runtime — if prerequisites (API keys, packages) are missing, the builtin is unavailable. The allow/deny system provides fine-grained control over which capabilities are active in each workspace.
 
 **Architecture:**
 
 ```
 BuiltinRegistry
-├─ Tools (13)
+├─ Tools (15)
 │  ├─ browser          Web automation via Playwright
 │  ├─ brave_search     Web search
 │  ├─ spawn            Sub-agent spawning
 │  ├─ cron             Agent self-scheduling
+│  ├─ cron_manager     Persistent YAML cron management
+│  ├─ acknowledge      Silent system event acknowledgment
 │  ├─ task_tracker     Persistent task management
 │  ├─ send_message     Mid-execution messaging
 │  ├─ send_file        Send workspace files to users
 │  ├─ followup         Self-continuation
+│  ├─ plan             Session-scoped planning
+│  ├─ channel_history  Channel history browsing
 │  ├─ memory_search    Semantic conversation search
 │  ├─ shell            Local command execution
 │  ├─ md2pdf            Markdown-to-PDF conversion
@@ -237,6 +241,52 @@ Responses are sent back to the first allowed user in the workspace's channel con
 User: "Ping me in 10 minutes to check on the deploy"
 Agent: [Calls schedule_at with timestamp 10 minutes from now]
 System: [Task fires, agent sends reminder to user's chat]
+```
+
+---
+
+### cron_manager
+
+**Group:** `automation`
+**Type:** Tool (4 functions)
+**Prerequisites:** None (always available)
+
+Persistent cron management — create, list, update, and delete YAML cron jobs that survive restarts. Unlike dynamic scheduling (`schedule_at`/`schedule_every`), cron_manager writes YAML files to `config/crons/` that are loaded by the cron scheduler at startup alongside any hand-authored cron files. Changes are also applied to the live scheduler immediately — no workspace restart required.
+
+**Available Functions:**
+- `create_cron` — Create a new persistent cron job (validates expression, writes YAML, hot-adds to scheduler)
+- `list_crons` — List all YAML crons with name, schedule, enabled status, and next run time
+- `update_cron` — Update fields on an existing cron job (hot-reloads in scheduler)
+- `delete_cron` — Remove a cron job file and unregister from scheduler
+
+**Configuration:**
+
+```yaml
+builtins:
+  cron_manager:
+    enabled: true
+```
+
+**Comparison with Dynamic Scheduling:**
+
+| Feature | Dynamic (`cron`) | Persistent (`cron_manager`) |
+|---------|------------------|------------------------------|
+| Storage | `data/dynamic_crons.json` | `config/crons/{name}.yaml` |
+| Scheduling | One-time or interval-based | Standard cron expressions |
+| Lifecycle | Auto-cleaned after execution (one-time) | Permanent until deleted |
+| Restarts | Loaded from JSON on restart | Loaded from YAML on restart |
+| Use case | "Remind me in 10 minutes" | "Daily summary at 9am" |
+
+**Name Validation:**
+
+Cron names must be lowercase alphanumeric with hyphens only (`^[a-z0-9][a-z0-9-]*$`). Names become filenames (`{name}.yaml`).
+
+**Usage Example:**
+
+```
+User: "Set up a daily summary cron at 9am"
+Agent: [Calls create_cron(name="daily-summary", schedule="0 9 * * *", prompt="Generate a daily summary...", delivery="channel")]
+Agent: "Done — 'daily-summary' will run every day at 9:00 AM and send results to this chat."
 ```
 
 ---
@@ -527,6 +577,43 @@ Agents create plans when tackling complex, multi-step tasks — especially when 
 User: "Research the latest AI safety papers and write a summary report"
 Agent: [Calls write_plan("1. Search for recent AI safety papers\n2. Read top 5 results\n3. Synthesize findings\n4. Write summary to reports/ai-safety.md")]
 Agent: [Proceeds to execute each step, updating the plan as steps complete]
+```
+
+---
+
+### acknowledge
+
+**Group:** `automation`
+**Type:** Tool
+**Prerequisites:** None (always available)
+
+Silent acknowledgment for system events. When the agent receives a `[SYSTEM]` event (cron result, heartbeat injection, sub-agent completion) and determines there is nothing the user needs to know, it calls `acknowledge_event` to suppress channel delivery. Everything is still logged — conversation history, token usage, and the acknowledgment reason. Silence means "don't message the user," not "don't record."
+
+**When to use:**
+
+The agent receives a `[SYSTEM]` notification with routine information — a cron ran successfully with no notable output, a heartbeat check found nothing actionable, or a background sub-agent completed a task the user doesn't need to hear about. Instead of sending a noisy "nothing to report" message, the agent calls `acknowledge_event` with a brief reason.
+
+**Key Behaviors:**
+
+- Only suppresses channel delivery for system-originated events. Has no effect on user messages.
+- One `acknowledge_event` call per agent invocation — duplicate calls return an error.
+- The agent's text response is still written to conversation history; it just isn't delivered to the channel.
+
+**Configuration:**
+
+```yaml
+builtins:
+  acknowledge:
+    enabled: true
+```
+
+**Usage Example:**
+
+```
+System: [SYSTEM] Cron 'daily-check' completed. Session log: memory/sessions/cron/daily-check_2026-03-25T09-00-00.jsonl
+Agent: [Reads session log — routine status, no anomalies found]
+Agent: [Calls acknowledge_event(reason="daily-check ran clean, no anomalies to report")]
+Agent: "Checked the daily-check cron result — all systems nominal." (not delivered to user)
 ```
 
 ---
@@ -839,6 +926,7 @@ builtins:
 | `system` | shell |
 | `context` | timestamp |
 | `agent` | spawn, cron, task_tracker, send_message, followup, send_file |
+| `automation` | cron_manager, acknowledge |
 | `browser` | browser |
 | `memory` | memory_search |
 | `document` | md2pdf |
