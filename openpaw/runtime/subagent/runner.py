@@ -1,6 +1,7 @@
 """Sub-agent lifecycle manager for OpenPaw."""
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping
@@ -16,12 +17,32 @@ from openpaw.core.prompts.system_events import (
     SUBAGENT_COMPLETED_SHORT_TEMPLATE,
     SUBAGENT_COMPLETED_TEMPLATE,
     SUBAGENT_FAILED_TEMPLATE,
+    SUBAGENT_PROGRESS_TEMPLATE,
     SUBAGENT_TIMED_OUT_TEMPLATE,
 )
 from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
 from openpaw.stores.subagent import SubAgentStore
 
 logger = logging.getLogger(__name__)
+
+
+def _format_elapsed(seconds: float) -> str:
+    """Format elapsed seconds as a human-readable string.
+
+    Args:
+        seconds: Elapsed time in seconds.
+
+    Returns:
+        Human-readable string such as "45s", "5m 30s", or "1h 2m 30s".
+    """
+    minutes, secs = divmod(int(seconds), 60)
+    if minutes >= 60:
+        hours, minutes = divmod(minutes, 60)
+        return f"{hours}h {minutes}m {secs}s"
+    if minutes > 0:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
+
 
 # Tools excluded from sub-agents to prevent recursion and unwanted side effects
 SUBAGENT_EXCLUDED_TOOLS = {
@@ -366,111 +387,127 @@ class SubAgentRunner:
                 # By setting the inner timeout higher, only the outer fires.
                 runner.timeout_seconds = (request.timeout_minutes * 60) + 30
 
-                # Run the agent with timeout
-                try:
-                    async with asyncio.timeout(request.timeout_minutes * 60):
-                        response = await runner.run(message=request.task)
-
-                    # Check if we were cancelled during execution
-                    # (cancel() sets status to CANCELLED before task.cancel())
-                    current_request = self._store.get(request.id)
-                    if current_request and current_request.status == SubAgentStatus.CANCELLED:
-                        logger.info(
-                            f"Sub-agent {request.id} completed but was cancelled - "
-                            "discarding result"
-                        )
-                        return  # Don't save result or send notification
-
-                except TimeoutError:
-                    # Handle timeout
-                    duration_ms = (time.monotonic() - start_time) * 1000
-                    self._store.update_status(
-                        request.id, SubAgentStatus.TIMED_OUT, completed_at=datetime.now(UTC)
+                # Start periodic progress timer if configured.
+                # The task is cancelled in the finally block regardless of outcome.
+                progress_task: asyncio.Task | None = None
+                if request.progress_interval_minutes > 0:
+                    progress_task = asyncio.create_task(
+                        self._progress_timer(request, runner, start_time)
                     )
 
-                    error_msg = f"Sub-agent timed out after {request.timeout_minutes} minutes"
+                try:
+                    # Run the agent with timeout
+                    try:
+                        async with asyncio.timeout(request.timeout_minutes * 60):
+                            response = await runner.run(message=request.task)
+
+                        # Check if we were cancelled during execution
+                        # (cancel() sets status to CANCELLED before task.cancel())
+                        current_request = self._store.get(request.id)
+                        if current_request and current_request.status == SubAgentStatus.CANCELLED:
+                            logger.info(
+                                f"Sub-agent {request.id} completed but was cancelled - "
+                                "discarding result"
+                            )
+                            return  # Don't save result or send notification
+
+                    except TimeoutError:
+                        # Handle timeout
+                        duration_ms = (time.monotonic() - start_time) * 1000
+                        self._store.update_status(
+                            request.id, SubAgentStatus.TIMED_OUT, completed_at=datetime.now(UTC)
+                        )
+
+                        error_msg = f"Sub-agent timed out after {request.timeout_minutes} minutes"
+                        result = SubAgentResult(
+                            request_id=request.id,
+                            output="",
+                            error=error_msg,
+                            duration_ms=duration_ms,
+                        )
+                        self._store.save_result(result)
+
+                        # Write session log even on timeout
+                        if self._session_logger:
+                            try:
+                                self._session_logger.write_session(
+                                    name=f"subagent_{request.label}",
+                                    prompt=request.task,
+                                    response="(timed out)",
+                                    tools_used=[],
+                                    metrics=None,
+                                    duration_ms=duration_ms,
+                                )
+                            except Exception as e:
+                                logger.warning(f"Failed to write timeout session log for sub-agent {request.id}: {e}")
+
+                        logger.warning(f"Sub-agent {request.id} timed out")
+
+                        # Send timeout notification if requested
+                        if request.notify:
+                            await self._send_notification(request, result)
+
+                        return
+
+                    # Success: save result
+                    duration_ms = (time.monotonic() - start_time) * 1000
+
+                    # Get token count from runner
+                    token_count = 0
+                    if runner.last_metrics:
+                        token_count = runner.last_metrics.total_tokens
+
                     result = SubAgentResult(
                         request_id=request.id,
-                        output="",
-                        error=error_msg,
+                        output=response,
+                        token_count=token_count,
                         duration_ms=duration_ms,
                     )
                     self._store.save_result(result)
 
-                    # Write session log even on timeout
+                    # Write session log
                     if self._session_logger:
                         try:
                             self._session_logger.write_session(
                                 name=f"subagent_{request.label}",
                                 prompt=request.task,
-                                response="(timed out)",
-                                tools_used=[],
-                                metrics=None,
+                                response=response,
+                                tools_used=runner.last_tools_used or [],
+                                metrics=runner.last_metrics,
                                 duration_ms=duration_ms,
                             )
                         except Exception as e:
-                            logger.warning(f"Failed to write timeout session log for sub-agent {request.id}: {e}")
+                            logger.warning(f"Failed to write session log for sub-agent {request.id}: {e}")
 
-                    logger.warning(f"Sub-agent {request.id} timed out")
+                    # Update status to COMPLETED
+                    self._store.update_status(
+                        request.id, SubAgentStatus.COMPLETED, completed_at=datetime.now(UTC)
+                    )
 
-                    # Send timeout notification if requested
+                    logger.info(
+                        f"Sub-agent {request.id} completed successfully "
+                        f"(duration: {duration_ms:.0f}ms, tokens: {token_count})"
+                    )
+
+                    # Send notification if requested
                     if request.notify:
                         await self._send_notification(request, result)
 
-                    return
-
-                # Success: save result
-                duration_ms = (time.monotonic() - start_time) * 1000
-
-                # Get token count from runner
-                token_count = 0
-                if runner.last_metrics:
-                    token_count = runner.last_metrics.total_tokens
-
-                result = SubAgentResult(
-                    request_id=request.id,
-                    output=response,
-                    token_count=token_count,
-                    duration_ms=duration_ms,
-                )
-                self._store.save_result(result)
-
-                # Write session log
-                if self._session_logger:
-                    try:
-                        self._session_logger.write_session(
-                            name=f"subagent_{request.label}",
-                            prompt=request.task,
-                            response=response,
-                            tools_used=runner.last_tools_used or [],
+                    # Log token usage
+                    if self._token_logger and runner.last_metrics:
+                        self._token_logger.log(
                             metrics=runner.last_metrics,
-                            duration_ms=duration_ms,
+                            workspace=self._workspace_name,
+                            invocation_type="subagent",
+                            session_key=request.session_key,
                         )
-                    except Exception as e:
-                        logger.warning(f"Failed to write session log for sub-agent {request.id}: {e}")
 
-                # Update status to COMPLETED
-                self._store.update_status(
-                    request.id, SubAgentStatus.COMPLETED, completed_at=datetime.now(UTC)
-                )
-
-                logger.info(
-                    f"Sub-agent {request.id} completed successfully "
-                    f"(duration: {duration_ms:.0f}ms, tokens: {token_count})"
-                )
-
-                # Send notification if requested
-                if request.notify:
-                    await self._send_notification(request, result)
-
-                # Log token usage
-                if self._token_logger and runner.last_metrics:
-                    self._token_logger.log(
-                        metrics=runner.last_metrics,
-                        workspace=self._workspace_name,
-                        invocation_type="subagent",
-                        session_key=request.session_key,
-                    )
+                finally:
+                    # Cancel the progress timer regardless of success/timeout/exception
+                    if progress_task is not None:
+                        progress_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await progress_task
 
         except asyncio.CancelledError:
             # Handle cancellation
@@ -508,6 +545,69 @@ class SubAgentRunner:
 
             logger.error(f"Sub-agent {request.id} failed: {e}", exc_info=True)
 
+    @staticmethod
+    def _build_origin_suffix(request: SubAgentRequest) -> str:
+        """Build the origin annotation string for notification/progress messages.
+
+        Args:
+            request: The sub-agent request to read the origin from.
+
+        Returns:
+            Empty string when no origin is set, otherwise a parenthetical
+            such as " (spawned by session: telegram:123456)".
+        """
+        if not request.origin:
+            return ""
+        parts = request.origin.split(":", 1)
+        if len(parts) == 2:
+            return f" (spawned by {parts[0]}: {parts[1]})"
+        return f" (spawned by {request.origin})"
+
+    async def _progress_timer(
+        self,
+        request: SubAgentRequest,
+        runner: "AgentRunner",
+        start_time: float,
+    ) -> None:
+        """Emit periodic progress updates for a running sub-agent.
+
+        Runs as a concurrent asyncio task alongside the agent execution. Reads
+        runner state (tools used, current tool) which is safe because Python's
+        GIL ensures atomic reads of list/string attributes.
+
+        Args:
+            request: The sub-agent request being executed.
+            runner: The AgentRunner instance to read state from.
+            start_time: Monotonic start time for elapsed calculation.
+        """
+        if not self._result_callback:
+            logger.debug("Progress timer started but no result_callback — exiting")
+            return
+
+        interval_seconds = request.progress_interval_minutes * 60
+
+        while True:
+            await asyncio.sleep(interval_seconds)
+
+            elapsed_seconds = time.monotonic() - start_time
+            tools_used = list(runner._last_tools_used) if runner._last_tools_used else []
+            current_tool = runner._current_tool_name or "thinking"
+
+            content = SUBAGENT_PROGRESS_TEMPLATE.format(
+                label=request.label,
+                elapsed=_format_elapsed(elapsed_seconds),
+                tools_summary=", ".join(tools_used[-5:]) if tools_used else "none yet",
+                current_activity=current_tool,
+                total_tools=len(tools_used),
+                origin_suffix=self._build_origin_suffix(request),
+            )
+
+            try:
+                await self._result_callback(request.session_key, content)
+                logger.debug(f"Sent progress update for sub-agent {request.id}")
+            except Exception as e:
+                logger.warning(f"Failed to send progress for {request.id}: {e}")
+
     def _format_notification(self, request: SubAgentRequest, result: SubAgentResult) -> str:
         """Format a notification message for sub-agent completion.
 
@@ -518,14 +618,7 @@ class SubAgentRunner:
         Returns:
             Formatted notification content with [SYSTEM] prefix.
         """
-        # Build origin suffix from request
-        origin_suffix = ""
-        if request.origin:
-            parts = request.origin.split(":", 1)
-            if len(parts) == 2:
-                origin_suffix = f" (spawned by {parts[0]}: {parts[1]})"
-            else:
-                origin_suffix = f" (spawned by {request.origin})"
+        origin_suffix = self._build_origin_suffix(request)
 
         # Determine status and format message
         if result.error:

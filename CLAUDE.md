@@ -878,13 +878,16 @@ builtins:
     enabled: true
     config:
       max_concurrent: 8  # Maximum simultaneous sub-agents (default: 8)
+      default_progress_interval: 0  # Minutes between progress updates (0 = disabled)
 ```
+
+**Progress Updates**: Sub-agents can send periodic progress pings to the main agent during execution. Set `progress_interval_minutes` on `spawn_agent` (or configure `default_progress_interval` in spawn config). Progress messages include elapsed time, tools used, and current activity. Delivered as `[SYSTEM]` queue events — the main agent decides whether to relay to the user.
 
 **Limits**: Maximum 8 concurrent sub-agents (configurable), timeout defaults to 30 minutes (1-120 range). Results are truncated at 50K characters to match `read_file` safety valve pattern.
 
 **Example Usage** (by agent):
 - User: "Research topic X in the background while I work on Y"
-- Agent calls `spawn_agent(task="Research topic X...", label="research-x")`
+- Agent calls `spawn_agent(task="Research topic X...", label="research-x", progress_interval_minutes=5)`
 - Sub-agent runs concurrently, agent continues working on Y
 - When complete, user receives notification with result summary
 
@@ -996,6 +999,22 @@ Scheduled agent runs (heartbeat, cron, sub-agent) write JSONL session logs to `{
 **Integration with Delivery Routing**: When `delivery` is set to `"agent"` or `"both"`, the injected `[SYSTEM]` message includes the session log path so the main agent can use `read_file()` to access the full session context. Output is truncated at 2000 characters in the injection message.
 
 **Implementation**: `SessionLogger` in `openpaw/agent/session_logger.py`. Each scheduler creates its own instance (no shared state, no locking needed).
+
+### Status Reminder Middleware
+
+Agents receive automatic reminders to use `send_message()` when they've been working silently for too many tool-calling turns. Uses a three-gate decision model to avoid nagging: threshold (minimum silent turns), budget (maximum reminders per run), and cooldown (spacing between reminders).
+
+**Configuration** (in `agent.yaml` or global config):
+
+```yaml
+status_reminder:
+  enabled: true        # Default on (only active when send_message builtin is loaded)
+  threshold: 5         # Tool-calling turns before first reminder
+  max_reminders: 3     # Maximum reminders per agent run
+  cooldown_turns: 1    # Minimum turns between consecutive reminders
+```
+
+**Implementation**: `StatusReminderMiddleware` in `openpaw/agent/middleware/status_reminder.py`. Uses `AgentMiddleware` hooks (`before_model`/`after_model`). Reminders are injected as `<framework_instruction>` tags into existing messages — non-invasive, no extra checkpoint entries.
 
 ### Filesystem Access
 

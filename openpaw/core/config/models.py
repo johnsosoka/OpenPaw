@@ -242,6 +242,11 @@ class SpawnBuiltinConfig(BuiltinItemConfig):
     """Configuration for the sub-agent spawn tool."""
 
     max_concurrent: int = Field(default=8, description="Maximum simultaneous sub-agents")
+    default_progress_interval: int = Field(
+        default=0,
+        ge=0,
+        description="Default progress interval in minutes (0 = disabled)",
+    )
 
 
 class Md2pdfBuiltinConfig(BuiltinItemConfig):
@@ -476,6 +481,34 @@ class AutoCompactConfig(BaseModel):
         return v
 
 
+class StatusReminderConfig(BaseModel):
+    """Configuration for status reminder middleware.
+
+    Controls when and how often the agent is reminded to call send_message()
+    during long silent tool-calling runs.
+    """
+
+    enabled: bool = Field(default=True, description="Enable silent operation detection")
+    threshold: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description="Turns without send_message before reminding",
+    )
+    max_reminders: int = Field(
+        default=3,
+        ge=0,
+        le=20,
+        description="Max reminders per agent run",
+    )
+    cooldown_turns: int = Field(
+        default=1,
+        ge=0,
+        le=10,
+        description="Min turns between consecutive reminders",
+    )
+
+
 class LifecycleConfig(BaseModel):
     """Configuration for lifecycle event notifications."""
 
@@ -621,6 +654,10 @@ class WorkspaceConfig(BaseModel):
     lifecycle: LifecycleConfig = Field(
         default_factory=LifecycleConfig,
         description="Lifecycle notification configuration",
+    )
+    status_reminder: StatusReminderConfig = Field(
+        default_factory=StatusReminderConfig,
+        description="Status reminder middleware configuration",
     )
 
     @field_validator("session_ttl_minutes")

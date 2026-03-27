@@ -169,6 +169,7 @@ builtins:
     enabled: true
     config:
       max_concurrent: 8  # Maximum simultaneous sub-agents (default: 8)
+      default_progress_interval: 0  # Minutes between progress updates (0 = disabled)
 ```
 
 **Tool Exclusions:**
@@ -183,12 +184,18 @@ Sub-agents cannot spawn sub-agents (no `spawn_agent`), send unsolicited messages
 
 When `notify: true` (default), sub-agent completion results are injected into the message queue, triggering a new agent turn to process the `[SYSTEM]` notification.
 
+**Progress Updates:**
+
+Sub-agents can send periodic status updates to the main agent during long-running tasks. Enable via the `progress_interval_minutes` parameter on `spawn_agent`, or set a workspace-level default with `default_progress_interval` in the spawn config.
+
+Progress messages are delivered as `[SYSTEM]` events to the main agent's queue and include elapsed time, tools called, and current activity. The main agent decides whether to relay updates to the user.
+
 **Usage Example:**
 
 ```
 User: "Research topic X in the background while I work on Y"
-Agent: [Calls spawn_agent(task="Research topic X...", label="research-x")]
-Sub-agent: [Runs concurrently, main agent continues working on Y]
+Agent: [Calls spawn_agent(task="Research topic X...", label="research-x", progress_interval_minutes=5)]
+Sub-agent: [Runs concurrently, sends progress every 5 min, main agent continues working on Y]
 System: [When complete, user receives notification with result summary]
 ```
 
@@ -836,6 +843,7 @@ builtins:
     enabled: true
     config:
       max_concurrent: 8
+      default_progress_interval: 0
 
   cron:
     enabled: true

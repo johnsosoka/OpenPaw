@@ -16,6 +16,7 @@ from openpaw.agent.middleware import (
     QueueAwareToolMiddleware,
     ToolTimeoutMiddleware,
 )
+from openpaw.agent.middleware.status_reminder import StatusReminderMiddleware
 from openpaw.agent.session_logger import SessionLogger
 from openpaw.builtins.base import BaseBuiltinProcessor
 from openpaw.builtins.loader import BuiltinLoader
@@ -297,7 +298,7 @@ class WorkspaceRunner:
         if extra_model_kwargs:
             self.logger.info(f"Passing extra model kwargs: {list(extra_model_kwargs.keys())}")
 
-        # Build middleware list (order matters: timeout → queue → approval)
+        # Build middleware list (order matters: timeout → status_reminder → queue → approval)
         tool_timeouts_config = self._get_tool_timeouts_config()
         self._tool_timeout_middleware = ToolTimeoutMiddleware(tool_timeouts_config)
         middlewares = [
@@ -306,6 +307,23 @@ class WorkspaceRunner:
         ]
         if self._approval_manager:
             middlewares.append(self._approval_middleware.get_middleware())
+
+        # Create status reminder middleware only when send_message builtin is active.
+        # There is no point reminding the agent to use a tool it doesn't have.
+        self._status_reminder_middleware: StatusReminderMiddleware | None = None
+        if "send_message" in self._enabled_builtin_names:
+            status_reminder_config = (
+                self._workspace.config.status_reminder
+                if self._workspace.config
+                else None
+            )
+            if status_reminder_config is None:
+                from openpaw.core.config.models import StatusReminderConfig
+                status_reminder_config = StatusReminderConfig()
+            self._status_reminder_middleware = StatusReminderMiddleware(status_reminder_config)
+            # Insert after timeout middleware, before queue/approval
+            middlewares.insert(1, self._status_reminder_middleware)
+            self.logger.info("Status reminder middleware enabled (threshold=%d)", status_reminder_config.threshold)
 
         # Create agent factory and initial agent runner (checkpointer added in start())
         self._agent_factory = AgentFactory(
@@ -344,6 +362,7 @@ class WorkspaceRunner:
             user_aliases=self._user_aliases,
             session_ttl_minutes=self._merged_config.get("session_ttl_minutes", 180),
             lifecycle_config=self._workspace.config.lifecycle if self._workspace.config else None,
+            status_reminder_middleware=self._status_reminder_middleware,
         )
 
     @property

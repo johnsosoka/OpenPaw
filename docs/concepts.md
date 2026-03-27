@@ -419,6 +419,7 @@ builtins:
     enabled: true
     config:
       max_concurrent: 8     # Maximum simultaneous sub-agents
+      default_progress_interval: 0
 ```
 
 Each sub-agent run produces a session log in `memory/sessions/subagent/` capturing the full prompt, the agent's response, the tools it used, and token metrics. The main agent can read these logs for the complete picture beyond the brief notification summary.
@@ -428,6 +429,9 @@ Each sub-agent run produces a session log in `memory/sessions/subagent/` capturi
 
 !!! note "Notification delivery"
     When a sub-agent completes, the main agent receives a brief summary (up to 500 characters) injected into its message queue. For the full result, the main agent uses the result retrieval tool with the sub-agent's ID. The complete output is also always available in the session log file.
+
+!!! info "Progress updates"
+    For long-running sub-agents, you can request periodic progress updates by setting `progress_interval_minutes` when spawning. The main agent receives `[SYSTEM]` events showing elapsed time, tools used, and current activity — and decides whether to relay them to you.
 
 See [Built-ins](builtins.md) for the complete sub-agent configuration, available tools, and guidance on designing effective sub-agent tasks.
 

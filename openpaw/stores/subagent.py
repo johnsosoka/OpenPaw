@@ -422,6 +422,7 @@ def create_subagent_request(
     allowed_tools: list[str] | None = None,
     denied_tools: list[str] | None = None,
     origin: str | None = None,
+    progress_interval_minutes: int = 0,
 ) -> SubAgentRequest:
     """Factory function for creating a new sub-agent request with auto-generated ID.
 
@@ -434,6 +435,8 @@ def create_subagent_request(
         notify: Whether to notify session on completion.
         allowed_tools: Optional whitelist of tool names (supports group: prefix).
         denied_tools: Optional additional tools to deny (supports group: prefix).
+        origin: Optional origin annotation for notifications.
+        progress_interval_minutes: How often to emit progress updates in minutes (0 = disabled).
 
     Returns:
         SubAgentRequest instance with unique ID.
@@ -457,4 +460,5 @@ def create_subagent_request(
         allowed_tools=allowed_tools,
         denied_tools=denied_tools,
         origin=origin,
+        progress_interval_minutes=progress_interval_minutes,
     )

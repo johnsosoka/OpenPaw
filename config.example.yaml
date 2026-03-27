@@ -102,6 +102,7 @@ builtins:
   #   enabled: true
   #   config:
   #     max_concurrent: 8           # Maximum simultaneous sub-agents
+  #     default_progress_interval: 0  # Minutes between progress updates (0 = disabled)
 
   # Browser automation via Playwright with accessibility tree navigation
   # (requires: poetry add playwright && poetry run playwright install chromium)
@@ -180,6 +181,14 @@ builtins:
 
 # Session TTL — auto-reset conversations after inactivity
 # session_ttl_minutes: 180          # Default: 3 hours (0 to disable)
+
+# Status reminder middleware — reminds agents to use send_message() during long silent runs
+# (only active when send_message builtin is enabled)
+# status_reminder:
+#   enabled: true
+#   threshold: 5              # Tool-calling turns before first reminder
+#   max_reminders: 3          # Max reminders per agent run
+#   cooldown_turns: 1         # Min turns between consecutive reminders
 
 # Heartbeat — periodic proactive agent check-ins (workspace-level only, in agent.yaml)
 # heartbeat:

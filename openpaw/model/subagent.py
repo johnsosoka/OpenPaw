@@ -54,6 +54,7 @@ class SubAgentRequest:
     allowed_tools: list[str] | None = None
     denied_tools: list[str] | None = None
     origin: str | None = None
+    progress_interval_minutes: int = 0  # 0 = disabled
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary with ISO 8601 datetime strings.
@@ -80,6 +81,8 @@ class SubAgentRequest:
             data.pop("denied_tools", None)
         if self.origin is None:
             data.pop("origin", None)
+        if self.progress_interval_minutes == 0:
+            data.pop("progress_interval_minutes", None)
 
         return data
 
@@ -115,6 +118,7 @@ class SubAgentRequest:
             allowed_tools=data.get("allowed_tools"),
             denied_tools=data.get("denied_tools"),
             origin=data.get("origin"),
+            progress_interval_minutes=data.get("progress_interval_minutes", 0),
         )
 
 
