@@ -169,12 +169,20 @@ builtins:
     enabled: true
     config:
       max_concurrent: 8  # Maximum simultaneous sub-agents (default: 8)
-      default_progress_interval: 0  # Minutes between progress updates (0 = disabled)
+      default_progress_interval: 5  # Minutes between progress updates (0 = disabled, default: 5)
 ```
 
 **Tool Exclusions:**
 
-Sub-agents cannot spawn sub-agents (no `spawn_agent`), send unsolicited messages (no `send_message`/`send_file`), self-continue (no `request_followup`), or schedule tasks (no cron tools). This prevents recursion and ensures sub-agents are single-purpose workers.
+Sub-agents have a restricted tool set to prevent recursion, unsolicited messaging, and persistent side effects:
+
+- **Spawning**: no `spawn_agent` (prevents sub-agent recursion)
+- **Messaging**: no `send_message`, `send_file` (sub-agents cannot contact users directly)
+- **Self-continuation**: no `request_followup`
+- **Scheduling**: no cron or dynamic scheduling tools (side effects outlive the sub-agent)
+- **Browser**: no browser tools (browser sessions require a session key for cleanup)
+- **Cron manager**: no persistent cron management tools (writes YAML files that persist after the sub-agent exits)
+- **Plan**: no session-scoped planning tools (requires session key context)
 
 **Lifecycle:**
 
@@ -182,11 +190,11 @@ Sub-agents cannot spawn sub-agents (no `spawn_agent`), send unsolicited messages
 
 **Notifications:**
 
-When `notify: true` (default), sub-agent completion results are injected into the message queue, triggering a new agent turn to process the `[SYSTEM]` notification.
+When `notify: true` (default), notifications are injected into the message queue for all terminal states — `completed`, `failed`, `timed_out`, and `cancelled`. Each notification includes a brief result summary and the session log path so the main agent can call `read_file()` on it for the full transcript.
 
 **Progress Updates:**
 
-Sub-agents can send periodic status updates to the main agent during long-running tasks. Enable via the `progress_interval_minutes` parameter on `spawn_agent`, or set a workspace-level default with `default_progress_interval` in the spawn config.
+Sub-agents emit progress updates every 5 minutes by default. Override per-spawn with `progress_interval_minutes`, or change the workspace default with `default_progress_interval` in the spawn config. Set to `0` to disable.
 
 Progress messages are delivered as `[SYSTEM]` events to the main agent's queue and include elapsed time, tools called, and current activity. The main agent decides whether to relay updates to the user.
 
@@ -843,7 +851,7 @@ builtins:
     enabled: true
     config:
       max_concurrent: 8
-      default_progress_interval: 0
+      default_progress_interval: 5
 
   cron:
     enabled: true

@@ -61,6 +61,26 @@ SUBAGENT_EXCLUDED_TOOLS = {
     "schedule_every",
     "list_scheduled",
     "cancel_scheduled",
+    # Prevent orphaned browser sessions (subagents have no session key for cleanup)
+    "browser_navigate",
+    "browser_snapshot",
+    "browser_click",
+    "browser_type",
+    "browser_select",
+    "browser_scroll",
+    "browser_back",
+    "browser_screenshot",
+    "browser_close",
+    "browser_tabs",
+    "browser_switch_tab",
+    # Prevent persistent cron jobs that outlive the subagent lifecycle
+    "create_cron",
+    "list_crons",
+    "update_cron",
+    "delete_cron",
+    # Plan tool requires a session key (undefined in subagent execution context)
+    "write_plan",
+    "read_plan",
 }
 
 
@@ -253,11 +273,24 @@ class SubAgentRunner:
             request_id: ID of the request to cancel.
 
         Returns:
-            True if the task was cancelled, False if not found.
+            True if the task was cancelled, False if not found or already terminal.
         """
         task = self._active_tasks.get(request_id)
         if not task:
             logger.warning(f"Cannot cancel: sub-agent {request_id} not active")
+            return False
+
+        # Guard against cancel-after-complete race: don't overwrite a terminal status.
+        current = self._store.get(request_id)
+        if current and current.status in (
+            SubAgentStatus.COMPLETED,
+            SubAgentStatus.FAILED,
+            SubAgentStatus.TIMED_OUT,
+        ):
+            logger.info(
+                f"Cannot cancel: sub-agent {request_id} already in terminal state "
+                f"({current.status.value})"
+            )
             return False
 
         # Cancel the task
@@ -430,7 +463,7 @@ class SubAgentRunner:
                         # Write session log even on timeout
                         if self._session_logger:
                             try:
-                                self._session_logger.write_session(
+                                log_path = self._session_logger.write_session(
                                     name=f"subagent_{request.label}",
                                     prompt=request.task,
                                     response="(timed out)",
@@ -438,6 +471,8 @@ class SubAgentRunner:
                                     metrics=None,
                                     duration_ms=duration_ms,
                                 )
+                                result.session_log_path = log_path
+                                self._store.save_result(result)
                             except Exception as e:
                                 logger.warning(f"Failed to write timeout session log for sub-agent {request.id}: {e}")
 
@@ -468,7 +503,7 @@ class SubAgentRunner:
                     # Write session log
                     if self._session_logger:
                         try:
-                            self._session_logger.write_session(
+                            log_path = self._session_logger.write_session(
                                 name=f"subagent_{request.label}",
                                 prompt=request.task,
                                 response=response,
@@ -476,6 +511,9 @@ class SubAgentRunner:
                                 metrics=runner.last_metrics,
                                 duration_ms=duration_ms,
                             )
+                            if log_path:
+                                result.session_log_path = log_path
+                                self._store.save_result(result)
                         except Exception as e:
                             logger.warning(f"Failed to write session log for sub-agent {request.id}: {e}")
 
@@ -524,7 +562,29 @@ class SubAgentRunner:
             )
             self._store.save_result(result)
 
+            # Write session log for cancelled path
+            if self._session_logger:
+                try:
+                    log_path = self._session_logger.write_session(
+                        name=f"subagent_{request.label}",
+                        prompt=request.task,
+                        response="(cancelled)",
+                        tools_used=[],
+                        metrics=None,
+                        duration_ms=duration_ms,
+                    )
+                    result.session_log_path = log_path
+                    self._store.save_result(result)
+                except Exception as log_err:
+                    logger.warning(f"Failed to write cancel session log for sub-agent {request.id}: {log_err}")
+
             logger.info(f"Sub-agent {request.id} was cancelled")
+
+            # Notify parent — must happen before re-raise; suppress secondary CancelledError
+            if request.notify:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await self._send_notification(request, result)
+
             raise  # Re-raise to propagate cancellation
 
         except Exception as e:
@@ -543,7 +603,27 @@ class SubAgentRunner:
             )
             self._store.save_result(result)
 
+            # Write session log for failure path
+            if self._session_logger:
+                try:
+                    log_path = self._session_logger.write_session(
+                        name=f"subagent_{request.label}",
+                        prompt=request.task,
+                        response=f"(failed: {error_msg})",
+                        tools_used=[],
+                        metrics=None,
+                        duration_ms=duration_ms,
+                    )
+                    result.session_log_path = log_path
+                    self._store.save_result(result)
+                except Exception as log_err:
+                    logger.warning(f"Failed to write failure session log for sub-agent {request.id}: {log_err}")
+
             logger.error(f"Sub-agent {request.id} failed: {e}", exc_info=True)
+
+            # Notify parent of failure
+            if request.notify:
+                await self._send_notification(request, result)
 
     @staticmethod
     def _build_origin_suffix(request: SubAgentRequest) -> str:
@@ -620,6 +700,12 @@ class SubAgentRunner:
         """
         origin_suffix = self._build_origin_suffix(request)
 
+        log_suffix = (
+            f"\nFull session log: {result.session_log_path}"
+            if result.session_log_path
+            else ""
+        )
+
         # Determine status and format message
         if result.error:
             if "timed out" in result.error.lower():
@@ -627,13 +713,13 @@ class SubAgentRunner:
                     label=request.label,
                     timeout_minutes=request.timeout_minutes,
                     origin_suffix=origin_suffix,
-                )
+                ) + log_suffix
             else:
                 return SUBAGENT_FAILED_TEMPLATE.format(
                     label=request.label,
                     error=result.error,
                     origin_suffix=origin_suffix,
-                )
+                ) + log_suffix
         else:
             output = result.output
             if len(output) > 500:
@@ -643,13 +729,13 @@ class SubAgentRunner:
                     output=output,
                     request_id=request.id,
                     origin_suffix=origin_suffix,
-                )
+                ) + log_suffix
             else:
                 return SUBAGENT_COMPLETED_SHORT_TEMPLATE.format(
                     label=request.label,
                     output=output,
                     origin_suffix=origin_suffix,
-                )
+                ) + log_suffix
 
     async def _send_notification(self, request: SubAgentRequest, result: SubAgentResult) -> None:
         """Send completion notification to the requesting session.

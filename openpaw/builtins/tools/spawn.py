@@ -113,7 +113,7 @@ class SpawnToolBuiltin(BaseBuiltinTool):
 
         # Extract configuration
         self.max_concurrent = self.config.get("max_concurrent", 8)
-        self.default_progress_interval = self.config.get("default_progress_interval", 0)
+        self.default_progress_interval = self.config.get("default_progress_interval", 5)
 
         # Runner reference (set via set_runner after initialization)
         self._runner: SubAgentRunner | None = None
@@ -312,7 +312,7 @@ class SpawnToolBuiltin(BaseBuiltinTool):
                     time_ago = self._format_time_ago(elapsed.total_seconds())
 
                     lines.append(
-                        f"- {request.id[:8]} | {request.label} | {request.status.value} | started {time_ago}"
+                        f"- {request.id} | {request.label} | {request.status.value} | started {time_ago}"
                     )
                 lines.append("")
 
@@ -329,7 +329,7 @@ class SpawnToolBuiltin(BaseBuiltinTool):
                         duration_str = "unknown"
 
                     lines.append(
-                        f"- {request.id[:8]} | {request.label} | {request.status.value} | {duration_str}"
+                        f"- {request.id} | {request.label} | {request.status.value} | {duration_str}"
                     )
 
             return "\n".join(lines) if lines else "No sub-agents found."
@@ -389,6 +389,9 @@ class SpawnToolBuiltin(BaseBuiltinTool):
 
             if result.token_count > 0:
                 lines.append(f"Tokens: {result.token_count}")
+
+            if result.session_log_path:
+                lines.append(f"Session log: {result.session_log_path}")
 
             if result.error:
                 lines.append(f"\nError: {result.error}")

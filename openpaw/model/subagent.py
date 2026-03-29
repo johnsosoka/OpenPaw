@@ -132,6 +132,7 @@ class SubAgentResult:
         token_count: Total tokens used during execution.
         duration_ms: Execution time in milliseconds.
         error: Error message if execution failed.
+        session_log_path: Relative path to the session JSONL log file, if written.
     """
 
     request_id: str
@@ -139,6 +140,7 @@ class SubAgentResult:
     token_count: int = 0
     duration_ms: float = 0.0
     error: str | None = None
+    session_log_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary.
@@ -164,4 +166,5 @@ class SubAgentResult:
             token_count=data.get("token_count", 0),
             duration_ms=data.get("duration_ms", 0.0),
             error=data.get("error"),
+            session_log_path=data.get("session_log_path"),
         )

@@ -393,7 +393,7 @@ Sub-agents are background workers the main agent can spawn to run tasks concurre
 
 ### What Sub-Agents Can Do
 
-A sub-agent has access to most of the same tools as the main agent — web search, browser automation, file operations, and so on. The important difference is what sub-agents cannot do: they cannot spawn their own sub-agents, they cannot send you messages directly, and they cannot create scheduled tasks. These restrictions prevent runaway recursion and ensure sub-agents remain focused, single-purpose workers rather than autonomous agents that grow in scope.
+A sub-agent has access to most of the same tools as the main agent — web search, file operations, and so on. The important difference is what sub-agents cannot do: they cannot spawn their own sub-agents, they cannot send you messages directly, they cannot create scheduled tasks, and they cannot use browser automation, persistent cron management, or session-scoped planning tools. These restrictions prevent runaway recursion, avoid persistent side effects that outlive the sub-agent, and ensure sub-agents remain focused, single-purpose workers rather than autonomous agents that grow in scope.
 
 Sub-agents run in their own isolated context with no shared conversation history. They do not affect the main agent's thread, and their output does not appear directly in the conversation. Instead, when a sub-agent completes, the main agent receives a notification containing a brief summary of the result. The main agent can then retrieve the full output using the sub-agent's ID and decide how to present or act on it.
 
@@ -419,19 +419,19 @@ builtins:
     enabled: true
     config:
       max_concurrent: 8     # Maximum simultaneous sub-agents
-      default_progress_interval: 0
+      default_progress_interval: 5  # Minutes between progress updates (0 to disable)
 ```
 
-Each sub-agent run produces a session log in `memory/sessions/subagent/` capturing the full prompt, the agent's response, the tools it used, and token metrics. The main agent can read these logs for the complete picture beyond the brief notification summary.
+Each sub-agent run produces a session log in `memory/sessions/subagent/` capturing the full prompt, the agent's response, the tools it used, and token metrics. Logs are written for all outcomes — success, failure, timeout, and cancellation. The session log path is surfaced in completion notifications and in `get_subagent_result` output, so the main agent can call `read_file()` on it directly for the complete transcript.
 
 !!! tip "When to use sub-agents"
     Sub-agents work best for tasks that are well-defined, independent, and time-consuming — things like "research these ten papers and extract the key findings" or "convert all PDFs in uploads/ to markdown and summarize each one." For quick lookups that take a few seconds, a direct tool call is simpler and faster than spawning a sub-agent.
 
 !!! note "Notification delivery"
-    When a sub-agent completes, the main agent receives a brief summary (up to 500 characters) injected into its message queue. For the full result, the main agent uses the result retrieval tool with the sub-agent's ID. The complete output is also always available in the session log file.
+    The main agent is notified when a sub-agent reaches any terminal state — completion, failure, timeout, or cancellation. The notification includes a brief summary and the session log path so the main agent can call `read_file()` on it for the full transcript. For the full result text, the main agent uses `get_subagent_result` with the sub-agent's ID.
 
 !!! info "Progress updates"
-    For long-running sub-agents, you can request periodic progress updates by setting `progress_interval_minutes` when spawning. The main agent receives `[SYSTEM]` events showing elapsed time, tools used, and current activity — and decides whether to relay them to you.
+    Sub-agents emit progress updates every 5 minutes by default. The main agent receives `[SYSTEM]` events showing elapsed time, tools used, and current activity, and decides whether to relay them to you. You can disable progress updates by setting `progress_interval_minutes: 0` when spawning.
 
 See [Built-ins](builtins.md) for the complete sub-agent configuration, available tools, and guidance on designing effective sub-agent tasks.
 
