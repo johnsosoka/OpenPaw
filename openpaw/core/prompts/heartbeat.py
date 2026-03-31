@@ -17,21 +17,21 @@ Use your task management tools to review active work:
 4. Update task status and notes as you work through each item
 
 ## Step 2: Review HEARTBEAT.md
-Check your agent/HEARTBEAT.md file for any non-task items requiring attention:
+Read agent/HEARTBEAT.md and follow it strictly. Act only on items written there:
 - Time-sensitive reminders or monitors
 - Pending status checks (PRs, builds, deployments)
 - User notifications that need to be sent
 
+Do not infer tasks from prior conversations or invent new ones.
+
 ## Step 3: Take Action or Stand Down
 If you found items needing attention:
 - Take appropriate action (check APIs, read files, notify user)
-- Update agent/HEARTBEAT.md with completed items
+- Remove completed items from agent/HEARTBEAT.md (do not leave stale entries)
 - Update task statuses with progress notes
 
 If nothing requires immediate attention, call acknowledge_event(reason) to suppress delivery.
 Fallback: if acknowledge_event is unavailable, respond exactly: HEARTBEAT_OK
-
-Do NOT repeat previously completed tasks or invent new ones.
 """,
     input_variables=["timestamp"],
 )
