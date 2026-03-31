@@ -26,8 +26,8 @@ def mock_tools():
     return [
         MockTool("read_file"),
         MockTool("write_file"),
-        MockTool("browser_navigate"),
-        MockTool("browser_click"),
+        MockTool("list_tasks"),
+        MockTool("create_task"),
         MockTool("brave_search"),
         MockTool("spawn_agent"),  # Should always be excluded
         MockTool("send_message"),  # Should always be excluded
@@ -40,7 +40,7 @@ def mock_group_resolver():
     """Mock group resolver for testing."""
     def resolver(group_name: str) -> list[str]:
         if group_name == "web":
-            return ["browser_navigate", "browser_click", "brave_search"]
+            return ["list_tasks", "create_task", "brave_search"]
         elif group_name == "filesystem":
             return ["read_file", "write_file"]
         elif group_name == "unknown":
@@ -60,8 +60,8 @@ class TestFilterSubagentTools:
         tool_names = [t.name for t in filtered]
         assert "read_file" in tool_names
         assert "write_file" in tool_names
-        assert "browser_navigate" in tool_names
-        assert "browser_click" in tool_names
+        assert "list_tasks" in tool_names
+        assert "create_task" in tool_names
         assert "brave_search" in tool_names
         assert "spawn_agent" not in tool_names
         assert "send_message" not in tool_names
@@ -79,14 +79,14 @@ class TestFilterSubagentTools:
 
     def test_denied_adds_additional_removals(self, mock_tools):
         """Denied adds additional removals beyond SUBAGENT_EXCLUDED_TOOLS."""
-        denied = ["browser_navigate", "brave_search"]
+        denied = ["list_tasks", "brave_search"]
         filtered = filter_subagent_tools(mock_tools, denied_tools=denied)
 
         tool_names = [t.name for t in filtered]
         assert "read_file" in tool_names
         assert "write_file" in tool_names
-        assert "browser_click" in tool_names
-        assert "browser_navigate" not in tool_names
+        assert "create_task" in tool_names
+        assert "list_tasks" not in tool_names
         assert "brave_search" not in tool_names
         # Excluded tools still removed
         assert "spawn_agent" not in tool_names
@@ -95,14 +95,14 @@ class TestFilterSubagentTools:
 
     def test_allowed_and_denied_compose(self, mock_tools):
         """Allowed + denied compose correctly (allowed first, then denied)."""
-        allowed = ["read_file", "write_file", "browser_navigate", "browser_click"]
-        denied = ["write_file", "browser_click"]
+        allowed = ["read_file", "write_file", "list_tasks", "create_task"]
+        denied = ["write_file", "create_task"]
         filtered = filter_subagent_tools(
             mock_tools, allowed_tools=allowed, denied_tools=denied
         )
 
         tool_names = [t.name for t in filtered]
-        assert tool_names == ["read_file", "browser_navigate"]
+        assert tool_names == ["read_file", "list_tasks"]
         assert len(filtered) == 2
 
     def test_excluded_tools_always_removed(self, mock_tools):
@@ -126,8 +126,8 @@ class TestFilterSubagentTools:
         )
 
         tool_names = [t.name for t in filtered]
-        assert "browser_navigate" in tool_names
-        assert "browser_click" in tool_names
+        assert "list_tasks" in tool_names
+        assert "create_task" in tool_names
         assert "brave_search" in tool_names
         assert "read_file" not in tool_names
         assert "write_file" not in tool_names
@@ -143,8 +143,8 @@ class TestFilterSubagentTools:
         tool_names = [t.name for t in filtered]
         assert "read_file" in tool_names
         assert "write_file" in tool_names
-        assert "browser_navigate" not in tool_names
-        assert "browser_click" not in tool_names
+        assert "list_tasks" not in tool_names
+        assert "create_task" not in tool_names
         assert "brave_search" not in tool_names
         assert len(filtered) == 2
 
@@ -158,8 +158,8 @@ class TestFilterSubagentTools:
         tool_names = [t.name for t in filtered]
         assert "read_file" in tool_names
         assert "write_file" in tool_names
-        assert "browser_navigate" in tool_names
-        assert "browser_click" in tool_names
+        assert "list_tasks" in tool_names
+        assert "create_task" in tool_names
         assert "brave_search" in tool_names
         # Excluded tools still removed
         assert "spawn_agent" not in tool_names
@@ -167,7 +167,7 @@ class TestFilterSubagentTools:
 
     def test_mixed_group_and_individual_tools(self, mock_tools, mock_group_resolver):
         """Can mix group: prefix and individual tool names."""
-        allowed = ["group:filesystem", "browser_navigate"]
+        allowed = ["group:filesystem", "list_tasks"]
         filtered = filter_subagent_tools(
             mock_tools, allowed_tools=allowed, group_resolver=mock_group_resolver
         )
@@ -175,8 +175,8 @@ class TestFilterSubagentTools:
         tool_names = [t.name for t in filtered]
         assert "read_file" in tool_names
         assert "write_file" in tool_names
-        assert "browser_navigate" in tool_names
-        assert "browser_click" not in tool_names
+        assert "list_tasks" in tool_names
+        assert "create_task" not in tool_names
         assert len(filtered) == 3
 
     def test_unknown_tool_names_warn_not_error(self, mock_tools, caplog):
@@ -197,7 +197,7 @@ class TestFilterSubagentTools:
     def test_unknown_tool_names_in_denied_warn(self, mock_tools, caplog):
         """Unknown tool names in denied_tools produce warning."""
         with caplog.at_level(logging.WARNING):
-            denied = ["unknown_tool"]
+            denied = ["totally_unknown_tool"]
             filtered = filter_subagent_tools(mock_tools, denied_tools=denied)
 
             # Should filter normally, just with warning
@@ -205,7 +205,7 @@ class TestFilterSubagentTools:
 
             # Check warning was logged
             assert "Unknown tools in denied_tools list" in caplog.text
-            assert "unknown_tool" in caplog.text
+            assert "totally_unknown_tool" in caplog.text
 
     def test_unknown_group_warns(self, mock_tools, mock_group_resolver, caplog):
         """Unknown group in allowed/denied produces warning."""
@@ -232,10 +232,11 @@ class TestFilterSubagentTools:
         """Empty denied_tools list has no effect."""
         filtered = filter_subagent_tools(mock_tools, denied_tools=[])
 
-        # Should behave same as default filtering
+        # Should behave same as default filtering — excludes spawn_agent, send_message, request_followup
         tool_names = [t.name for t in filtered]
         assert len(filtered) == 5
         assert "spawn_agent" not in tool_names
+        assert "send_message" not in tool_names
 
 
 class TestSubAgentRequestDomainModel:

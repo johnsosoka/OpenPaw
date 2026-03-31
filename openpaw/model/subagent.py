@@ -54,6 +54,7 @@ class SubAgentRequest:
     allowed_tools: list[str] | None = None
     denied_tools: list[str] | None = None
     origin: str | None = None
+    progress_interval_minutes: int = 0  # 0 = disabled
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary with ISO 8601 datetime strings.
@@ -80,6 +81,8 @@ class SubAgentRequest:
             data.pop("denied_tools", None)
         if self.origin is None:
             data.pop("origin", None)
+        if self.progress_interval_minutes == 0:
+            data.pop("progress_interval_minutes", None)
 
         return data
 
@@ -115,6 +118,7 @@ class SubAgentRequest:
             allowed_tools=data.get("allowed_tools"),
             denied_tools=data.get("denied_tools"),
             origin=data.get("origin"),
+            progress_interval_minutes=data.get("progress_interval_minutes", 0),
         )
 
 
@@ -128,6 +132,7 @@ class SubAgentResult:
         token_count: Total tokens used during execution.
         duration_ms: Execution time in milliseconds.
         error: Error message if execution failed.
+        session_log_path: Relative path to the session JSONL log file, if written.
     """
 
     request_id: str
@@ -135,6 +140,7 @@ class SubAgentResult:
     token_count: int = 0
     duration_ms: float = 0.0
     error: str | None = None
+    session_log_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary.
@@ -160,4 +166,5 @@ class SubAgentResult:
             token_count=data.get("token_count", 0),
             duration_ms=data.get("duration_ms", 0.0),
             error=data.get("error"),
+            session_log_path=data.get("session_log_path"),
         )

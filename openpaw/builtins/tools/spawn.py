@@ -35,6 +35,15 @@ class SpawnAgentInput(BaseModel):
     notify: bool = Field(
         default=True, description="Whether to send notification when done"
     )
+    progress_interval_minutes: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "How often to send progress updates in minutes. "
+            "0 disables progress updates. When enabled, sends elapsed time, "
+            "tools used, and current activity to the main agent."
+        ),
+    )
     allowed_tools: list[str] | None = Field(
         default=None,
         description=(
@@ -104,12 +113,15 @@ class SpawnToolBuiltin(BaseBuiltinTool):
 
         # Extract configuration
         self.max_concurrent = self.config.get("max_concurrent", 8)
+        self.default_progress_interval = self.config.get("default_progress_interval", 5)
 
         # Runner reference (set via set_runner after initialization)
         self._runner: SubAgentRunner | None = None
 
         logger.info(
-            f"SpawnToolBuiltin initialized (max_concurrent: {self.max_concurrent})"
+            f"SpawnToolBuiltin initialized "
+            f"(max_concurrent: {self.max_concurrent}, "
+            f"default_progress_interval: {self.default_progress_interval})"
         )
 
     def set_runner(self, runner: SubAgentRunner) -> None:
@@ -132,6 +144,65 @@ class SpawnToolBuiltin(BaseBuiltinTool):
             self._create_cancel_subagent_tool(),
         ]
 
+    def _build_spawn_request(
+        self,
+        task: str,
+        label: str,
+        timeout_minutes: int,
+        notify: bool,
+        progress_interval_minutes: int,
+        allowed_tools: list[str] | None,
+        denied_tools: list[str] | None,
+    ) -> Any:
+        """Validate inputs and build a SubAgentRequest.
+
+        Returns:
+            SubAgentRequest on success, or an error string on failure.
+        """
+        if self._runner is None:
+            return "[Error: Sub-agent spawning not available (runner not initialized)]"
+
+        session_key = get_current_session_key()
+        if not session_key:
+            return "[Error: Cannot spawn sub-agent: no active session context]"
+
+        # Resolve progress interval: apply workspace default, clamp to timeout
+        if progress_interval_minutes == 0 and self.default_progress_interval > 0:
+            progress_interval_minutes = self.default_progress_interval
+        if progress_interval_minutes > 0 and progress_interval_minutes > timeout_minutes:
+            progress_interval_minutes = timeout_minutes
+
+        request = create_subagent_request(
+            task=task,
+            label=label,
+            session_key=session_key,
+            status=SubAgentStatus.PENDING,
+            timeout_minutes=timeout_minutes,
+            notify=notify,
+            allowed_tools=allowed_tools,
+            denied_tools=denied_tools,
+            origin=get_invocation_origin(),
+            progress_interval_minutes=progress_interval_minutes,
+        )
+
+        try:
+            self._runner._store.create(request)
+        except Exception as e:
+            logger.error(f"Failed to create sub-agent request: {e}")
+            return f"[Error: Failed to create sub-agent request: {e}]"
+
+        return request
+
+    @staticmethod
+    def _format_spawn_success(request_id: str, label: str, timeout_minutes: int) -> str:
+        """Format the success message after spawning."""
+        return (
+            f"Sub-agent spawned: {request_id}\n"
+            f"Label: {label}\n"
+            f"Timeout: {timeout_minutes}min\n"
+            f"Use list_subagents to check status."
+        )
+
     def _create_spawn_agent_tool(self) -> StructuredTool:
         """Create the spawn_agent tool."""
 
@@ -140,54 +211,20 @@ class SpawnToolBuiltin(BaseBuiltinTool):
             label: str,
             timeout_minutes: int = 30,
             notify: bool = True,
+            progress_interval_minutes: int = 0,
             allowed_tools: list[str] | None = None,
             denied_tools: list[str] | None = None,
         ) -> str:
-            """Sync wrapper for spawn_agent (for LangChain compatibility).
-
-            Args:
-                task: Detailed instruction for the sub-agent to execute.
-                label: Short human-readable label.
-                timeout_minutes: Maximum runtime in minutes (1-120).
-                notify: Whether to send notification when done.
-                allowed_tools: Optional whitelist of tool names.
-                denied_tools: Optional additional tools to deny.
-
-            Returns:
-                Confirmation message with sub-agent ID or error.
-            """
-            # Guard: check if runner is set
-            if self._runner is None:
-                return "[Error: Sub-agent spawning not available (runner not initialized)]"
-
-            # Get current session key from context
-            session_key = get_current_session_key()
-            if not session_key:
-                return "[Error: Cannot spawn sub-agent: no active session context]"
-
-            # Create request
-            request = create_subagent_request(
-                task=task,
-                label=label,
-                session_key=session_key,
-                status=SubAgentStatus.PENDING,
-                timeout_minutes=timeout_minutes,
-                notify=notify,
-                allowed_tools=allowed_tools,
-                denied_tools=denied_tools,
-                origin=get_invocation_origin(),
+            """Sync wrapper for spawn_agent (for LangChain compatibility)."""
+            result = self._build_spawn_request(
+                task, label, timeout_minutes, notify,
+                progress_interval_minutes, allowed_tools, denied_tools,
             )
+            if isinstance(result, str):
+                return result
+            request = result
 
-            # Persist request to store
             try:
-                self._runner._store.create(request)
-            except Exception as e:
-                logger.error(f"Failed to create sub-agent request: {e}")
-                return f"[Error: Failed to create sub-agent request: {e}]"
-
-            # Spawn the sub-agent (async operation)
-            try:
-                # Get or create event loop
                 try:
                     loop = asyncio.get_running_loop()
                     future = asyncio.run_coroutine_threadsafe(
@@ -195,16 +232,10 @@ class SpawnToolBuiltin(BaseBuiltinTool):
                     )
                     request_id = future.result(timeout=5.0)
                 except RuntimeError:
-                    # No running loop - safe to use asyncio.run
                     request_id = asyncio.run(self._runner.spawn(request))
 
                 logger.info(f"Spawned sub-agent: {request_id} ('{label}')")
-                return (
-                    f"Sub-agent spawned: {request_id}\n"
-                    f"Label: {label}\n"
-                    f"Timeout: {timeout_minutes}min\n"
-                    f"Use list_subagents to check status."
-                )
+                return self._format_spawn_success(request_id, label, timeout_minutes)
             except Exception as e:
                 logger.error(f"Failed to spawn sub-agent: {e}")
                 return f"[Error: Failed to spawn sub-agent: {e}]"
@@ -214,61 +245,23 @@ class SpawnToolBuiltin(BaseBuiltinTool):
             label: str,
             timeout_minutes: int = 30,
             notify: bool = True,
+            progress_interval_minutes: int = 0,
             allowed_tools: list[str] | None = None,
             denied_tools: list[str] | None = None,
         ) -> str:
-            """Spawn a new sub-agent to execute a task in the background.
-
-            Args:
-                task: Detailed instruction for the sub-agent to execute.
-                label: Short human-readable label.
-                timeout_minutes: Maximum runtime in minutes (1-120).
-                notify: Whether to send notification when done.
-                allowed_tools: Optional whitelist of tool names.
-                denied_tools: Optional additional tools to deny.
-
-            Returns:
-                Confirmation message with sub-agent ID or error.
-            """
-            # Guard: check if runner is set
-            if self._runner is None:
-                return "[Error: Sub-agent spawning not available (runner not initialized)]"
-
-            # Get current session key from context
-            session_key = get_current_session_key()
-            if not session_key:
-                return "[Error: Cannot spawn sub-agent: no active session context]"
-
-            # Create request
-            request = create_subagent_request(
-                task=task,
-                label=label,
-                session_key=session_key,
-                status=SubAgentStatus.PENDING,
-                timeout_minutes=timeout_minutes,
-                notify=notify,
-                allowed_tools=allowed_tools,
-                denied_tools=denied_tools,
-                origin=get_invocation_origin(),
+            """Spawn a new sub-agent to execute a task in the background."""
+            result = self._build_spawn_request(
+                task, label, timeout_minutes, notify,
+                progress_interval_minutes, allowed_tools, denied_tools,
             )
+            if isinstance(result, str):
+                return result
+            request = result
 
-            # Persist request to store
-            try:
-                self._runner._store.create(request)
-            except Exception as e:
-                logger.error(f"Failed to create sub-agent request: {e}")
-                return f"[Error: Failed to create sub-agent request: {e}]"
-
-            # Spawn the sub-agent
             try:
                 request_id = await self._runner.spawn(request)
                 logger.info(f"Spawned sub-agent: {request_id} ('{label}')")
-                return (
-                    f"Sub-agent spawned: {request_id}\n"
-                    f"Label: {label}\n"
-                    f"Timeout: {timeout_minutes}min\n"
-                    f"Use list_subagents to check status."
-                )
+                return self._format_spawn_success(request_id, label, timeout_minutes)
             except Exception as e:
                 logger.error(f"Failed to spawn sub-agent: {e}")
                 return f"[Error: Failed to spawn sub-agent: {e}]"
@@ -319,7 +312,7 @@ class SpawnToolBuiltin(BaseBuiltinTool):
                     time_ago = self._format_time_ago(elapsed.total_seconds())
 
                     lines.append(
-                        f"- {request.id[:8]} | {request.label} | {request.status.value} | started {time_ago}"
+                        f"- {request.id} | {request.label} | {request.status.value} | started {time_ago}"
                     )
                 lines.append("")
 
@@ -336,7 +329,7 @@ class SpawnToolBuiltin(BaseBuiltinTool):
                         duration_str = "unknown"
 
                     lines.append(
-                        f"- {request.id[:8]} | {request.label} | {request.status.value} | {duration_str}"
+                        f"- {request.id} | {request.label} | {request.status.value} | {duration_str}"
                     )
 
             return "\n".join(lines) if lines else "No sub-agents found."
@@ -396,6 +389,9 @@ class SpawnToolBuiltin(BaseBuiltinTool):
 
             if result.token_count > 0:
                 lines.append(f"Tokens: {result.token_count}")
+
+            if result.session_log_path:
+                lines.append(f"Session log: {result.session_log_path}")
 
             if result.error:
                 lines.append(f"\nError: {result.error}")

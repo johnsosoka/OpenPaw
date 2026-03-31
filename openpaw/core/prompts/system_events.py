@@ -45,6 +45,24 @@ SUBAGENT_COMPLETED_SHORT_TEMPLATE = PromptTemplate(
     input_variables=["label", "output", "origin_suffix"],
 )
 
+# Sub-agent periodic progress update
+SUBAGENT_PROGRESS_TEMPLATE = PromptTemplate(
+    template=(
+        "[SYSTEM] Sub-agent '{label}' progress update{origin_suffix}.\n"
+        "Elapsed: {elapsed} | Tools called: {total_tools}\n"
+        "Recent tools: {tools_summary}\n"
+        "Currently: {current_activity}"
+    ),
+    input_variables=[
+        "label",
+        "elapsed",
+        "total_tools",
+        "tools_summary",
+        "current_activity",
+        "origin_suffix",
+    ],
+)
+
 # Interrupt mode notification (static, no variables)
 INTERRUPT_NOTIFICATION = "[Run interrupted — processing new message]"
 
