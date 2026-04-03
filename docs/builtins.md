@@ -169,11 +169,20 @@ builtins:
     enabled: true
     config:
       max_concurrent: 8  # Maximum simultaneous sub-agents (default: 8)
+      default_progress_interval: 5  # Minutes between progress updates (0 = disabled, default: 5)
 ```
 
 **Tool Exclusions:**
 
-Sub-agents cannot spawn sub-agents (no `spawn_agent`), send unsolicited messages (no `send_message`/`send_file`), self-continue (no `request_followup`), or schedule tasks (no cron tools). This prevents recursion and ensures sub-agents are single-purpose workers.
+Sub-agents have a restricted tool set to prevent recursion, unsolicited messaging, and persistent side effects:
+
+- **Spawning**: no `spawn_agent` (prevents sub-agent recursion)
+- **Messaging**: no `send_message`, `send_file` (sub-agents cannot contact users directly)
+- **Self-continuation**: no `request_followup`
+- **Scheduling**: no cron or dynamic scheduling tools (side effects outlive the sub-agent)
+- **Browser**: no browser tools (browser sessions require a session key for cleanup)
+- **Cron manager**: no persistent cron management tools (writes YAML files that persist after the sub-agent exits)
+- **Plan**: no session-scoped planning tools (requires session key context)
 
 **Lifecycle:**
 
@@ -181,14 +190,20 @@ Sub-agents cannot spawn sub-agents (no `spawn_agent`), send unsolicited messages
 
 **Notifications:**
 
-When `notify: true` (default), sub-agent completion results are injected into the message queue, triggering a new agent turn to process the `[SYSTEM]` notification.
+When `notify: true` (default), notifications are injected into the message queue for all terminal states — `completed`, `failed`, `timed_out`, and `cancelled`. Each notification includes a brief result summary and the session log path so the main agent can call `read_file()` on it for the full transcript.
+
+**Progress Updates:**
+
+Sub-agents emit progress updates every 5 minutes by default. Override per-spawn with `progress_interval_minutes`, or change the workspace default with `default_progress_interval` in the spawn config. Set to `0` to disable.
+
+Progress messages are delivered as `[SYSTEM]` events to the main agent's queue and include elapsed time, tools called, and current activity. The main agent decides whether to relay updates to the user.
 
 **Usage Example:**
 
 ```
 User: "Research topic X in the background while I work on Y"
-Agent: [Calls spawn_agent(task="Research topic X...", label="research-x")]
-Sub-agent: [Runs concurrently, main agent continues working on Y]
+Agent: [Calls spawn_agent(task="Research topic X...", label="research-x", progress_interval_minutes=5)]
+Sub-agent: [Runs concurrently, sends progress every 5 min, main agent continues working on Y]
 System: [When complete, user receives notification with result summary]
 ```
 
@@ -649,6 +664,36 @@ To find voice IDs, visit the [ElevenLabs Voice Library](https://elevenlabs.io/vo
 
 ---
 
+### status_reminder
+
+**Group:** `agent`
+**Type:** Middleware (not a tool — operates automatically)
+**Prerequisites:** `send_message` builtin must be enabled
+
+Automatic detection of long silent tool-calling runs. When the agent completes multiple tool-calling turns without calling `send_message()`, the middleware injects a reminder to communicate with the user. Uses a three-gate decision model to avoid nagging: threshold (minimum silent turns before first reminder), budget (maximum reminders per run), and cooldown (minimum turns between consecutive reminders).
+
+This is not a tool the agent calls — it operates transparently as middleware on every agent run where `send_message` is available.
+
+**Configuration:**
+
+```yaml
+status_reminder:
+  enabled: true              # Default: true
+  threshold: 5               # Tool-calling turns before first reminder (1-50)
+  max_reminders: 3           # Max reminders per agent run (0-20)
+  cooldown_turns: 1          # Min turns between consecutive reminders (0-10)
+```
+
+**Behavior:**
+
+- Reminders are injected as `<framework_instruction>` tags into existing messages — no extra checkpoint entries, no additional API calls
+- Only active when the `send_message` builtin is loaded for the workspace
+- Resets between agent runs (each user message starts a fresh count)
+- Set `max_reminders: 0` to disable reminders while keeping detection active
+- Disabled entirely with `enabled: false`
+
+---
+
 ## Processors
 
 [![Processor Pipeline](../assets/diagrams/processor-pipeline.png)](../assets/diagrams/processor-pipeline.png)
@@ -836,6 +881,7 @@ builtins:
     enabled: true
     config:
       max_concurrent: 8
+      default_progress_interval: 5
 
   cron:
     enabled: true

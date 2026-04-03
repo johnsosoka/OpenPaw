@@ -862,13 +862,15 @@ Agents can spawn background workers for concurrent task execution using the `spa
 
 **Storage**: Sub-agent state persists to `{workspace}/.openpaw/subagents.yaml` and survives restarts. Completed/failed/cancelled requests older than 24 hours are automatically cleaned up on initialization.
 
-**Tool Exclusions**: Sub-agents cannot spawn sub-agents (no `spawn_agent`), send unsolicited messages (no `send_message`/`send_file`), self-continue (no `request_followup`), or schedule tasks (no cron tools). This prevents recursion and ensures sub-agents are single-purpose workers.
+**Tool Exclusions**: Sub-agents cannot spawn sub-agents (no `spawn_agent`), send unsolicited messages (no `send_message`/`send_file`), self-continue (no `request_followup`), schedule tasks (no cron tools), use browser tools (no session key for cleanup), use persistent cron management (side effects outlive sub-agent), or use plan tools (requires session key context). See `SUBAGENT_EXCLUDED_TOOLS` in the runner.
 
 **Lifecycle**: `pending` → `running` → `completed`/`failed`/`cancelled`/`timed_out`. Running sub-agents exceeding their timeout are marked as `timed_out` during cleanup.
 
-**Notifications**: When `notify: true` (default), sub-agent completion results are injected into the message queue via `WorkspaceRunner._inject_system_event()` using `QueueMode.COLLECT`. This triggers a new agent turn where the main agent processes the `[SYSTEM]` notification and responds naturally. Notifications are truncated (500 chars) with a prompt to use `get_subagent_result` for full output. If no `result_callback` is configured, falls back to direct channel messaging.
+**Notifications**: When `notify: true` (default), notifications are injected via `WorkspaceRunner._inject_system_event()` using `QueueMode.COLLECT` for ALL terminal states: `completed`, `failed`, `timed_out`, and `cancelled`. Notification includes result summary and `session_log_path` for direct `read_file()` access. If no `result_callback` is configured, falls back to direct channel messaging.
 
-**Session Logging**: Every sub-agent execution writes a JSONL session log to `memory/sessions/subagent/`, including prompt, response, tools used, and metrics. Logs are written for all outcomes (success, timeout, failure).
+**Session Logging**: Every sub-agent execution writes a JSONL session log to `memory/sessions/subagent/` for all outcomes (success, failure, timeout, cancellation). `SubAgentResult` includes `session_log_path` field; the path is surfaced in notifications and `get_subagent_result` output.
+
+**Cancel Race Guard**: `cancel()` returns `False` if the sub-agent is already in a terminal state (`COMPLETED`, `FAILED`, `TIMED_OUT`), preventing status overwrite.
 
 **Configuration** (optional, in `agent.yaml` or global config):
 
@@ -878,13 +880,16 @@ builtins:
     enabled: true
     config:
       max_concurrent: 8  # Maximum simultaneous sub-agents (default: 8)
+      default_progress_interval: 5  # Minutes between progress updates (0 = disabled, default: 5)
 ```
+
+**Progress Updates**: Sub-agents can send periodic progress pings to the main agent during execution. Set `progress_interval_minutes` on `spawn_agent` (or configure `default_progress_interval` in spawn config). Progress messages include elapsed time, tools used, and current activity. Delivered as `[SYSTEM]` queue events — the main agent decides whether to relay to the user.
 
 **Limits**: Maximum 8 concurrent sub-agents (configurable), timeout defaults to 30 minutes (1-120 range). Results are truncated at 50K characters to match `read_file` safety valve pattern.
 
 **Example Usage** (by agent):
 - User: "Research topic X in the background while I work on Y"
-- Agent calls `spawn_agent(task="Research topic X...", label="research-x")`
+- Agent calls `spawn_agent(task="Research topic X...", label="research-x", progress_interval_minutes=5)`
 - Sub-agent runs concurrently, agent continues working on Y
 - When complete, user receives notification with result summary
 
@@ -996,6 +1001,22 @@ Scheduled agent runs (heartbeat, cron, sub-agent) write JSONL session logs to `{
 **Integration with Delivery Routing**: When `delivery` is set to `"agent"` or `"both"`, the injected `[SYSTEM]` message includes the session log path so the main agent can use `read_file()` to access the full session context. Output is truncated at 2000 characters in the injection message.
 
 **Implementation**: `SessionLogger` in `openpaw/agent/session_logger.py`. Each scheduler creates its own instance (no shared state, no locking needed).
+
+### Status Reminder Middleware
+
+Agents receive automatic reminders to use `send_message()` when they've been working silently for too many tool-calling turns. Uses a three-gate decision model to avoid nagging: threshold (minimum silent turns), budget (maximum reminders per run), and cooldown (spacing between reminders).
+
+**Configuration** (in `agent.yaml` or global config):
+
+```yaml
+status_reminder:
+  enabled: true        # Default on (only active when send_message builtin is loaded)
+  threshold: 5         # Tool-calling turns before first reminder
+  max_reminders: 3     # Maximum reminders per agent run
+  cooldown_turns: 1    # Minimum turns between consecutive reminders
+```
+
+**Implementation**: `StatusReminderMiddleware` in `openpaw/agent/middleware/status_reminder.py`. Uses `AgentMiddleware` hooks (`before_model`/`after_model`). Reminders are injected as `<framework_instruction>` tags into existing messages — non-invasive, no extra checkpoint entries.
 
 ### Filesystem Access
 

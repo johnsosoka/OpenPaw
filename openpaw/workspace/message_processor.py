@@ -44,6 +44,7 @@ class MessageProcessor:
         user_aliases: dict[int, str] | None = None,
         session_ttl_minutes: int = 0,
         lifecycle_config: Any = None,
+        status_reminder_middleware: Any = None,
     ):
         """Initialize message processor.
 
@@ -64,6 +65,8 @@ class MessageProcessor:
             session_ttl_minutes: Auto-reset conversation after N minutes of
                 inactivity. 0 disables TTL checking.
             lifecycle_config: LifecycleConfig instance for notification flags.
+            status_reminder_middleware: Optional StatusReminderMiddleware instance.
+                When provided, its reset() is called alongside queue/approval resets.
         """
         self._agent_runner = agent_runner
         self._session_manager = session_manager
@@ -80,6 +83,7 @@ class MessageProcessor:
         self._user_aliases = user_aliases or {}
         self._session_ttl_minutes = session_ttl_minutes
         self._lifecycle_config = lifecycle_config
+        self._status_reminder_middleware = status_reminder_middleware
 
     def update_agent_runner(self, runner: "AgentRunner") -> None:
         """Update the agent runner instance.
@@ -375,6 +379,8 @@ class MessageProcessor:
                 self._queue_middleware.reset()
                 if self._approval_manager:
                     self._approval_middleware.reset()
+                if self._status_reminder_middleware:
+                    self._status_reminder_middleware.reset()
 
             # Check steer (captured before reset)
             if steered and steer_messages:

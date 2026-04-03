@@ -133,6 +133,24 @@ builtins:
 !!! note "API key gating"
     Tools with API key prerequisites are automatically disabled if the key is not set. You do not need to explicitly disable them — missing credentials are enough. The agent simply does not see tools whose prerequisites are unmet.
 
+### Automatic Status Reminders
+
+When `send_message` is enabled, the framework automatically monitors whether the agent is communicating during long-running tasks. If the agent completes several tool-calling turns without sending a progress update, it receives a gentle nudge to use `send_message()`. This keeps you informed during tasks that involve many tool calls — file processing, multi-step research, or background coordination.
+
+The reminder system uses three gates to avoid nagging: a threshold (how many silent turns before the first reminder), a budget (maximum reminders per run), and a cooldown (spacing between consecutive reminders). All three are configurable. The defaults — remind after 5 silent turns, up to 3 times per run, with at least 1 turn between reminders — work well for most workspaces.
+
+Reminders are injected as lightweight framework instructions into the agent's message stream. They do not generate extra messages to you, consume additional API calls, or create checkpoint entries. If `send_message` is not enabled for the workspace, the reminder system is inactive regardless of configuration.
+
+```yaml
+status_reminder:
+  enabled: true        # Default on (only active when send_message is loaded)
+  threshold: 5         # Tool-calling turns before first reminder
+  max_reminders: 3     # Maximum reminders per agent run
+  cooldown_turns: 1    # Minimum turns between consecutive reminders
+```
+
+See [Configuration](configuration.md) for the full status reminder configuration reference.
+
 See [Built-ins](builtins.md) for the full list of tools and processors, their prerequisites, group memberships, and all configuration options.
 
 ---
@@ -393,7 +411,7 @@ Sub-agents are background workers the main agent can spawn to run tasks concurre
 
 ### What Sub-Agents Can Do
 
-A sub-agent has access to most of the same tools as the main agent — web search, browser automation, file operations, and so on. The important difference is what sub-agents cannot do: they cannot spawn their own sub-agents, they cannot send you messages directly, and they cannot create scheduled tasks. These restrictions prevent runaway recursion and ensure sub-agents remain focused, single-purpose workers rather than autonomous agents that grow in scope.
+A sub-agent has access to most of the same tools as the main agent — web search, file operations, and so on. The important difference is what sub-agents cannot do: they cannot spawn their own sub-agents, they cannot send you messages directly, they cannot create scheduled tasks, and they cannot use browser automation, persistent cron management, or session-scoped planning tools. These restrictions prevent runaway recursion, avoid persistent side effects that outlive the sub-agent, and ensure sub-agents remain focused, single-purpose workers rather than autonomous agents that grow in scope.
 
 Sub-agents run in their own isolated context with no shared conversation history. They do not affect the main agent's thread, and their output does not appear directly in the conversation. Instead, when a sub-agent completes, the main agent receives a notification containing a brief summary of the result. The main agent can then retrieve the full output using the sub-agent's ID and decide how to present or act on it.
 
@@ -419,15 +437,24 @@ builtins:
     enabled: true
     config:
       max_concurrent: 8     # Maximum simultaneous sub-agents
+      default_progress_interval: 5  # Minutes between progress updates (0 to disable)
 ```
 
-Each sub-agent run produces a session log in `memory/sessions/subagent/` capturing the full prompt, the agent's response, the tools it used, and token metrics. The main agent can read these logs for the complete picture beyond the brief notification summary.
+Each sub-agent run produces a session log in `memory/sessions/subagent/` capturing the full prompt, the agent's response, the tools it used, and token metrics. Logs are written for all outcomes — success, failure, timeout, and cancellation. The session log path is surfaced in completion notifications and in `get_subagent_result` output, so the main agent can call `read_file()` on it directly for the complete transcript.
 
 !!! tip "When to use sub-agents"
     Sub-agents work best for tasks that are well-defined, independent, and time-consuming — things like "research these ten papers and extract the key findings" or "convert all PDFs in uploads/ to markdown and summarize each one." For quick lookups that take a few seconds, a direct tool call is simpler and faster than spawning a sub-agent.
 
 !!! note "Notification delivery"
-    When a sub-agent completes, the main agent receives a brief summary (up to 500 characters) injected into its message queue. For the full result, the main agent uses the result retrieval tool with the sub-agent's ID. The complete output is also always available in the session log file.
+    The main agent is notified when a sub-agent reaches any terminal state — completion, failure, timeout, or cancellation. The notification includes a brief summary and the session log path so the main agent can call `read_file()` on it for the full transcript. For the full result text, the main agent uses `get_subagent_result` with the sub-agent's ID.
+
+### Progress Updates
+
+While a sub-agent is running, it emits periodic progress updates to the main agent. By default, updates are sent every 5 minutes. Each update is delivered as a `[SYSTEM]` event containing elapsed time, the tools the sub-agent has called so far, and what it is currently doing (the last tool it invoked, or "thinking" if it is between tool calls).
+
+The main agent decides what to do with these updates. It might relay them to you if you asked to be kept informed, or it might silently absorb them if the task is routine. Progress updates are not sent to you directly — they go through the main agent, which has the context to judge whether you need to hear about them.
+
+You can control the progress interval per spawn by setting `progress_interval_minutes` when the agent calls `spawn_agent`. Set it to `0` to disable progress updates entirely for a specific sub-agent, or configure the workspace default with `default_progress_interval` in the spawn builtin config.
 
 See [Built-ins](builtins.md) for the complete sub-agent configuration, available tools, and guidance on designing effective sub-agent tasks.
 

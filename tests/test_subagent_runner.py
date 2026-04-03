@@ -694,17 +694,41 @@ def test_get_result_delegates_to_store(sub_agent_runner, mock_store):
 def test_subagent_excluded_tools_contains_expected_names():
     """Test that SUBAGENT_EXCLUDED_TOOLS contains expected tool names."""
     expected_tools = {
+        # Prevent sub-sub-agents
         "spawn_agent",
         "list_subagents",
         "get_subagent_result",
         "cancel_subagent",
+        # Prevent self-continuation
         "request_followup",
+        # Prevent unsolicited user messaging
         "send_message",
         "send_file",
+        # Prevent persistence that outlives sub-agent lifecycle
         "schedule_at",
         "schedule_every",
         "list_scheduled",
         "cancel_scheduled",
+        # Prevent orphaned browser sessions
+        "browser_navigate",
+        "browser_snapshot",
+        "browser_click",
+        "browser_type",
+        "browser_select",
+        "browser_scroll",
+        "browser_back",
+        "browser_screenshot",
+        "browser_close",
+        "browser_tabs",
+        "browser_switch_tab",
+        # Prevent persistent cron side effects
+        "create_cron",
+        "list_crons",
+        "update_cron",
+        "delete_cron",
+        # Plan tool requires session key (undefined in subagent context)
+        "write_plan",
+        "read_plan",
     }
 
     assert SUBAGENT_EXCLUDED_TOOLS == expected_tools
@@ -1039,3 +1063,496 @@ def test_format_notification_timeout():
     assert "research-x" in content
     assert "timed out" in content
     assert "30 minutes" in content
+
+
+# ---------------------------------------------------------------------------
+# Phase 1A: Notification on failure and cancel paths
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_notification_sent_on_failure_when_notify_true(
+    mock_store, mock_channel, mock_token_logger
+):
+    """Test that notification is sent on failure when notify=True."""
+    mock_runner = Mock(spec=AgentRunner)
+    mock_runner.run = AsyncMock(side_effect=RuntimeError("boom"))
+    mock_runner.additional_tools = []
+    mock_runner._build_agent = Mock(return_value=Mock())
+    mock_runner._agent = Mock()
+    mock_runner.last_metrics = None
+    mock_runner.timeout_seconds = 1800
+
+    mock_callback = AsyncMock()
+
+    runner = SubAgentRunner(
+        agent_factory=lambda: mock_runner,
+        store=mock_store,
+        channels={"telegram": mock_channel},
+        token_logger=mock_token_logger,
+        workspace_name="test",
+        max_concurrent=2,
+        result_callback=mock_callback,
+    )
+
+    request = SubAgentRequest(
+        id="test-req",
+        task="Test task",
+        label="fail-test",
+        status=SubAgentStatus.RUNNING,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+        notify=True,
+    )
+
+    await runner._execute_subagent(request)
+
+    mock_callback.assert_called_once()
+    content = mock_callback.call_args[0][1]
+    assert "fail-test" in content
+    assert "failed" in content
+
+
+@pytest.mark.asyncio
+async def test_notification_not_sent_on_failure_when_notify_false(
+    mock_store, mock_channel, mock_token_logger
+):
+    """Test that notification is NOT sent on failure when notify=False."""
+    mock_runner = Mock(spec=AgentRunner)
+    mock_runner.run = AsyncMock(side_effect=RuntimeError("boom"))
+    mock_runner.additional_tools = []
+    mock_runner._build_agent = Mock(return_value=Mock())
+    mock_runner._agent = Mock()
+    mock_runner.last_metrics = None
+    mock_runner.timeout_seconds = 1800
+
+    mock_callback = AsyncMock()
+
+    runner = SubAgentRunner(
+        agent_factory=lambda: mock_runner,
+        store=mock_store,
+        channels={"telegram": mock_channel},
+        token_logger=mock_token_logger,
+        workspace_name="test",
+        max_concurrent=2,
+        result_callback=mock_callback,
+    )
+
+    request = SubAgentRequest(
+        id="test-req",
+        task="Test task",
+        label="fail-test",
+        status=SubAgentStatus.RUNNING,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+        notify=False,
+    )
+
+    await runner._execute_subagent(request)
+
+    mock_callback.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_notification_sent_on_cancellation_when_notify_true(
+    mock_store, mock_channel, mock_token_logger
+):
+    """Test that notification is sent on cancellation when notify=True."""
+    mock_runner = Mock(spec=AgentRunner)
+
+    async def slow_run(message):
+        await asyncio.sleep(10)
+        return "unreachable"
+
+    mock_runner.run = slow_run
+    mock_runner.additional_tools = []
+    mock_runner._build_agent = Mock(return_value=Mock())
+    mock_runner._agent = Mock()
+    mock_runner.last_metrics = None
+    mock_runner.timeout_seconds = 1800
+
+    mock_callback = AsyncMock()
+
+    runner = SubAgentRunner(
+        agent_factory=lambda: mock_runner,
+        store=mock_store,
+        channels={"telegram": mock_channel},
+        token_logger=mock_token_logger,
+        workspace_name="test",
+        max_concurrent=2,
+        result_callback=mock_callback,
+    )
+
+    request = SubAgentRequest(
+        id="test-req",
+        task="Test task",
+        label="cancel-test",
+        status=SubAgentStatus.RUNNING,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+        notify=True,
+    )
+
+    task = asyncio.create_task(runner._execute_subagent(request))
+    await asyncio.sleep(0.1)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    mock_callback.assert_called_once()
+    content = mock_callback.call_args[0][1]
+    assert "cancel-test" in content
+    assert "failed" in content or "cancelled" in content
+
+
+# ---------------------------------------------------------------------------
+# Phase 1B: SessionLogger write_session produces unique files per concurrent call
+# ---------------------------------------------------------------------------
+
+
+def test_session_logger_write_session_concurrent_unique_paths(tmp_path):
+    """Concurrent write_session calls must produce separate JSONL files."""
+    import threading
+
+    from openpaw.agent.session_logger import SessionLogger
+
+    logger_instance = SessionLogger(workspace_path=tmp_path, session_type="subagent")
+    paths: list[str] = []
+    lock = threading.Lock()
+
+    def write_one():
+        path = logger_instance.write_session(
+            name="subagent_worker",
+            prompt="do something",
+            response="done",
+            tools_used=[],
+            metrics=None,
+            duration_ms=100.0,
+        )
+        with lock:
+            paths.append(path)
+
+    threads = [threading.Thread(target=write_one) for _ in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # Every write must produce a distinct file
+    assert len(paths) == 10
+    assert len(set(paths)) == 10, "Concurrent write_session calls produced duplicate paths"
+
+    # Every file must exist on disk with 3 records
+    for rel_path in paths:
+        abs_path = tmp_path / rel_path
+        assert abs_path.exists(), f"Session log file missing: {rel_path}"
+        lines = abs_path.read_text().strip().split("\n")
+        assert len(lines) == 3, f"Expected 3 records in {rel_path}, got {len(lines)}"
+
+
+def test_session_logger_write_session_returns_relative_path(tmp_path):
+    """write_session must return a path relative to workspace root."""
+    from openpaw.agent.session_logger import SessionLogger
+
+    logger_instance = SessionLogger(workspace_path=tmp_path, session_type="subagent")
+    rel_path = logger_instance.write_session(
+        name="subagent_test",
+        prompt="prompt",
+        response="response",
+        tools_used=["read_file"],
+        metrics=None,
+        duration_ms=50.0,
+    )
+
+    assert not rel_path.startswith("/"), "Path should be relative, not absolute"
+    assert (tmp_path / rel_path).exists()
+
+
+# ---------------------------------------------------------------------------
+# Phase 1C: session_log_path surfaced in SubAgentResult and notification
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_session_log_path_set_on_result_after_success(
+    mock_store, mock_channel, mock_token_logger, tmp_path
+):
+    """session_log_path should be set on the result after a successful run."""
+    from openpaw.agent.session_logger import SessionLogger
+
+    session_logger = SessionLogger(workspace_path=tmp_path, session_type="subagent")
+
+    # Build a runner with properly configured tools_used so JSON serialization works.
+    local_runner = Mock(spec=AgentRunner)
+    local_runner.run = AsyncMock(return_value="Test response")
+    local_runner.additional_tools = []
+    local_runner._build_agent = Mock(return_value=Mock())
+    local_runner._agent = Mock()
+    local_runner.last_metrics = InvocationMetrics(
+        input_tokens=10, output_tokens=5, total_tokens=15, llm_calls=1
+    )
+    local_runner.last_tools_used = ["read_file"]
+    local_runner.timeout_seconds = 1800
+
+    saved_results: list[SubAgentResult] = []
+    mock_store.save_result = Mock(side_effect=lambda r: saved_results.append(r))
+
+    runner = SubAgentRunner(
+        agent_factory=lambda: local_runner,
+        store=mock_store,
+        channels={"telegram": mock_channel},
+        token_logger=mock_token_logger,
+        workspace_name="test",
+        max_concurrent=2,
+        session_logger=session_logger,
+    )
+
+    request = SubAgentRequest(
+        id="test-req",
+        task="Test task",
+        label="log-path-test",
+        status=SubAgentStatus.RUNNING,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+        notify=False,
+    )
+
+    await runner._execute_subagent(request)
+
+    # The last save_result call should have session_log_path set
+    assert saved_results, "save_result was never called"
+    final_result = saved_results[-1]
+    assert final_result.session_log_path is not None
+    assert "log-path-test" in final_result.session_log_path
+
+
+@pytest.mark.asyncio
+async def test_session_log_path_appears_in_notification(
+    mock_store, mock_channel, mock_token_logger, tmp_path
+):
+    """session_log_path should appear in the notification message when set."""
+    from openpaw.agent.session_logger import SessionLogger
+
+    session_logger = SessionLogger(workspace_path=tmp_path, session_type="subagent")
+    mock_callback = AsyncMock()
+
+    local_runner = Mock(spec=AgentRunner)
+    local_runner.run = AsyncMock(return_value="Test response")
+    local_runner.additional_tools = []
+    local_runner._build_agent = Mock(return_value=Mock())
+    local_runner._agent = Mock()
+    local_runner.last_metrics = InvocationMetrics(
+        input_tokens=10, output_tokens=5, total_tokens=15, llm_calls=1
+    )
+    local_runner.last_tools_used = []
+    local_runner.timeout_seconds = 1800
+
+    runner = SubAgentRunner(
+        agent_factory=lambda: local_runner,
+        store=mock_store,
+        channels={"telegram": mock_channel},
+        token_logger=mock_token_logger,
+        workspace_name="test",
+        max_concurrent=2,
+        result_callback=mock_callback,
+        session_logger=session_logger,
+    )
+
+    request = SubAgentRequest(
+        id="test-req",
+        task="Test task",
+        label="notif-log-test",
+        status=SubAgentStatus.RUNNING,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+        notify=True,
+    )
+
+    await runner._execute_subagent(request)
+
+    mock_callback.assert_called_once()
+    content = mock_callback.call_args[0][1]
+    assert "Full session log:" in content
+
+
+def test_format_notification_includes_log_path_when_set():
+    """_format_notification appends session log path when result.session_log_path is set."""
+    runner = SubAgentRunner(
+        agent_factory=lambda: Mock(),
+        store=Mock(),
+        channels={},
+        workspace_name="test",
+    )
+
+    request = SubAgentRequest(
+        id="test-req",
+        task="Test task",
+        label="log-label",
+        status=SubAgentStatus.COMPLETED,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+    )
+
+    result = SubAgentResult(
+        request_id="test-req",
+        output="done",
+        session_log_path="memory/sessions/subagent/subagent_log-label_2026.jsonl",
+    )
+
+    content = runner._format_notification(request, result)
+    assert "Full session log:" in content
+    assert "memory/sessions/subagent" in content
+
+
+def test_format_notification_no_log_path_when_not_set():
+    """_format_notification does not include log path line when session_log_path is None."""
+    runner = SubAgentRunner(
+        agent_factory=lambda: Mock(),
+        store=Mock(),
+        channels={},
+        workspace_name="test",
+    )
+
+    request = SubAgentRequest(
+        id="test-req",
+        task="Test task",
+        label="log-label",
+        status=SubAgentStatus.COMPLETED,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+    )
+
+    result = SubAgentResult(
+        request_id="test-req",
+        output="done",
+        session_log_path=None,
+    )
+
+    content = runner._format_notification(request, result)
+    assert "Full session log:" not in content
+
+
+# ---------------------------------------------------------------------------
+# Phase 4A: Cancel-after-complete race guard
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cancel_returns_false_for_completed_status(mock_store, mock_channel, mock_token_logger):
+    """cancel() returns False when the sub-agent is already COMPLETED."""
+    completed_request = SubAgentRequest(
+        id="test-req",
+        task="task",
+        label="label",
+        status=SubAgentStatus.COMPLETED,
+        session_key="telegram:12345",
+    )
+    mock_store.get.return_value = completed_request
+
+    # Add a fake active task so cancel doesn't bail out on the first check
+    runner = SubAgentRunner(
+        agent_factory=lambda: Mock(),
+        store=mock_store,
+        channels={"telegram": mock_channel},
+        token_logger=mock_token_logger,
+        workspace_name="test",
+        max_concurrent=2,
+    )
+    fake_task = Mock(spec=asyncio.Task)
+    runner._active_tasks["test-req"] = fake_task
+
+    result = await runner.cancel("test-req")
+
+    assert result is False
+    fake_task.cancel.assert_not_called()
+    mock_store.update_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cancel_returns_false_for_failed_status(mock_store, mock_channel, mock_token_logger):
+    """cancel() returns False when the sub-agent is already FAILED."""
+    failed_request = SubAgentRequest(
+        id="test-req",
+        task="task",
+        label="label",
+        status=SubAgentStatus.FAILED,
+        session_key="telegram:12345",
+    )
+    mock_store.get.return_value = failed_request
+
+    runner = SubAgentRunner(
+        agent_factory=lambda: Mock(),
+        store=mock_store,
+        channels={"telegram": mock_channel},
+        token_logger=mock_token_logger,
+        workspace_name="test",
+        max_concurrent=2,
+    )
+    fake_task = Mock(spec=asyncio.Task)
+    runner._active_tasks["test-req"] = fake_task
+
+    result = await runner.cancel("test-req")
+
+    assert result is False
+    fake_task.cancel.assert_not_called()
+    mock_store.update_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cancel_returns_false_for_timed_out_status(mock_store, mock_channel, mock_token_logger):
+    """cancel() returns False when the sub-agent is already TIMED_OUT."""
+    timed_out_request = SubAgentRequest(
+        id="test-req",
+        task="task",
+        label="label",
+        status=SubAgentStatus.TIMED_OUT,
+        session_key="telegram:12345",
+    )
+    mock_store.get.return_value = timed_out_request
+
+    runner = SubAgentRunner(
+        agent_factory=lambda: Mock(),
+        store=mock_store,
+        channels={"telegram": mock_channel},
+        token_logger=mock_token_logger,
+        workspace_name="test",
+        max_concurrent=2,
+    )
+    fake_task = Mock(spec=asyncio.Task)
+    runner._active_tasks["test-req"] = fake_task
+
+    result = await runner.cancel("test-req")
+
+    assert result is False
+    fake_task.cancel.assert_not_called()
+    mock_store.update_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_cancel_proceeds_for_running_status(mock_store, mock_channel, mock_token_logger):
+    """cancel() proceeds normally when the sub-agent is still RUNNING."""
+    running_request = SubAgentRequest(
+        id="test-req",
+        task="task",
+        label="label",
+        status=SubAgentStatus.RUNNING,
+        session_key="telegram:12345",
+    )
+    mock_store.get.return_value = running_request
+
+    runner = SubAgentRunner(
+        agent_factory=lambda: Mock(),
+        store=mock_store,
+        channels={"telegram": mock_channel},
+        token_logger=mock_token_logger,
+        workspace_name="test",
+        max_concurrent=2,
+    )
+    fake_task = Mock(spec=asyncio.Task)
+    runner._active_tasks["test-req"] = fake_task
+
+    result = await runner.cancel("test-req")
+
+    assert result is True
+    fake_task.cancel.assert_called_once()

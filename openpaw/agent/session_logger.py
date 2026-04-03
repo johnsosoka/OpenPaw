@@ -55,6 +55,10 @@ class SessionLogger:
 
         Naming: {name}_{YYYY-MM-DD}T{HH-MM-SS}.jsonl
 
+        Note: This method mutates ``_current_path`` and is NOT safe for
+        concurrent callers sharing the same SessionLogger instance.
+        Use :meth:`write_session` for concurrent use (e.g., subagents).
+
         Args:
             name: Session name (e.g., "heartbeat", cron job name).
 
@@ -106,7 +110,9 @@ class SessionLogger:
     ) -> str:
         """Convenience: write a complete session in one call.
 
-        Writes three records: prompt, response, metadata.
+        Writes three records: prompt, response, metadata. This method is
+        fully self-contained — it generates its own path and does not mutate
+        shared instance state, making it safe for concurrent callers.
 
         Args:
             name: Session name for the file.
@@ -120,26 +126,12 @@ class SessionLogger:
             Relative path to the session file (relative to workspace root),
             suitable for read_file() by the main agent.
         """
-        self.create_session(name)
-        now = datetime.now(UTC).isoformat()
-
-        # Write prompt record
-        self.write_record(
-            SessionRecord(
-                type="prompt",
-                timestamp=now,
-                content=prompt,
-            )
-        )
-
-        # Write response record
-        self.write_record(
-            SessionRecord(
-                type="response",
-                timestamp=now,
-                content=response,
-            )
-        )
+        self._ensure_dir()
+        # Single timestamp for filename and records; microseconds for uniqueness.
+        now_dt = datetime.now(UTC)
+        timestamp = now_dt.strftime("%Y-%m-%dT%H-%M-%S-%f")
+        path = self._sessions_dir / f"{name}_{timestamp}.jsonl"
+        now = now_dt.isoformat()
 
         # Build metrics dict
         metrics_dict: dict[str, Any] | None = None
@@ -151,20 +143,27 @@ class SessionLogger:
                 "llm_calls": metrics.llm_calls,
             }
 
-        # Write metadata record
-        self.write_record(
-            SessionRecord(
-                type="metadata",
-                timestamp=now,
-                tools_used=tools_used if tools_used else None,
-                metrics=metrics_dict,
-                duration_ms=round(duration_ms, 1),
-            )
-        )
+        records: list[dict[str, Any]] = [
+            {"type": "prompt", "timestamp": now, "content": prompt},
+            {"type": "response", "timestamp": now, "content": response},
+            {
+                "type": "metadata",
+                "timestamp": now,
+                **({"tools_used": tools_used} if tools_used else {}),
+                **({"metrics": metrics_dict} if metrics_dict is not None else {}),
+                "duration_ms": round(duration_ms, 1),
+            },
+        ]
 
-        # Return relative path for read_file() compatibility
         try:
-            return str(self._current_path.relative_to(self._workspace_path))
+            with path.open("w", encoding="utf-8") as f:
+                for record in records:
+                    f.write(json.dumps(record) + "\n")
+        except OSError as e:
+            logger.warning(f"Failed to write session file: {e}")
+            return ""
+
+        try:
+            return str(path.relative_to(self._workspace_path))
         except ValueError:
-            # Fallback to absolute if relative fails
-            return str(self._current_path)
+            return str(path)
