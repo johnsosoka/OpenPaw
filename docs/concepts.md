@@ -133,6 +133,24 @@ builtins:
 !!! note "API key gating"
     Tools with API key prerequisites are automatically disabled if the key is not set. You do not need to explicitly disable them — missing credentials are enough. The agent simply does not see tools whose prerequisites are unmet.
 
+### Automatic Status Reminders
+
+When `send_message` is enabled, the framework automatically monitors whether the agent is communicating during long-running tasks. If the agent completes several tool-calling turns without sending a progress update, it receives a gentle nudge to use `send_message()`. This keeps you informed during tasks that involve many tool calls — file processing, multi-step research, or background coordination.
+
+The reminder system uses three gates to avoid nagging: a threshold (how many silent turns before the first reminder), a budget (maximum reminders per run), and a cooldown (spacing between consecutive reminders). All three are configurable. The defaults — remind after 5 silent turns, up to 3 times per run, with at least 1 turn between reminders — work well for most workspaces.
+
+Reminders are injected as lightweight framework instructions into the agent's message stream. They do not generate extra messages to you, consume additional API calls, or create checkpoint entries. If `send_message` is not enabled for the workspace, the reminder system is inactive regardless of configuration.
+
+```yaml
+status_reminder:
+  enabled: true        # Default on (only active when send_message is loaded)
+  threshold: 5         # Tool-calling turns before first reminder
+  max_reminders: 3     # Maximum reminders per agent run
+  cooldown_turns: 1    # Minimum turns between consecutive reminders
+```
+
+See [Configuration](configuration.md) for the full status reminder configuration reference.
+
 See [Built-ins](builtins.md) for the full list of tools and processors, their prerequisites, group memberships, and all configuration options.
 
 ---
@@ -430,8 +448,13 @@ Each sub-agent run produces a session log in `memory/sessions/subagent/` capturi
 !!! note "Notification delivery"
     The main agent is notified when a sub-agent reaches any terminal state — completion, failure, timeout, or cancellation. The notification includes a brief summary and the session log path so the main agent can call `read_file()` on it for the full transcript. For the full result text, the main agent uses `get_subagent_result` with the sub-agent's ID.
 
-!!! info "Progress updates"
-    Sub-agents emit progress updates every 5 minutes by default. The main agent receives `[SYSTEM]` events showing elapsed time, tools used, and current activity, and decides whether to relay them to you. You can disable progress updates by setting `progress_interval_minutes: 0` when spawning.
+### Progress Updates
+
+While a sub-agent is running, it emits periodic progress updates to the main agent. By default, updates are sent every 5 minutes. Each update is delivered as a `[SYSTEM]` event containing elapsed time, the tools the sub-agent has called so far, and what it is currently doing (the last tool it invoked, or "thinking" if it is between tool calls).
+
+The main agent decides what to do with these updates. It might relay them to you if you asked to be kept informed, or it might silently absorb them if the task is routine. Progress updates are not sent to you directly — they go through the main agent, which has the context to judge whether you need to hear about them.
+
+You can control the progress interval per spawn by setting `progress_interval_minutes` when the agent calls `spawn_agent`. Set it to `0` to disable progress updates entirely for a specific sub-agent, or configure the workspace default with `default_progress_interval` in the spawn builtin config.
 
 See [Built-ins](builtins.md) for the complete sub-agent configuration, available tools, and guidance on designing effective sub-agent tasks.
 
