@@ -287,6 +287,12 @@ approval_gates:
     overwrite_file:
       require_approval: true
       show_args: true
+
+status_reminder:
+  enabled: true
+  threshold: 5
+  max_reminders: 3
+  cooldown_turns: 1
 ```
 
 ### Workspace-Specific Fields
@@ -490,6 +496,26 @@ lifecycle:
 **tools** — Per-tool approval settings.
 
 When a gated tool is called, execution pauses and the user sees approve/deny buttons in their chat. On approval, the agent re-runs with tool execution allowed. On denial, the agent receives a system message and can adjust its approach. See [Concepts](concepts.md) for a detailed walkthrough of the approval flow.
+
+#### Status Reminder
+
+```yaml
+status_reminder:
+  enabled: true              # Default: true
+  threshold: 5               # Tool-calling turns before first reminder (1-50)
+  max_reminders: 3           # Max reminders per agent run (0-20)
+  cooldown_turns: 1          # Min turns between consecutive reminders (0-10)
+```
+
+**enabled** — Enable automatic reminders for the agent to use `send_message()` during long silent tool-calling runs. Only active when the `send_message` builtin is loaded. Default: `true`.
+
+**threshold** — Number of consecutive tool-calling turns without a `send_message()` call before the first reminder is injected. Range: 1-50.
+
+**max_reminders** — Maximum number of reminders the agent receives per agent run. Prevents nagging. Set to `0` to disable reminders entirely while keeping detection active. Range: 0-20.
+
+**cooldown_turns** — Minimum number of turns between consecutive reminders. Prevents back-to-back reminders. Range: 0-10.
+
+Reminders are injected as `<framework_instruction>` tags into the agent's message stream — they do not create extra checkpoint entries or consume additional API calls.
 
 ---
 

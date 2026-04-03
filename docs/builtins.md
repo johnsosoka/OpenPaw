@@ -664,6 +664,36 @@ To find voice IDs, visit the [ElevenLabs Voice Library](https://elevenlabs.io/vo
 
 ---
 
+### status_reminder
+
+**Group:** `agent`
+**Type:** Middleware (not a tool — operates automatically)
+**Prerequisites:** `send_message` builtin must be enabled
+
+Automatic detection of long silent tool-calling runs. When the agent completes multiple tool-calling turns without calling `send_message()`, the middleware injects a reminder to communicate with the user. Uses a three-gate decision model to avoid nagging: threshold (minimum silent turns before first reminder), budget (maximum reminders per run), and cooldown (minimum turns between consecutive reminders).
+
+This is not a tool the agent calls — it operates transparently as middleware on every agent run where `send_message` is available.
+
+**Configuration:**
+
+```yaml
+status_reminder:
+  enabled: true              # Default: true
+  threshold: 5               # Tool-calling turns before first reminder (1-50)
+  max_reminders: 3           # Max reminders per agent run (0-20)
+  cooldown_turns: 1          # Min turns between consecutive reminders (0-10)
+```
+
+**Behavior:**
+
+- Reminders are injected as `<framework_instruction>` tags into existing messages — no extra checkpoint entries, no additional API calls
+- Only active when the `send_message` builtin is loaded for the workspace
+- Resets between agent runs (each user message starts a fresh count)
+- Set `max_reminders: 0` to disable reminders while keeping detection active
+- Disabled entirely with `enabled: false`
+
+---
+
 ## Processors
 
 [![Processor Pipeline](../assets/diagrams/processor-pipeline.png)](../assets/diagrams/processor-pipeline.png)
