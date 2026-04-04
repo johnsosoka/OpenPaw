@@ -63,6 +63,7 @@ class AgentWorkspace:
     config: "WorkspaceConfig | None" = None
     crons: "list[CronDefinition]" = field(default_factory=list)
     skills: list[SkillInfo] = field(default_factory=list)
+    team_roster: str = ""
 
     def reload_files(self) -> None:
         """Re-read workspace markdown files from disk.
@@ -126,6 +127,10 @@ class AgentWorkspace:
         )
         if framework_context:
             sections.append(f"<framework>\n{framework_context}\n</framework>")
+
+        # Team roster — injected when spawn profiles are configured
+        if self.team_roster:
+            sections.append(f"<team>\n{self.team_roster}\n</team>")
 
         # Skills — injected before workspace context so agents know what's available
         if self.skills:
