@@ -59,6 +59,14 @@ class SpawnAgentInput(BaseModel):
             "Applied after allowed_tools filtering."
         ),
     )
+    profile: str | None = Field(
+        default=None,
+        description=(
+            "Optional spawn profile name. Use list_team_profiles to see available profiles. "
+            "Profiles provide preset system prompts, tool restrictions, and model overrides. "
+            "Per-spawn allowed_tools/denied_tools further restrict the profile's tool set."
+        ),
+    )
 
 
 class GetSubagentResultInput(BaseModel):
@@ -142,6 +150,7 @@ class SpawnToolBuiltin(BaseBuiltinTool):
             self._create_list_subagents_tool(),
             self._create_get_subagent_result_tool(),
             self._create_cancel_subagent_tool(),
+            self._create_list_team_profiles_tool(),
         ]
 
     def _build_spawn_request(
@@ -153,6 +162,7 @@ class SpawnToolBuiltin(BaseBuiltinTool):
         progress_interval_minutes: int,
         allowed_tools: list[str] | None,
         denied_tools: list[str] | None,
+        profile: str | None = None,
     ) -> Any:
         """Validate inputs and build a SubAgentRequest.
 
@@ -183,6 +193,7 @@ class SpawnToolBuiltin(BaseBuiltinTool):
             denied_tools=denied_tools,
             origin=get_invocation_origin(),
             progress_interval_minutes=progress_interval_minutes,
+            profile=profile,
         )
 
         try:
@@ -214,11 +225,12 @@ class SpawnToolBuiltin(BaseBuiltinTool):
             progress_interval_minutes: int = 0,
             allowed_tools: list[str] | None = None,
             denied_tools: list[str] | None = None,
+            profile: str | None = None,
         ) -> str:
             """Sync wrapper for spawn_agent (for LangChain compatibility)."""
             result = self._build_spawn_request(
                 task, label, timeout_minutes, notify,
-                progress_interval_minutes, allowed_tools, denied_tools,
+                progress_interval_minutes, allowed_tools, denied_tools, profile,
             )
             if isinstance(result, str):
                 return result
@@ -248,11 +260,12 @@ class SpawnToolBuiltin(BaseBuiltinTool):
             progress_interval_minutes: int = 0,
             allowed_tools: list[str] | None = None,
             denied_tools: list[str] | None = None,
+            profile: str | None = None,
         ) -> str:
             """Spawn a new sub-agent to execute a task in the background."""
             result = self._build_spawn_request(
                 task, label, timeout_minutes, notify,
-                progress_interval_minutes, allowed_tools, denied_tools,
+                progress_interval_minutes, allowed_tools, denied_tools, profile,
             )
             if isinstance(result, str):
                 return result
@@ -277,6 +290,57 @@ class SpawnToolBuiltin(BaseBuiltinTool):
                 "Ideal for: parallel research, long-running analysis, concurrent API calls."
             ),
             args_schema=SpawnAgentInput,
+        )
+
+    def _create_list_team_profiles_tool(self) -> StructuredTool:
+        """Create the list_team_profiles tool."""
+
+        def list_team_profiles() -> str:
+            """List available spawn profiles for sub-agent specialization."""
+            if self._runner is None:
+                return "[Error: Spawn profiles not available (runner not initialized)]"
+
+            resolver = self._runner._profile_resolver
+            if resolver is None or len(resolver) == 0:
+                return "No spawn profiles configured."
+
+            profiles = resolver.list_profiles()
+            lines = [f"Available spawn profiles ({len(profiles)}):"]
+            lines.append("")
+
+            for p in profiles:
+                lines.append(f"**{p.name}** ({p.source})")
+                if p.description:
+                    lines.append(f"  {p.description}")
+                if p.model:
+                    lines.append(f"  Model: {p.model}")
+                if p.allowed_tools:
+                    lines.append(f"  Allowed tools: {', '.join(p.allowed_tools)}")
+                if p.denied_tools:
+                    lines.append(f"  Denied tools: {', '.join(p.denied_tools)}")
+                if p.allowed_skills is not None:
+                    if p.allowed_skills:
+                        lines.append(f"  Allowed skills: {', '.join(p.allowed_skills)}")
+                    else:
+                        lines.append("  Skills: none (all disabled)")
+                if p.denied_skills:
+                    lines.append(f"  Denied skills: {', '.join(p.denied_skills)}")
+                if p.timeout_minutes:
+                    lines.append(f"  Timeout: {p.timeout_minutes}min")
+                if p.max_turns:
+                    lines.append(f"  Max turns: {p.max_turns}")
+                lines.append("")
+
+            return "\n".join(lines)
+
+        return StructuredTool.from_function(
+            func=list_team_profiles,
+            name="list_team_profiles",
+            description=(
+                "List available spawn profiles for sub-agent specialization. "
+                "Shows profile names, descriptions, model overrides, and tool restrictions. "
+                "Use a profile name with spawn_agent(profile='name') for specialized sub-agents."
+            ),
         )
 
     def _create_list_subagents_tool(self) -> StructuredTool:

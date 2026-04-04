@@ -716,5 +716,9 @@ class Config(BaseModel):
         default_factory=ToolTimeoutsConfig,
         description="Default tool timeout configuration",
     )
+    team_profiles_path: str | None = Field(
+        default=None,
+        description="Path to system-level spawn profiles directory (available to all workspaces)",
+    )
 
     model_config = {"extra": "allow"}

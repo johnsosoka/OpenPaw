@@ -132,6 +132,13 @@ SECTION_SUB_AGENT_SPAWNING = (
     "separate stateless agent. The notification will include the origin (e.g., 'spawned "
     "by cron: weekly-ai-deep-dive'). Treat these as completed background work — review "
     "the result, take follow-up action if needed, and inform the user."
+    "\n\n"
+    "**Team profiles:** Your workspace may define spawn profiles — named "
+    "configurations for specialized sub-agents. Use `list_team_profiles` to see "
+    "available profiles and `spawn_agent(profile='name')` to use one. Profiles "
+    "provide focused system prompts, tool restrictions, and model overrides "
+    "for cost or capability optimization. When a profile fits the task, prefer "
+    "it over manual tool filtering.\n\n"
 )
 
 # Web browsing - conditional on browser builtin

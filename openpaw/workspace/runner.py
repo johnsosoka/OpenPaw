@@ -28,9 +28,10 @@ from openpaw.core.channel_context import format_channel_context
 from openpaw.core.config import Config, merge_configs
 from openpaw.core.config.models import ApprovalGatesConfig, ToolTimeoutsConfig
 from openpaw.core.logging import setup_workspace_logger
-from openpaw.core.paths import CONVERSATIONS_DB, DOT_ENV
+from openpaw.core.paths import CONVERSATIONS_DB, DOT_ENV, TEAM_DIR
 from openpaw.core.utils import resolve_user_name
 from openpaw.model.message import Message, MessageDirection
+from openpaw.model.spawn_profile import SpawnProfile
 from openpaw.runtime.approval import ApprovalGateManager
 from openpaw.runtime.queue.lane import LaneQueue, QueueItem, QueueMode
 from openpaw.runtime.queue.manager import QueueManager
@@ -43,6 +44,8 @@ from openpaw.workspace.agent_factory import AgentFactory, filter_workspace_tools
 from openpaw.workspace.lifecycle import LifecycleManager
 from openpaw.workspace.loader import WorkspaceLoader
 from openpaw.workspace.message_processor import MessageProcessor
+from openpaw.workspace.profile_loader import load_spawn_profiles
+from openpaw.workspace.profile_resolver import SpawnProfileResolver
 from openpaw.workspace.tool_loader import load_workspace_tools
 
 
@@ -701,6 +704,17 @@ class WorkspaceRunner:
             self._token_logger,
         )
 
+        # Load spawn profiles and create resolver
+        workspace_profiles = load_spawn_profiles(
+            self._workspace.path / str(TEAM_DIR)
+        )
+        system_profiles: list[SpawnProfile] = []
+        if self.config.team_profiles_path:
+            system_profiles = load_spawn_profiles(
+                Path(self.config.team_profiles_path), source="system"
+            )
+        profile_resolver = SpawnProfileResolver(workspace_profiles, system_profiles)
+
         # Start sub-agent runner
         subagent_session_logger = SessionLogger(self._workspace.path, session_type="subagent")
         self._subagent_runner = SubAgentRunner(
@@ -712,6 +726,8 @@ class WorkspaceRunner:
             max_concurrent=8,
             result_callback=self._inject_system_event,
             session_logger=subagent_session_logger,
+            profile_resolver=profile_resolver,
+            agent_factory_instance=self._agent_factory,
         )
         self._connect_spawn_tool_to_runner()
         self._connect_channel_history_tool()

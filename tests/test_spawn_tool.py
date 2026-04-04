@@ -86,12 +86,12 @@ def test_set_runner():
     assert tool._runner is mock_runner
 
 
-def test_get_langchain_tool_returns_four_tools(spawn_tool: SpawnToolBuiltin):
-    """Test get_langchain_tool returns 4 tools."""
+def test_get_langchain_tool_returns_five_tools(spawn_tool: SpawnToolBuiltin):
+    """Test get_langchain_tool returns 5 tools."""
     tools = spawn_tool.get_langchain_tool()
 
     assert isinstance(tools, list)
-    assert len(tools) == 4
+    assert len(tools) == 5
 
     tool_names = {tool.name for tool in tools}
     assert tool_names == {
@@ -99,6 +99,7 @@ def test_get_langchain_tool_returns_four_tools(spawn_tool: SpawnToolBuiltin):
         "list_subagents",
         "get_subagent_result",
         "cancel_subagent",
+        "list_team_profiles",
     }
 
 

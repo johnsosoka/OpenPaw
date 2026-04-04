@@ -9,6 +9,7 @@ from openpaw.agent import AgentRunner
 from openpaw.core.config import WorkspaceToolsConfig
 from openpaw.core.config.models import ProviderDefinition
 from openpaw.core.config.providers import ResolvedProvider, resolve_provider
+from openpaw.model.spawn_profile import SpawnProfile
 
 
 @dataclass
@@ -292,6 +293,48 @@ class AgentFactory:
             enabled_builtins=self._enabled_builtin_names,
             extra_model_kwargs=merged_extra,
             middleware=[],  # No middleware for stateless agents
+            channel_logging_enabled=self._channel_logging_enabled,
+        )
+
+    def create_profiled_agent(self, profile: SpawnProfile) -> AgentRunner:
+        """Create a stateless agent with profile-driven overrides.
+
+        Uses the profile's model, temperature, and max_turns when set,
+        falling back to workspace defaults. No checkpointer or middleware.
+
+        Args:
+            profile: SpawnProfile with optional model/temperature/max_turns overrides.
+
+        Returns:
+            AgentRunner configured per the profile.
+        """
+        all_tools = list(self._builtin_tools) + list(self._workspace_tools)
+
+        if profile.model is not None:
+            resolved = self._resolve_for_model(profile.model)
+            api_key = resolved.api_key if resolved.api_key is not None else self._resolve_api_key(profile.model)
+        else:
+            resolved = self._resolve_for_model(self._configured_model)
+            api_key = resolved.api_key if resolved.api_key is not None else self._api_key
+
+        temperature = profile.temperature if profile.temperature is not None else self._temperature
+        max_turns = profile.max_turns if profile.max_turns is not None else self._max_turns
+        merged_extra = {**resolved.extra_kwargs, **self._extra_model_kwargs}
+        region = resolved.region or self._region
+
+        return AgentRunner(
+            workspace=self._workspace,
+            model=resolved.model_str,
+            api_key=api_key,
+            max_turns=max_turns,
+            temperature=temperature,
+            checkpointer=None,
+            tools=all_tools if all_tools else None,
+            region=region,
+            timeout_seconds=self._timeout_seconds,
+            enabled_builtins=self._enabled_builtin_names,
+            extra_model_kwargs=merged_extra,
+            middleware=[],
             channel_logging_enabled=self._channel_logging_enabled,
         )
 

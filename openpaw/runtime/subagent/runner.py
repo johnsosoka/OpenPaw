@@ -1,12 +1,15 @@
 """Sub-agent lifecycle manager for OpenPaw."""
 
+from __future__ import annotations
+
 import asyncio
 import contextlib
 import logging
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from copy import copy
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openpaw.agent import AgentRunner
 from openpaw.agent.metrics import TokenUsageLogger
@@ -20,8 +23,13 @@ from openpaw.core.prompts.system_events import (
     SUBAGENT_PROGRESS_TEMPLATE,
     SUBAGENT_TIMED_OUT_TEMPLATE,
 )
+from openpaw.model.spawn_profile import SpawnProfile
 from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
 from openpaw.stores.subagent import SubAgentStore
+from openpaw.workspace.profile_resolver import SpawnProfileResolver
+
+if TYPE_CHECKING:
+    from openpaw.workspace.agent_factory import AgentFactory
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +209,8 @@ class SubAgentRunner:
         max_concurrent: int = 8,
         result_callback: Callable[[str, str], Awaitable[None]] | None = None,
         session_logger: SessionLogger | None = None,
+        profile_resolver: SpawnProfileResolver | None = None,
+        agent_factory_instance: AgentFactory | None = None,
     ):
         """Initialize the sub-agent runner.
 
@@ -214,6 +224,11 @@ class SubAgentRunner:
             result_callback: Optional callback for queue injection of results.
                 If provided, called with (session_key, content) instead of direct channel send.
             session_logger: Optional SessionLogger for writing session logs.
+            profile_resolver: Optional SpawnProfileResolver for named spawn profiles.
+                When provided, sub-agents can request a profile by name to apply
+                model overrides, tool filtering, and system prompt injection.
+            agent_factory_instance: Optional AgentFactory used to create profiled agents
+                via create_profiled_agent(). Required when profiles specify model overrides.
         """
         self._agent_factory = agent_factory
         self._store = store
@@ -223,6 +238,8 @@ class SubAgentRunner:
         self._max_concurrent = max_concurrent
         self._result_callback = result_callback
         self._session_logger = session_logger
+        self._profile_resolver = profile_resolver
+        self._agent_factory_instance = agent_factory_instance
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._active_tasks: dict[str, asyncio.Task] = {}
 
@@ -394,16 +411,113 @@ class SubAgentRunner:
             async with self._semaphore:
                 logger.info(f"Executing sub-agent: {request.id} ('{request.label}')")
 
-                # Create fresh agent instance
-                runner = self._agent_factory()
+                # --- Profile resolution ---
+                # Resolve before creating the agent so we can route to the right factory.
+                profile: SpawnProfile | None = None
+                if request.profile:
+                    if self._profile_resolver is None:
+                        error_msg = (
+                            f"Spawn profile '{request.profile}' requested but no profiles are configured"
+                        )
+                        duration_ms = (time.monotonic() - start_time) * 1000
+                        result = SubAgentResult(
+                            request_id=request.id, output="", error=error_msg, duration_ms=duration_ms,
+                        )
+                        self._store.update_status(
+                            request.id, SubAgentStatus.FAILED, completed_at=datetime.now(UTC)
+                        )
+                        self._store.save_result(result)
+                        if request.notify:
+                            await self._send_notification(request, result)
+                        logger.warning(f"Sub-agent {request.id} failed: {error_msg}")
+                        return
 
-                # Filter tools based on request configuration
+                    profile = self._profile_resolver.resolve(request.profile)
+                    if profile is None:
+                        available = ", ".join(self._profile_resolver.list_profile_names()) or "none"
+                        error_msg = (
+                            f"Spawn profile '{request.profile}' not found. "
+                            f"Available profiles: {available}"
+                        )
+                        duration_ms = (time.monotonic() - start_time) * 1000
+                        result = SubAgentResult(
+                            request_id=request.id, output="", error=error_msg, duration_ms=duration_ms,
+                        )
+                        self._store.update_status(
+                            request.id, SubAgentStatus.FAILED, completed_at=datetime.now(UTC)
+                        )
+                        self._store.save_result(result)
+                        if request.notify:
+                            await self._send_notification(request, result)
+                        logger.warning(f"Sub-agent {request.id} failed: {error_msg}")
+                        return
+
+                # Create agent — use profiled factory when profile has model-level overrides
+                if profile and self._agent_factory_instance and (
+                    profile.model is not None
+                    or profile.temperature is not None
+                    or profile.max_turns is not None
+                ):
+                    runner = self._agent_factory_instance.create_profiled_agent(profile)
+                else:
+                    runner = self._agent_factory()
+
+                # --- Profile workspace overrides (prompt + skills) ---
+                # Copy workspace before ANY mutation to avoid shared-state corruption.
+                needs_copy = profile and (
+                    profile.system_prompt
+                    or profile.allowed_skills is not None
+                    or profile.denied_skills
+                )
+                if needs_copy:
+                    runner.workspace = copy(runner.workspace)
+
+                if profile and profile.system_prompt:
+                    role_block = (
+                        f'<team_role profile="{profile.name}">\n'
+                        f"{profile.system_prompt.strip()}\n"
+                        f"</team_role>\n\n"
+                    )
+                    runner.workspace.agent_md = role_block + runner.workspace.agent_md
+
+                # --- Profile skill filtering ---
+                if profile and runner.workspace.skills:
+                    if profile.allowed_skills is not None:
+                        # Whitelist: only keep named skills (empty list = no skills)
+                        allowed = set(profile.allowed_skills)
+                        original_count = len(runner.workspace.skills)
+                        runner.workspace.skills = [
+                            s for s in runner.workspace.skills if s.name in allowed
+                        ]
+                        filtered = original_count - len(runner.workspace.skills)
+                        if filtered > 0:
+                            logger.debug(
+                                f"Profile '{profile.name}' filtered {filtered} skill(s) "
+                                f"via allowed_skills"
+                            )
+                    if profile.denied_skills:
+                        # Blocklist: remove named skills
+                        denied = set(profile.denied_skills)
+                        runner.workspace.skills = [
+                            s for s in runner.workspace.skills if s.name not in denied
+                        ]
+
+                # Filter tools — two-pass: profile restricts first, per-spawn second
                 original_tool_count = len(runner.additional_tools)
+
+                if profile and (profile.allowed_tools or profile.denied_tools):
+                    runner.additional_tools = filter_subagent_tools(
+                        runner.additional_tools,
+                        allowed_tools=profile.allowed_tools,
+                        denied_tools=profile.denied_tools,
+                    )
+
                 runner.additional_tools = filter_subagent_tools(
                     runner.additional_tools,
                     allowed_tools=request.allowed_tools,
                     denied_tools=request.denied_tools,
                 )
+
                 filtered_count = original_tool_count - len(runner.additional_tools)
 
                 if filtered_count > 0:
@@ -414,11 +528,16 @@ class SubAgentRunner:
                 # Rebuild agent with filtered tools
                 runner._agent = runner._build_agent()
 
+                # Apply timeout: prefer profile default when per-spawn is still the default (30)
+                effective_timeout = request.timeout_minutes
+                if profile and profile.timeout_minutes and request.timeout_minutes == 30:
+                    effective_timeout = profile.timeout_minutes
+
                 # Override agent's internal timeout to defer to SubAgentRunner's
                 # outer timeout. AgentRunner.run() catches TimeoutError internally
                 # and returns a string, which would be misclassified as success.
                 # By setting the inner timeout higher, only the outer fires.
-                runner.timeout_seconds = (request.timeout_minutes * 60) + 30
+                runner.timeout_seconds = (effective_timeout * 60) + 30
 
                 # Start periodic progress timer if configured.
                 # The task is cancelled in the finally block regardless of outcome.
@@ -431,7 +550,7 @@ class SubAgentRunner:
                 try:
                     # Run the agent with timeout
                     try:
-                        async with asyncio.timeout(request.timeout_minutes * 60):
+                        async with asyncio.timeout(effective_timeout * 60):
                             response = await runner.run(message=request.task)
 
                         # Check if we were cancelled during execution
@@ -646,7 +765,7 @@ class SubAgentRunner:
     async def _progress_timer(
         self,
         request: SubAgentRequest,
-        runner: "AgentRunner",
+        runner: AgentRunner,
         start_time: float,
     ) -> None:
         """Emit periodic progress updates for a running sub-agent.
