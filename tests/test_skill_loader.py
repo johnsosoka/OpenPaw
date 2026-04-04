@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from openpaw.core.workspace import AgentWorkspace
-from openpaw.model.skill import SkillInfo
+from openpaw.model.skill import SkillInfo, SkillInjectMode
 from openpaw.workspace.skill_loader import load_workspace_skills
 
 # ---------------------------------------------------------------------------
@@ -401,6 +401,7 @@ class TestSystemPromptSkillsSection:
             description="",
             content="Use pytest fixtures for reusable setup.",
             path=tmp_path / "testing",
+            inject=SkillInjectMode.FULL,
         )
         workspace = _make_workspace(tmp_path, skills=[skill])
 
@@ -415,6 +416,7 @@ class TestSystemPromptSkillsSection:
             description="",
             content="Some content here.",
             path=tmp_path / "no-desc",
+            inject=SkillInjectMode.FULL,
         )
         workspace = _make_workspace(tmp_path, skills=[skill])
         prompt = workspace.build_system_prompt(enabled_builtins=[])
@@ -437,6 +439,7 @@ class TestSystemPromptSkillsSection:
             description="A helpful skill.",
             content="Detailed instructions here.",
             path=tmp_path / "my-skill",
+            inject=SkillInjectMode.FULL,
         )
         workspace = _make_workspace(tmp_path, skills=[skill])
 
@@ -461,12 +464,14 @@ class TestSystemPromptSkillsSection:
                 description="Alpha description.",
                 content="Alpha body.",
                 path=tmp_path / "alpha",
+                inject=SkillInjectMode.FULL,
             ),
             SkillInfo(
                 name="Skill Beta",
                 description="Beta description.",
                 content="Beta body.",
                 path=tmp_path / "beta",
+                inject=SkillInjectMode.FULL,
             ),
         ]
         workspace = _make_workspace(tmp_path, skills=skills)
@@ -493,3 +498,199 @@ class TestSystemPromptSkillsSection:
         skills_pos = prompt.index("<skills>")
         context_pos = prompt.index("<workspace_context>")
         assert skills_pos < context_pos
+
+
+# ---------------------------------------------------------------------------
+# TestSkillInjectMode
+# ---------------------------------------------------------------------------
+
+
+class TestSkillInjectMode:
+    """Tests for the inject frontmatter field parsing."""
+
+    def test_inject_defaults_to_summary(self, tmp_path: Path) -> None:
+        """Skill with no inject field in frontmatter defaults to SUMMARY."""
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("---\nname: my-skill\ndescription: A skill\n---\nContent here.")
+
+        skills = load_workspace_skills(tmp_path)
+        assert len(skills) == 1
+        assert skills[0].inject == SkillInjectMode.SUMMARY
+
+    def test_inject_full_parsed(self, tmp_path: Path) -> None:
+        """inject: full in frontmatter produces FULL mode."""
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("---\nname: my-skill\ninject: full\n---\nContent.")
+
+        skills = load_workspace_skills(tmp_path)
+        assert skills[0].inject == SkillInjectMode.FULL
+
+    def test_inject_summary_parsed(self, tmp_path: Path) -> None:
+        """inject: summary in frontmatter produces SUMMARY mode."""
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("---\nname: my-skill\ninject: summary\n---\nContent.")
+
+        skills = load_workspace_skills(tmp_path)
+        assert skills[0].inject == SkillInjectMode.SUMMARY
+
+    def test_inject_invalid_falls_back_to_summary(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+        """Invalid inject value logs warning and defaults to SUMMARY."""
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("---\nname: my-skill\ninject: bogus\n---\nContent.")
+
+        with caplog.at_level(logging.WARNING):
+            skills = load_workspace_skills(tmp_path)
+
+        assert skills[0].inject == SkillInjectMode.SUMMARY
+        assert "invalid inject mode" in caplog.text.lower()
+
+    def test_inject_case_insensitive(self, tmp_path: Path) -> None:
+        """inject: FULL (uppercase) is accepted."""
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("---\nname: my-skill\ninject: FULL\n---\nContent.")
+
+        skills = load_workspace_skills(tmp_path)
+        assert skills[0].inject == SkillInjectMode.FULL
+
+
+# ---------------------------------------------------------------------------
+# TestSkillReadPath
+# ---------------------------------------------------------------------------
+
+
+class TestSkillReadPath:
+    """Tests for read_path computation."""
+
+    def test_read_path_computed_from_directory_name(self, tmp_path: Path) -> None:
+        """read_path uses the directory name, not the frontmatter name."""
+        skill_dir = tmp_path / "my-cool-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("---\nname: Different Name\n---\nContent.")
+
+        skills = load_workspace_skills(tmp_path)
+        assert skills[0].read_path == "agent/skills/my-cool-skill/SKILL.md"
+
+    def test_read_path_independent_of_frontmatter_name(self, tmp_path: Path) -> None:
+        """Even with a custom frontmatter name, read_path uses dir name."""
+        skill_dir = tmp_path / "dir-name"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("---\nname: custom-name\n---\nContent.")
+
+        skills = load_workspace_skills(tmp_path)
+        assert skills[0].name == "custom-name"  # Name from frontmatter
+        assert skills[0].read_path == "agent/skills/dir-name/SKILL.md"  # Path from dir
+
+
+# ---------------------------------------------------------------------------
+# TestSkillInjectModeInPrompt
+# ---------------------------------------------------------------------------
+
+
+class TestSkillInjectModeInPrompt:
+    """Tests for inject-mode-aware system prompt rendering."""
+
+    def test_full_inject_includes_content_in_prompt(self, tmp_path: Path) -> None:
+        """FULL mode includes complete skill content in prompt."""
+        skill = SkillInfo(
+            name="Full Skill", description="Desc", content="Detailed content here.",
+            path=tmp_path / "full", inject=SkillInjectMode.FULL,
+        )
+        workspace = _make_workspace(tmp_path, skills=[skill])
+        prompt = workspace.build_system_prompt(enabled_builtins=[])
+        assert "Detailed content here." in prompt
+        assert "---" in prompt  # Separator present
+
+    def test_summary_inject_excludes_content_from_prompt(self, tmp_path: Path) -> None:
+        """SUMMARY mode does NOT include skill content in prompt."""
+        skill = SkillInfo(
+            name="Summary Skill", description="Desc", content="Secret content.",
+            path=tmp_path / "summary", inject=SkillInjectMode.SUMMARY,
+            read_path="agent/skills/summary/SKILL.md",
+        )
+        workspace = _make_workspace(tmp_path, skills=[skill])
+        prompt = workspace.build_system_prompt(enabled_builtins=[])
+        assert "Secret content." not in prompt
+
+    def test_summary_inject_includes_read_pointer(self, tmp_path: Path) -> None:
+        """SUMMARY mode includes read_file() pointer in prompt."""
+        skill = SkillInfo(
+            name="Summary Skill", description="Desc", content="Content.",
+            path=tmp_path / "summary", inject=SkillInjectMode.SUMMARY,
+            read_path="agent/skills/summary/SKILL.md",
+        )
+        workspace = _make_workspace(tmp_path, skills=[skill])
+        prompt = workspace.build_system_prompt(enabled_builtins=[])
+        assert "read_file('agent/skills/summary/SKILL.md')" in prompt
+
+    def test_summary_inject_includes_description(self, tmp_path: Path) -> None:
+        """SUMMARY mode includes the description in prompt."""
+        skill = SkillInfo(
+            name="My Skill", description="A helpful description.", content="Content.",
+            path=tmp_path / "my", inject=SkillInjectMode.SUMMARY,
+            read_path="agent/skills/my/SKILL.md",
+        )
+        workspace = _make_workspace(tmp_path, skills=[skill])
+        prompt = workspace.build_system_prompt(enabled_builtins=[])
+        assert "A helpful description." in prompt
+
+    def test_mixed_inject_modes(self, tmp_path: Path) -> None:
+        """One FULL and one SUMMARY skill render correctly together."""
+        full_skill = SkillInfo(
+            name="Always", description="Always present.", content="Full body.",
+            path=tmp_path / "always", inject=SkillInjectMode.FULL,
+        )
+        summary_skill = SkillInfo(
+            name="On Demand", description="Load when needed.", content="Hidden body.",
+            path=tmp_path / "ondemand", inject=SkillInjectMode.SUMMARY,
+            read_path="agent/skills/ondemand/SKILL.md",
+        )
+        workspace = _make_workspace(tmp_path, skills=[full_skill, summary_skill])
+        prompt = workspace.build_system_prompt(enabled_builtins=[])
+
+        assert "Full body." in prompt           # FULL content present
+        assert "Hidden body." not in prompt     # SUMMARY content absent
+        assert "read_file('agent/skills/ondemand/SKILL.md')" in prompt  # Pointer present
+
+    def test_preamble_present_with_summary_skills(self, tmp_path: Path) -> None:
+        """Preamble about read_file() appears when summary skills exist."""
+        skill = SkillInfo(
+            name="My Skill", description="Desc", content="Content.",
+            path=tmp_path / "my", inject=SkillInjectMode.SUMMARY,
+            read_path="agent/skills/my/SKILL.md",
+        )
+        workspace = _make_workspace(tmp_path, skills=[skill])
+        prompt = workspace.build_system_prompt(enabled_builtins=[])
+        assert "Use read_file()" in prompt
+
+    def test_no_preamble_with_only_full_skills(self, tmp_path: Path) -> None:
+        """No preamble when all skills are FULL inject."""
+        skill = SkillInfo(
+            name="Full Only", description="Desc", content="Content.",
+            path=tmp_path / "full", inject=SkillInjectMode.FULL,
+        )
+        workspace = _make_workspace(tmp_path, skills=[skill])
+        prompt = workspace.build_system_prompt(enabled_builtins=[])
+        assert "Use read_file()" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# TestSkillSource
+# ---------------------------------------------------------------------------
+
+
+class TestSkillSource:
+    """Tests for the source field."""
+
+    def test_workspace_skill_default_source(self, tmp_path: Path) -> None:
+        """Loaded workspace skills have source='workspace' by default."""
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("---\nname: my-skill\n---\nContent.")
+
+        skills = load_workspace_skills(tmp_path)
+        assert skills[0].source == "workspace"

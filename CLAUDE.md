@@ -281,6 +281,7 @@ agent_workspaces/<name>/
 ├── crons/        # Scheduled task definitions
 │   └── *.yaml / *.yml    # Individual cron job configurations
 ├── skills/       # LangChain skill directories (SKILL.md format)
+│   └── _framework/  # Materialized framework skills (auto-generated, read-only)
 └── tools/        # LangChain tools (Python files with @tool decorated functions)
 ```
 
@@ -1204,20 +1205,49 @@ version: "1.0"
 - `name` — Skill display name (falls back to directory name if omitted)
 - `description` — Short description, truncated to 1024 chars (empty if omitted)
 - `version` — Optional, not used by the framework
+- `inject` — Injection mode: `summary` (default) or `full` (see Progressive Disclosure below)
 
 **Behavior**:
 - Skills are loaded at workspace startup by `WorkspaceLoader` via `load_workspace_skills()`
-- Full content is injected into the system prompt as a `<skills>` XML block between `</framework>` and `<workspace_context>`
+- Skill entries are injected into the system prompt as a `<skills>` XML block between `</framework>` and `<workspace_context>`
 - Directories prefixed with `_` are skipped
 - If no frontmatter is present, the entire file becomes the content with directory name as the skill name
 - Invalid YAML frontmatter degrades gracefully (logged warning, falls back to directory name)
 - Empty or missing `agent/skills/` directory is silently ignored
 
+**Progressive Disclosure:** By default, skills inject only their name and description into the system prompt, with a `read_file()` pointer for on-demand access to the full content. This keeps the system prompt lean while making skill knowledge available when needed. Skills can opt into full injection via `inject: full` in their YAML frontmatter.
+
+**Inject Modes:**
+- `summary` (default) — Name, description, and `read_file()` pointer in prompt. Full content loaded on demand.
+- `full` — Complete content injected into every system prompt (legacy behavior).
+
+**SKILL.md Frontmatter:**
+```yaml
+---
+name: my-skill
+description: Short description shown in system prompt
+inject: summary    # or "full" for always-present content
+---
+```
+
 **Components**:
-- `SkillInfo` dataclass in `openpaw/model/skill.py` — pure data model (name, description, content, path)
-- `load_workspace_skills()` in `openpaw/workspace/skill_loader.py` — scans directories, parses frontmatter
+- `SkillInfo` dataclass in `openpaw/model/skill.py` — pure data model (name, description, content, path, inject mode, read_path)
+- `load_workspace_skills()` in `openpaw/workspace/skill_loader.py` — scans directories, parses frontmatter, resolves read_path
 - `AgentWorkspace.skills` field in `openpaw/core/workspace.py` — stores loaded skills
-- `AgentWorkspace._build_skills_section()` — formats skills for system prompt injection
+- `AgentWorkspace._build_skills_section()` — formats skills for system prompt injection (summary vs. full per skill)
+
+### Framework Skills
+
+OpenPaw bundles three reference skills in `openpaw/builtins/skills/` that provide detailed documentation for framework capabilities. These are automatically loaded at workspace startup and materialized into `agent/skills/_framework/` for agent `read_file()` access.
+
+**Bundled Skills:**
+- `team-management` — Sub-agent spawning patterns, lifecycle communication, team profile building
+- `web-browsing` — Browser automation workflow, accessibility tree navigation, domain restrictions
+- `channel-awareness` — Channel history browsing, JSONL log searching, message lookup patterns
+
+Framework skills use `summary` inject mode by default — agents see a brief description in their prompt and load the full reference on demand. Workspace skills override framework skills with the same name.
+
+The corresponding framework prompt sections (`Sub-Agent Spawning`, `Web Browsing`, `Channel History`, `Channel Logs`) are trimmed to brief behavioral stubs with `read_file()` pointers to the skills.
 
 ### Builtins System
 
