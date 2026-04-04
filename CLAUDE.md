@@ -277,7 +277,7 @@ agent_workspaces/<name>/
 │           │       └── {YYYY-MM-DD}.jsonl  # Daily JSONL (ts, msg_id, user_id, display_name, content, attachments)
 │           └── _archive/ # Logs moved here after retention_days
 ├── agent/
-│   └── team/     # Spawn profiles (named sub-agent configs in YAML)
+│   └── team/     # Spawn profiles (flat *.yaml or directory with profile.yaml + tools/)
 ├── crons/        # Scheduled task definitions
 │   └── *.yaml / *.yml    # Individual cron job configurations
 ├── skills/       # LangChain skill directories (SKILL.md format)
@@ -922,6 +922,7 @@ allowed_tools:
   - ls
 
 allowed_skills: []     # No parent skills injected (keeps prompt lean)
+inherit_tools: true    # Whether to include parent workspace tools (default: true)
 
 timeout_minutes: 10
 max_turns: 15
@@ -940,6 +941,7 @@ max_turns: 15
 | `denied_tools` | Blacklist — sub-agent cannot use these tools (applied after `allowed_tools`) |
 | `allowed_skills` | Skill whitelist by name. `null` (default) inherits all parent skills. Empty list `[]` disables all skills. |
 | `denied_skills` | Skill blocklist by name. Removes matching skills from the sub-agent prompt. Applied after `allowed_skills` filtering. |
+| `inherit_tools` | Whether the sub-agent inherits parent workspace tools. `true` (default) appends profile tools to parent tools. `false` replaces parent tools — sub-agent gets only profile-scoped tools plus filesystem tools. |
 | `timeout_minutes` | Execution timeout (1–120, falls back to spawn config default) |
 | `max_turns` | Maximum agent turns (falls back to workspace model config) |
 
@@ -961,6 +963,22 @@ team_profiles_path: team_profiles  # System-level profiles shared across workspa
 - `list_team_profiles` — list available profiles (workspace + system) with their names and descriptions
 
 **Backward Compatibility**: Calling `spawn_agent` without a `profile` argument is identical to existing behavior — no profile is loaded and all normal sub-agent defaults apply.
+
+**Directory Profiles**: Profiles can optionally be directories instead of flat YAML files. A directory profile contains `profile.yaml` (same schema) plus an optional `tools/` subdirectory with `@tool` decorated Python functions exclusive to that profile:
+
+```
+agent/team/
+  simple-profile.yaml              # Flat YAML (still works)
+  code-specialist/                  # Directory profile
+    profile.yaml                    # Profile config (same schema + inherit_tools)
+    tools/                          # Profile-scoped tools
+      run_linter.py                 # @tool decorated functions
+      requirements.txt              # Optional tool dependencies
+```
+
+Profile tools follow the same conventions as workspace tools: `@tool` decorator, `_` prefix skipping, `requirements.txt` auto-install. Tools are loaded at workspace startup. `SUBAGENT_EXCLUDED_TOOLS` applies to profile tools the same as parent tools.
+
+When `inherit_tools: false`, the sub-agent receives only profile-scoped tools (plus filesystem tools which are always present). When `inherit_tools: true` (default), profile tools are appended to the filtered parent tool set. Both flat YAML and directory formats coexist — if a file and directory share the same stem, the directory takes precedence with a warning.
 
 ### Queue-Aware Tool Middleware
 

@@ -1,7 +1,10 @@
 """Domain models for spawn profiles."""
 
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -44,6 +47,13 @@ class SpawnProfile:
         max_turns: Maximum number of LLM turns for sub-agents using
             this profile. Falls back to the workspace model config
             when None.
+        inherit_tools: Whether the sub-agent inherits parent workspace
+            tools. True (default) appends profile tools to parent tools.
+            False replaces parent tools with only profile tools.
+        tools: Pre-loaded LangChain tool instances from the profile's
+            tools/ directory. Populated by the loader at startup. Empty
+            list for flat YAML profiles or profiles without a tools/
+            directory.
         source: Origin of this profile — "workspace" for profiles loaded
             from the workspace profiles directory, "system" for built-in
             framework profiles.
@@ -63,5 +73,7 @@ class SpawnProfile:
     denied_skills: list[str] | None = None
     timeout_minutes: int | None = None
     max_turns: int | None = None
+    inherit_tools: bool = True
+    tools: list[Any] = field(default_factory=list)
     source: str = "workspace"
     path: Path | None = None

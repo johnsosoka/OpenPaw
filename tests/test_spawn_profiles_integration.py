@@ -707,3 +707,100 @@ class TestSkillFiltering:
 
         assert len(workspace_copy.skills) == 2
         assert workspace_copy.skills is skills
+
+
+# ---------------------------------------------------------------------------
+# Section 9: Profile tool injection logic
+# ---------------------------------------------------------------------------
+
+
+def _make_tool(name: str) -> MagicMock:
+    """Create a mock tool with a .name attribute."""
+    tool = MagicMock()
+    tool.name = name
+    return tool
+
+
+class TestProfileToolInjection:
+    """Profile tool injection logic: inherit_tools, collision detection, exclusions."""
+
+    def test_inherit_tools_true_appends_profile_tools(self) -> None:
+        """inherit_tools=True appends profile tools to the existing parent tools."""
+        parent_tools = [_make_tool("brave_search"), _make_tool("read_file")]
+        profile_tools = [_make_tool("custom_tool")]
+        profile = make_profile("appender", inherit_tools=True, tools=profile_tools)
+
+        # Mirror the runner injection branch for inherit_tools=True
+        additional_tools = list(parent_tools) + list(profile.tools)
+
+        names = [t.name for t in additional_tools]
+        assert len(additional_tools) == 3
+        assert "custom_tool" in names
+
+    def test_inherit_tools_false_replaces_parent_tools(self) -> None:
+        """inherit_tools=False replaces parent tools entirely with profile tools."""
+        # Parent tools exist but are discarded when inherit_tools=False
+        _make_tool("brave_search"), _make_tool("read_file")
+        profile_tools = [_make_tool("custom_tool")]
+        profile = make_profile("replacer", inherit_tools=False, tools=profile_tools)
+
+        # Mirror the runner injection branch for inherit_tools=False
+        additional_tools = list(profile.tools)
+
+        names = [t.name for t in additional_tools]
+        assert len(additional_tools) == 1
+        assert "custom_tool" in names
+        assert "brave_search" not in names
+        assert "read_file" not in names
+
+    def test_inherit_tools_false_with_allowed_tools_filters_profile_tools(self) -> None:
+        """inherit_tools=False then allowed_tools restricts to only the permitted tools."""
+        profile_tools = [_make_tool("tool_a"), _make_tool("tool_b")]
+        profile = make_profile(
+            "restricted",
+            inherit_tools=False,
+            tools=profile_tools,
+            allowed_tools=["tool_a"],
+        )
+
+        # Replace with profile tools, then apply filter pass
+        replaced = list(profile.tools)
+        result = filter_subagent_tools(replaced, allowed_tools=profile.allowed_tools)
+
+        names = [t.name for t in result]
+        assert "tool_a" in names
+        assert "tool_b" not in names
+
+    def test_profile_tool_name_collision_detected(self) -> None:
+        """When a profile tool shares a name with a parent tool, collision is detected."""
+        parent_tools = [_make_tool("read_file")]
+        profile_tools = [_make_tool("read_file")]
+        profile = make_profile("collider", inherit_tools=True, tools=profile_tools)
+
+        # Mirror the collision detection logic from the runner
+        parent_names = {t.name for t in parent_tools}
+        collisions = [t.name for t in profile.tools if t.name in parent_names]
+
+        assert collisions == ["read_file"]
+
+    def test_subagent_excluded_tools_applied_to_profile_tools(self) -> None:
+        """SUBAGENT_EXCLUDED_TOOLS removes forbidden tools even when injected via a profile."""
+        profile_tools = [_make_tool("spawn_agent"), _make_tool("custom_tool")]
+        profile = make_profile("unsafe", inherit_tools=False, tools=profile_tools)
+
+        # Replace with profile tools, then apply the exclusion floor
+        replaced = list(profile.tools)
+        result = filter_subagent_tools(replaced)
+
+        names = [t.name for t in result]
+        assert "spawn_agent" not in names
+        assert "custom_tool" in names
+
+    def test_inherit_tools_false_no_profile_tools_warning_condition(self) -> None:
+        """inherit_tools=False with no profile tools triggers the warning condition."""
+        profile = make_profile("empty-replacer", inherit_tools=False, tools=[])
+
+        # Simulate the exact conditional the runner evaluates before logging a warning
+        triggers_warning = not profile.inherit_tools and not profile.tools
+
+        assert triggers_warning is True

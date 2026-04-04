@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -499,3 +500,155 @@ def test_allowed_skills_and_denied_skills_not_in_unknown_key_warning(
     warning_text = " ".join(r.message for r in caplog.records if r.levelno >= logging.WARNING)
     assert "allowed_skills" not in warning_text
     assert "denied_skills" not in warning_text
+
+
+# ---------------------------------------------------------------------------
+# inherit_tools field and directory profile format
+# ---------------------------------------------------------------------------
+
+
+def test_flat_yaml_has_default_inherit_tools_and_empty_tools(tmp_path: Path) -> None:
+    """A flat YAML profile defaults inherit_tools to True and tools to []."""
+    (tmp_path / "flat.yaml").write_text("name: flat\ndescription: flat profile\n")
+
+    profiles = load_spawn_profiles(tmp_path)
+
+    assert len(profiles) == 1
+    assert profiles[0].inherit_tools is True
+    assert profiles[0].tools == []
+
+
+def test_directory_profile_loads_from_profile_yaml(tmp_path: Path) -> None:
+    """A directory containing profile.yaml is loaded with the correct fields."""
+    profile_dir = tmp_path / "my-profile"
+    profile_dir.mkdir()
+    (profile_dir / "profile.yaml").write_text(
+        "name: my-profile\ndescription: directory profile\n"
+    )
+
+    profiles = load_spawn_profiles(tmp_path)
+
+    assert len(profiles) == 1
+    assert profiles[0].name == "my-profile"
+    assert profiles[0].description == "directory profile"
+
+
+def test_directory_profile_with_tools_loads_tool_functions(tmp_path: Path) -> None:
+    """Tools in a directory profile's tools/ subdir are loaded onto the profile."""
+    profile_dir = tmp_path / "my-tool-profile"
+    profile_dir.mkdir()
+    (profile_dir / "profile.yaml").write_text(
+        "name: my-tool-profile\ndescription: has tools\n"
+    )
+    tools_dir = profile_dir / "tools"
+    tools_dir.mkdir()
+    (tools_dir / "sample_tool.py").write_text(
+        'from langchain_core.tools import tool\n\n'
+        '@tool\n'
+        'def sample_tool(query: str) -> str:\n'
+        '    """A sample tool for testing."""\n'
+        '    return f"result: {query}"\n'
+    )
+
+    mock_tool = MagicMock()
+    mock_tool.name = "sample_tool"
+
+    with patch(
+        "openpaw.workspace.tool_loader.load_workspace_tools",
+        return_value=[mock_tool],
+    ):
+        profiles = load_spawn_profiles(tmp_path)
+
+    assert len(profiles) == 1
+    assert len(profiles[0].tools) == 1
+    assert profiles[0].tools[0].name == "sample_tool"
+
+
+def test_directory_profile_without_tools_dir(tmp_path: Path) -> None:
+    """A directory profile with no tools/ subdirectory loads with an empty tools list."""
+    profile_dir = tmp_path / "no-tools"
+    profile_dir.mkdir()
+    (profile_dir / "profile.yaml").write_text("name: no-tools\ndescription: bare dir\n")
+
+    profiles = load_spawn_profiles(tmp_path)
+
+    assert len(profiles) == 1
+    assert profiles[0].tools == []
+
+
+def test_directory_without_profile_yaml_is_skipped(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A directory lacking profile.yaml is skipped with a debug log message."""
+    bad_dir = tmp_path / "bad-dir"
+    bad_dir.mkdir()
+    (tmp_path / "good.yaml").write_text("name: good\ndescription: valid flat profile\n")
+
+    with caplog.at_level(logging.DEBUG, logger="openpaw.workspace.profile_loader"):
+        profiles = load_spawn_profiles(tmp_path)
+
+    assert len(profiles) == 1
+    assert profiles[0].name == "good"
+    assert any("no profile.yaml" in record.message for record in caplog.records)
+
+
+def test_same_stem_file_and_directory_directory_wins(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """When a .yaml file and directory share the same stem, the directory wins."""
+    (tmp_path / "clash.yaml").write_text(
+        "name: clash\ndescription: from file\n"
+    )
+    clash_dir = tmp_path / "clash"
+    clash_dir.mkdir()
+    (clash_dir / "profile.yaml").write_text(
+        "name: clash\ndescription: from directory\n"
+    )
+
+    with caplog.at_level(logging.WARNING, logger="openpaw.workspace.profile_loader"):
+        profiles = load_spawn_profiles(tmp_path)
+
+    assert len(profiles) == 1
+    assert profiles[0].description == "from directory"
+    assert any("both file and directory" in record.message for record in caplog.records)
+
+
+def test_underscore_prefix_directory_is_skipped(tmp_path: Path) -> None:
+    """Directories whose names start with '_' are silently ignored."""
+    disabled_dir = tmp_path / "_disabled"
+    disabled_dir.mkdir()
+    (disabled_dir / "profile.yaml").write_text("name: disabled\ndescription: should skip\n")
+    (tmp_path / "enabled.yaml").write_text("name: enabled\ndescription: visible\n")
+
+    profiles = load_spawn_profiles(tmp_path)
+
+    assert len(profiles) == 1
+    assert profiles[0].name == "enabled"
+
+
+def test_inherit_tools_false_parsed(tmp_path: Path) -> None:
+    """A flat YAML profile with inherit_tools: false is parsed correctly."""
+    (tmp_path / "no-inherit.yaml").write_text(
+        "name: no-inherit\ndescription: test\ninherit_tools: false\n"
+    )
+
+    profiles = load_spawn_profiles(tmp_path)
+
+    assert len(profiles) == 1
+    assert profiles[0].inherit_tools is False
+
+
+def test_inherit_tools_invalid_value_defaults_to_true(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A non-boolean inherit_tools value falls back to True with a warning logged."""
+    (tmp_path / "bad-inherit.yaml").write_text(
+        "name: bad-inherit\ndescription: test\ninherit_tools: not_a_bool\n"
+    )
+
+    with caplog.at_level(logging.WARNING, logger="openpaw.workspace.profile_loader"):
+        profiles = load_spawn_profiles(tmp_path)
+
+    assert len(profiles) == 1
+    assert profiles[0].inherit_tools is True
+    assert any("inherit_tools" in record.message for record in caplog.records)

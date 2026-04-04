@@ -502,6 +502,53 @@ class SubAgentRunner:
                             s for s in runner.workspace.skills if s.name not in denied
                         ]
 
+                # --- Profile tool injection ---
+                if profile:
+                    if not profile.inherit_tools:
+                        # Replace: sub-agent gets ONLY profile tools (no parent tools)
+                        parent_count = len(runner.additional_tools)
+                        runner.additional_tools = list(profile.tools)
+                        logger.debug(
+                            "Profile '%s' inherit_tools=False: replaced %d parent tools "
+                            "with %d profile tools",
+                            profile.name,
+                            parent_count,
+                            len(profile.tools),
+                        )
+                        if not profile.tools:
+                            logger.warning(
+                                "Profile '%s' has inherit_tools=False but no profile tools "
+                                "— sub-agent will have only filesystem tools",
+                                profile.name,
+                            )
+                    elif profile.tools:
+                        # Append: sub-agent gets parent tools + profile tools
+                        parent_names = {
+                            getattr(t, "name", "") for t in runner.additional_tools
+                        }
+                        profile_names = {t.name for t in profile.tools}
+                        collisions = parent_names & profile_names
+                        if collisions:
+                            logger.warning(
+                                "Profile '%s' tools override parent tools with same name: %s",
+                                profile.name,
+                                sorted(collisions),
+                            )
+                            # Remove parent tools that are overridden by profile tools
+                            runner.additional_tools = [
+                                t for t in runner.additional_tools
+                                if getattr(t, "name", "") not in collisions
+                            ]
+                        runner.additional_tools = (
+                            list(runner.additional_tools) + list(profile.tools)
+                        )
+                        logger.debug(
+                            "Profile '%s': added %d profile tool(s) to %d parent tools",
+                            profile.name,
+                            len(profile.tools),
+                            len(runner.additional_tools) - len(profile.tools),
+                        )
+
                 # Filter tools — two-pass: profile restricts first, per-spawn second
                 original_tool_count = len(runner.additional_tools)
 
