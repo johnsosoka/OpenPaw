@@ -516,7 +516,7 @@ When the workspace starts, the framework resolves "moonshot" against the catalog
 
 The catalog also powers the `/model` command. When you switch models at runtime with `/model moonshot:kimi-k2.5`, the framework resolves the provider name through the catalog and applies the correct connection details automatically.
 
-The provider catalog supports all connection types that OpenPaw understands: Anthropic, OpenAI, xAI (Grok), AWS Bedrock, and any OpenAI-compatible API endpoint. For Bedrock, there is no API key field — the framework uses your configured AWS credentials instead. The catalog handles that detail automatically based on the provider type.
+The provider catalog supports all connection types that OpenPaw understands: Anthropic, OpenAI, xAI (Grok), Fireworks.ai (DeepSeek, Llama, Qwen), AWS Bedrock, and any OpenAI-compatible API endpoint. For Bedrock, there is no API key field — the framework uses your configured AWS credentials instead. The catalog handles that detail automatically based on the provider type.
 
 See [Configuration](configuration.md) for the full provider catalog reference, all supported provider types, and AWS Bedrock configuration.
 

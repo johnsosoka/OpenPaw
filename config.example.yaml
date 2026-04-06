@@ -31,6 +31,7 @@ lanes:
 #   anthropic:claude-sonnet-4-20250514
 #   openai:gpt-4o
 #   xai:grok-3-mini
+#   fireworks:accounts/fireworks/models/deepseek-v3p1
 #   bedrock_converse:moonshot.kimi-k2-thinking
 agent:
   model: anthropic:claude-sonnet-4-20250514
@@ -53,6 +54,8 @@ agent:
 #     base_url: https://api.moonshot.ai/v1
 #   xai:
 #     api_key: ${XAI_API_KEY}
+#   fireworks:
+#     api_key: ${FIREWORKS_API_KEY}
 #   bedrock:
 #     type: bedrock_converse
 #     region: us-east-1

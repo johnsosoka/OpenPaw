@@ -26,7 +26,7 @@ Each agent gets its own filesystem, conversation history, configuration, and sch
 
 ### Multi-Provider LLM Support
 
-Run agents on Anthropic Claude, OpenAI GPT, AWS Bedrock (Kimi K2, Nova, Mistral), xAI Grok, or any OpenAI-compatible API. Define provider connections once in a central catalog, then reference them by name. Switch models at runtime with `/model` — no restart required.
+Run agents on Anthropic Claude, OpenAI GPT, Fireworks.ai (DeepSeek, Llama, Qwen), AWS Bedrock (Kimi K2, Nova, Mistral), xAI Grok, or any OpenAI-compatible API. Define provider connections once in a central catalog, then reference them by name. Switch models at runtime with `/model` — no restart required.
 
 ### Responsive Queue System
 

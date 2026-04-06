@@ -566,6 +566,30 @@ model:
 
 **Credentials**: Set `XAI_API_KEY` in environment or workspace `.env`.
 
+#### Fireworks.ai Configuration
+
+OpenPaw supports Fireworks.ai models via the dedicated `langchain-fireworks` package (`ChatFireworks`).
+
+**Per-workspace (`agent.yaml`)**:
+
+```yaml
+model:
+  provider: fireworks
+  model: accounts/fireworks/models/deepseek-v3p1
+  api_key: ${FIREWORKS_API_KEY}
+  temperature: 0.7
+```
+
+**Available Fireworks Models**:
+- `accounts/fireworks/models/deepseek-v3p1` - DeepSeek V3.1 (163K context)
+- `accounts/fireworks/models/llama-v3p3-70b-instruct` - Llama 3.3 70B (131K context)
+- `accounts/fireworks/models/qwen3-235b-a22b-instruct-2507` - Qwen3 235B MoE (262K context)
+- `accounts/fireworks/models/qwen3-coder-480b-a35b-instruct` - Qwen3 Coder 480B MoE (262K context)
+- `accounts/fireworks/models/llama-v3p1-405b-instruct` - Llama 3.1 405B (131K context)
+- `accounts/fireworks/models/mistral-large-3-fp8` - Mistral Large 3 (256K context)
+
+**Credentials**: Set `FIREWORKS_API_KEY` in environment or workspace `.env`.
+
 #### OpenAI-Compatible APIs
 
 Any OpenAI-compatible provider can be used by specifying `base_url` in the workspace model config. Extra kwargs beyond the standard set (`provider`, `model`, `api_key`, `temperature`, `max_turns`, `timeout_seconds`, `region`) are passed through to `init_chat_model()`.
