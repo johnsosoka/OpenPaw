@@ -64,7 +64,7 @@ poetry install -E all-builtins
 | `memory` | Semantic search over conversation archives | `sqlite-vec` package |
 | `all-builtins` | All of the above | All API keys above |
 
-**Note:** Docling (document conversion), Playwright (browser automation), and all LLM providers (Anthropic, OpenAI, AWS Bedrock, xAI) are **core dependencies** installed automatically with `poetry install`.
+**Note:** Docling (document conversion), Playwright (browser automation), and all LLM providers (Anthropic, OpenAI, AWS Bedrock, xAI, Fireworks.ai) are **core dependencies** installed automatically with `poetry install`.
 
 ### 4. Set Up Environment Variables
 

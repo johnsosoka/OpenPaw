@@ -17,6 +17,7 @@ dependencies = [
     "langchain-aws (>=1.0.0,<2.0.0)",
     "langchain-openai (>=1.1.7,<2.0.0)",
     "langchain-xai (>=1.2.2,<2.0.0)",
+    "langchain-fireworks (>=1.0.0,<2.0.0)",
     # Channel adapters
     "python-telegram-bot[job-queue] (>=22.6,<23.0)",
     "discord.py (>=2.6.0,<3.0.0)",

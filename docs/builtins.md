@@ -1019,7 +1019,7 @@ poetry install -E all-builtins
 **Core dependencies** (included in base `poetry install`):
 - `docling`, `easyocr`, `opencv-python-headless` — Document conversion and OCR
 - `playwright` — Browser automation
-- `langchain-anthropic`, `langchain-openai`, `langchain-aws`, `langchain-xai` — LLM providers
+- `langchain-anthropic`, `langchain-openai`, `langchain-aws`, `langchain-xai`, `langchain-fireworks` — LLM providers
 - `weasyprint`, `markdown`, `pygments` — Markdown-to-PDF conversion
 - Shell tool — No extra dependencies required
 

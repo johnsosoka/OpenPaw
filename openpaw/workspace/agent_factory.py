@@ -28,6 +28,7 @@ class AgentFactory:
         "bedrock_converse": None,
         "bedrock": None,
         "xai": "XAI_API_KEY",
+        "fireworks": "FIREWORKS_API_KEY",
     }
 
     def __init__(
@@ -190,7 +191,7 @@ class AgentFactory:
         else:
             provider = "openai"
 
-        supported = {"openai", "anthropic", "bedrock_converse", "bedrock", "xai"}
+        supported = {"openai", "anthropic", "bedrock_converse", "bedrock", "xai", "fireworks"}
         if provider not in supported:
             return False, (
                 f"Unsupported provider: '{provider}'. "
