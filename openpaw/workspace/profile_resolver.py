@@ -57,6 +57,26 @@ class SpawnProfileResolver:
         """Return all profile names sorted alphabetically."""
         return sorted(self._profiles.keys())
 
+    def register(self, profile: SpawnProfile) -> None:
+        """Register or update a profile in the resolver.
+
+        Args:
+            profile: Profile to register. Overwrites any existing profile with
+                the same name.
+        """
+        self._profiles[profile.name] = profile
+
+    def unregister(self, name: str) -> bool:
+        """Remove a profile from the resolver.
+
+        Args:
+            name: Profile name to remove.
+
+        Returns:
+            True if the profile was found and removed, False if not found.
+        """
+        return self._profiles.pop(name, None) is not None
+
     def __len__(self) -> int:
         """Return the number of registered profiles."""
         return len(self._profiles)

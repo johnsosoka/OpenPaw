@@ -81,6 +81,61 @@ class CancelSubagentInput(BaseModel):
     id: str = Field(description="The sub-agent ID to cancel")
 
 
+class CreateProfileInput(BaseModel):
+    """Input schema for creating a spawn profile."""
+
+    name: str = Field(
+        description=(
+            "Profile name. Use lowercase letters, digits, and hyphens only "
+            "(e.g., 'code-reviewer', 'news-scout'). Becomes the filename."
+        )
+    )
+    description: str = Field(
+        description="Short description of what this profile does and when to use it"
+    )
+    system_prompt: str | None = Field(
+        default=None,
+        description="Role-specific instructions prepended to the agent's system prompt",
+    )
+    model: str | None = Field(
+        default=None,
+        description=(
+            "Model override (e.g., 'anthropic:claude-haiku-4-5-20251001'). "
+            "Omit to use workspace default."
+        ),
+    )
+    temperature: float | None = Field(
+        default=None,
+        description="Temperature override. Omit to use workspace default.",
+    )
+    allowed_tools: list[str] | None = Field(
+        default=None,
+        description="Tool whitelist. Only these tools will be available to the sub-agent.",
+    )
+    denied_tools: list[str] | None = Field(
+        default=None,
+        description="Tool blocklist. These tools will be removed.",
+    )
+    allowed_skills: list[str] | None = Field(
+        default=None,
+        description=(
+            "Skill whitelist. Empty list [] disables all skills. Omit to inherit all."
+        ),
+    )
+    timeout_minutes: int | None = Field(
+        default=None, ge=1, le=120, description="Default timeout in minutes."
+    )
+    max_turns: int | None = Field(
+        default=None, description="Maximum LLM turns."
+    )
+
+
+class DeleteProfileInput(BaseModel):
+    """Input schema for deleting a spawn profile."""
+
+    name: str = Field(description="Name of the profile to delete")
+
+
 class SpawnToolBuiltin(BaseBuiltinTool):
     """Sub-agent spawning for concurrent background task execution.
 
@@ -147,10 +202,12 @@ class SpawnToolBuiltin(BaseBuiltinTool):
         """Return spawn tools as a list of LangChain StructuredTools."""
         return [
             self._create_spawn_agent_tool(),
+            self._create_list_team_profiles_tool(),
             self._create_list_subagents_tool(),
             self._create_get_subagent_result_tool(),
             self._create_cancel_subagent_tool(),
-            self._create_list_team_profiles_tool(),
+            self._create_create_profile_tool(),
+            self._create_delete_profile_tool(),
         ]
 
     def _build_spawn_request(
@@ -550,6 +607,194 @@ class SpawnToolBuiltin(BaseBuiltinTool):
                 "Use this to stop sub-agents that are no longer needed or are taking too long."
             ),
             args_schema=CancelSubagentInput,
+        )
+
+    def _create_create_profile_tool(self) -> StructuredTool:
+        """Create the create_profile tool."""
+
+        def create_profile(
+            name: str,
+            description: str,
+            system_prompt: str | None = None,
+            model: str | None = None,
+            temperature: float | None = None,
+            allowed_tools: list[str] | None = None,
+            denied_tools: list[str] | None = None,
+            allowed_skills: list[str] | None = None,
+            timeout_minutes: int | None = None,
+            max_turns: int | None = None,
+        ) -> str:
+            """Create a persistent spawn profile YAML file and register it immediately.
+
+            Args:
+                name: Profile name (lowercase, hyphens allowed).
+                description: Short description of the profile.
+                system_prompt: Optional role instructions for the sub-agent.
+                model: Optional model override string.
+                temperature: Optional temperature override.
+                allowed_tools: Optional tool whitelist.
+                denied_tools: Optional tool blocklist.
+                allowed_skills: Optional skill whitelist.
+                timeout_minutes: Optional default timeout in minutes.
+                max_turns: Optional max LLM turns.
+
+            Returns:
+                Confirmation message or error string.
+            """
+            import os
+
+            import yaml as _yaml
+
+            from openpaw.core.paths import TEAM_DIR
+            from openpaw.workspace.profile_loader import _NAME_PATTERN, _load_profile
+
+            if self._runner is None:
+                return "[Error: Spawn profiles not available (runner not initialized)]"
+
+            name = name.strip().lower()
+
+            if not _NAME_PATTERN.match(name):
+                return (
+                    f"[Error: Invalid profile name '{name}'. "
+                    "Use lowercase letters, digits, and hyphens only "
+                    "(e.g., 'code-reviewer', 'news-scout'). "
+                    "Must start with a letter or digit.]"
+                )
+
+            resolver = self._runner._profile_resolver
+            if resolver is not None and resolver.resolve(name) is not None:
+                return (
+                    f"[Error: A profile named '{name}' already exists. "
+                    "Delete it first with delete_profile if you want to replace it.]"
+                )
+
+            workspace_path = os.getenv("OPENPAW_WORKSPACE_PATH")
+            if not workspace_path:
+                return "[Error: OPENPAW_WORKSPACE_PATH environment variable is not set]"
+
+            import pathlib
+            team_dir = pathlib.Path(workspace_path) / str(TEAM_DIR)
+            profile_path = team_dir / f"{name}.yaml"
+
+            # Build the YAML dict — only include fields that were provided.
+            profile_data: dict = {"name": name, "description": description}
+            if system_prompt is not None:
+                profile_data["system_prompt"] = system_prompt
+            if model is not None:
+                profile_data["model"] = model
+            if temperature is not None:
+                profile_data["temperature"] = temperature
+            if allowed_tools is not None:
+                profile_data["allowed_tools"] = allowed_tools
+            if denied_tools is not None:
+                profile_data["denied_tools"] = denied_tools
+            if allowed_skills is not None:
+                profile_data["allowed_skills"] = allowed_skills
+            if timeout_minutes is not None:
+                profile_data["timeout_minutes"] = timeout_minutes
+            if max_turns is not None:
+                profile_data["max_turns"] = max_turns
+
+            # Write YAML to disk.
+            try:
+                team_dir.mkdir(parents=True, exist_ok=True)
+                with profile_path.open("w", encoding="utf-8") as f:
+                    _yaml.dump(profile_data, f, default_flow_style=False, sort_keys=False)
+            except OSError as e:
+                return f"[Error: Failed to write profile file: {e}]"
+
+            # Parse back through _load_profile to validate and get a typed object.
+            try:
+                profile = _load_profile(profile_path, source="workspace")
+            except Exception as e:
+                # Clean up the written file so we don't leave a broken profile on disk.
+                try:
+                    profile_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                return f"[Error: Profile validation failed: {e}]"
+
+            # Register in the live resolver.
+            if resolver is not None:
+                resolver.register(profile)
+
+            logger.info("Created spawn profile '%s'", name)
+            return (
+                f"Created spawn profile '{name}'.\n"
+                f"  Description: {description}\n"
+                f"  File: {TEAM_DIR}/{name}.yaml\n"
+                f"Use list_team_profiles to see all available profiles."
+            )
+
+        return StructuredTool.from_function(
+            func=create_profile,
+            name="create_profile",
+            description=(
+                "Create a persistent spawn profile YAML file that survives workspace restarts. "
+                "Profiles provide reusable sub-agent configurations — model overrides, "
+                "tool restrictions, system prompts, and timeouts. "
+                "The new profile is available immediately via spawn_agent(profile='name')."
+            ),
+            args_schema=CreateProfileInput,
+        )
+
+    def _create_delete_profile_tool(self) -> StructuredTool:
+        """Create the delete_profile tool."""
+
+        def delete_profile(name: str) -> str:
+            """Permanently delete a spawn profile and remove it from the live resolver.
+
+            Args:
+                name: Name of the profile to delete.
+
+            Returns:
+                Confirmation message or error string.
+            """
+            import os
+            import pathlib
+
+            from openpaw.core.paths import TEAM_DIR
+
+            if self._runner is None:
+                return "[Error: Spawn profiles not available (runner not initialized)]"
+
+            resolver = self._runner._profile_resolver
+            if resolver is None or resolver.resolve(name) is None:
+                return (
+                    f"[Error: Profile '{name}' not found. "
+                    "Use list_team_profiles to see available profiles.]"
+                )
+
+            workspace_path = os.getenv("OPENPAW_WORKSPACE_PATH")
+            if not workspace_path:
+                return "[Error: OPENPAW_WORKSPACE_PATH environment variable is not set]"
+
+            profile_path = pathlib.Path(workspace_path) / str(TEAM_DIR) / f"{name}.yaml"
+
+            # Remove from live resolver first (mirrors cron_manager pattern).
+            resolver.unregister(name)
+
+            # Remove YAML file from disk.
+            try:
+                profile_path.unlink(missing_ok=True)
+            except OSError as e:
+                return f"[Error: Failed to delete profile file: {e}]"
+
+            logger.info("Deleted spawn profile '%s'", name)
+            return (
+                f"Deleted spawn profile '{name}'. "
+                f"The file {TEAM_DIR}/{name}.yaml has been removed."
+            )
+
+        return StructuredTool.from_function(
+            func=delete_profile,
+            name="delete_profile",
+            description=(
+                "Permanently delete a spawn profile. "
+                "Removes the YAML file from agent/team/ and unregisters the profile "
+                "from the live resolver. This action cannot be undone."
+            ),
+            args_schema=DeleteProfileInput,
         )
 
     def _format_time_ago(self, seconds: float) -> str:
