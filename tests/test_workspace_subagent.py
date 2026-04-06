@@ -197,7 +197,7 @@ class TestFrameworkPromptSubagent:
 
         assert "## Sub-Agent Spawning" in prompt
         assert "spawn background sub-agents" in prompt
-        assert "Proactive delegation:" in prompt  # Updated to reflect new content
+        assert "team-management" in prompt  # Skill pointer present in trimmed stub
 
     def test_framework_prompt_includes_subagent_when_none(
         self, mock_workspace: AgentWorkspace

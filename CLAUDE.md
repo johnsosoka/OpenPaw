@@ -276,9 +276,12 @@ agent_workspaces/<name>/
 │           │   └── {channel}/
 │           │       └── {YYYY-MM-DD}.jsonl  # Daily JSONL (ts, msg_id, user_id, display_name, content, attachments)
 │           └── _archive/ # Logs moved here after retention_days
+├── agent/
+│   └── team/     # Spawn profiles (flat *.yaml or directory with profile.yaml + tools/)
 ├── crons/        # Scheduled task definitions
 │   └── *.yaml / *.yml    # Individual cron job configurations
 ├── skills/       # LangChain skill directories (SKILL.md format)
+│   └── _framework/  # Materialized framework skills (auto-generated, read-only)
 └── tools/        # LangChain tools (Python files with @tool decorated functions)
 ```
 
@@ -917,6 +920,91 @@ builtins:
 - Sub-agent runs concurrently, agent continues working on Y
 - When complete, user receives notification with result summary
 
+### Spawn Profiles
+
+Spawn profiles are named YAML configurations that define specialized sub-agent personas. Instead of every `spawn_agent` call starting from scratch, agents can reference a profile to load a pre-defined system prompt, model, tool set, and resource limits.
+
+**Directory**: `agent/team/*.yaml` inside the workspace root. Files prefixed with `_` are skipped.
+
+**Profile YAML Format**:
+
+```yaml
+# agent/team/news-scout.yaml
+name: news-scout
+description: "Specialized agent for real-time news intelligence"
+
+system_prompt: |
+  You are a news intelligence specialist. Focus on accuracy
+  and source attribution. Always cite sources.
+
+model: anthropic:claude-haiku-4-5-20251001
+temperature: 0.3
+
+allowed_tools:
+  - brave_search
+  - read_file
+  - write_file
+  - ls
+
+allowed_skills: []     # No parent skills injected (keeps prompt lean)
+inherit_tools: true    # Whether to include parent workspace tools (default: true)
+
+timeout_minutes: 10
+max_turns: 15
+```
+
+**Available Fields**:
+
+| Field | Description |
+|-------|-------------|
+| `name` | Profile identifier — must match `^[a-z0-9][a-z0-9-]*$` and the filename stem |
+| `description` | Short summary shown by `list_team_profiles` |
+| `system_prompt` | Injected as the sub-agent's system context |
+| `model` | Model string in `provider:model` format (falls back to workspace model) |
+| `temperature` | Sampling temperature override |
+| `allowed_tools` | Whitelist — sub-agent can only use these tools |
+| `denied_tools` | Blacklist — sub-agent cannot use these tools (applied after `allowed_tools`) |
+| `allowed_skills` | Skill whitelist by name. `null` (default) inherits all parent skills. Empty list `[]` disables all skills. |
+| `denied_skills` | Skill blocklist by name. Removes matching skills from the sub-agent prompt. Applied after `allowed_skills` filtering. |
+| `inherit_tools` | Whether the sub-agent inherits parent workspace tools. `true` (default) appends profile tools to parent tools. `false` replaces parent tools — sub-agent gets only profile-scoped tools plus filesystem tools. |
+| `timeout_minutes` | Execution timeout (1–120, falls back to spawn config default) |
+| `max_turns` | Maximum agent turns (falls back to workspace model config) |
+
+**System-Level Profiles**: A `team_profiles_path` key in global `config.yaml` points to a directory of profiles shared across all workspaces.
+
+```yaml
+# config.yaml
+team_profiles_path: team_profiles  # System-level profiles shared across workspaces
+```
+
+**Resolution Order**: Workspace `agent/team/` is checked first; system `team_profiles_path` is the fallback. A workspace profile with the same name shadows the system-level profile.
+
+**Tool Filter Composition**: Profile `allowed_tools`/`denied_tools` are applied first, then any per-call overrides passed to `spawn_agent`. This two-pass approach lets profiles set a broad capability boundary and callers narrow it further for a specific task.
+
+**Skill Filtering**: Sub-agents inherit all parent workspace skills by default (injected into the system prompt as a `<skills>` block). Skills can consume significant prompt space — filtering keeps sub-agents focused and cost-efficient. `allowed_skills: []` is the most common pattern for lightweight workers that need no domain knowledge. `allowed_skills: ["specific-skill"]` restricts to a single relevant skill for domain-expert personas. `denied_skills` removes specific skills while keeping the rest, useful when one skill is irrelevant but the others are not.
+
+**Agent Tools**:
+- `spawn_agent(profile='news-scout', task='...', ...)` — spawn using a named profile; all profile fields are applied before per-call overrides
+- `list_team_profiles` — list available profiles (workspace + system) with their names and descriptions
+
+**Backward Compatibility**: Calling `spawn_agent` without a `profile` argument is identical to existing behavior — no profile is loaded and all normal sub-agent defaults apply.
+
+**Directory Profiles**: Profiles can optionally be directories instead of flat YAML files. A directory profile contains `profile.yaml` (same schema) plus an optional `tools/` subdirectory with `@tool` decorated Python functions exclusive to that profile:
+
+```
+agent/team/
+  simple-profile.yaml              # Flat YAML (still works)
+  code-specialist/                  # Directory profile
+    profile.yaml                    # Profile config (same schema + inherit_tools)
+    tools/                          # Profile-scoped tools
+      run_linter.py                 # @tool decorated functions
+      requirements.txt              # Optional tool dependencies
+```
+
+Profile tools follow the same conventions as workspace tools: `@tool` decorator, `_` prefix skipping, `requirements.txt` auto-install. Tools are loaded at workspace startup. `SUBAGENT_EXCLUDED_TOOLS` applies to profile tools the same as parent tools.
+
+When `inherit_tools: false`, the sub-agent receives only profile-scoped tools (plus filesystem tools which are always present). When `inherit_tools: true` (default), profile tools are appended to the filtered parent tool set. Both flat YAML and directory formats coexist — if a file and directory share the same stem, the directory takes precedence with a warning.
+
 ### Queue-Aware Tool Middleware
 
 `QueueAwareToolMiddleware` enables responsive agent behavior by checking for pending user messages during tool execution. The middleware composes with approval middleware in `create_agent(middleware=[queue_middleware, approval_middleware])`.
@@ -1141,20 +1229,49 @@ version: "1.0"
 - `name` — Skill display name (falls back to directory name if omitted)
 - `description` — Short description, truncated to 1024 chars (empty if omitted)
 - `version` — Optional, not used by the framework
+- `inject` — Injection mode: `summary` (default) or `full` (see Progressive Disclosure below)
 
 **Behavior**:
 - Skills are loaded at workspace startup by `WorkspaceLoader` via `load_workspace_skills()`
-- Full content is injected into the system prompt as a `<skills>` XML block between `</framework>` and `<workspace_context>`
+- Skill entries are injected into the system prompt as a `<skills>` XML block between `</framework>` and `<workspace_context>`
 - Directories prefixed with `_` are skipped
 - If no frontmatter is present, the entire file becomes the content with directory name as the skill name
 - Invalid YAML frontmatter degrades gracefully (logged warning, falls back to directory name)
 - Empty or missing `agent/skills/` directory is silently ignored
 
+**Progressive Disclosure:** By default, skills inject only their name and description into the system prompt, with a `read_file()` pointer for on-demand access to the full content. This keeps the system prompt lean while making skill knowledge available when needed. Skills can opt into full injection via `inject: full` in their YAML frontmatter.
+
+**Inject Modes:**
+- `summary` (default) — Name, description, and `read_file()` pointer in prompt. Full content loaded on demand.
+- `full` — Complete content injected into every system prompt (legacy behavior).
+
+**SKILL.md Frontmatter:**
+```yaml
+---
+name: my-skill
+description: Short description shown in system prompt
+inject: summary    # or "full" for always-present content
+---
+```
+
 **Components**:
-- `SkillInfo` dataclass in `openpaw/model/skill.py` — pure data model (name, description, content, path)
-- `load_workspace_skills()` in `openpaw/workspace/skill_loader.py` — scans directories, parses frontmatter
+- `SkillInfo` dataclass in `openpaw/model/skill.py` — pure data model (name, description, content, path, inject mode, read_path)
+- `load_workspace_skills()` in `openpaw/workspace/skill_loader.py` — scans directories, parses frontmatter, resolves read_path
 - `AgentWorkspace.skills` field in `openpaw/core/workspace.py` — stores loaded skills
-- `AgentWorkspace._build_skills_section()` — formats skills for system prompt injection
+- `AgentWorkspace._build_skills_section()` — formats skills for system prompt injection (summary vs. full per skill)
+
+### Framework Skills
+
+OpenPaw bundles three reference skills in `openpaw/builtins/skills/` that provide detailed documentation for framework capabilities. These are automatically loaded at workspace startup and materialized into `agent/skills/_framework/` for agent `read_file()` access.
+
+**Bundled Skills:**
+- `team-management` — Sub-agent spawning patterns, lifecycle communication, team profile building
+- `web-browsing` — Browser automation workflow, accessibility tree navigation, domain restrictions
+- `channel-awareness` — Channel history browsing, JSONL log searching, message lookup patterns
+
+Framework skills use `summary` inject mode by default — agents see a brief description in their prompt and load the full reference on demand. Workspace skills override framework skills with the same name.
+
+The corresponding framework prompt sections (`Sub-Agent Spawning`, `Web Browsing`, `Channel History`, `Channel Logs`) are trimmed to brief behavioral stubs with `read_file()` pointers to the skills.
 
 ### Builtins System
 

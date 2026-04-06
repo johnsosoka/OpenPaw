@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from openpaw.model.skill import SkillInfo
+from openpaw.model.skill import SkillInfo, SkillInjectMode
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +74,101 @@ def load_workspace_skills(skills_path: Path) -> list[SkillInfo]:
     return skills
 
 
+def load_framework_skills() -> list[SkillInfo]:
+    """Load framework-bundled skills from the OpenPaw package.
+
+    Framework skills provide reference documentation for framework capabilities
+    (team management, web browsing, channel awareness). They are loaded from
+    ``openpaw/builtins/skills/`` and merged with workspace skills at startup.
+
+    Returns:
+        List of SkillInfo instances with ``source="framework"``.
+        Empty list if the directory doesn't exist.
+    """
+    framework_skills_dir = Path(__file__).resolve().parent.parent / "builtins" / "skills"
+
+    if not framework_skills_dir.exists():
+        logger.debug("Framework skills directory not found: %s", framework_skills_dir)
+        return []
+
+    skills: list[SkillInfo] = []
+
+    for skill_dir in sorted(framework_skills_dir.iterdir()):
+        if not skill_dir.is_dir():
+            continue
+        if skill_dir.name.startswith("_"):
+            continue
+
+        skill_file = skill_dir / _SKILL_FILENAME
+        if not skill_file.exists():
+            continue
+
+        try:
+            skill = _load_skill(skill_dir, skill_file)
+            skill.source = "framework"
+            # Framework skills are materialized into the workspace at startup,
+            # so read_path points to the materialized location.
+            skill.read_path = f"agent/skills/_framework/{skill_dir.name}/SKILL.md"
+            skills.append(skill)
+        except Exception as e:
+            logger.error("Failed to load framework skill '%s': %s", skill_dir.name, e)
+            continue
+
+    if skills:
+        logger.info(
+            "Loaded %d framework skill(s): %s",
+            len(skills),
+            [s.name for s in skills],
+        )
+
+    return skills
+
+
+def materialize_framework_skills(
+    workspace_path: Path,
+    skills: list[SkillInfo],
+) -> None:
+    """Write framework skill content into the workspace for agent read_file() access.
+
+    Framework skills live in the Python package (outside the agent's sandbox).
+    This function copies their SKILL.md content into the workspace at
+    ``agent/skills/_framework/{name}/SKILL.md`` so agents can access them
+    via ``read_file()``.
+
+    The ``_framework`` prefix prevents the workspace skill loader from
+    double-loading these files (underscore prefix convention).
+
+    Args:
+        workspace_path: Root path of the agent workspace.
+        skills: Framework skills to materialize (only ``source="framework"`` are written).
+    """
+    for skill in skills:
+        if skill.source != "framework":
+            continue
+
+        # Build full content with frontmatter
+        target_dir = workspace_path / "agent" / "skills" / "_framework" / skill.name
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target_file = target_dir / _SKILL_FILENAME
+
+        # Write the original SKILL.md content (frontmatter + body)
+        # Re-read from the source path to get the complete file
+        source_file = skill.path / _SKILL_FILENAME
+        if source_file.exists():
+            content = source_file.read_text(encoding="utf-8")
+        else:
+            # Fallback: reconstruct from SkillInfo fields
+            content = skill.content
+
+        target_file.write_text(content, encoding="utf-8")
+
+    framework_count = sum(1 for s in skills if s.source == "framework")
+    if framework_count:
+        logger.debug(
+            "Materialized %d framework skill(s) into workspace", framework_count
+        )
+
+
 def _load_skill(skill_dir: Path, skill_file: Path) -> SkillInfo:
     """Parse a SKILL.md file and return a SkillInfo instance.
 
@@ -91,11 +186,32 @@ def _load_skill(skill_dir: Path, skill_file: Path) -> SkillInfo:
     raw_description = str(frontmatter.get("description") or "")
     description = raw_description[:_MAX_DESCRIPTION_LENGTH]
 
+    # Parse inject mode from frontmatter
+    raw_inject = frontmatter.get("inject")
+    if raw_inject is None:
+        inject = SkillInjectMode.SUMMARY
+    else:
+        raw_inject_str = str(raw_inject).strip().lower()
+        try:
+            inject = SkillInjectMode(raw_inject_str)
+        except ValueError:
+            logger.warning(
+                "Skill '%s' has invalid inject mode '%s' — defaulting to summary",
+                skill_dir.name,
+                raw_inject,
+            )
+            inject = SkillInjectMode.SUMMARY
+
+    # Compute read_path: workspace-relative path for agent read_file() access
+    read_path = f"agent/skills/{skill_dir.name}/SKILL.md"
+
     return SkillInfo(
         name=name,
         description=description,
         content=content,
         path=skill_dir,
+        inject=inject,
+        read_path=read_path,
     )
 
 

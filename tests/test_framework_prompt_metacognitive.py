@@ -32,34 +32,29 @@ class TestSubAgentProactiveGuidance:
     def test_subagent_section_includes_proactive_guidance(
         self, mock_workspace: AgentWorkspace
     ) -> None:
-        """Sub-agent section includes 'should consider' and decision criteria."""
+        """Sub-agent section stub includes core behavioral guidance and skill pointer."""
         prompt = mock_workspace.build_system_prompt(enabled_builtins=["spawn"])
 
-        # Verify proactive language
+        # Verify section header present
         assert "## Sub-Agent Spawning" in prompt
-        assert "**Proactive delegation:**" in prompt
-        assert "should consider spawning sub-agents" in prompt
 
-        # Verify decision criteria are present
-        assert "multiple independent components" in prompt
-        assert "researched or processed in parallel" in prompt
-        assert "task would take significant time" in prompt
-        assert "gather information from multiple sources" in prompt
+        # Verify stub core content
+        assert "spawn background sub-agents" in prompt
+        assert "always tell the user what you are delegating" in prompt
 
-        # Verify transparency requirement
-        assert "always tell the user what you are delegating and why" in prompt
-        assert "Do not silently spawn background work" in prompt
+        # Verify skill pointer (trimmed stub offloads detail to skill)
+        assert "team-management" in prompt
+        assert "read_file" in prompt
 
     def test_subagent_section_preserves_original_content(
         self, mock_workspace: AgentWorkspace
     ) -> None:
-        """Enhanced section still includes original notification content."""
+        """Trimmed section retains transparency and delegation guidance."""
         prompt = mock_workspace.build_system_prompt(enabled_builtins=["spawn"])
 
-        # Original content should still be present
-        assert "sub-agent completes" in prompt
-        assert "list_subagents" in prompt
-        assert "get_subagent_result" in prompt
+        # Core behavioral guidance still present in stub
+        assert "delegating" in prompt
+        assert "Summarize results" in prompt
 
 
 class TestFollowupProactiveGuidance:
@@ -231,14 +226,13 @@ class TestPromptTone:
     """Test that enhanced sections maintain consistent proactive tone."""
 
     def test_proactive_language_consistency(self, mock_workspace: AgentWorkspace) -> None:
-        """All enhanced sections use consistent proactive language."""
+        """Key proactive language patterns are present across enabled sections."""
         prompt = mock_workspace.build_system_prompt(
             enabled_builtins=["spawn", "followup", "task_tracker", "send_message"]
         )
 
-        # Check for proactive language patterns
+        # Check for proactive language patterns (stub + other sections)
         proactive_keywords = [
-            "should consider",
             "Prefer proactive action",
             "When starting work",
             "Do not stop after diagnosis",
@@ -249,15 +243,14 @@ class TestPromptTone:
             assert keyword in prompt, f"Expected proactive keyword '{keyword}' in prompt"
 
     def test_transparency_requirements_present(self, mock_workspace: AgentWorkspace) -> None:
-        """Enhanced sections maintain transparency requirements."""
+        """Transparency requirements are present across enabled sections."""
         prompt = mock_workspace.build_system_prompt(
             enabled_builtins=["spawn", "followup", "send_message"]
         )
 
-        # Check transparency language
+        # Check transparency language — sub-agent stub + other sections
         transparency_patterns = [
             "always tell the user",
-            "Do not silently",
             "Explain what you are doing",
         ]
 
@@ -522,12 +515,12 @@ class TestChannelLogsSection:
         prompt = mock_workspace.build_system_prompt(channel_logging_enabled=True)
         assert "memory/logs/channel" in prompt
 
-    def test_channel_logs_section_contains_grep_files_example(
+    def test_channel_logs_section_contains_skill_pointer(
         self, mock_workspace: AgentWorkspace
     ) -> None:
-        """Channel logs section shows how to search logs with grep_files."""
+        """Channel logs section points to channel-awareness skill for search patterns."""
         prompt = mock_workspace.build_system_prompt(channel_logging_enabled=True)
-        assert "grep_files" in prompt
+        assert "channel-awareness" in prompt
 
     def test_channel_logs_section_contains_read_file_example(
         self, mock_workspace: AgentWorkspace

@@ -49,8 +49,8 @@ class TestBrowserFrameworkPrompt:
         # With browser enabled
         prompt = workspace.build_system_prompt(enabled_builtins=["browser"])
         assert "## Web Browsing" in prompt
-        assert "browser_snapshot is your primary page understanding tool" in prompt
-        assert "browser_close" in prompt
+        assert "browser_snapshot" in prompt
+        assert "web-browsing" in prompt  # Skill pointer present in trimmed stub
 
     def test_browser_prompt_absent_when_not_enabled(self):
         """Browser framework prompt should be absent when 'browser' not in enabled_builtins."""
@@ -92,16 +92,13 @@ class TestBrowserFrameworkPrompt:
 
         prompt = workspace.build_system_prompt(enabled_builtins=["browser"])
 
-        # Check for key concepts
-        assert "snapshot" in prompt.lower()
-        assert "ref" in prompt.lower()
-        assert "browser_close" in prompt
-        assert "domain restrictions" in prompt.lower()
-        assert "ephemeral" in prompt.lower()
+        # Check stub content — core guidance still present
+        assert "browser_snapshot" in prompt
+        assert "Do NOT send screenshots" in prompt
 
-        # Check for screenshot de-emphasis
-        assert "Do NOT send screenshots to users unless they specifically ask" in prompt
-        assert "browser_snapshot is your primary page understanding tool" in prompt
+        # Skill pointer (detail offloaded to skill file)
+        assert "web-browsing" in prompt
+        assert "read_file" in prompt
 
 
 class TestBrowserCleanupIntegration:

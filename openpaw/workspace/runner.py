@@ -28,9 +28,10 @@ from openpaw.core.channel_context import format_channel_context
 from openpaw.core.config import Config, merge_configs
 from openpaw.core.config.models import ApprovalGatesConfig, ToolTimeoutsConfig
 from openpaw.core.logging import setup_workspace_logger
-from openpaw.core.paths import CONVERSATIONS_DB, DOT_ENV
+from openpaw.core.paths import CONVERSATIONS_DB, DOT_ENV, TEAM_DIR
 from openpaw.core.utils import resolve_user_name
 from openpaw.model.message import Message, MessageDirection
+from openpaw.model.spawn_profile import SpawnProfile
 from openpaw.runtime.approval import ApprovalGateManager
 from openpaw.runtime.queue.lane import LaneQueue, QueueItem, QueueMode
 from openpaw.runtime.queue.manager import QueueManager
@@ -43,7 +44,68 @@ from openpaw.workspace.agent_factory import AgentFactory, filter_workspace_tools
 from openpaw.workspace.lifecycle import LifecycleManager
 from openpaw.workspace.loader import WorkspaceLoader
 from openpaw.workspace.message_processor import MessageProcessor
+from openpaw.workspace.profile_loader import load_spawn_profiles
+from openpaw.workspace.profile_resolver import SpawnProfileResolver
 from openpaw.workspace.tool_loader import load_workspace_tools
+
+
+def _build_team_roster(resolver: SpawnProfileResolver) -> str:
+    """Build a team roster string for injection into the system prompt.
+
+    Provides the agent with awareness of its available sub-agent team members,
+    their roles, and dispatch guidance.
+
+    Args:
+        resolver: Profile resolver with loaded team profiles.
+
+    Returns:
+        Formatted team roster string for the ``<team>`` prompt section.
+    """
+    profiles = resolver.list_profiles()
+    if not profiles:
+        return ""
+
+    lines = [
+        "## Your Sub-Agent Team",
+        "",
+        "You have specialized sub-agent profiles available for delegation. "
+        "Use `spawn_agent(profile='name', task='...')` to dispatch work. "
+        "Sub-agents run in the background and notify you when complete.",
+        "",
+        "| Profile | Role | Model |",
+        "|---------|------|-------|",
+    ]
+
+    for p in profiles:
+        model = p.model or "(workspace default)"
+        desc = p.description or "(no description)"
+        lines.append(f"| `{p.name}` | {desc} | {model} |")
+
+    lines.append("")
+    lines.append("### Dispatch Guidelines")
+    lines.append("")
+    lines.append(
+        "- **Delegate proactively** — when you recognize a task that fits "
+        "a profile, spawn it without waiting to be asked"
+    )
+    lines.append(
+        "- **Prefer profiles over manual tool filtering** — profiles carry "
+        "focused prompts and tool restrictions tuned for their role"
+    )
+    lines.append(
+        "- **Sub-agents are fire-and-forget** — you cannot send follow-up "
+        "messages; write a thorough task prompt upfront"
+    )
+    lines.append(
+        "- **Chain results** — one sub-agent's output (saved to workspace) "
+        "can be input for another sub-agent or your own synthesis"
+    )
+    lines.append(
+        "- **Use `list_team_profiles` for details** — see tool restrictions, "
+        "timeouts, and skill configurations per profile"
+    )
+
+    return "\n".join(lines)
 
 
 class WorkspaceRunner:
@@ -701,6 +763,21 @@ class WorkspaceRunner:
             self._token_logger,
         )
 
+        # Load spawn profiles and create resolver
+        workspace_profiles = load_spawn_profiles(
+            self._workspace.path / str(TEAM_DIR)
+        )
+        system_profiles: list[SpawnProfile] = []
+        if self.config.team_profiles_path:
+            system_profiles = load_spawn_profiles(
+                Path(self.config.team_profiles_path), source="system"
+            )
+        profile_resolver = SpawnProfileResolver(workspace_profiles, system_profiles)
+
+        # Inject team roster into the workspace system prompt
+        if len(profile_resolver) > 0:
+            self._workspace.team_roster = _build_team_roster(profile_resolver)
+
         # Start sub-agent runner
         subagent_session_logger = SessionLogger(self._workspace.path, session_type="subagent")
         self._subagent_runner = SubAgentRunner(
@@ -712,6 +789,8 @@ class WorkspaceRunner:
             max_concurrent=8,
             result_callback=self._inject_system_event,
             session_logger=subagent_session_logger,
+            profile_resolver=profile_resolver,
+            agent_factory_instance=self._agent_factory,
         )
         self._connect_spawn_tool_to_runner()
         self._connect_channel_history_tool()
