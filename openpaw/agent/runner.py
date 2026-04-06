@@ -120,9 +120,17 @@ def create_chat_model(
         logger.info(f"Creating ChatXAI: model={model_name}")
         return ChatXAI(**kwargs)
 
+    if provider == "fireworks":
+        from langchain_fireworks import ChatFireworks
+
+        if api_key:
+            kwargs["fireworks_api_key"] = api_key
+        logger.info(f"Creating ChatFireworks: model={model_name}")
+        return ChatFireworks(**kwargs)
+
     raise ValueError(
         f"Unsupported model provider: '{provider}'. "
-        f"Supported: openai, anthropic, bedrock_converse, xai"
+        f"Supported: openai, anthropic, bedrock_converse, xai, fireworks"
     )
 
 
