@@ -30,7 +30,7 @@ def test_channels_list_parses() -> None:
     """A 'channels:' list with multiple entries loads correctly."""
     data = {
         "channels": [
-            {"type": "telegram", "token": "tg-token"},
+            {"type": "telegram", "token": "tg-token", "primary": True},
             {"type": "discord", "token": "dc-token"},
         ]
     }
@@ -126,7 +126,7 @@ def test_channels_with_same_type_different_names() -> None:
     """Two channels sharing the same type but with different names parse without error."""
     data = {
         "channels": [
-            {"name": "tg-primary", "type": "telegram", "token": "token-a"},
+            {"name": "tg-primary", "type": "telegram", "token": "token-a", "primary": True},
             {"name": "tg-secondary", "type": "telegram", "token": "token-b"},
         ]
     }

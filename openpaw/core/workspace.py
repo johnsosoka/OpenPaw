@@ -33,6 +33,7 @@ from openpaw.core.prompts.framework import (
     SECTION_WORK_ETHIC,
     SECTION_WORKSPACE_FILESYSTEM,
     build_capability_summary,
+    build_channels_section,
     build_cron_context,
     build_framework_orientation,
 )
@@ -330,7 +331,12 @@ class AgentWorkspace:
             if cron.output is not None
         )
         has_spawn = enabled_builtins is None or "spawn" in enabled_builtins
-        if heartbeat_agent_delivery or cron_agent_delivery or has_spawn:
+        has_cross_channel = (
+            self.config is not None
+            and self.config.channels is not None
+            and len(self.config.channels) >= 2
+        )
+        if heartbeat_agent_delivery or cron_agent_delivery or has_spawn or has_cross_channel:
             sections.append(SECTION_SYSTEM_EVENTS)
 
         # Memory search - include if memory_search is enabled
@@ -344,6 +350,12 @@ class AgentWorkspace:
         # Channel logs - include when persistent channel logging is active
         if channel_logging_enabled:
             sections.append(SECTION_CHANNEL_LOGS)
+
+        # Cross-channel communication - include when 2+ channels configured
+        if self.config and self.config.channels and len(self.config.channels) >= 2:
+            channels_section = build_channels_section(self.config.channels)
+            if channels_section:
+                sections.append(channels_section)
 
         # Channel context is always available (group messages prepend recent history)
         sections.append(SECTION_CHANNEL_CONTEXT)

@@ -292,6 +292,89 @@ SECTION_SYSTEM_EVENTS = (
     "channel delivery for system-originated events — it has no effect on user messages."
 )
 
+# Cross-channel communication - conditional on 2+ channels configured
+SECTION_CHANNELS_HEADER = (
+    "\n\n## Connected Channels\n\n"
+    "You are connected to multiple communication channels. You can send messages "
+    "and files to any channel using the optional `channel` parameter on "
+    "`send_message` and `send_file`.\n\n"
+)
+
+SECTION_CHANNELS_ETIQUETTE = (
+    "\n### Cross-Channel Escalation Rule\n\n"
+    "**IMPORTANT: When you receive a message on a public channel (Discord server, "
+    "group chat), you MUST escalate to the primary channel.** Follow this pattern:\n\n"
+    "1. Send a brief acknowledgment on the public channel (your normal response)\n"
+    "2. Send a detailed briefing to the primary channel using "
+    "`send_message(content='...', channel='<primary_channel_name>')`\n\n"
+    "**Public channels** — Keep responses short and professional. Acknowledge, "
+    "confirm you're investigating, report outcomes. Never share verbose details, "
+    "investigation results, or request permissions in public.\n\n"
+    "**Primary channel** — This is where you send detailed briefings, "
+    "investigation results, request user decisions, and share sensitive information.\n\n"
+    "When you omit the `channel` parameter, messages go to the channel that "
+    "triggered the current interaction. Use the `channel` parameter to target "
+    "a different channel.\n"
+)
+
+SECTION_CHANNELS_CONTEXT_RECOVERY = (
+    "\n### Cross-Channel Context Recovery\n\n"
+    "When you receive a `[SYSTEM]` escalation event referencing another channel, "
+    "you can review the source channel's logs for full context:\n\n"
+    "- Channel logs are at: `memory/logs/channel/{server}/{channel}/{YYYY-MM-DD}.jsonl`\n"
+    "- Use `grep_files('memory/logs/channel', 'search term')` to find relevant messages\n"
+    "- Use `read_file()` on specific log files for chronological context\n"
+    "- Sub-agent investigation logs referenced in the escalation event contain "
+    "tool calls, responses, and metrics from the investigation\n\n"
+    "Review these logs before responding to the user about an escalation — they "
+    "contain the full picture that the summary may not capture.\n"
+)
+
+
+def build_channels_section(channels_config: list) -> str:
+    """Build the channels section for the framework prompt.
+
+    Args:
+        channels_config: List of WorkspaceChannelConfig objects.
+
+    Returns:
+        Formatted channels section with listing table and etiquette guidance,
+        or empty string if fewer than 2 channels.
+    """
+    if len(channels_config) < 2:
+        return ""
+
+    parts = [SECTION_CHANNELS_HEADER.strip()]
+
+    # Build channel listing table
+    parts.append("")
+    parts.append("| Channel | Type | Role | Default Target |")
+    parts.append("|---------|------|------|----------------|")
+    for ch in channels_config:
+        ch_name = ch.name or ch.type or "unknown"
+        ch_type = ch.type or "unknown"
+        role = "**primary**" if ch.primary else "public"
+
+        # Resolve display target
+        target = ch.default_target_id
+        if target is None and ch.allowed_users:
+            target = ch.allowed_users[0]
+        target_str = str(target) if target is not None else "—"
+
+        parts.append(f"| `{ch_name}` | {ch_type} | {role} | {target_str} |")
+
+    # Find the primary channel name for concrete examples in the prompt
+    primary_name = next(
+        ((ch.name or ch.type or "unknown") for ch in channels_config if ch.primary),
+        "primary",
+    )
+    etiquette = SECTION_CHANNELS_ETIQUETTE.replace("<primary_channel_name>", primary_name)
+    parts.append(etiquette)
+    parts.append(SECTION_CHANNELS_CONTEXT_RECOVERY)
+
+    return "\n".join(parts)
+
+
 # Channel context - always included (group messages prepend recent history)
 SECTION_CHANNEL_CONTEXT = (
     "\n\n## Channel Context\n\n"
