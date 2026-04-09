@@ -462,6 +462,11 @@ class SubAgentRunner:
                 else:
                     runner = self._agent_factory()
 
+                # Inject sub-agent label so logs distinguish sub-agent from main agent.
+                # Prefer profile name (e.g., "devin:homelab-specialist"), fall back to task label.
+                sub_label = request.profile or request.label
+                runner._log_label = f"{self._workspace_name}:{sub_label}"
+
                 # --- Profile workspace overrides (prompt + skills) ---
                 # Copy workspace before ANY mutation to avoid shared-state corruption.
                 needs_copy = profile and (
