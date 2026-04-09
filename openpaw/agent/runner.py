@@ -233,6 +233,10 @@ class AgentRunner:
         self._middleware = middleware or []
         self.channel_logging_enabled = channel_logging_enabled
 
+        # Log label for distinguishing main agent from sub-agents.
+        # Defaults to workspace name; sub-agent runner overrides with profile label.
+        self._log_label: str = workspace.name
+
         # Per-invocation tracking (populated after each run)
         self._last_metrics: InvocationMetrics | None = None
         self._last_tools_used: list[str] = []
@@ -643,7 +647,7 @@ class AgentRunner:
                             tool_calls = getattr(msg, "tool_calls", [])
                             if tool_calls:
                                 tool_names = [tc.get("name", "?") for tc in tool_calls]
-                                logger.info(f"[{self.workspace.name}] Tool calls: {tool_names}")
+                                logger.info(f"[{self._log_label}] Tool calls: {tool_names}")
                                 # Track last tool called for timeout reporting
                                 self._current_tool_name = tool_calls[-1].get("name")
                             for tc in tool_calls:
@@ -665,7 +669,7 @@ class AgentRunner:
 
             logger.warning(
                 f"Agent timed out after {self.timeout_seconds}s "
-                f"(workspace: {self.workspace.name})"
+                f"(workspace: {self._log_label})"
             )
 
             # Use rich notification if we know what tool was executing
@@ -701,7 +705,7 @@ class AgentRunner:
             if self.strip_thinking and "<think>" in raw_response.lower():
                 logger.warning(
                     f"Fallback thinking stripping triggered "
-                    f"(workspace: {self.workspace.name}, model: {self.model_id})"
+                    f"(workspace: {self._log_label}, model: {self.model_id})"
                 )
                 return self._strip_thinking_tokens(raw_response)
             return raw_response
@@ -746,7 +750,7 @@ class AgentRunner:
             if self.strip_thinking and "<think>" in raw_response.lower():
                 logger.warning(
                     f"Fallback thinking stripping triggered "
-                    f"(workspace: {self.workspace.name}, model: {self.model_id})"
+                    f"(workspace: {self._log_label}, model: {self.model_id})"
                 )
                 return self._strip_thinking_tokens(raw_response)
             return raw_response
