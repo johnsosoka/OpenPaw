@@ -38,6 +38,17 @@ agent:
   max_turns: 50
   temperature: 0.7
 
+# Per-workspace model config (in agent.yaml) supports these additional fields:
+#
+# model:
+#   provider: anthropic
+#   model: claude-sonnet-4-20250514
+#   max_retries: 3        # Retry attempts on transient errors (504, 429, connection).
+#                         # Default: 3. Set to 0 or null to disable.
+#                         # OpenAI/Anthropic/xAI use native SDK retry (with logging).
+#                         # Fireworks wraps with LangChain .with_retry() (SDK retry is a no-op).
+#                         # Bedrock is excluded — boto3 manages its own retry strategy.
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Provider catalog — define provider connection details once, reference by name.
 # Workspaces use shorthand: model: "provider_name:model_id"

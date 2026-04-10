@@ -353,9 +353,12 @@ class WorkspaceRunner:
         # Extract extra model kwargs beyond the known set.
         # max_output_tokens is excluded here and handled separately below
         # so it maps to the LangChain constructor kwarg name "max_tokens".
+        # max_retries is excluded here and forwarded explicitly so create_chat_model()
+        # can apply it per-provider (native for OpenAI/Anthropic/xAI, .with_retry()
+        # for Fireworks, and skipped entirely for Bedrock).
         known_model_keys = {
             "provider", "model", "api_key", "temperature", "max_turns",
-            "region", "timeout_seconds", "max_output_tokens",
+            "region", "timeout_seconds", "max_output_tokens", "max_retries",
         }
         extra_model_kwargs = {
             k: v for k, v in agent_config.items() if k not in known_model_keys and v is not None
@@ -366,6 +369,14 @@ class WorkspaceRunner:
         if workspace_max_output_tokens is not None:
             extra_model_kwargs["max_tokens"] = workspace_max_output_tokens
             self.logger.info(f"Applying workspace max_output_tokens cap: {workspace_max_output_tokens}")
+
+        # Forward max_retries explicitly (default 3 from WorkspaceModelConfig).
+        # create_chat_model() applies it per-provider: native for OpenAI/Anthropic/xAI,
+        # .with_retry() for Fireworks, and skipped for Bedrock (boto3 handles its own retry).
+        workspace_max_retries = agent_config.get("max_retries", 3)
+        extra_model_kwargs["max_retries"] = workspace_max_retries
+        if workspace_max_retries and workspace_max_retries > 0:
+            self.logger.info(f"Retry config: max_retries={workspace_max_retries}")
 
         if extra_model_kwargs:
             self.logger.info(f"Passing extra model kwargs: {list(extra_model_kwargs.keys())}")
