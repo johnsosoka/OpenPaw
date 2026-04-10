@@ -71,6 +71,13 @@ class WorkspaceModelConfig(BaseModel):
         default=None,
         description="Maximum output tokens per LLM call (None = provider default). Applied to all agent types.",
     )
+    max_retries: int | None = Field(
+        default=3,
+        description=(
+            "Max retry attempts on transient API errors (504, 429, connection errors). "
+            "None or 0 disables retries. Bedrock is excluded (boto3 manages its own retries)."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod

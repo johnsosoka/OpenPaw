@@ -24,6 +24,12 @@ from openpaw.core.workspace import AgentWorkspace
 
 logger = logging.getLogger(__name__)
 
+# Surface retry diagnostics from provider SDKs.
+# OpenAI SDK logs "Retrying request to %s in %f seconds" at INFO.
+# Anthropic SDK logs similar messages at INFO.
+logging.getLogger("openai._base_client").setLevel(logging.INFO)
+logging.getLogger("anthropic._base_client").setLevel(logging.INFO)
+
 # Models known to produce thinking tokens
 THINKING_MODELS = [
     "moonshot.kimi-k2-thinking",
@@ -55,10 +61,14 @@ def create_chat_model(
         temperature: Model temperature setting.
         region: AWS region for Bedrock models (e.g., us-east-1).
         extra_kwargs: Additional kwargs to pass to the model constructor
-            (e.g., base_url for OpenAI-compatible APIs).
+            (e.g., base_url for OpenAI-compatible APIs, max_retries for retry config).
 
     Returns:
-        Configured BaseChatModel instance.
+        Configured BaseChatModel instance. For Fireworks, returns a
+        RunnableRetry wrapper when max_retries > 0 (the Fireworks SDK does not
+        implement native retry). Callers that need model attribute access (e.g.
+        ``profile``) should hold a reference to the raw model separately — see
+        ``AgentRunner._build_agent()`` for the established pattern.
 
     Raises:
         ValueError: If provider is not supported.
@@ -80,6 +90,11 @@ def create_chat_model(
     if extra_kwargs:
         kwargs.update(extra_kwargs)
 
+    # Extract max_retries before merging into provider kwargs.
+    # Different providers require different handling (see per-provider logic below).
+    max_retries: int | None = kwargs.pop("max_retries", 3)
+    effective_retries = max_retries if (max_retries and max_retries > 0) else 0
+
     # Flatten model_kwargs into direct constructor args so that params like
     # extra_body reach the provider class directly instead of being silently dropped
     nested_model_kwargs = kwargs.pop("model_kwargs", None)
@@ -91,7 +106,11 @@ def create_chat_model(
 
         if api_key:
             kwargs["api_key"] = api_key
-        logger.info(f"Creating ChatOpenAI: model={model_name}, kwargs={list(kwargs.keys())}")
+        if effective_retries > 0:
+            kwargs["max_retries"] = effective_retries
+            logger.info(f"Creating ChatOpenAI: model={model_name}, max_retries={effective_retries}")
+        else:
+            logger.info(f"Creating ChatOpenAI: model={model_name}, kwargs={list(kwargs.keys())}")
         return ChatOpenAI(**kwargs)
 
     if provider == "anthropic":
@@ -99,7 +118,11 @@ def create_chat_model(
 
         if api_key:
             kwargs["api_key"] = api_key
-        logger.info(f"Creating ChatAnthropic: model={model_name}")
+        if effective_retries > 0:
+            kwargs["max_retries"] = effective_retries
+            logger.info(f"Creating ChatAnthropic: model={model_name}, max_retries={effective_retries}")
+        else:
+            logger.info(f"Creating ChatAnthropic: model={model_name}")
         return ChatAnthropic(**kwargs)
 
     if provider in ("bedrock_converse", "bedrock"):
@@ -107,7 +130,8 @@ def create_chat_model(
 
         if region:
             kwargs["region_name"] = region
-        # Bedrock uses AWS credentials, not api_key
+        # Bedrock uses AWS credentials, not api_key.
+        # boto3 manages its own retry strategy — do not pass max_retries.
         kwargs.pop("api_key", None)
         logger.info(f"Creating ChatBedrockConverse: model={model_name}, kwargs_keys={list(kwargs.keys())}")
         return ChatBedrockConverse(**kwargs)
@@ -117,16 +141,39 @@ def create_chat_model(
 
         if api_key:
             kwargs["xai_api_key"] = api_key
-        logger.info(f"Creating ChatXAI: model={model_name}")
+        if effective_retries > 0:
+            kwargs["max_retries"] = effective_retries
+            logger.info(f"Creating ChatXAI: model={model_name}, max_retries={effective_retries}")
+        else:
+            logger.info(f"Creating ChatXAI: model={model_name}")
         return ChatXAI(**kwargs)
 
     if provider == "fireworks":
+        import httpx
         from langchain_fireworks import ChatFireworks
 
         if api_key:
             kwargs["fireworks_api_key"] = api_key
+        # The Fireworks SDK sets _max_retries but does not actually use it — it is a
+        # no-op. Use LangChain's .with_retry() wrapper instead to get real retry behavior.
         logger.info(f"Creating ChatFireworks: model={model_name}")
-        return ChatFireworks(**kwargs)
+        raw_model = ChatFireworks(**kwargs)
+        if effective_retries > 0:
+            logger.info(
+                f"Wrapping ChatFireworks with retry (stop_after_attempt={effective_retries + 1})"
+            )
+            return raw_model.with_retry(
+                retry_if_exception_type=(
+                    httpx.HTTPStatusError,
+                    httpx.ConnectError,
+                    httpx.ReadTimeout,
+                    ConnectionError,
+                    TimeoutError,
+                ),
+                stop_after_attempt=effective_retries + 1,  # total attempts, not retries
+                wait_exponential_jitter=True,
+            )
+        return raw_model
 
     raise ValueError(
         f"Unsupported model provider: '{provider}'. "
@@ -531,7 +578,10 @@ class AgentRunner:
         """
         # 1. Initialize model directly via provider class
         model = self._create_model()
-        self._model_instance = model
+        # For providers that return a RunnableRetry wrapper (e.g. Fireworks), store
+        # the underlying BaseChatModel separately so attribute access like .profile
+        # works correctly. The wrapper is passed to create_agent for actual execution.
+        self._model_instance = getattr(model, "bound", model)
 
         # 2. Create FilesystemTools for workspace
         workspace_root = self.workspace.path.resolve()
