@@ -255,7 +255,7 @@ class TaskToolBuiltin(BaseBuiltinTool):
                     desc_preview += "..."
 
                 lines.append(
-                    f"{status_icon} [{task.id[:8]}] {task.type}{priority_marker}\n"
+                    f"{status_icon} [{task.id}] {task.type}{priority_marker}\n"
                     f"  Status: {task.status.value} | {time_info}\n"
                     f"  {desc_preview}\n"
                 )

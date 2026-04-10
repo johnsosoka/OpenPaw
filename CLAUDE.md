@@ -306,6 +306,7 @@ model:
   api_key: ${ANTHROPIC_API_KEY}
   temperature: 0.5
   max_turns: 50
+  max_output_tokens: 4096        # Cap output tokens for all stateless agents (default: uncapped)
 
 # Shorthand format also accepted (auto-split on first colon):
 # model: "anthropic:claude-sonnet-4-20250514"
@@ -715,6 +716,8 @@ output:
   channel: telegram
   target_id: 123456789  # Preferred (channel-agnostic). Legacy: chat_id, channel_id
   delivery: channel   # Where to deliver: channel, agent, or both (default: channel)
+
+max_output_tokens: 4096  # Cap output tokens for this cron (default: uncapped, inherits workspace model default)
 ```
 
 **Output Routing**: The `output.channel` field references a channel name (defaults to type). Use `target_id` as the preferred routing field (channel-type-agnostic). Legacy fields `chat_id` and `channel_id` are still supported as fallbacks.
@@ -1071,6 +1074,7 @@ heartbeat:
   active_hours: "09:00-17:00"    # Only run during these hours (optional)
   suppress_ok: true              # Don't send message if agent responds "HEARTBEAT_OK"
   delivery: channel              # Where to deliver: channel, agent, or both (default: channel)
+  max_output_tokens: 2000        # Cap output tokens per heartbeat run (default: uncapped)
   output:
     channel: telegram
     target_id: 123456789
@@ -1096,6 +1100,8 @@ HEARTBEAT_OK responses are always suppressed from both channel delivery and agen
 **Session Logging**: Every heartbeat execution (including HEARTBEAT_OK and errors) writes a JSONL session log to `memory/sessions/heartbeat/`. These serve as an audit trail and are readable by the main agent via `read_file()`.
 
 **Prompt Template**: The heartbeat prompt is built dynamically from a structured template. `HEARTBEAT.md` serves as a scratchpad for agent-maintained notes on what to check during heartbeats.
+
+**Output Token Cap**: When `max_output_tokens` is set, the LLM's output is capped at that token count. A warning is logged when the cap is reached, indicating the response was likely truncated. This prevents runaway token generation from models with repetition bugs. The cap can also be set at the workspace model level (`model.max_output_tokens`) as a default for all stateless agents; component-specific settings take precedence.
 
 ### Session Logging
 
@@ -1182,6 +1188,7 @@ def check_availability(date: str) -> str:
 - Environment variables from workspace `.env` are available
 - Multiple tools per file are supported
 - Files starting with `_` are ignored
+- Sibling imports are supported (`from helper import func`) — the tools directory is added to `sys.path` at load time
 
 **Dependencies**: Add a `tools/requirements.txt` for tool-specific packages:
 
@@ -1476,3 +1483,23 @@ lifecycle:
 - When TTL fires, channel context history is **not** injected into the fresh thread — prevents the agent from parroting stale conversation after a reset.
 - User receives a brief notification when TTL triggers a reset (controlled by `lifecycle.notify_session_ttl`).
 - TTL check runs **before** auto-compact — a fresh conversation never triggers compaction on the same message.
+
+#### Checkpoint Pruning
+
+Orphaned checkpoint data is automatically pruned at startup. When conversations rotate (`/new`, `/compact`, TTL expiry), the old conversation's checkpoint data remains in `conversations.db`. Over time this causes significant database bloat (observed: 14GB in production).
+
+**Configuration** (in `agent.yaml` or global config):
+
+```yaml
+checkpoint_retention_days: 7  # Prune orphaned checkpoints older than 7 days (default: 7, 0 to disable)
+```
+
+**Behavior**:
+- Runs once at workspace startup, after checkpointer initialization
+- Identifies orphaned threads (not referenced by any active session in `sessions.json`)
+- Deletes checkpoint and write data for orphaned threads older than `retention_days`
+- Runs `VACUUM` to reclaim disk space after deletion
+- Best-effort: failures are logged and never block startup
+- Follows the same startup-cleanup pattern as `ChannelLogger.archive_old_logs()`
+
+**Components**: `CheckpointPruner` in `openpaw/runtime/session/pruner.py`. `SessionManager.get_active_thread_ids()` provides the set of thread IDs to preserve.

@@ -266,10 +266,17 @@ class AgentFactory:
             channel_logging_enabled=self._channel_logging_enabled,
         )
 
-    def create_stateless_agent(self) -> AgentRunner:
+    def create_stateless_agent(
+        self, extra_overrides: dict[str, Any] | None = None
+    ) -> AgentRunner:
         """Create a stateless agent for scheduled tasks (no checkpointer).
 
         Always uses configured model, ignoring runtime overrides.
+
+        Args:
+            extra_overrides: Optional extra model kwargs that take highest precedence,
+                overriding both catalog extras and workspace-level extra_model_kwargs.
+                Used by heartbeat/cron schedulers to apply per-job caps (e.g. max_tokens).
 
         Returns:
             AgentRunner without conversation state.
@@ -278,7 +285,10 @@ class AgentFactory:
 
         resolved = self._resolve_for_model(self._configured_model)
         api_key = resolved.api_key if resolved.api_key is not None else self._api_key
+        # Resolution order: catalog extras < workspace extras < per-call overrides
         merged_extra = {**resolved.extra_kwargs, **self._extra_model_kwargs}
+        if extra_overrides:
+            merged_extra.update(extra_overrides)
         region = resolved.region or self._region
 
         return AgentRunner(
@@ -297,7 +307,11 @@ class AgentFactory:
             channel_logging_enabled=self._channel_logging_enabled,
         )
 
-    def create_profiled_agent(self, profile: SpawnProfile) -> AgentRunner:
+    def create_profiled_agent(
+        self,
+        profile: SpawnProfile,
+        extra_overrides: dict[str, Any] | None = None,
+    ) -> AgentRunner:
         """Create a stateless agent with profile-driven overrides.
 
         Uses the profile's model, temperature, and max_turns when set,
@@ -305,6 +319,8 @@ class AgentFactory:
 
         Args:
             profile: SpawnProfile with optional model/temperature/max_turns overrides.
+            extra_overrides: Optional extra model kwargs applied after all other merging,
+                taking highest precedence (e.g. per-spawn max_tokens caps).
 
         Returns:
             AgentRunner configured per the profile.
@@ -320,7 +336,10 @@ class AgentFactory:
 
         temperature = profile.temperature if profile.temperature is not None else self._temperature
         max_turns = profile.max_turns if profile.max_turns is not None else self._max_turns
+        # Resolution order: catalog extras < workspace extras < per-call overrides
         merged_extra = {**resolved.extra_kwargs, **self._extra_model_kwargs}
+        if extra_overrides:
+            merged_extra.update(extra_overrides)
         region = resolved.region or self._region
 
         return AgentRunner(
@@ -371,13 +390,18 @@ class AgentFactory:
         if name in self._enabled_builtin_names:
             self._enabled_builtin_names.remove(name)
 
-    def get_agent_factory_closure(self) -> Callable[[], AgentRunner]:
+    def get_agent_factory_closure(self) -> Callable[..., AgentRunner]:
         """Create a closure for spawning stateless agents.
+
+        The returned callable forwards keyword arguments to
+        :meth:`create_stateless_agent`, allowing callers (e.g. heartbeat and
+        cron schedulers) to inject per-invocation overrides such as
+        ``extra_overrides={"max_tokens": N}``.
 
         Returns:
             Callable that creates fresh AgentRunner instances.
         """
-        return lambda: self.create_stateless_agent()
+        return lambda **kwargs: self.create_stateless_agent(**kwargs)
 
 
 def filter_workspace_tools(

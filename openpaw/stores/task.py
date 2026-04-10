@@ -178,11 +178,45 @@ class TaskStore:
 
         logger.info(f"Created task: {task.id} ({task.type}, {task.status.value})")
 
+    def _resolve_task_id(self, tasks: list[dict[str, Any]], task_id: str) -> str | None:
+        """Resolve a task ID, supporting prefix matching as fallback.
+
+        Tries an exact match first (fast path). If no exact match is found,
+        falls back to prefix matching. Ambiguous prefixes (matching multiple
+        tasks) return None to avoid incorrect mutations.
+
+        Args:
+            tasks: List of task dicts from storage.
+            task_id: Full or prefix task ID.
+
+        Returns:
+            The resolved full task ID, or None if not found or ambiguous.
+        """
+        # Exact match (fast path)
+        for task_data in tasks:
+            if task_data["id"] == task_id:
+                return task_id
+
+        # Prefix match fallback
+        matches = [t["id"] for t in tasks if t["id"].startswith(task_id)]
+
+        if len(matches) == 1:
+            logger.info(f"Resolved task ID prefix '{task_id}' to '{matches[0]}'")
+            return matches[0]
+
+        if len(matches) > 1:
+            logger.warning(f"Ambiguous task ID prefix '{task_id}': matches {len(matches)} tasks")
+            return None
+
+        return None
+
     def get(self, task_id: str) -> Task | None:
         """Retrieve a single task by ID.
 
+        Supports full UUID or unambiguous prefix match.
+
         Args:
-            task_id: Unique task identifier.
+            task_id: Full or prefix task identifier.
 
         Returns:
             Task instance if found, None otherwise.
@@ -190,8 +224,12 @@ class TaskStore:
         with self._lock:
             data = self._load_unlocked()
 
+        resolved_id = self._resolve_task_id(data["tasks"], task_id)
+        if resolved_id is None:
+            return None
+
         for task_data in data["tasks"]:
-            if task_data["id"] == task_id:
+            if task_data["id"] == resolved_id:
                 return Task.from_dict(task_data)
 
         return None
@@ -257,8 +295,13 @@ class TaskStore:
         with self._lock:
             data = self._load_unlocked()
 
+            resolved_id = self._resolve_task_id(data["tasks"], task_id)
+            if resolved_id is None:
+                logger.warning(f"Task not found for update: {task_id}")
+                return False
+
             for i, task_data in enumerate(data["tasks"]):
-                if task_data["id"] == task_id:
+                if task_data["id"] == resolved_id:
                     # Load existing task
                     task = Task.from_dict(task_data)
 
@@ -276,7 +319,6 @@ class TaskStore:
                     logger.info(f"Updated task: {task_id}")
                     return True
 
-        logger.warning(f"Task not found for update: {task_id}")
         return False
 
     def delete(self, task_id: str) -> bool:
@@ -290,17 +332,16 @@ class TaskStore:
         """
         with self._lock:
             data = self._load_unlocked()
-            initial_count = len(data["tasks"])
 
-            data["tasks"] = [t for t in data["tasks"] if t["id"] != task_id]
+            resolved_id = self._resolve_task_id(data["tasks"], task_id)
+            if resolved_id is None:
+                logger.warning(f"Task not found for deletion: {task_id}")
+                return False
 
-            if len(data["tasks"]) < initial_count:
-                self._save_unlocked(data)
-                logger.info(f"Deleted task: {task_id}")
-                return True
-
-        logger.warning(f"Task not found for deletion: {task_id}")
-        return False
+            data["tasks"] = [t for t in data["tasks"] if t["id"] != resolved_id]
+            self._save_unlocked(data)
+            logger.info(f"Deleted task: {task_id}")
+            return True
 
     def cleanup_old_tasks(self, max_age_days: int = 3, stale_threshold_hours: int = 48) -> int:
         """Remove completed tasks older than specified age and handle stale tasks.

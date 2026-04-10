@@ -233,6 +233,9 @@ class AgentRunner:
         self._middleware = middleware or []
         self.channel_logging_enabled = channel_logging_enabled
 
+        # Capture max_tokens for truncation detection after runs
+        self._max_output_tokens: int | None = self.extra_model_kwargs.get("max_tokens")
+
         # Log label for distinguishing main agent from sub-agents.
         # Defaults to workspace name; sub-agent runner overrides with profile label.
         self._log_label: str = workspace.name
@@ -253,6 +256,15 @@ class AgentRunner:
             self.strip_thinking = True
 
         self._agent = self._build_agent()
+
+    @property
+    def max_output_tokens(self) -> int | None:
+        """Get the configured output token cap for this runner.
+
+        Returns:
+            The max_tokens value passed via extra_model_kwargs, or None if uncapped.
+        """
+        return self._max_output_tokens
 
     @property
     def last_metrics(self) -> InvocationMetrics | None:
@@ -692,6 +704,15 @@ class AgentRunner:
         self._last_metrics = extract_metrics_from_callback(
             usage_callback, duration_ms, self.model_id
         )
+
+        # Warn when output token cap may have caused response truncation
+        if self._max_output_tokens and self._last_metrics:
+            if self._last_metrics.output_tokens >= self._max_output_tokens:
+                logger.warning(
+                    f"Output token cap reached: "
+                    f"{self._last_metrics.output_tokens}/{self._max_output_tokens} tokens "
+                    f"— response may be truncated (workspace: {self._log_label})"
+                )
 
         # Extract response from final messages
         if final_messages:
