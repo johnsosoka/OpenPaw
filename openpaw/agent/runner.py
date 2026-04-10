@@ -150,30 +150,40 @@ def create_chat_model(
 
     if provider == "fireworks":
         import httpx
+        import tenacity
         from langchain_fireworks import ChatFireworks
 
         if api_key:
             kwargs["fireworks_api_key"] = api_key
-        # The Fireworks SDK sets _max_retries but does not actually use it — it is a
-        # no-op. Use LangChain's .with_retry() wrapper instead to get real retry behavior.
         logger.info(f"Creating ChatFireworks: model={model_name}")
-        raw_model = ChatFireworks(**kwargs)
+        model = ChatFireworks(**kwargs)
+
+        # The Fireworks SDK's _max_retries is a no-op — patch _agenerate with
+        # tenacity for real retry behavior.  This preserves bind_tools() and all
+        # model attributes (unlike .with_retry() which wraps the entire Runnable).
         if effective_retries > 0:
-            logger.info(
-                f"Wrapping ChatFireworks with retry (stop_after_attempt={effective_retries + 1})"
-            )
-            return raw_model.with_retry(
-                retry_if_exception_type=(
+            logger.info(f"Patching ChatFireworks._agenerate with retry (max_attempts={effective_retries + 1})")
+            original_agenerate = model._agenerate
+
+            @tenacity.retry(
+                retry=tenacity.retry_if_exception_type((
                     httpx.HTTPStatusError,
                     httpx.ConnectError,
                     httpx.ReadTimeout,
                     ConnectionError,
                     TimeoutError,
-                ),
-                stop_after_attempt=effective_retries + 1,  # total attempts, not retries
-                wait_exponential_jitter=True,
+                )),
+                stop=tenacity.stop_after_attempt(effective_retries + 1),
+                wait=tenacity.wait_exponential_jitter(initial=1, max=60),
+                before_sleep=tenacity.before_sleep_log(logger, logging.WARNING),
+                reraise=True,
             )
-        return raw_model
+            async def _agenerate_with_retry(*args: Any, **kw: Any) -> Any:
+                return await original_agenerate(*args, **kw)
+
+            model._agenerate = _agenerate_with_retry  # type: ignore[method-assign]
+
+        return model
 
     raise ValueError(
         f"Unsupported model provider: '{provider}'. "
@@ -578,10 +588,7 @@ class AgentRunner:
         """
         # 1. Initialize model directly via provider class
         model = self._create_model()
-        # For providers that return a RunnableRetry wrapper (e.g. Fireworks), store
-        # the underlying BaseChatModel separately so attribute access like .profile
-        # works correctly. The wrapper is passed to create_agent for actual execution.
-        self._model_instance = getattr(model, "bound", model)
+        self._model_instance = model
 
         # 2. Create FilesystemTools for workspace
         workspace_root = self.workspace.path.resolve()
