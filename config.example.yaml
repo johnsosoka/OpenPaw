@@ -185,6 +185,9 @@ builtins:
 # Session TTL — auto-reset conversations after inactivity
 # session_ttl_minutes: 180          # Default: 3 hours (0 to disable)
 
+# Checkpoint pruning — remove old conversation data from conversations.db at startup
+# checkpoint_retention_days: 7     # Default: 7 days (0 to disable)
+
 # Status reminder middleware — reminds agents to use send_message() during long silent runs
 # (only active when send_message builtin is enabled)
 # status_reminder:
@@ -199,6 +202,7 @@ builtins:
 #   interval_minutes: 30          # How often the agent checks in
 #   active_hours: "09:00-17:00"   # Only run during this window (workspace timezone)
 #   suppress_ok: true             # Suppress messages when agent responds HEARTBEAT_OK
+#   max_output_tokens: 2000        # Cap output tokens per heartbeat run (default: uncapped)
 #   delivery: channel             # channel, agent, or both
 #   target_channel: telegram
 #   target_id: 123456789          # Preferred (channel-agnostic). Legacy: target_chat_id
@@ -221,6 +225,7 @@ builtins:
 #       model: claude-sonnet-4-20250514
 #       temperature: 0.5
 #       max_turns: 50
+#       max_output_tokens: 4096    # Cap output tokens for stateless agents (default: uncapped)
 #
 # AWS Bedrock:
 #   model:

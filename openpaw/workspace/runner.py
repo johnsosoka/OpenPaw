@@ -350,13 +350,23 @@ class WorkspaceRunner:
             model_str = f"{agent_config['provider']}:{agent_config['model']}"
         self.logger.info(f"Initializing agent with model: {model_str}")
 
-        # Extract extra model kwargs beyond the known set
+        # Extract extra model kwargs beyond the known set.
+        # max_output_tokens is excluded here and handled separately below
+        # so it maps to the LangChain constructor kwarg name "max_tokens".
         known_model_keys = {
-            "provider", "model", "api_key", "temperature", "max_turns", "region", "timeout_seconds"
+            "provider", "model", "api_key", "temperature", "max_turns",
+            "region", "timeout_seconds", "max_output_tokens",
         }
         extra_model_kwargs = {
             k: v for k, v in agent_config.items() if k not in known_model_keys and v is not None
         }
+
+        # Workspace-level max_output_tokens becomes "max_tokens" for LangChain providers
+        workspace_max_output_tokens = agent_config.get("max_output_tokens")
+        if workspace_max_output_tokens is not None:
+            extra_model_kwargs["max_tokens"] = workspace_max_output_tokens
+            self.logger.info(f"Applying workspace max_output_tokens cap: {workspace_max_output_tokens}")
+
         if extra_model_kwargs:
             self.logger.info(f"Passing extra model kwargs: {list(extra_model_kwargs.keys())}")
 
@@ -730,6 +740,31 @@ class WorkspaceRunner:
         await self._checkpointer.setup()
         self._agent_runner.update_checkpointer(self._checkpointer)
         self.logger.info(f"Initialized SQLite checkpointer: {self._db_path}")
+
+        # Prune orphaned checkpoint data at startup
+        retention_days = (
+            self._workspace.config.checkpoint_retention_days
+            if self._workspace.config
+            else 7
+        )
+        if retention_days > 0:
+            try:
+                from openpaw.runtime.session.pruner import CheckpointPruner
+
+                pruner = CheckpointPruner(
+                    db_conn=self._db_conn,
+                    session_manager=self._session_manager,
+                    retention_days=retention_days,
+                )
+                result = await pruner.prune()
+                if result.threads_pruned > 0:
+                    self.logger.info(
+                        f"Checkpoint pruning: removed {result.threads_pruned} thread(s), "
+                        f"{result.checkpoints_deleted} checkpoint(s), "
+                        f"{result.writes_deleted} write(s)"
+                    )
+            except Exception as e:
+                self.logger.warning(f"Checkpoint pruning failed (non-fatal): {e}")
 
         # Initialize vector store if memory search is enabled
         if self._vector_store:

@@ -258,6 +258,11 @@ def _load_module_from_file(file_path: Path) -> ModuleType:
     # Add to sys.modules so imports within the module work
     sys.modules[module_name] = module
 
+    # Add tools directory to sys.path for sibling imports
+    tools_dir = str(file_path.parent)
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
+
     try:
         spec.loader.exec_module(module)
     except Exception as e:
