@@ -607,6 +607,28 @@ model:
   temperature: 1.0
 ```
 
+### API Retry Resilience
+
+Transient API errors (504 Gateway Timeout, 429 rate limits, connection errors) are automatically retried with exponential backoff and jitter. Default: 3 retries.
+
+**Configuration** (in `agent.yaml` or global config):
+
+```yaml
+model:
+  provider: fireworks
+  model: accounts/fireworks/models/kimi-k2p5
+  max_retries: 3  # Default: 3. Set to 0 to disable.
+```
+
+**Per-provider behavior**:
+- **OpenAI, Anthropic, xAI**: Native SDK retry via `max_retries` constructor kwarg. SDK loggers surface retry diagnostics at INFO level.
+- **Fireworks**: `ChatFireworks._agenerate` patched with tenacity (the Fireworks SDK's `_max_retries` is a no-op). Retry attempts logged at WARNING via `before_sleep_log`.
+- **Bedrock**: Skipped — boto3 manages its own retry strategy via AWS SDK configuration.
+
+**Retried exceptions**: `httpx.HTTPStatusError` (5xx), `httpx.ConnectError`, `httpx.ReadTimeout`, `ConnectionError`, `TimeoutError`.
+
+**Components**: Retry config extracted from `extra_model_kwargs` in `create_chat_model()` (`openpaw/agent/runner.py`). Fireworks tenacity patch uses `wait_exponential_jitter(initial=1, max=60)`.
+
 ### Token Usage Tracking
 
 Every agent invocation (user messages, cron jobs, heartbeats) logs token counts to `{workspace}/.openpaw/token_usage.jsonl`. The `/status` command displays tokens today and tokens this session.
