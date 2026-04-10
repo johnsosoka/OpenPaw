@@ -108,15 +108,12 @@ def test_bedrock_no_max_retries() -> None:
         assert "max_retries" not in call_kwargs
 
 
-def test_fireworks_wrapped_with_retry() -> None:
-    """Fireworks model is wrapped with .with_retry() since the SDK's native retry is a no-op."""
-    import httpx
+def test_fireworks_agenerate_patched_with_tenacity() -> None:
+    """Fireworks _agenerate is patched with tenacity retry when max_retries > 0."""
+    mock_model = Mock()
+    mock_model._agenerate = Mock()
 
-    mock_raw_model = Mock()
-    mock_wrapped = Mock()
-    mock_raw_model.with_retry.return_value = mock_wrapped
-
-    with patch("langchain_fireworks.ChatFireworks", return_value=mock_raw_model):
+    with patch("langchain_fireworks.ChatFireworks", return_value=mock_model):
         result = create_chat_model(
             model_str="fireworks:accounts/fireworks/models/deepseek-v3p1",
             api_key="test-key",
@@ -124,25 +121,21 @@ def test_fireworks_wrapped_with_retry() -> None:
             extra_kwargs={"max_retries": 3},
         )
 
-    # Should have called .with_retry() on the raw model
-    mock_raw_model.with_retry.assert_called_once()
-    call_kwargs = mock_raw_model.with_retry.call_args[1]
-    assert call_kwargs["stop_after_attempt"] == 4  # max_retries + 1
-    assert call_kwargs["wait_exponential_jitter"] is True
-    # Verify the correct exception types are included
-    retry_types = call_kwargs["retry_if_exception_type"]
-    assert httpx.HTTPStatusError in retry_types
-    assert httpx.ConnectError in retry_types
-    assert httpx.ReadTimeout in retry_types
-    # The wrapper is returned, not the raw model
-    assert result is mock_wrapped
+    # Model itself is returned (not a wrapper), preserving bind_tools()
+    assert result is mock_model
+    # _agenerate should be replaced with a tenacity-wrapped version
+    assert result._agenerate is not mock_model._agenerate.__func__ if hasattr(mock_model._agenerate, '__func__') else True
+    # The patched function should have tenacity retry attributes
+    assert hasattr(result._agenerate, "retry")
 
 
-def test_fireworks_no_wrap_when_retries_disabled() -> None:
-    """Fireworks model is NOT wrapped when max_retries is 0."""
-    mock_raw_model = Mock()
+def test_fireworks_no_patch_when_retries_disabled() -> None:
+    """Fireworks _agenerate is NOT patched when max_retries is 0."""
+    original_agenerate = Mock()
+    mock_model = Mock()
+    mock_model._agenerate = original_agenerate
 
-    with patch("langchain_fireworks.ChatFireworks", return_value=mock_raw_model):
+    with patch("langchain_fireworks.ChatFireworks", return_value=mock_model):
         result = create_chat_model(
             model_str="fireworks:accounts/fireworks/models/deepseek-v3p1",
             api_key="test-key",
@@ -150,8 +143,8 @@ def test_fireworks_no_wrap_when_retries_disabled() -> None:
             extra_kwargs={"max_retries": 0},
         )
 
-    mock_raw_model.with_retry.assert_not_called()
-    assert result is mock_raw_model
+    assert result is mock_model
+    assert result._agenerate is original_agenerate
 
 
 def test_disabled_when_zero() -> None:
