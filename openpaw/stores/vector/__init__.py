@@ -5,23 +5,28 @@ from openpaw.stores.vector.base import (
     VectorDocument,
     VectorSearchResult,
 )
+from openpaw.stores.vector.conversation_indexer import ConversationIndexer
 from openpaw.stores.vector.embeddings import (
     BaseEmbeddingProvider,
+    LocalEmbeddingProvider,
     OpenAIEmbeddingProvider,
 )
 from openpaw.stores.vector.factory import (
     create_embedding_provider,
     create_vector_store,
 )
-from openpaw.stores.vector.indexer import ConversationIndexer
+from openpaw.stores.vector.file_indexer import FileIndexer, IndexingResult
 
 __all__ = [
     "BaseVectorStore",
     "VectorDocument",
     "VectorSearchResult",
     "BaseEmbeddingProvider",
+    "LocalEmbeddingProvider",
     "OpenAIEmbeddingProvider",
     "create_embedding_provider",
     "create_vector_store",
     "ConversationIndexer",
+    "FileIndexer",
+    "IndexingResult",
 ]

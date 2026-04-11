@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from openpaw.stores.vector.indexer import ConversationIndexer
+from openpaw.stores.vector.conversation_indexer import ConversationIndexer
 
 
 @pytest.fixture
@@ -167,6 +167,17 @@ class TestCreateChunks:
         assert metadata["conversation_id"] == "conv_123"
         assert metadata["session_key"] == "telegram:456"
         assert metadata["chunk_index"] == 0
+
+    def test_chunk_metadata_includes_source_type_conversation(self, indexer):
+        """Test chunk metadata includes source_type='conversation' for all chunks."""
+        turns = [
+            ({"content": "Q1"}, {"content": "A1"}),
+            ({"content": "Q2"}, {"content": "A2"}),
+            ({"content": "Q3"}, {"content": "A3"}),
+        ]
+        chunks = indexer._create_chunks(turns, "conv_123", "telegram:456")
+        for chunk in chunks:
+            assert chunk.metadata["source_type"] == "conversation"
 
     def test_chunk_metadata_includes_timestamps_when_present(self, indexer):
         """Test chunk metadata includes timestamps when present."""

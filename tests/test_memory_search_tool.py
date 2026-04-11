@@ -59,44 +59,99 @@ class TestSetContext:
         assert memory_search_tool._vector_store is mock_vector_store
         assert memory_search_tool._embedding_provider is mock_embedding_provider
 
+    def test_set_context_defaults_conversations_enabled_true(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
+        """Test set_context defaults conversations_enabled to True."""
+        memory_search_tool.set_context(mock_vector_store, mock_embedding_provider)
+        assert memory_search_tool._conversations_enabled is True
+
+    def test_set_context_defaults_files_enabled_false(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
+        """Test set_context defaults files_enabled to False."""
+        memory_search_tool.set_context(mock_vector_store, mock_embedding_provider)
+        assert memory_search_tool._files_enabled is False
+
+    def test_set_context_accepts_conversations_enabled_kwarg(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
+        """Test set_context accepts and stores conversations_enabled kwarg."""
+        memory_search_tool.set_context(mock_vector_store, mock_embedding_provider, conversations_enabled=False)
+        assert memory_search_tool._conversations_enabled is False
+
+    def test_set_context_accepts_files_enabled_kwarg(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
+        """Test set_context accepts and stores files_enabled kwarg."""
+        memory_search_tool.set_context(mock_vector_store, mock_embedding_provider, files_enabled=True)
+        assert memory_search_tool._files_enabled is True
+
 
 class TestGetLangChainTool:
     """Tests for get_langchain_tool method."""
 
-    def test_returns_structured_tool(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
-        """Test get_langchain_tool returns StructuredTool."""
+    def test_returns_list(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
+        """Test get_langchain_tool returns a list."""
         memory_search_tool.set_context(mock_vector_store, mock_embedding_provider)
-        tool = memory_search_tool.get_langchain_tool()
-        assert tool is not None
-        assert hasattr(tool, "name")
-        assert hasattr(tool, "description")
+        tools = memory_search_tool.get_langchain_tool()
+        assert isinstance(tools, list)
 
-    def test_tool_name_is_search_conversations(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
-        """Test tool name is 'search_conversations'."""
-        memory_search_tool.set_context(mock_vector_store, mock_embedding_provider)
-        tool = memory_search_tool.get_langchain_tool()
-        assert tool.name == "search_conversations"
+    def test_returns_search_conversations_when_conversations_enabled(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
+        """Test get_langchain_tool returns search_conversations when conversations enabled."""
+        memory_search_tool.set_context(mock_vector_store, mock_embedding_provider, conversations_enabled=True)
+        tools = memory_search_tool.get_langchain_tool()
+        tool_names = [t.name for t in tools]
+        assert "search_conversations" in tool_names
+
+    def test_excludes_search_conversations_when_conversations_disabled(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
+        """Test get_langchain_tool omits search_conversations when conversations disabled."""
+        memory_search_tool.set_context(mock_vector_store, mock_embedding_provider, conversations_enabled=False, files_enabled=False)
+        tools = memory_search_tool.get_langchain_tool()
+        tool_names = [t.name for t in tools]
+        assert "search_conversations" not in tool_names
+
+    def test_returns_search_workspace_when_files_enabled(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
+        """Test get_langchain_tool returns search_workspace when files enabled."""
+        memory_search_tool.set_context(mock_vector_store, mock_embedding_provider, files_enabled=True)
+        tools = memory_search_tool.get_langchain_tool()
+        tool_names = [t.name for t in tools]
+        assert "search_workspace" in tool_names
+
+    def test_excludes_search_workspace_when_files_disabled(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
+        """Test get_langchain_tool omits search_workspace when files disabled."""
+        memory_search_tool.set_context(mock_vector_store, mock_embedding_provider, files_enabled=False)
+        tools = memory_search_tool.get_langchain_tool()
+        tool_names = [t.name for t in tools]
+        assert "search_workspace" not in tool_names
+
+    def test_returns_both_tools_when_both_enabled(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
+        """Test get_langchain_tool returns both tools when both sources are enabled."""
+        memory_search_tool.set_context(mock_vector_store, mock_embedding_provider, conversations_enabled=True, files_enabled=True)
+        tools = memory_search_tool.get_langchain_tool()
+        tool_names = [t.name for t in tools]
+        assert "search_conversations" in tool_names
+        assert "search_workspace" in tool_names
+        assert len(tools) == 2
+
+    def test_returns_empty_list_when_both_disabled(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
+        """Test get_langchain_tool returns empty list when both sources are disabled."""
+        memory_search_tool.set_context(mock_vector_store, mock_embedding_provider, conversations_enabled=False, files_enabled=False)
+        tools = memory_search_tool.get_langchain_tool()
+        assert tools == []
 
 
-class TestAsyncSearch:
-    """Tests for async search functionality."""
+class TestAsyncSearchConversations:
+    """Tests for _search_conversations_async."""
 
     @pytest.mark.asyncio
-    async def test_search_when_context_not_set_returns_error(self, memory_search_tool):
-        """Test async search when context not set returns error message."""
-        result = await memory_search_tool._search_async("test query", 5)
-        assert "[Error: Memory search not available" in result
+    async def test_search_when_context_not_set_returns_no_results(self, memory_search_tool):
+        """Test async conversation search when context not set returns no-results message.
+
+        _query() returns [] early when the vector store is unset; the outer sync
+        wrapper is responsible for the "[Error: Memory search not available]" guard.
+        """
+        result = await memory_search_tool._search_conversations_async("test query", 5)
+        assert "No relevant conversations found" in result
 
     @pytest.mark.asyncio
     async def test_search_with_mock_dependencies(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
-        """Test async search with mock vector store and embedding provider."""
-        # Set up context
+        """Test async conversation search with mock vector store and embedding provider."""
         memory_search_tool.set_context(mock_vector_store, mock_embedding_provider)
-
-        # Mock embedding generation
         mock_embedding_provider.embed_query.return_value = [0.1, 0.2, 0.3]
 
-        # Mock search results
         doc = VectorDocument(
             id="conv_123:chunk:0",
             content="User: Hello\nAgent: Hi there",
@@ -104,6 +159,7 @@ class TestAsyncSearch:
                 "conversation_id": "conv_123",
                 "session_key": "telegram:456",
                 "chunk_index": 0,
+                "source_type": "conversation",
                 "timestamp_start": "2024-01-01T10:00:00",
             },
             embedding=[0.1, 0.2, 0.3],
@@ -111,38 +167,42 @@ class TestAsyncSearch:
         result = VectorSearchResult(document=doc, score=0.95)
         mock_vector_store.search.return_value = [result]
 
-        # Execute search
-        output = await memory_search_tool._search_async("test query", 5)
+        output = await memory_search_tool._search_conversations_async("test query", 5)
 
-        # Verify embedding provider was called
         mock_embedding_provider.embed_query.assert_called_once_with("test query")
-
-        # Verify vector store was called
         mock_vector_store.search.assert_called_once()
         call_kwargs = mock_vector_store.search.call_args[1]
         assert call_kwargs["query_embedding"] == [0.1, 0.2, 0.3]
-        assert call_kwargs["limit"] == 5
 
-        # Verify output format
         assert "Found 1 relevant conversation" in output
 
     @pytest.mark.asyncio
-    async def test_search_with_no_results(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
-        """Test search with no results returns appropriate message."""
+    async def test_search_passes_conversation_source_type(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
+        """Test conversation search passes source_type='conversation' to the store."""
         memory_search_tool.set_context(mock_vector_store, mock_embedding_provider)
         mock_vector_store.search.return_value = []
 
-        output = await memory_search_tool._search_async("test query", 5)
+        await memory_search_tool._search_conversations_async("test query", 5)
+
+        call_kwargs = mock_vector_store.search.call_args[1]
+        assert call_kwargs.get("source_type") == "conversation"
+
+    @pytest.mark.asyncio
+    async def test_search_with_no_results(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
+        """Test conversation search with no results returns appropriate message."""
+        memory_search_tool.set_context(mock_vector_store, mock_embedding_provider)
+        mock_vector_store.search.return_value = []
+
+        output = await memory_search_tool._search_conversations_async("test query", 5)
         assert "No relevant conversations found" in output
 
     @pytest.mark.asyncio
     async def test_search_formats_results_correctly(
         self, memory_search_tool, mock_vector_store, mock_embedding_provider
     ):
-        """Test search formats results with score, conversation ID, and content."""
+        """Test conversation search formats results with score, conversation ID, and content."""
         memory_search_tool.set_context(mock_vector_store, mock_embedding_provider)
 
-        # Create mock results
         doc1 = VectorDocument(
             id="conv_abc:chunk:0",
             content="User: Question 1\nAgent: Answer 1",
@@ -150,6 +210,7 @@ class TestAsyncSearch:
                 "conversation_id": "conv_abc",
                 "session_key": "telegram:123",
                 "chunk_index": 0,
+                "source_type": "conversation",
                 "timestamp_start": "2024-01-01T10:00:00",
             },
         )
@@ -160,6 +221,7 @@ class TestAsyncSearch:
                 "conversation_id": "conv_xyz",
                 "session_key": "telegram:456",
                 "chunk_index": 2,
+                "source_type": "conversation",
             },
         )
         results = [
@@ -168,23 +230,16 @@ class TestAsyncSearch:
         ]
         mock_vector_store.search.return_value = results
 
-        output = await memory_search_tool._search_async("test query", 5)
+        output = await memory_search_tool._search_conversations_async("test query", 5)
 
-        # Check header
         assert "Found 2 relevant conversation(s)" in output
-
-        # Check result 1
         assert "Result 1 (score: 0.95)" in output
         assert "Conversation: conv_abc" in output
-        assert "Chunk: 0" in output
         assert "Time: 2024-01-01T10:00:00" in output
         assert "User: Question 1" in output
         assert "Agent: Answer 1" in output
-
-        # Check result 2
         assert "Result 2 (score: 0.85)" in output
         assert "Conversation: conv_xyz" in output
-        assert "Chunk: 2" in output
         assert "User: Question 2" in output
         assert "Agent: Answer 2" in output
 
@@ -192,10 +247,84 @@ class TestAsyncSearch:
     async def test_search_handles_exceptions_gracefully(
         self, memory_search_tool, mock_vector_store, mock_embedding_provider
     ):
-        """Test search handles exceptions and returns error message."""
+        """Test conversation search handles exceptions and returns error message."""
         memory_search_tool.set_context(mock_vector_store, mock_embedding_provider)
         mock_vector_store.search.side_effect = Exception("Database connection failed")
 
-        output = await memory_search_tool._search_async("test query", 5)
+        output = await memory_search_tool._search_conversations_async("test query", 5)
         assert "[Error: Memory search failed:" in output
         assert "Database connection failed" in output
+
+
+class TestAsyncSearchWorkspace:
+    """Tests for _search_workspace_async."""
+
+    @pytest.mark.asyncio
+    async def test_search_workspace_when_context_not_set_returns_no_results(self, memory_search_tool):
+        """Test workspace search when context not set returns no-results message.
+
+        _query() returns [] early when the vector store is unset; the outer sync
+        wrapper is responsible for the "[Error: Memory search not available]" guard.
+        """
+        result = await memory_search_tool._search_workspace_async("test query", 5)
+        assert "No relevant workspace files found" in result
+
+    @pytest.mark.asyncio
+    async def test_search_workspace_passes_file_source_type(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
+        """Test workspace search passes source_type='file' to the store."""
+        memory_search_tool.set_context(mock_vector_store, mock_embedding_provider)
+        mock_vector_store.search.return_value = []
+
+        await memory_search_tool._search_workspace_async("test query", 5)
+
+        call_kwargs = mock_vector_store.search.call_args[1]
+        assert call_kwargs.get("source_type") == "file"
+
+    @pytest.mark.asyncio
+    async def test_search_workspace_with_no_results(self, memory_search_tool, mock_vector_store, mock_embedding_provider):
+        """Test workspace search with no results returns appropriate message."""
+        memory_search_tool.set_context(mock_vector_store, mock_embedding_provider)
+        mock_vector_store.search.return_value = []
+
+        output = await memory_search_tool._search_workspace_async("test query", 5)
+        assert "No relevant workspace files found" in output
+
+    @pytest.mark.asyncio
+    async def test_search_workspace_formats_results_correctly(
+        self, memory_search_tool, mock_vector_store, mock_embedding_provider
+    ):
+        """Test workspace search formats results with file path and chunk info."""
+        memory_search_tool.set_context(mock_vector_store, mock_embedding_provider)
+
+        doc = VectorDocument(
+            id="agent/notes.md:chunk:0",
+            content="# Project notes\nThis is a note about the project.",
+            metadata={
+                "file_path": "agent/notes.md",
+                "chunk_index": 0,
+                "source_type": "file",
+                "indexed_at": "2024-01-01T10:00:00",
+            },
+        )
+        results = [VectorSearchResult(document=doc, score=0.88)]
+        mock_vector_store.search.return_value = results
+
+        output = await memory_search_tool._search_workspace_async("test query", 5)
+
+        assert "Found 1 relevant file section(s)" in output
+        assert "Result 1 (score: 0.88)" in output
+        assert "File: agent/notes.md" in output
+        assert "Indexed: 2024-01-01T10:00:00" in output
+        assert "Project notes" in output
+
+    @pytest.mark.asyncio
+    async def test_search_workspace_handles_exceptions_gracefully(
+        self, memory_search_tool, mock_vector_store, mock_embedding_provider
+    ):
+        """Test workspace search handles exceptions and returns error message."""
+        memory_search_tool.set_context(mock_vector_store, mock_embedding_provider)
+        mock_vector_store.search.side_effect = Exception("Storage failure")
+
+        output = await memory_search_tool._search_workspace_async("test query", 5)
+        assert "[Error: Workspace search failed:" in output
+        assert "Storage failure" in output

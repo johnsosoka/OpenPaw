@@ -60,4 +60,11 @@ def create_embedding_provider(provider: str, config: dict[str, Any]) -> BaseEmbe
             model=config.get("model", "text-embedding-3-small"),
         )
 
+    if provider == "local":
+        from openpaw.stores.vector.embeddings import LocalEmbeddingProvider
+
+        return LocalEmbeddingProvider(
+            model=config.get("model", "all-MiniLM-L6-v2"),
+        )
+
     raise ValueError(f"Unknown embedding provider: {provider}")

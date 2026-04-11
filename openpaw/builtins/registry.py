@@ -189,6 +189,13 @@ class BuiltinRegistry:
         except ImportError as e:
             logger.debug(f"Docling processor not available: {e}")
 
+        try:
+            from openpaw.builtins.processors.rag_injection import RagInjectionProcessor
+
+            self.register_processor(RagInjectionProcessor)
+        except ImportError as e:
+            logger.debug(f"RAG injection processor not available: {e}")
+
     def register_tool(self, tool_class: type["BaseBuiltinTool"]) -> None:
         """Register a tool builtin.
 

@@ -236,35 +236,62 @@ class WorkspaceRunner:
         self._vector_store: Any | None = None
         self._embedding_provider: Any | None = None
         self._indexer: Any | None = None
+        self._file_indexer: Any | None = None
 
         memory_config = self._workspace.config.memory if self._workspace.config else None
         if memory_config and memory_config.enabled:
             try:
+                from openpaw.stores.vector.conversation_indexer import ConversationIndexer
                 from openpaw.stores.vector.factory import (
                     create_embedding_provider,
                     create_vector_store,
                 )
-                from openpaw.stores.vector.indexer import ConversationIndexer
+
+                self._embedding_provider = create_embedding_provider(
+                    provider=memory_config.embedding.provider,
+                    config=memory_config.embedding.model_dump(),
+                )
+
+                # Validate dimensions match between embedding provider and vector store config
+                configured_dims = memory_config.vector_store.dimensions
+                provider_dims = self._embedding_provider.dimensions
+                if configured_dims != provider_dims:
+                    raise ValueError(
+                        f"Dimension mismatch: vector store configured for {configured_dims} "
+                        f"but embedding provider '{memory_config.embedding.provider}:{memory_config.embedding.model}' "
+                        f"produces {provider_dims}. "
+                        f"Set memory.vector_store.dimensions to {provider_dims}."
+                    )
 
                 self._vector_store = create_vector_store(
                     provider=memory_config.vector_store.provider,
                     config=memory_config.vector_store.model_dump(),
                     workspace_path=self._workspace.path,
                 )
-                self._embedding_provider = create_embedding_provider(
-                    provider=memory_config.embedding.provider,
-                    config=memory_config.embedding.model_dump(),
-                )
-                self._indexer = ConversationIndexer(
-                    vector_store=self._vector_store,
-                    embedding_provider=self._embedding_provider,
-                )
+
+                if memory_config.conversations.enabled:
+                    self._indexer = ConversationIndexer(
+                        vector_store=self._vector_store,
+                        embedding_provider=self._embedding_provider,
+                    )
+
+                if memory_config.files.enabled:
+                    from openpaw.stores.vector.file_indexer import FileIndexer
+
+                    self._file_indexer = FileIndexer(
+                        vector_store=self._vector_store,
+                        embedding_provider=self._embedding_provider,
+                        workspace_path=self._workspace.path,
+                        config=memory_config.files,
+                    )
+
                 self.logger.info("Memory search infrastructure initialized")
             except Exception as e:
                 self.logger.error(f"Failed to initialize memory search: {e}")
                 self._vector_store = None
                 self._embedding_provider = None
                 self._indexer = None
+                self._file_indexer = None
 
         self._conversation_archiver = ConversationArchiver(
             workspace_path=self._workspace.path,
@@ -579,6 +606,7 @@ class WorkspaceRunner:
             subagent_store=self._subagent_store,
             agent_factory=self._agent_factory,
             channels=self._channels,
+            file_indexer=self._file_indexer,
         )
 
     async def _handle_inbound_message(self, message: Message) -> None:
@@ -782,8 +810,23 @@ class WorkspaceRunner:
             await self._vector_store.initialize()
             self.logger.info("Vector store initialized")
 
+        # Index workspace files at startup if enabled
+        if self._file_indexer:
+            try:
+                result = await self._file_indexer.index_workspace()
+                self.logger.info(
+                    "Workspace file indexing complete: %d indexed, %d skipped (%d chunks, %.0fms)",
+                    result.files_indexed,
+                    result.files_skipped,
+                    result.chunks_created,
+                    result.duration_ms,
+                )
+            except Exception as e:
+                self.logger.warning(f"Workspace file indexing failed (non-fatal): {e}")
+
         # Wire memory search tool
         self._connect_memory_search_tool()
+        self._connect_rag_injection_processor()
 
         # Setup channels
         self._channels = await self._lifecycle_manager.setup_channels()
@@ -917,14 +960,27 @@ class WorkspaceRunner:
         try:
             memory_tool = self._builtin_loader.get_tool_instance("memory_search")
             if memory_tool and self._vector_store and self._embedding_provider:
-                memory_tool.set_context(self._vector_store, self._embedding_provider)
+                memory_config = self._workspace.config.memory if self._workspace.config else None
+                conversations_enabled = (
+                    memory_config.conversations.enabled if memory_config else True
+                )
+                files_enabled = (
+                    memory_config.files.enabled if memory_config else False
+                )
+                memory_tool.set_context(
+                    self._vector_store,
+                    self._embedding_provider,
+                    conversations_enabled=conversations_enabled,
+                    files_enabled=files_enabled,
+                )
                 self.logger.info("Connected MemorySearchTool to vector store")
             elif memory_tool:
                 # Vector store not available — remove broken tool from agent
-                self._agent_factory.remove_builtin_tools({"search_conversations"})
+                self._agent_factory.remove_builtin_tools(
+                    {"search_conversations", "search_workspace"}
+                )
                 self._agent_factory.remove_enabled_builtin("memory_search")
                 # Rebuild agent without the broken tool and propagate to all holders.
-                # If additional agent_runner holders are added, update them here too.
                 self._agent_runner = self._agent_factory.create_agent(
                     checkpointer=self._checkpointer
                 )
@@ -936,6 +992,42 @@ class WorkspaceRunner:
                 self.logger.debug("MemorySearchTool not loaded for this workspace")
         except Exception as e:
             self.logger.warning(f"Failed to connect MemorySearchTool: {e}")
+
+    def _connect_rag_injection_processor(self) -> None:
+        """Wire RAG injection processor to vector store if injection is enabled.
+
+        Finds the RagInjectionProcessor among loaded processors and calls
+        set_context with the vector store, embedding provider, and injection config.
+        If the vector store is unavailable, the processor remains inert (returns
+        messages unchanged).
+        """
+        memory_config = self._workspace.config.memory if self._workspace.config else None
+        if not (memory_config and memory_config.enabled and memory_config.injection.enabled):
+            return
+
+        if not self._vector_store or not self._embedding_provider:
+            self.logger.debug("RAG injection skipped: vector store not available")
+            return
+
+        try:
+            from openpaw.builtins.processors.rag_injection import RagInjectionProcessor
+
+            for processor in self._processors:
+                if isinstance(processor, RagInjectionProcessor):
+                    injection_config = memory_config.injection
+                    processor.set_context(
+                        vector_store=self._vector_store,
+                        embedding_provider=self._embedding_provider,
+                        max_results=injection_config.max_results,
+                        min_score=injection_config.min_score,
+                        max_tokens=injection_config.max_tokens,
+                        sources=injection_config.sources,
+                    )
+                    self.logger.info("Connected RagInjectionProcessor to vector store")
+                    return
+            self.logger.debug("RagInjectionProcessor not loaded for this workspace")
+        except Exception as e:
+            self.logger.warning(f"Failed to connect RagInjectionProcessor: {e}")
 
     def _resolve_user_name(self, message: Message) -> str:
         """Resolve display name, defaulting to 'Unknown' (guaranteed non-None)."""
