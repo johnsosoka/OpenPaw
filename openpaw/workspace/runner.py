@@ -826,6 +826,7 @@ class WorkspaceRunner:
 
         # Wire memory search tool
         self._connect_memory_search_tool()
+        self._connect_rag_injection_processor()
 
         # Setup channels
         self._channels = await self._lifecycle_manager.setup_channels()
@@ -991,6 +992,42 @@ class WorkspaceRunner:
                 self.logger.debug("MemorySearchTool not loaded for this workspace")
         except Exception as e:
             self.logger.warning(f"Failed to connect MemorySearchTool: {e}")
+
+    def _connect_rag_injection_processor(self) -> None:
+        """Wire RAG injection processor to vector store if injection is enabled.
+
+        Finds the RagInjectionProcessor among loaded processors and calls
+        set_context with the vector store, embedding provider, and injection config.
+        If the vector store is unavailable, the processor remains inert (returns
+        messages unchanged).
+        """
+        memory_config = self._workspace.config.memory if self._workspace.config else None
+        if not (memory_config and memory_config.enabled and memory_config.injection.enabled):
+            return
+
+        if not self._vector_store or not self._embedding_provider:
+            self.logger.debug("RAG injection skipped: vector store not available")
+            return
+
+        try:
+            from openpaw.builtins.processors.rag_injection import RagInjectionProcessor
+
+            for processor in self._processors:
+                if isinstance(processor, RagInjectionProcessor):
+                    injection_config = memory_config.injection
+                    processor.set_context(
+                        vector_store=self._vector_store,
+                        embedding_provider=self._embedding_provider,
+                        max_results=injection_config.max_results,
+                        min_score=injection_config.min_score,
+                        max_tokens=injection_config.max_tokens,
+                        sources=injection_config.sources,
+                    )
+                    self.logger.info("Connected RagInjectionProcessor to vector store")
+                    return
+            self.logger.debug("RagInjectionProcessor not loaded for this workspace")
+        except Exception as e:
+            self.logger.warning(f"Failed to connect RagInjectionProcessor: {e}")
 
     def _resolve_user_name(self, message: Message) -> str:
         """Resolve display name, defaulting to 'Unknown' (guaranteed non-None)."""
