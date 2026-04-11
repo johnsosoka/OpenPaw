@@ -2194,10 +2194,9 @@ tiktoken = ">=0.7.0,<1.0.0"
 name = "langchain-text-splitters"
 version = "1.1.1"
 description = "LangChain text splitting utilities"
-optional = true
+optional = false
 python-versions = "<4.0.0,>=3.10.0"
 groups = ["main"]
-markers = "extra == \"web\" or extra == \"all-builtins\""
 files = [
     {file = "langchain_text_splitters-1.1.1-py3-none-any.whl", hash = "sha256:5ed0d7bf314ba925041e7d7d17cd8b10f688300d5415fb26c29442f061e329dc"},
     {file = "langchain_text_splitters-1.1.1.tar.gz", hash = "sha256:34861abe7c07d9e49d4dc852d0129e26b32738b60a74486853ec9b6d6a8e01d2"},
@@ -7876,4 +7875,4 @@ web = ["langchain-community"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "c66acfc5615f3362b230cd739ab454a4d360e24409be46fb9c7e781726180d76"
+content-hash = "3d20d0dad2deabb0a26967064670d08bb89f33fb75b93cc59e2e2c688492e639"
