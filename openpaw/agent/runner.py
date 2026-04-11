@@ -151,6 +151,7 @@ def create_chat_model(
     if provider == "fireworks":
         import httpx
         import tenacity
+        from fireworks.client.error import FireworksError
         from langchain_fireworks import ChatFireworks
 
         if api_key:
@@ -172,6 +173,7 @@ def create_chat_model(
                     httpx.ReadTimeout,
                     ConnectionError,
                     TimeoutError,
+                    FireworksError,
                 )),
                 stop=tenacity.stop_after_attempt(effective_retries + 1),
                 wait=tenacity.wait_exponential_jitter(initial=1, max=60),
