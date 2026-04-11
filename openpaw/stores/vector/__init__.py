@@ -14,6 +14,7 @@ from openpaw.stores.vector.factory import (
     create_embedding_provider,
     create_vector_store,
 )
+from openpaw.stores.vector.file_indexer import FileIndexer, IndexingResult
 
 __all__ = [
     "BaseVectorStore",
@@ -24,4 +25,6 @@ __all__ = [
     "create_embedding_provider",
     "create_vector_store",
     "ConversationIndexer",
+    "FileIndexer",
+    "IndexingResult",
 ]

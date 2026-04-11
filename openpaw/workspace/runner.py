@@ -236,6 +236,7 @@ class WorkspaceRunner:
         self._vector_store: Any | None = None
         self._embedding_provider: Any | None = None
         self._indexer: Any | None = None
+        self._file_indexer: Any | None = None
 
         memory_config = self._workspace.config.memory if self._workspace.config else None
         if memory_config and memory_config.enabled:
@@ -274,12 +275,23 @@ class WorkspaceRunner:
                         embedding_provider=self._embedding_provider,
                     )
 
+                if memory_config.files.enabled:
+                    from openpaw.stores.vector.file_indexer import FileIndexer
+
+                    self._file_indexer = FileIndexer(
+                        vector_store=self._vector_store,
+                        embedding_provider=self._embedding_provider,
+                        workspace_path=self._workspace.path,
+                        config=memory_config.files,
+                    )
+
                 self.logger.info("Memory search infrastructure initialized")
             except Exception as e:
                 self.logger.error(f"Failed to initialize memory search: {e}")
                 self._vector_store = None
                 self._embedding_provider = None
                 self._indexer = None
+                self._file_indexer = None
 
         self._conversation_archiver = ConversationArchiver(
             workspace_path=self._workspace.path,
@@ -594,6 +606,7 @@ class WorkspaceRunner:
             subagent_store=self._subagent_store,
             agent_factory=self._agent_factory,
             channels=self._channels,
+            file_indexer=self._file_indexer,
         )
 
     async def _handle_inbound_message(self, message: Message) -> None:
@@ -796,6 +809,20 @@ class WorkspaceRunner:
         if self._vector_store:
             await self._vector_store.initialize()
             self.logger.info("Vector store initialized")
+
+        # Index workspace files at startup if enabled
+        if self._file_indexer:
+            try:
+                result = await self._file_indexer.index_workspace()
+                self.logger.info(
+                    "Workspace file indexing complete: %d indexed, %d skipped (%d chunks, %.0fms)",
+                    result.files_indexed,
+                    result.files_skipped,
+                    result.chunks_created,
+                    result.duration_ms,
+                )
+            except Exception as e:
+                self.logger.warning(f"Workspace file indexing failed (non-fatal): {e}")
 
         # Wire memory search tool
         self._connect_memory_search_tool()

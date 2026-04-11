@@ -51,6 +51,7 @@ class CommandContext:
     subagent_store: Any = None  # SubAgentStore, for /status subagent info
     agent_factory: Any = None  # AgentFactory, for /model command
     channels: dict | None = None  # dict[str, ChannelAdapter], for /status channel info
+    file_indexer: Any = None  # FileIndexer, for /reindex command
 
 
 @dataclass
