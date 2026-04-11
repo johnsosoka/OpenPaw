@@ -439,29 +439,137 @@ class ApprovalGatesConfig(BaseModel):
 class EmbeddingConfig(BaseModel):
     """Configuration for the embedding provider."""
 
-    provider: str = Field(default="openai", description="Embedding provider (openai)")
+    provider: str = Field(default="openai", description="Embedding provider (openai, local)")
     model: str = Field(default="text-embedding-3-small", description="Embedding model name")
     api_key: str | None = Field(default=None, description="API key for embedding provider")
 
 
 class VectorStoreConfig(BaseModel):
-    """Configuration for the vector store backend."""
+    """Configuration for the vector store backend.
+
+    The provider field accepts built-in names (sqlite_vec) or dotted import
+    paths for custom BaseVectorStore implementations (BYOVS).
+    """
 
     provider: str = Field(
-        default="sqlite_vec", description="Vector store provider (sqlite_vec)"
+        default="sqlite_vec", description="Vector store provider (sqlite_vec or dotted import path)"
     )
     dimensions: int = Field(default=1536, description="Embedding dimensions")
 
 
-class MemoryConfig(BaseModel):
-    """Configuration for conversation memory and vector search."""
+class ConversationIndexingConfig(BaseModel):
+    """Configuration for conversation history indexing."""
 
-    enabled: bool = Field(default=False, description="Enable conversation vector search")
+    enabled: bool = Field(
+        default=True,
+        description="Index archived conversations for semantic search",
+    )
+    chunk_window: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Number of turn pairs per chunk",
+    )
+    chunk_overlap: int = Field(
+        default=1,
+        ge=0,
+        description="Overlap in turn pairs between consecutive chunks",
+    )
+
+
+class FileIndexingConfig(BaseModel):
+    """Configuration for workspace file indexing."""
+
+    enabled: bool = Field(
+        default=False,
+        description="Index workspace files for semantic search",
+    )
+    include: list[str] = Field(
+        default_factory=lambda: [
+            "agent/**/*.md",
+            "memory/**/*.md",
+            "memory/**/*.json",
+            "uploads/**/*.md",
+            "uploads/**/*.txt",
+        ],
+        description="Glob patterns for files to index",
+    )
+    exclude: list[str] = Field(
+        default_factory=lambda: [
+            ".openpaw/**",
+        ],
+        description="Glob patterns to exclude from indexing",
+    )
+    max_file_size_kb: int = Field(
+        default=512,
+        ge=1,
+        description="Skip files larger than this (KB)",
+    )
+    chunk_size: int = Field(
+        default=1000,
+        ge=100,
+        le=10000,
+        description="Characters per chunk",
+    )
+    chunk_overlap: int = Field(
+        default=200,
+        ge=0,
+        description="Character overlap between chunks",
+    )
+
+
+class InjectionConfig(BaseModel):
+    """Configuration for automatic RAG context injection on inbound messages."""
+
+    enabled: bool = Field(
+        default=False,
+        description="Auto-inject RAG context into inbound messages",
+    )
+    max_results: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Maximum results to inject per message",
+    )
+    min_score: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="Minimum similarity score to include a result",
+    )
+    max_tokens: int = Field(
+        default=500,
+        ge=100,
+        le=2000,
+        description="Approximate token budget for injected context",
+    )
+    sources: list[str] = Field(
+        default_factory=lambda: ["conversations", "files"],
+        description="Which sources to query: conversations, files, or both",
+    )
+
+
+class MemoryConfig(BaseModel):
+    """Configuration for RAG-based memory (conversations and workspace files)."""
+
+    enabled: bool = Field(default=False, description="Master switch for RAG memory features")
     vector_store: VectorStoreConfig = Field(
         default_factory=VectorStoreConfig, description="Vector store backend config"
     )
     embedding: EmbeddingConfig = Field(
         default_factory=EmbeddingConfig, description="Embedding provider config"
+    )
+    conversations: ConversationIndexingConfig = Field(
+        default_factory=ConversationIndexingConfig,
+        description="Conversation history indexing config",
+    )
+    files: FileIndexingConfig = Field(
+        default_factory=FileIndexingConfig,
+        description="Workspace file indexing config",
+    )
+    injection: InjectionConfig = Field(
+        default_factory=InjectionConfig,
+        description="Automatic RAG context injection config",
     )
 
 

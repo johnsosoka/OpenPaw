@@ -61,7 +61,8 @@ class SqliteVecStore(BaseVectorStore):
                 id TEXT PRIMARY KEY,
                 content TEXT NOT NULL,
                 metadata_json TEXT NOT NULL DEFAULT '{}',
-                conversation_id TEXT
+                conversation_id TEXT,
+                source_type TEXT NOT NULL DEFAULT 'conversation'
             )
         """)
 
@@ -75,6 +76,45 @@ class SqliteVecStore(BaseVectorStore):
 
         await self._conn.commit()
         logger.info("SqliteVecStore tables initialized")
+
+        await self._ensure_schema_up_to_date()
+
+    async def _ensure_schema_up_to_date(self) -> None:
+        """Apply backward-compatible schema migrations.
+
+        Checks for and applies any missing columns or tables relative to the
+        current schema version. Safe to call on both new and existing databases.
+        """
+        if not self._conn:
+            return
+
+        # Check if source_type column exists on the documents table
+        cursor = await self._conn.execute("PRAGMA table_info(documents)")
+        columns = {row[1] for row in await cursor.fetchall()}
+
+        if "source_type" not in columns:
+            logger.info("Migrating documents table: adding source_type column")
+            await self._conn.execute(
+                "ALTER TABLE documents ADD COLUMN source_type TEXT NOT NULL DEFAULT 'conversation'"
+            )
+
+        # Index for source_type filtering
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_documents_source_type ON documents(source_type)"
+        )
+
+        # File index hashes table for change detection (Phase 2 prep)
+        await self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS file_index_hashes (
+                file_path TEXT PRIMARY KEY,
+                file_hash TEXT NOT NULL,
+                indexed_at TEXT NOT NULL,
+                chunk_count INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+
+        await self._conn.commit()
+        logger.info("SqliteVecStore schema is up to date")
 
     async def add_documents(self, documents: list[VectorDocument]) -> int:
         """Add or update documents in the vector store.
@@ -95,9 +135,20 @@ class SqliteVecStore(BaseVectorStore):
                 continue
 
             # Insert into documents table
+            sql = (
+                "INSERT OR REPLACE INTO documents"
+                " (id, content, metadata_json, conversation_id, source_type)"
+                " VALUES (?, ?, ?, ?, ?)"
+            )
             await self._conn.execute(
-                "INSERT OR REPLACE INTO documents (id, content, metadata_json, conversation_id) VALUES (?, ?, ?, ?)",
-                (doc.id, doc.content, json.dumps(doc.metadata), doc.metadata.get("conversation_id", ""))
+                sql,
+                (
+                    doc.id,
+                    doc.content,
+                    json.dumps(doc.metadata),
+                    doc.metadata.get("conversation_id", ""),
+                    doc.metadata.get("source_type", "conversation"),
+                ),
             )
 
             # Serialize embedding for sqlite-vec
@@ -121,6 +172,7 @@ class SqliteVecStore(BaseVectorStore):
         query_embedding: list[float],
         limit: int = 5,
         metadata_filter: dict[str, Any] | None = None,
+        source_type: str | None = None,
     ) -> list[VectorSearchResult]:
         """Search for similar documents by embedding.
 
@@ -128,6 +180,7 @@ class SqliteVecStore(BaseVectorStore):
             query_embedding: Query vector to search for.
             limit: Maximum number of results to return.
             metadata_filter: Optional metadata filters (key-value pairs).
+            source_type: Optional source type filter (e.g. 'conversation', 'file').
 
         Returns:
             List of search results sorted by relevance (highest first).
@@ -138,24 +191,42 @@ class SqliteVecStore(BaseVectorStore):
         # Serialize query embedding
         query_bytes = struct.pack(f'{len(query_embedding)}f', *query_embedding)
 
-        # Over-fetch if filtering (we'll post-filter metadata)
-        fetch_limit = limit * 3 if metadata_filter else limit
+        # Over-fetch to compensate for post-filters (metadata and/or source_type)
+        needs_post_filter = bool(metadata_filter) or source_type is not None
+        fetch_limit = limit * 3 if needs_post_filter else limit
 
-        # Vector similarity search: CTE with k= constraint, then JOIN to documents
-        cursor = await self._conn.execute(
-            """
-            WITH knn_matches AS (
-                SELECT id, distance
-                FROM vec_documents
-                WHERE embedding MATCH ? AND k = ?
+        if source_type is not None:
+            # Push source_type filter into the SQL JOIN for efficiency
+            cursor = await self._conn.execute(
+                """
+                WITH knn_matches AS (
+                    SELECT id, distance
+                    FROM vec_documents
+                    WHERE embedding MATCH ? AND k = ?
+                )
+                SELECT d.id, d.content, d.metadata_json, d.conversation_id, knn.distance
+                FROM knn_matches knn
+                JOIN documents d ON d.id = knn.id
+                WHERE d.source_type = ?
+                ORDER BY knn.distance
+                """,
+                (query_bytes, fetch_limit, source_type),
             )
-            SELECT d.id, d.content, d.metadata_json, d.conversation_id, knn.distance
-            FROM knn_matches knn
-            JOIN documents d ON d.id = knn.id
-            ORDER BY knn.distance
-            """,
-            (query_bytes, fetch_limit)
-        )
+        else:
+            cursor = await self._conn.execute(
+                """
+                WITH knn_matches AS (
+                    SELECT id, distance
+                    FROM vec_documents
+                    WHERE embedding MATCH ? AND k = ?
+                )
+                SELECT d.id, d.content, d.metadata_json, d.conversation_id, knn.distance
+                FROM knn_matches knn
+                JOIN documents d ON d.id = knn.id
+                ORDER BY knn.distance
+                """,
+                (query_bytes, fetch_limit),
+            )
 
         rows = await cursor.fetchall()
 
@@ -224,6 +295,59 @@ class SqliteVecStore(BaseVectorStore):
         cursor = await self._conn.execute("SELECT COUNT(*) FROM documents")
         row = await cursor.fetchone()
         return row[0] if row else 0
+
+    async def get_file_hashes(self) -> dict[str, str]:
+        """Get all tracked file path -> hash mappings.
+
+        Returns:
+            Mapping of file_path to file_hash for all indexed files.
+        """
+        if not self._conn:
+            raise RuntimeError("Vector store not initialized - call initialize() first")
+
+        cursor = await self._conn.execute("SELECT file_path, file_hash FROM file_index_hashes")
+        rows = await cursor.fetchall()
+        return {row[0]: row[1] for row in rows}
+
+    async def set_file_hash(self, file_path: str, file_hash: str, chunk_count: int) -> None:
+        """Upsert a file hash record.
+
+        Args:
+            file_path: Relative path to the indexed file.
+            file_hash: Content hash of the file (e.g. SHA-256 hex digest).
+            chunk_count: Number of document chunks stored for this file.
+        """
+        if not self._conn:
+            raise RuntimeError("Vector store not initialized - call initialize() first")
+
+        from datetime import UTC, datetime
+
+        indexed_at = datetime.now(UTC).isoformat()
+        await self._conn.execute(
+            """
+            INSERT OR REPLACE INTO file_index_hashes (file_path, file_hash, indexed_at, chunk_count)
+            VALUES (?, ?, ?, ?)
+            """,
+            (file_path, file_hash, indexed_at, chunk_count),
+        )
+        await self._conn.commit()
+        logger.debug(f"Set file hash for {file_path} ({chunk_count} chunks)")
+
+    async def remove_file_hash(self, file_path: str) -> None:
+        """Remove a file hash record.
+
+        Args:
+            file_path: Relative path of the file to remove from the index.
+        """
+        if not self._conn:
+            raise RuntimeError("Vector store not initialized - call initialize() first")
+
+        await self._conn.execute(
+            "DELETE FROM file_index_hashes WHERE file_path = ?",
+            (file_path,),
+        )
+        await self._conn.commit()
+        logger.debug(f"Removed file hash for {file_path}")
 
     async def close(self) -> None:
         """Close the database connection."""

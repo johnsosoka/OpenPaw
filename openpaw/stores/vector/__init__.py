@@ -5,6 +5,7 @@ from openpaw.stores.vector.base import (
     VectorDocument,
     VectorSearchResult,
 )
+from openpaw.stores.vector.conversation_indexer import ConversationIndexer
 from openpaw.stores.vector.embeddings import (
     BaseEmbeddingProvider,
     OpenAIEmbeddingProvider,
@@ -13,7 +14,6 @@ from openpaw.stores.vector.factory import (
     create_embedding_provider,
     create_vector_store,
 )
-from openpaw.stores.vector.indexer import ConversationIndexer
 
 __all__ = [
     "BaseVectorStore",

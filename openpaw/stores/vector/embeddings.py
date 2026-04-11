@@ -53,6 +53,12 @@ class OpenAIEmbeddingProvider(BaseEmbeddingProvider):
     Uses the OpenAI embeddings API with text-embedding-3-small by default.
     """
 
+    KNOWN_DIMENSIONS: dict[str, int] = {
+        "text-embedding-3-small": 1536,
+        "text-embedding-3-large": 3072,
+        "text-embedding-ada-002": 1536,
+    }
+
     def __init__(self, api_key: str | None = None, model: str = "text-embedding-3-small"):
         """Initialize the OpenAI embedding provider.
 
@@ -67,7 +73,7 @@ class OpenAIEmbeddingProvider(BaseEmbeddingProvider):
         else:
             self._embeddings = OpenAIEmbeddings(model=model)
         self._model = model
-        self._dimensions = 1536  # text-embedding-3-small default
+        self._dimensions = self.KNOWN_DIMENSIONS.get(model, 1536)
 
         logger.info(f"OpenAI embedding provider initialized (model: {model}, dims: {self._dimensions})")
 

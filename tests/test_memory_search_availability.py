@@ -261,6 +261,10 @@ def _make_mock_runner(
     Uses the same pattern as test_lifecycle_notifications.py: construct a
     MagicMock(spec=WorkspaceRunner) and attach the attributes that the real
     method reads.
+
+    Note: _workspace is only created in __init__, not as a class attribute, so
+    MagicMock(spec=WorkspaceRunner) blocks it. We set it explicitly here because
+    _connect_memory_search_tool reads _workspace.config.memory for sub-config flags.
     """
     runner = MagicMock(spec=WorkspaceRunner)
     runner.workspace_name = "test_workspace"
@@ -272,6 +276,10 @@ def _make_mock_runner(
 
     runner._vector_store = vector_store
     runner._embedding_provider = embedding_provider
+
+    # _workspace is blocked by spec because it is only set in __init__.
+    # Attach it explicitly so _connect_memory_search_tool can read config flags.
+    runner._workspace = MagicMock()
 
     # Agent factory (real or mock)
     if agent_factory is None:
@@ -301,7 +309,7 @@ class TestConnectMemorySearchTool:
     """Integration tests for WorkspaceRunner._connect_memory_search_tool."""
 
     def test_set_context_called_when_vector_store_available(self):
-        """When vector store is available, set_context is called on the memory tool."""
+        """When vector store is available, set_context is called with store and provider."""
         mock_memory_tool = MagicMock()
         mock_vector_store = MagicMock()
         mock_embedding_provider = MagicMock()
@@ -314,9 +322,13 @@ class TestConnectMemorySearchTool:
 
         WorkspaceRunner._connect_memory_search_tool(runner)
 
-        mock_memory_tool.set_context.assert_called_once_with(
-            mock_vector_store, mock_embedding_provider
-        )
+        # Verify set_context was called once with the right positional args.
+        # The kwargs (conversations_enabled, files_enabled) come from workspace config
+        # and may be MagicMock values in this unit-test context, so check only positions.
+        mock_memory_tool.set_context.assert_called_once()
+        call_args = mock_memory_tool.set_context.call_args
+        assert call_args.args[0] is mock_vector_store
+        assert call_args.args[1] is mock_embedding_provider
 
     def test_agent_not_rebuilt_when_vector_store_available(self):
         """Agent is not rebuilt when the vector store is present."""
@@ -333,7 +345,7 @@ class TestConnectMemorySearchTool:
         runner._agent_factory.create_agent.assert_not_called()
 
     def test_tools_removed_when_vector_store_unavailable(self):
-        """When vector store is None, broken tool is removed from factory."""
+        """When vector store is None, both memory search tools are removed from factory."""
         mock_memory_tool = MagicMock()
 
         runner = _make_mock_runner(
@@ -345,7 +357,7 @@ class TestConnectMemorySearchTool:
         WorkspaceRunner._connect_memory_search_tool(runner)
 
         runner._agent_factory.remove_builtin_tools.assert_called_once_with(
-            {"search_conversations"}
+            {"search_conversations", "search_workspace"}
         )
 
     def test_enabled_builtin_removed_when_vector_store_unavailable(self):
@@ -444,7 +456,7 @@ class TestConnectMemorySearchTool:
         assert "MemorySearchTool" in warning_message
 
     def test_vector_store_present_but_no_embedding_provider_removes_tool(self):
-        """Vector store present but embedding provider absent still removes tool."""
+        """Vector store present but embedding provider absent still removes both tools."""
         mock_memory_tool = MagicMock()
 
         runner = _make_mock_runner(
@@ -457,11 +469,11 @@ class TestConnectMemorySearchTool:
 
         # Condition requires BOTH vector_store AND embedding_provider
         runner._agent_factory.remove_builtin_tools.assert_called_once_with(
-            {"search_conversations"}
+            {"search_conversations", "search_workspace"}
         )
 
     def test_embedding_provider_present_but_no_vector_store_removes_tool(self):
-        """Embedding provider present but vector store absent still removes tool."""
+        """Embedding provider present but vector store absent still removes both tools."""
         mock_memory_tool = MagicMock()
 
         runner = _make_mock_runner(
@@ -473,5 +485,5 @@ class TestConnectMemorySearchTool:
         WorkspaceRunner._connect_memory_search_tool(runner)
 
         runner._agent_factory.remove_builtin_tools.assert_called_once_with(
-            {"search_conversations"}
+            {"search_conversations", "search_workspace"}
         )

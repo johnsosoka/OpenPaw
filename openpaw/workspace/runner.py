@@ -240,25 +240,40 @@ class WorkspaceRunner:
         memory_config = self._workspace.config.memory if self._workspace.config else None
         if memory_config and memory_config.enabled:
             try:
+                from openpaw.stores.vector.conversation_indexer import ConversationIndexer
                 from openpaw.stores.vector.factory import (
                     create_embedding_provider,
                     create_vector_store,
                 )
-                from openpaw.stores.vector.indexer import ConversationIndexer
+
+                self._embedding_provider = create_embedding_provider(
+                    provider=memory_config.embedding.provider,
+                    config=memory_config.embedding.model_dump(),
+                )
+
+                # Validate dimensions match between embedding provider and vector store config
+                configured_dims = memory_config.vector_store.dimensions
+                provider_dims = self._embedding_provider.dimensions
+                if configured_dims != provider_dims:
+                    raise ValueError(
+                        f"Dimension mismatch: vector store configured for {configured_dims} "
+                        f"but embedding provider '{memory_config.embedding.provider}:{memory_config.embedding.model}' "
+                        f"produces {provider_dims}. "
+                        f"Set memory.vector_store.dimensions to {provider_dims}."
+                    )
 
                 self._vector_store = create_vector_store(
                     provider=memory_config.vector_store.provider,
                     config=memory_config.vector_store.model_dump(),
                     workspace_path=self._workspace.path,
                 )
-                self._embedding_provider = create_embedding_provider(
-                    provider=memory_config.embedding.provider,
-                    config=memory_config.embedding.model_dump(),
-                )
-                self._indexer = ConversationIndexer(
-                    vector_store=self._vector_store,
-                    embedding_provider=self._embedding_provider,
-                )
+
+                if memory_config.conversations.enabled:
+                    self._indexer = ConversationIndexer(
+                        vector_store=self._vector_store,
+                        embedding_provider=self._embedding_provider,
+                    )
+
                 self.logger.info("Memory search infrastructure initialized")
             except Exception as e:
                 self.logger.error(f"Failed to initialize memory search: {e}")
@@ -917,14 +932,27 @@ class WorkspaceRunner:
         try:
             memory_tool = self._builtin_loader.get_tool_instance("memory_search")
             if memory_tool and self._vector_store and self._embedding_provider:
-                memory_tool.set_context(self._vector_store, self._embedding_provider)
+                memory_config = self._workspace.config.memory if self._workspace.config else None
+                conversations_enabled = (
+                    memory_config.conversations.enabled if memory_config else True
+                )
+                files_enabled = (
+                    memory_config.files.enabled if memory_config else False
+                )
+                memory_tool.set_context(
+                    self._vector_store,
+                    self._embedding_provider,
+                    conversations_enabled=conversations_enabled,
+                    files_enabled=files_enabled,
+                )
                 self.logger.info("Connected MemorySearchTool to vector store")
             elif memory_tool:
                 # Vector store not available — remove broken tool from agent
-                self._agent_factory.remove_builtin_tools({"search_conversations"})
+                self._agent_factory.remove_builtin_tools(
+                    {"search_conversations", "search_workspace"}
+                )
                 self._agent_factory.remove_enabled_builtin("memory_search")
                 # Rebuild agent without the broken tool and propagate to all holders.
-                # If additional agent_runner holders are added, update them here too.
                 self._agent_runner = self._agent_factory.create_agent(
                     checkpointer=self._checkpointer
                 )
