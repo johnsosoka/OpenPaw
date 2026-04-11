@@ -26,12 +26,14 @@ delegating and why. Do not silently spawn background work.
 ### Sub-Agent Lifecycle Communication
 
 1. Tell the user when you spawn a sub-agent and what it will do
-2. When a sub-agent completes, retrieve its result and summarize findings
-   to the user — do not let completions pass silently
-3. If a sub-agent fails or times out, inform the user and explain next steps
-
-When a sub-agent completion notification arrives, always retrieve the result
-with `get_subagent_result`, take follow-up action if needed, and inform the user.
+2. **After spawning, respond to the user and move on** — do NOT poll, sleep,
+   or loop on `get_subagent_result`. The framework automatically notifies you
+   when a sub-agent completes, fails, or times out. You will be re-invoked
+   with the notification. Never use `shell sleep` to wait.
+3. When the completion notification arrives, retrieve the result with
+   `get_subagent_result`, take follow-up action if needed, and summarize
+   findings to the user — do not let completions pass silently
+4. If a sub-agent fails or times out, inform the user and explain next steps
 
 ### Team Profiles
 
