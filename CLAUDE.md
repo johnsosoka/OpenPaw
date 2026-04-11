@@ -276,9 +276,12 @@ agent_workspaces/<name>/
 │           │   └── {channel}/
 │           │       └── {YYYY-MM-DD}.jsonl  # Daily JSONL (ts, msg_id, user_id, display_name, content, attachments)
 │           └── _archive/ # Logs moved here after retention_days
+├── agent/
+│   └── team/     # Spawn profiles (flat *.yaml or directory with profile.yaml + tools/)
 ├── crons/        # Scheduled task definitions
 │   └── *.yaml / *.yml    # Individual cron job configurations
 ├── skills/       # LangChain skill directories (SKILL.md format)
+│   └── _framework/  # Materialized framework skills (auto-generated, read-only)
 └── tools/        # LangChain tools (Python files with @tool decorated functions)
 ```
 
@@ -303,6 +306,7 @@ model:
   api_key: ${ANTHROPIC_API_KEY}
   temperature: 0.5
   max_turns: 50
+  max_output_tokens: 4096        # Cap output tokens for all stateless agents (default: uncapped)
 
 # Shorthand format also accepted (auto-split on first colon):
 # model: "anthropic:claude-sonnet-4-20250514"
@@ -566,6 +570,30 @@ model:
 
 **Credentials**: Set `XAI_API_KEY` in environment or workspace `.env`.
 
+#### Fireworks.ai Configuration
+
+OpenPaw supports Fireworks.ai models via the dedicated `langchain-fireworks` package (`ChatFireworks`).
+
+**Per-workspace (`agent.yaml`)**:
+
+```yaml
+model:
+  provider: fireworks
+  model: accounts/fireworks/models/deepseek-v3p1
+  api_key: ${FIREWORKS_API_KEY}
+  temperature: 0.7
+```
+
+**Available Fireworks Models**:
+- `accounts/fireworks/models/deepseek-v3p1` - DeepSeek V3.1 (163K context)
+- `accounts/fireworks/models/llama-v3p3-70b-instruct` - Llama 3.3 70B (131K context)
+- `accounts/fireworks/models/qwen3-235b-a22b-instruct-2507` - Qwen3 235B MoE (262K context)
+- `accounts/fireworks/models/qwen3-coder-480b-a35b-instruct` - Qwen3 Coder 480B MoE (262K context)
+- `accounts/fireworks/models/llama-v3p1-405b-instruct` - Llama 3.1 405B (131K context)
+- `accounts/fireworks/models/mistral-large-3-fp8` - Mistral Large 3 (256K context)
+
+**Credentials**: Set `FIREWORKS_API_KEY` in environment or workspace `.env`.
+
 #### OpenAI-Compatible APIs
 
 Any OpenAI-compatible provider can be used by specifying `base_url` in the workspace model config. Extra kwargs beyond the standard set (`provider`, `model`, `api_key`, `temperature`, `max_turns`, `timeout_seconds`, `region`) are passed through to `init_chat_model()`.
@@ -578,6 +606,28 @@ model:
   base_url: https://api.moonshot.ai/v1
   temperature: 1.0
 ```
+
+### API Retry Resilience
+
+Transient API errors (504 Gateway Timeout, 429 rate limits, connection errors) are automatically retried with exponential backoff and jitter. Default: 3 retries.
+
+**Configuration** (in `agent.yaml` or global config):
+
+```yaml
+model:
+  provider: fireworks
+  model: accounts/fireworks/models/kimi-k2p5
+  max_retries: 3  # Default: 3. Set to 0 to disable.
+```
+
+**Per-provider behavior**:
+- **OpenAI, Anthropic, xAI**: Native SDK retry via `max_retries` constructor kwarg. SDK loggers surface retry diagnostics at INFO level.
+- **Fireworks**: `ChatFireworks._agenerate` patched with tenacity (the Fireworks SDK's `_max_retries` is a no-op). Retry attempts logged at WARNING via `before_sleep_log`.
+- **Bedrock**: Skipped — boto3 manages its own retry strategy via AWS SDK configuration.
+
+**Retried exceptions**: `httpx.HTTPStatusError` (5xx), `httpx.ConnectError`, `httpx.ReadTimeout`, `ConnectionError`, `TimeoutError`.
+
+**Components**: Retry config extracted from `extra_model_kwargs` in `create_chat_model()` (`openpaw/agent/runner.py`). Fireworks tenacity patch uses `wait_exponential_jitter(initial=1, max=60)`.
 
 ### Token Usage Tracking
 
@@ -688,6 +738,8 @@ output:
   channel: telegram
   target_id: 123456789  # Preferred (channel-agnostic). Legacy: chat_id, channel_id
   delivery: channel   # Where to deliver: channel, agent, or both (default: channel)
+
+max_output_tokens: 4096  # Cap output tokens for this cron (default: uncapped, inherits workspace model default)
 ```
 
 **Output Routing**: The `output.channel` field references a channel name (defaults to type). Use `target_id` as the preferred routing field (channel-type-agnostic). Legacy fields `chat_id` and `channel_id` are still supported as fallbacks.
@@ -893,6 +945,91 @@ builtins:
 - Sub-agent runs concurrently, agent continues working on Y
 - When complete, user receives notification with result summary
 
+### Spawn Profiles
+
+Spawn profiles are named YAML configurations that define specialized sub-agent personas. Instead of every `spawn_agent` call starting from scratch, agents can reference a profile to load a pre-defined system prompt, model, tool set, and resource limits.
+
+**Directory**: `agent/team/*.yaml` inside the workspace root. Files prefixed with `_` are skipped.
+
+**Profile YAML Format**:
+
+```yaml
+# agent/team/news-scout.yaml
+name: news-scout
+description: "Specialized agent for real-time news intelligence"
+
+system_prompt: |
+  You are a news intelligence specialist. Focus on accuracy
+  and source attribution. Always cite sources.
+
+model: anthropic:claude-haiku-4-5-20251001
+temperature: 0.3
+
+allowed_tools:
+  - brave_search
+  - read_file
+  - write_file
+  - ls
+
+allowed_skills: []     # No parent skills injected (keeps prompt lean)
+inherit_tools: true    # Whether to include parent workspace tools (default: true)
+
+timeout_minutes: 10
+max_turns: 15
+```
+
+**Available Fields**:
+
+| Field | Description |
+|-------|-------------|
+| `name` | Profile identifier — must match `^[a-z0-9][a-z0-9-]*$` and the filename stem |
+| `description` | Short summary shown by `list_team_profiles` |
+| `system_prompt` | Injected as the sub-agent's system context |
+| `model` | Model string in `provider:model` format (falls back to workspace model) |
+| `temperature` | Sampling temperature override |
+| `allowed_tools` | Whitelist — sub-agent can only use these tools |
+| `denied_tools` | Blacklist — sub-agent cannot use these tools (applied after `allowed_tools`) |
+| `allowed_skills` | Skill whitelist by name. `null` (default) inherits all parent skills. Empty list `[]` disables all skills. |
+| `denied_skills` | Skill blocklist by name. Removes matching skills from the sub-agent prompt. Applied after `allowed_skills` filtering. |
+| `inherit_tools` | Whether the sub-agent inherits parent workspace tools. `true` (default) appends profile tools to parent tools. `false` replaces parent tools — sub-agent gets only profile-scoped tools plus filesystem tools. |
+| `timeout_minutes` | Execution timeout (1–120, falls back to spawn config default) |
+| `max_turns` | Maximum agent turns (falls back to workspace model config) |
+
+**System-Level Profiles**: A `team_profiles_path` key in global `config.yaml` points to a directory of profiles shared across all workspaces.
+
+```yaml
+# config.yaml
+team_profiles_path: team_profiles  # System-level profiles shared across workspaces
+```
+
+**Resolution Order**: Workspace `agent/team/` is checked first; system `team_profiles_path` is the fallback. A workspace profile with the same name shadows the system-level profile.
+
+**Tool Filter Composition**: Profile `allowed_tools`/`denied_tools` are applied first, then any per-call overrides passed to `spawn_agent`. This two-pass approach lets profiles set a broad capability boundary and callers narrow it further for a specific task.
+
+**Skill Filtering**: Sub-agents inherit all parent workspace skills by default (injected into the system prompt as a `<skills>` block). Skills can consume significant prompt space — filtering keeps sub-agents focused and cost-efficient. `allowed_skills: []` is the most common pattern for lightweight workers that need no domain knowledge. `allowed_skills: ["specific-skill"]` restricts to a single relevant skill for domain-expert personas. `denied_skills` removes specific skills while keeping the rest, useful when one skill is irrelevant but the others are not.
+
+**Agent Tools**:
+- `spawn_agent(profile='news-scout', task='...', ...)` — spawn using a named profile; all profile fields are applied before per-call overrides
+- `list_team_profiles` — list available profiles (workspace + system) with their names and descriptions
+
+**Backward Compatibility**: Calling `spawn_agent` without a `profile` argument is identical to existing behavior — no profile is loaded and all normal sub-agent defaults apply.
+
+**Directory Profiles**: Profiles can optionally be directories instead of flat YAML files. A directory profile contains `profile.yaml` (same schema) plus an optional `tools/` subdirectory with `@tool` decorated Python functions exclusive to that profile:
+
+```
+agent/team/
+  simple-profile.yaml              # Flat YAML (still works)
+  code-specialist/                  # Directory profile
+    profile.yaml                    # Profile config (same schema + inherit_tools)
+    tools/                          # Profile-scoped tools
+      run_linter.py                 # @tool decorated functions
+      requirements.txt              # Optional tool dependencies
+```
+
+Profile tools follow the same conventions as workspace tools: `@tool` decorator, `_` prefix skipping, `requirements.txt` auto-install. Tools are loaded at workspace startup. `SUBAGENT_EXCLUDED_TOOLS` applies to profile tools the same as parent tools.
+
+When `inherit_tools: false`, the sub-agent receives only profile-scoped tools (plus filesystem tools which are always present). When `inherit_tools: true` (default), profile tools are appended to the filtered parent tool set. Both flat YAML and directory formats coexist — if a file and directory share the same stem, the directory takes precedence with a warning.
+
 ### Queue-Aware Tool Middleware
 
 `QueueAwareToolMiddleware` enables responsive agent behavior by checking for pending user messages during tool execution. The middleware composes with approval middleware in `create_agent(middleware=[queue_middleware, approval_middleware])`.
@@ -959,6 +1096,7 @@ heartbeat:
   active_hours: "09:00-17:00"    # Only run during these hours (optional)
   suppress_ok: true              # Don't send message if agent responds "HEARTBEAT_OK"
   delivery: channel              # Where to deliver: channel, agent, or both (default: channel)
+  max_output_tokens: 2000        # Cap output tokens per heartbeat run (default: uncapped)
   output:
     channel: telegram
     target_id: 123456789
@@ -984,6 +1122,8 @@ HEARTBEAT_OK responses are always suppressed from both channel delivery and agen
 **Session Logging**: Every heartbeat execution (including HEARTBEAT_OK and errors) writes a JSONL session log to `memory/sessions/heartbeat/`. These serve as an audit trail and are readable by the main agent via `read_file()`.
 
 **Prompt Template**: The heartbeat prompt is built dynamically from a structured template. `HEARTBEAT.md` serves as a scratchpad for agent-maintained notes on what to check during heartbeats.
+
+**Output Token Cap**: When `max_output_tokens` is set, the LLM's output is capped at that token count. A warning is logged when the cap is reached, indicating the response was likely truncated. This prevents runaway token generation from models with repetition bugs. The cap can also be set at the workspace model level (`model.max_output_tokens`) as a default for all stateless agents; component-specific settings take precedence.
 
 ### Session Logging
 
@@ -1070,6 +1210,7 @@ def check_availability(date: str) -> str:
 - Environment variables from workspace `.env` are available
 - Multiple tools per file are supported
 - Files starting with `_` are ignored
+- Sibling imports are supported (`from helper import func`) — the tools directory is added to `sys.path` at load time
 
 **Dependencies**: Add a `tools/requirements.txt` for tool-specific packages:
 
@@ -1117,20 +1258,49 @@ version: "1.0"
 - `name` — Skill display name (falls back to directory name if omitted)
 - `description` — Short description, truncated to 1024 chars (empty if omitted)
 - `version` — Optional, not used by the framework
+- `inject` — Injection mode: `summary` (default) or `full` (see Progressive Disclosure below)
 
 **Behavior**:
 - Skills are loaded at workspace startup by `WorkspaceLoader` via `load_workspace_skills()`
-- Full content is injected into the system prompt as a `<skills>` XML block between `</framework>` and `<workspace_context>`
+- Skill entries are injected into the system prompt as a `<skills>` XML block between `</framework>` and `<workspace_context>`
 - Directories prefixed with `_` are skipped
 - If no frontmatter is present, the entire file becomes the content with directory name as the skill name
 - Invalid YAML frontmatter degrades gracefully (logged warning, falls back to directory name)
 - Empty or missing `agent/skills/` directory is silently ignored
 
+**Progressive Disclosure:** By default, skills inject only their name and description into the system prompt, with a `read_file()` pointer for on-demand access to the full content. This keeps the system prompt lean while making skill knowledge available when needed. Skills can opt into full injection via `inject: full` in their YAML frontmatter.
+
+**Inject Modes:**
+- `summary` (default) — Name, description, and `read_file()` pointer in prompt. Full content loaded on demand.
+- `full` — Complete content injected into every system prompt (legacy behavior).
+
+**SKILL.md Frontmatter:**
+```yaml
+---
+name: my-skill
+description: Short description shown in system prompt
+inject: summary    # or "full" for always-present content
+---
+```
+
 **Components**:
-- `SkillInfo` dataclass in `openpaw/model/skill.py` — pure data model (name, description, content, path)
-- `load_workspace_skills()` in `openpaw/workspace/skill_loader.py` — scans directories, parses frontmatter
+- `SkillInfo` dataclass in `openpaw/model/skill.py` — pure data model (name, description, content, path, inject mode, read_path)
+- `load_workspace_skills()` in `openpaw/workspace/skill_loader.py` — scans directories, parses frontmatter, resolves read_path
 - `AgentWorkspace.skills` field in `openpaw/core/workspace.py` — stores loaded skills
-- `AgentWorkspace._build_skills_section()` — formats skills for system prompt injection
+- `AgentWorkspace._build_skills_section()` — formats skills for system prompt injection (summary vs. full per skill)
+
+### Framework Skills
+
+OpenPaw bundles three reference skills in `openpaw/builtins/skills/` that provide detailed documentation for framework capabilities. These are automatically loaded at workspace startup and materialized into `agent/skills/_framework/` for agent `read_file()` access.
+
+**Bundled Skills:**
+- `team-management` — Sub-agent spawning patterns, lifecycle communication, team profile building
+- `web-browsing` — Browser automation workflow, accessibility tree navigation, domain restrictions
+- `channel-awareness` — Channel history browsing, JSONL log searching, message lookup patterns
+
+Framework skills use `summary` inject mode by default — agents see a brief description in their prompt and load the full reference on demand. Workspace skills override framework skills with the same name.
+
+The corresponding framework prompt sections (`Sub-Agent Spawning`, `Web Browsing`, `Channel History`, `Channel Logs`) are trimmed to brief behavioral stubs with `read_file()` pointers to the skills.
 
 ### Builtins System
 
@@ -1335,3 +1505,23 @@ lifecycle:
 - When TTL fires, channel context history is **not** injected into the fresh thread — prevents the agent from parroting stale conversation after a reset.
 - User receives a brief notification when TTL triggers a reset (controlled by `lifecycle.notify_session_ttl`).
 - TTL check runs **before** auto-compact — a fresh conversation never triggers compaction on the same message.
+
+#### Checkpoint Pruning
+
+Orphaned checkpoint data is automatically pruned at startup. When conversations rotate (`/new`, `/compact`, TTL expiry), the old conversation's checkpoint data remains in `conversations.db`. Over time this causes significant database bloat (observed: 14GB in production).
+
+**Configuration** (in `agent.yaml` or global config):
+
+```yaml
+checkpoint_retention_days: 7  # Prune orphaned checkpoints older than 7 days (default: 7, 0 to disable)
+```
+
+**Behavior**:
+- Runs once at workspace startup, after checkpointer initialization
+- Identifies orphaned threads (not referenced by any active session in `sessions.json`)
+- Deletes checkpoint and write data for orphaned threads older than `retention_days`
+- Runs `VACUUM` to reclaim disk space after deletion
+- Best-effort: failures are logged and never block startup
+- Follows the same startup-cleanup pattern as `ChannelLogger.archive_old_logs()`
+
+**Components**: `CheckpointPruner` in `openpaw/runtime/session/pruner.py`. `SessionManager.get_active_thread_ids()` provides the set of thread IDs to preserve.

@@ -19,6 +19,7 @@ from openpaw.core.paths import (
     MEMORY_LOGS_DIR,
     SKILLS_DIR,
     SOUL_MD,
+    TEAM_DIR,
     TOOLS_DIR,
     USER_MD,
     WORKSPACE_DIR,
@@ -286,6 +287,36 @@ def _provider_api_key_env(provider: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Default profile scaffolding
+# ---------------------------------------------------------------------------
+
+def _scaffold_default_profiles(workspace_path: Path) -> None:
+    """Copy bundled default team profiles into a new workspace.
+
+    Copies YAML profiles from ``openpaw/builtins/profiles/`` into the
+    workspace's ``agent/team/`` directory. These provide a starter team
+    of sub-agent profiles that work with builtin tools.
+
+    Args:
+        workspace_path: Root path of the new workspace.
+    """
+    source_dir = Path(__file__).resolve().parent / "builtins" / "profiles"
+    if not source_dir.exists():
+        return
+
+    target_dir = workspace_path / str(TEAM_DIR)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    for profile_file in sorted(source_dir.glob("*.yaml")):
+        target_file = target_dir / profile_file.name
+        if not target_file.exists():
+            target_file.write_text(
+                profile_file.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+
+
+# ---------------------------------------------------------------------------
 # Workspace creation
 # ---------------------------------------------------------------------------
 
@@ -324,6 +355,7 @@ def _create_workspace(
         AGENT_DIR,
         TOOLS_DIR,
         SKILLS_DIR,
+        TEAM_DIR,
         CONFIG_DIR,
         CRONS_DIR,
         DATA_DIR,
@@ -350,6 +382,9 @@ def _create_workspace(
     )
     (workspace_path / str(DOT_ENV)).write_text(TEMPLATE_ENV, encoding="utf-8")
 
+    # Scaffold default team profiles from bundled defaults.
+    _scaffold_default_profiles(workspace_path)
+
     return workspace_path
 
 
@@ -371,7 +406,8 @@ def _print_next_steps(workspace_path: Path, name: str) -> None:
     print("  1. Edit config/agent.yaml with your model and channel settings")
     print("  2. Add API keys to config/.env")
     print("  3. Customize agent/AGENT.md, agent/USER.md, and agent/SOUL.md")
-    print(f"  4. Run: openpaw -c config.yaml -w {name}")
+    print("  4. Review agent/team/ for default sub-agent profiles (edit or remove)")
+    print(f"  5. Run: openpaw -c config.yaml -w {name}")
 
 
 # ---------------------------------------------------------------------------

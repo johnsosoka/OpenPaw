@@ -1,7 +1,7 @@
-"""Markdown to Telegram HTML converter.
+"""Markdown formatting for channel adapters.
 
-Converts standard markdown formatting to Telegram-compatible HTML for proper
-rendering in the Telegram Bot API.
+Provides markdown-to-HTML conversion for Telegram and shared utilities
+for channels that lack native table rendering.
 
 Telegram supports a limited subset of HTML tags:
 - <b>bold</b>, <strong>bold</strong>
@@ -11,11 +11,109 @@ Telegram supports a limited subset of HTML tags:
 - <a href="url">link text</a>
 
 Standard markdown headers are converted to bold text since Telegram has no
-native header support.
+native header support. Markdown tables are converted to aligned monospace
+blocks since Telegram and Discord have no native table rendering.
 """
 
 import html
 import re
+
+
+def markdown_tables_to_monospace(text: str) -> str:
+    """Convert markdown pipe tables to aligned monospace code blocks.
+
+    Detects consecutive lines that look like markdown table rows (start with |)
+    and replaces each table with a ``` monospace block. Column widths are
+    normalized so content aligns neatly. Separator rows (|---|---|) are replaced
+    with a dashed line of the correct total width.
+
+    This is a shared utility — usable by any channel that lacks native table
+    rendering (Telegram, Discord, etc.).
+
+    Args:
+        text: Text potentially containing markdown tables.
+
+    Returns:
+        Text with tables replaced by fenced monospace blocks.
+    """
+    lines = text.split("\n")
+    result: list[str] = []
+    table_lines: list[str] = []
+
+    def _flush_table() -> None:
+        """Convert accumulated table_lines into a monospace block."""
+        if not table_lines:
+            return
+
+        # Parse cells from each row
+        rows: list[list[str]] = []
+        separator_indices: list[int] = []
+
+        for i, line in enumerate(table_lines):
+            stripped = line.strip()
+            # Remove leading/trailing pipes and split
+            if stripped.startswith("|"):
+                stripped = stripped[1:]
+            if stripped.endswith("|"):
+                stripped = stripped[:-1]
+            cells = [c.strip() for c in stripped.split("|")]
+
+            # Detect separator rows (all cells match ---+ pattern)
+            if all(re.match(r"^:?-{2,}:?$", c) for c in cells):
+                separator_indices.append(i)
+
+            rows.append(cells)
+
+        if not rows:
+            result.extend(table_lines)
+            return
+
+        # Compute max column widths
+        num_cols = max(len(row) for row in rows)
+        col_widths = [0] * num_cols
+        for i, row in enumerate(rows):
+            if i in separator_indices:
+                continue
+            for j, cell in enumerate(row):
+                if j < num_cols:
+                    col_widths[j] = max(col_widths[j], len(cell))
+
+        # Ensure minimum width of 3 per column
+        col_widths = [max(w, 3) for w in col_widths]
+
+        # Build aligned output
+        total_width = sum(col_widths) + (num_cols - 1) * 3  # 3 = " | " separator
+        aligned: list[str] = []
+
+        for i, row in enumerate(rows):
+            if i in separator_indices:
+                aligned.append("-" * total_width)
+                continue
+            padded = []
+            for j in range(num_cols):
+                cell = row[j] if j < len(row) else ""
+                padded.append(cell.ljust(col_widths[j]))
+            aligned.append(" | ".join(padded))
+
+        result.append("```")
+        result.extend(aligned)
+        result.append("```")
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("|") and stripped.endswith("|"):
+            table_lines.append(line)
+        else:
+            if table_lines:
+                _flush_table()
+                table_lines = []
+            result.append(line)
+
+    # Flush any trailing table
+    if table_lines:
+        _flush_table()
+
+    return "\n".join(result)
 
 
 def markdown_to_telegram_html(text: str) -> str:
@@ -46,6 +144,11 @@ def markdown_to_telegram_html(text: str) -> str:
         >>> markdown_to_telegram_html("Check `config.yaml` file")
         'Check <code>config.yaml</code> file'
     """
+    # Step 0: Convert markdown tables to fenced monospace blocks.
+    # This runs before code block extraction so the ``` fences are picked up
+    # naturally by the code block handler below.
+    text = markdown_tables_to_monospace(text)
+
     # Step 1: Extract and protect code blocks
     code_blocks: list[str] = []
 

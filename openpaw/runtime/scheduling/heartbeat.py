@@ -45,7 +45,7 @@ class HeartbeatScheduler:
         self,
         workspace_name: str,
         workspace_path: Path,
-        agent_factory: Callable[[], Any],
+        agent_factory: Callable[..., Any],
         channels: Mapping[str, ChannelAdapter],
         config: HeartbeatConfig,
         timezone: str = "UTC",
@@ -356,13 +356,35 @@ class HeartbeatScheduler:
         start_time = time_module.monotonic()
 
         try:
-            agent_runner = self.agent_factory()
+            # Resolve max_output_tokens: heartbeat config takes precedence over
+            # the workspace-level default already baked into the factory's
+            # extra_model_kwargs. Passing it here as extra_overrides lets the
+            # heartbeat-specific cap win.
+            extra_overrides: dict[str, Any] = {}
+            if self.config.max_output_tokens is not None:
+                extra_overrides["max_tokens"] = self.config.max_output_tokens
+
+            agent_runner = (
+                self.agent_factory(extra_overrides=extra_overrides)
+                if extra_overrides
+                else self.agent_factory()
+            )
             heartbeat_prompt = self._build_heartbeat_prompt(task_summary=task_summary)
             response = await agent_runner.run(message=heartbeat_prompt)
             duration_ms = (time_module.monotonic() - start_time) * 1000
 
             # Extract metrics and activity from agent runner
             metrics = agent_runner.last_metrics
+
+            # Log a warning when the output cap was hit — response is likely truncated
+            cap = agent_runner.max_output_tokens
+            if isinstance(cap, int) and metrics and isinstance(metrics.output_tokens, int):
+                if metrics.output_tokens >= cap:
+                    logger.warning(
+                        f"Heartbeat output token cap reached: "
+                        f"{metrics.output_tokens}/{cap} tokens "
+                        f"— response likely truncated (workspace: {self.workspace_name})"
+                    )
             input_tokens = metrics.input_tokens if metrics else None
             output_tokens = metrics.output_tokens if metrics else None
             total_tokens = metrics.total_tokens if metrics else None

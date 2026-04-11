@@ -18,13 +18,18 @@ from openpaw.core.paths import (
     USER_MD,
 )
 from openpaw.core.workspace import AgentWorkspace
-from openpaw.workspace.skill_loader import load_workspace_skills
+from openpaw.workspace.skill_loader import (
+    load_framework_skills,
+    load_workspace_skills,
+    materialize_framework_skills,
+)
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from openpaw.core.config import WorkspaceConfig
     from openpaw.core.config.models import CronDefinition
+    from openpaw.model.skill import SkillInfo
 
 
 class WorkspaceLoader:
@@ -87,7 +92,26 @@ class WorkspaceLoader:
         # Load optional workspace config, crons, and skills
         workspace_config = self._load_workspace_config(workspace_path)
         crons = self._load_crons(workspace_path)
-        skills = load_workspace_skills(skills_path)
+
+        # Load workspace skills and merge with framework skills
+        workspace_skills = load_workspace_skills(skills_path)
+        framework_skills = load_framework_skills()
+
+        # Merge: workspace skills override framework skills by name
+        skills_by_name: dict[str, SkillInfo] = {}
+        for skill in framework_skills:
+            skills_by_name[skill.name] = skill
+        for skill in workspace_skills:
+            if skill.name in skills_by_name:
+                logger.info(
+                    "Workspace skill '%s' overrides framework skill with same name",
+                    skill.name,
+                )
+            skills_by_name[skill.name] = skill
+        skills = list(skills_by_name.values())
+
+        # Materialize framework skills into workspace for agent read_file() access
+        materialize_framework_skills(workspace_path, skills)
 
         return AgentWorkspace(
             name=workspace_name,

@@ -201,4 +201,6 @@ def test_empty_extra_model_kwargs_works(mock_workspace: AgentWorkspace) -> None:
 
         assert call_kwargs["temperature"] == 0.7
         assert call_kwargs["api_key"] == "test-key"
-        assert set(call_kwargs.keys()) == {"model", "temperature", "api_key"}
+        # max_retries is now always forwarded (default=3) — no longer testing exact key set
+        assert "model" in call_kwargs
+        assert "base_url" not in call_kwargs

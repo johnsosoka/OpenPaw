@@ -11,6 +11,8 @@
 
 ---
 
+> **Alpha Software** -- OpenPaw is in active development and should be considered an alpha release. APIs, configuration formats, and behavior may change between versions. Contributions and feedback are welcome, but expect rough edges.
+
 OpenPaw gives each agent its own workspace -- personality files, custom tools, scheduled tasks -- then gets out of the way. It handles the orchestration so you can focus on what your agents actually do.
 
 Agents can ingest documents, browse the web, search the internet, and manage their own files -- making them well-suited for research, information processing, and long-running autonomous workflows. Give them a schedule and they'll check in on their own.

@@ -230,6 +230,23 @@ class SessionManager:
             elapsed = (datetime.now(UTC) - state.last_active_at).total_seconds()
             return elapsed > ttl_minutes * 60
 
+    def get_active_thread_ids(self) -> set[str]:
+        """Return the set of thread_ids for all current active conversations.
+
+        Thread IDs are built by combining each session's session_key with its
+        active conversation_id using the standard format::
+
+            "{session_key}:{conversation_id}"
+
+        Returns:
+            Set of thread_id strings matching what the checkpointer uses.
+        """
+        with self._lock:
+            return {
+                f"{session_key}:{state.conversation_id}"
+                for session_key, state in self._sessions.items()
+            }
+
     def list_sessions(self) -> dict[str, SessionState]:
         """List all active sessions.
 

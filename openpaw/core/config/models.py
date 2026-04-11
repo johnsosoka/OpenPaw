@@ -67,6 +67,17 @@ class WorkspaceModelConfig(BaseModel):
     temperature: float | None = Field(default=None, description="Model temperature")
     max_turns: int | None = Field(default=None, description="Max agent turns per run")
     region: str | None = Field(default=None, description="AWS region for Bedrock models (e.g., us-east-1)")
+    max_output_tokens: int | None = Field(
+        default=None,
+        description="Maximum output tokens per LLM call (None = provider default). Applied to all agent types.",
+    )
+    max_retries: int | None = Field(
+        default=3,
+        description=(
+            "Max retry attempts on transient API errors (504, 429, connection errors). "
+            "None or 0 disables retries. Bedrock is excluded (boto3 manages its own retries)."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -373,6 +384,10 @@ class HeartbeatConfig(BaseModel):
         default="channel",
         description="Where to deliver results: channel (direct) or agent (queue injection)",
     )
+    max_output_tokens: int | None = Field(
+        default=None,
+        description="Max output tokens for heartbeat runs (overrides workspace model default)",
+    )
 
     @field_validator("delivery", mode="before")
     @classmethod
@@ -552,6 +567,10 @@ class CronDefinition(BaseModel):
     enabled: bool = Field(default=True, description="Whether the job is active")
     prompt: str = Field(description="User prompt to inject when cron triggers")
     output: CronOutputConfig = Field(description="Where to send the response")
+    max_output_tokens: int | None = Field(
+        default=None,
+        description="Max output tokens for this cron job (overrides workspace model default)",
+    )
 
     @field_validator("schedule")
     @classmethod
@@ -651,6 +670,10 @@ class WorkspaceConfig(BaseModel):
         default=180,
         description="Auto-reset conversation after N minutes of inactivity (0 to disable)",
     )
+    checkpoint_retention_days: int = Field(
+        default=7,
+        description="Prune orphaned checkpoint data older than N days at startup (0 to disable)",
+    )
     lifecycle: LifecycleConfig = Field(
         default_factory=LifecycleConfig,
         description="Lifecycle notification configuration",
@@ -665,6 +688,13 @@ class WorkspaceConfig(BaseModel):
     def validate_session_ttl_minutes(cls, v: int) -> int:
         if v < 0:
             raise ValueError("session_ttl_minutes must be >= 0")
+        return v
+
+    @field_validator("checkpoint_retention_days")
+    @classmethod
+    def validate_checkpoint_retention_days(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("checkpoint_retention_days must be >= 0")
         return v
 
     @field_validator("timezone")
@@ -715,6 +745,10 @@ class Config(BaseModel):
     tool_timeouts: ToolTimeoutsConfig = Field(
         default_factory=ToolTimeoutsConfig,
         description="Default tool timeout configuration",
+    )
+    team_profiles_path: str | None = Field(
+        default=None,
+        description="Path to system-level spawn profiles directory (available to all workspaces)",
     )
 
     model_config = {"extra": "allow"}

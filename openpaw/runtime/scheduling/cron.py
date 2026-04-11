@@ -46,7 +46,7 @@ class CronScheduler:
     def __init__(
         self,
         workspace_path: Path,
-        agent_factory: Callable[[], Any],
+        agent_factory: Callable[..., Any],
         channels: Mapping[str, ChannelAdapter],
         token_logger: TokenUsageLogger | None = None,
         workspace_name: str = "unknown",
@@ -195,11 +195,38 @@ class CronScheduler:
         set_invocation_origin(f"cron:{cron.name}")
 
         try:
-            agent_runner = self.agent_factory()
+            # Resolve max_output_tokens: per-cron definition takes precedence over
+            # the workspace-level default already baked into the factory's
+            # extra_model_kwargs. Passing it as extra_overrides lets the
+            # cron-specific cap win without mutating factory state.
+            extra_overrides: dict[str, Any] = {}
+            if cron.max_output_tokens is not None:
+                extra_overrides["max_tokens"] = cron.max_output_tokens
+
+            agent_runner = (
+                self.agent_factory(extra_overrides=extra_overrides)
+                if extra_overrides
+                else self.agent_factory()
+            )
 
             start_time = time_module.monotonic()
             response = await agent_runner.run(message=cron.prompt)
             duration_ms = (time_module.monotonic() - start_time) * 1000
+
+            # Log a warning when the output cap was hit — response is likely truncated
+            cron_metrics_check = agent_runner.last_metrics
+            cron_cap = agent_runner.max_output_tokens
+            if (
+                isinstance(cron_cap, int)
+                and cron_metrics_check
+                and isinstance(cron_metrics_check.output_tokens, int)
+                and cron_metrics_check.output_tokens >= cron_cap
+            ):
+                logger.warning(
+                    f"Cron '{cron.name}' output token cap reached: "
+                    f"{cron_metrics_check.output_tokens}/{cron_cap} tokens "
+                    f"— response likely truncated (workspace: {self._workspace_name})"
+                )
 
             # Write session log
             session_path: str | None = None

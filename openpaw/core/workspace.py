@@ -63,6 +63,7 @@ class AgentWorkspace:
     config: "WorkspaceConfig | None" = None
     crons: "list[CronDefinition]" = field(default_factory=list)
     skills: list[SkillInfo] = field(default_factory=list)
+    team_roster: str = ""
 
     def reload_files(self) -> None:
         """Re-read workspace markdown files from disk.
@@ -127,6 +128,10 @@ class AgentWorkspace:
         if framework_context:
             sections.append(f"<framework>\n{framework_context}\n</framework>")
 
+        # Team roster — injected when spawn profiles are configured
+        if self.team_roster:
+            sections.append(f"<team>\n{self.team_roster}\n</team>")
+
         # Skills — injected before workspace context so agents know what's available
         if self.skills:
             skills_section = self._build_skills_section()
@@ -175,13 +180,28 @@ class AgentWorkspace:
     def _build_skills_section(self) -> str:
         """Build the skills section of the system prompt.
 
-        Formats each skill's name, description, and full content into a
-        structured block. Skills without descriptions omit the description line.
+        Renders each skill according to its inject mode:
+        - FULL: name, description, separator, and complete content (legacy behavior).
+        - SUMMARY: name, description, and a read_file() pointer for on-demand access.
 
         Returns:
             Formatted skills section string, ready to wrap in ``<skills>`` tags.
         """
+        from openpaw.model.skill import SkillInjectMode
+
         lines = ["## Available Skills"]
+
+        # Check if any skills use summary mode — add preamble if so
+        has_summary = any(
+            skill.inject == SkillInjectMode.SUMMARY and skill.read_path
+            for skill in self.skills
+        )
+        if has_summary:
+            lines.append("")
+            lines.append(
+                "Skills marked with a file path contain detailed reference "
+                "content. Use read_file() to load the full skill when you need it."
+            )
 
         for skill in self.skills:
             lines.append("")
@@ -190,9 +210,14 @@ class AgentWorkspace:
             if skill.description:
                 lines.append(skill.description)
 
-            lines.append("")
-            lines.append("---")
-            lines.append(skill.content.strip())
+            if skill.inject == SkillInjectMode.FULL:
+                # Full injection: include complete content (legacy behavior)
+                lines.append("")
+                lines.append("---")
+                lines.append(skill.content.strip())
+            elif skill.read_path:
+                # Summary mode: just a pointer for on-demand loading
+                lines.append(f"Full reference: `read_file('{skill.read_path}')`")
 
         return "\n".join(lines)
 

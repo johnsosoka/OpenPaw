@@ -341,7 +341,7 @@ model:
   max_turns: 50
 ```
 
-**provider** — Model provider: `anthropic`, `openai`, `bedrock_converse`, or any OpenAI-compatible API via `openai` with `base_url`.
+**provider** — Model provider: `anthropic`, `openai`, `xai`, `fireworks`, `bedrock_converse`, or any OpenAI-compatible API via `openai` with `base_url`.
 
 **model** — Model identifier (provider-specific).
 

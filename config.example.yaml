@@ -31,11 +31,23 @@ lanes:
 #   anthropic:claude-sonnet-4-20250514
 #   openai:gpt-4o
 #   xai:grok-3-mini
+#   fireworks:accounts/fireworks/models/deepseek-v3p1
 #   bedrock_converse:moonshot.kimi-k2-thinking
 agent:
   model: anthropic:claude-sonnet-4-20250514
   max_turns: 50
   temperature: 0.7
+
+# Per-workspace model config (in agent.yaml) supports these additional fields:
+#
+# model:
+#   provider: anthropic
+#   model: claude-sonnet-4-20250514
+#   max_retries: 3        # Retry attempts on transient errors (504, 429, connection).
+#                         # Default: 3. Set to 0 or null to disable.
+#                         # OpenAI/Anthropic/xAI use native SDK retry (with logging).
+#                         # Fireworks wraps with LangChain .with_retry() (SDK retry is a no-op).
+#                         # Bedrock is excluded — boto3 manages its own retry strategy.
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Provider catalog — define provider connection details once, reference by name.
@@ -53,6 +65,8 @@ agent:
 #     base_url: https://api.moonshot.ai/v1
 #   xai:
 #     api_key: ${XAI_API_KEY}
+#   fireworks:
+#     api_key: ${FIREWORKS_API_KEY}
 #   bedrock:
 #     type: bedrock_converse
 #     region: us-east-1
@@ -182,6 +196,9 @@ builtins:
 # Session TTL — auto-reset conversations after inactivity
 # session_ttl_minutes: 180          # Default: 3 hours (0 to disable)
 
+# Checkpoint pruning — remove old conversation data from conversations.db at startup
+# checkpoint_retention_days: 7     # Default: 7 days (0 to disable)
+
 # Status reminder middleware — reminds agents to use send_message() during long silent runs
 # (only active when send_message builtin is enabled)
 # status_reminder:
@@ -196,6 +213,7 @@ builtins:
 #   interval_minutes: 30          # How often the agent checks in
 #   active_hours: "09:00-17:00"   # Only run during this window (workspace timezone)
 #   suppress_ok: true             # Suppress messages when agent responds HEARTBEAT_OK
+#   max_output_tokens: 2000        # Cap output tokens per heartbeat run (default: uncapped)
 #   delivery: channel             # channel, agent, or both
 #   target_channel: telegram
 #   target_id: 123456789          # Preferred (channel-agnostic). Legacy: target_chat_id
@@ -218,6 +236,7 @@ builtins:
 #       model: claude-sonnet-4-20250514
 #       temperature: 0.5
 #       max_turns: 50
+#       max_output_tokens: 4096    # Cap output tokens for stateless agents (default: uncapped)
 #
 # AWS Bedrock:
 #   model:

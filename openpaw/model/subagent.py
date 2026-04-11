@@ -39,6 +39,7 @@ class SubAgentRequest:
         completed_at: When the sub-agent finished.
         timeout_minutes: Maximum runtime before timeout.
         notify: Whether to notify session on completion.
+        profile: Optional spawn profile name for this request.
     """
 
     id: str
@@ -55,6 +56,7 @@ class SubAgentRequest:
     denied_tools: list[str] | None = None
     origin: str | None = None
     progress_interval_minutes: int = 0  # 0 = disabled
+    profile: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary with ISO 8601 datetime strings.
@@ -83,6 +85,8 @@ class SubAgentRequest:
             data.pop("origin", None)
         if self.progress_interval_minutes == 0:
             data.pop("progress_interval_minutes", None)
+        if self.profile is None:
+            data.pop("profile", None)
 
         return data
 
@@ -119,6 +123,7 @@ class SubAgentRequest:
             denied_tools=data.get("denied_tools"),
             origin=data.get("origin"),
             progress_interval_minutes=data.get("progress_interval_minutes", 0),
+            profile=data.get("profile"),
         )
 
 

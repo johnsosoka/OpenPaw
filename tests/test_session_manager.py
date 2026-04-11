@@ -167,6 +167,40 @@ def test_list_sessions(tmp_path: Path):
     assert "discord:333" in sessions
 
 
+def test_get_active_thread_ids_empty(tmp_path: Path):
+    """get_active_thread_ids returns an empty set when no sessions exist."""
+    manager = SessionManager(tmp_path)
+    assert manager.get_active_thread_ids() == set()
+
+
+def test_get_active_thread_ids_returns_correct_format(tmp_path: Path):
+    """get_active_thread_ids returns thread IDs in '{session_key}:{conversation_id}' format."""
+    manager = SessionManager(tmp_path)
+
+    thread_a = manager.get_thread_id("telegram:111")
+    thread_b = manager.get_thread_id("discord:222")
+
+    active = manager.get_active_thread_ids()
+
+    assert active == {thread_a, thread_b}
+
+
+def test_get_active_thread_ids_reflects_conversation_rotation(tmp_path: Path):
+    """After /new, get_active_thread_ids returns the new thread, not the old one."""
+    manager = SessionManager(tmp_path)
+
+    old_thread = manager.get_thread_id("telegram:123")
+    old_conv_id = manager.new_conversation("telegram:123")
+    new_thread = manager.get_thread_id("telegram:123")
+
+    active = manager.get_active_thread_ids()
+
+    assert new_thread in active
+    assert old_thread not in active
+    # Sanity check: the returned old_thread and new_thread actually differ
+    assert old_thread != new_thread
+
+
 def test_get_state_returns_none_for_unknown_session(tmp_path: Path):
     """Test get_state returns None for unknown session."""
     manager = SessionManager(tmp_path)

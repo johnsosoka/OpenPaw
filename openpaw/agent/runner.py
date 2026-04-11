@@ -24,6 +24,12 @@ from openpaw.core.workspace import AgentWorkspace
 
 logger = logging.getLogger(__name__)
 
+# Surface retry diagnostics from provider SDKs.
+# OpenAI SDK logs "Retrying request to %s in %f seconds" at INFO.
+# Anthropic SDK logs similar messages at INFO.
+logging.getLogger("openai._base_client").setLevel(logging.INFO)
+logging.getLogger("anthropic._base_client").setLevel(logging.INFO)
+
 # Models known to produce thinking tokens
 THINKING_MODELS = [
     "moonshot.kimi-k2-thinking",
@@ -55,10 +61,14 @@ def create_chat_model(
         temperature: Model temperature setting.
         region: AWS region for Bedrock models (e.g., us-east-1).
         extra_kwargs: Additional kwargs to pass to the model constructor
-            (e.g., base_url for OpenAI-compatible APIs).
+            (e.g., base_url for OpenAI-compatible APIs, max_retries for retry config).
 
     Returns:
-        Configured BaseChatModel instance.
+        Configured BaseChatModel instance. For Fireworks, returns a
+        RunnableRetry wrapper when max_retries > 0 (the Fireworks SDK does not
+        implement native retry). Callers that need model attribute access (e.g.
+        ``profile``) should hold a reference to the raw model separately — see
+        ``AgentRunner._build_agent()`` for the established pattern.
 
     Raises:
         ValueError: If provider is not supported.
@@ -80,6 +90,11 @@ def create_chat_model(
     if extra_kwargs:
         kwargs.update(extra_kwargs)
 
+    # Extract max_retries before merging into provider kwargs.
+    # Different providers require different handling (see per-provider logic below).
+    max_retries: int | None = kwargs.pop("max_retries", 3)
+    effective_retries = max_retries if (max_retries and max_retries > 0) else 0
+
     # Flatten model_kwargs into direct constructor args so that params like
     # extra_body reach the provider class directly instead of being silently dropped
     nested_model_kwargs = kwargs.pop("model_kwargs", None)
@@ -91,7 +106,11 @@ def create_chat_model(
 
         if api_key:
             kwargs["api_key"] = api_key
-        logger.info(f"Creating ChatOpenAI: model={model_name}, kwargs={list(kwargs.keys())}")
+        if effective_retries > 0:
+            kwargs["max_retries"] = effective_retries
+            logger.info(f"Creating ChatOpenAI: model={model_name}, max_retries={effective_retries}")
+        else:
+            logger.info(f"Creating ChatOpenAI: model={model_name}, kwargs={list(kwargs.keys())}")
         return ChatOpenAI(**kwargs)
 
     if provider == "anthropic":
@@ -99,7 +118,11 @@ def create_chat_model(
 
         if api_key:
             kwargs["api_key"] = api_key
-        logger.info(f"Creating ChatAnthropic: model={model_name}")
+        if effective_retries > 0:
+            kwargs["max_retries"] = effective_retries
+            logger.info(f"Creating ChatAnthropic: model={model_name}, max_retries={effective_retries}")
+        else:
+            logger.info(f"Creating ChatAnthropic: model={model_name}")
         return ChatAnthropic(**kwargs)
 
     if provider in ("bedrock_converse", "bedrock"):
@@ -107,7 +130,8 @@ def create_chat_model(
 
         if region:
             kwargs["region_name"] = region
-        # Bedrock uses AWS credentials, not api_key
+        # Bedrock uses AWS credentials, not api_key.
+        # boto3 manages its own retry strategy — do not pass max_retries.
         kwargs.pop("api_key", None)
         logger.info(f"Creating ChatBedrockConverse: model={model_name}, kwargs_keys={list(kwargs.keys())}")
         return ChatBedrockConverse(**kwargs)
@@ -117,12 +141,53 @@ def create_chat_model(
 
         if api_key:
             kwargs["xai_api_key"] = api_key
-        logger.info(f"Creating ChatXAI: model={model_name}")
+        if effective_retries > 0:
+            kwargs["max_retries"] = effective_retries
+            logger.info(f"Creating ChatXAI: model={model_name}, max_retries={effective_retries}")
+        else:
+            logger.info(f"Creating ChatXAI: model={model_name}")
         return ChatXAI(**kwargs)
+
+    if provider == "fireworks":
+        import httpx
+        import tenacity
+        from langchain_fireworks import ChatFireworks
+
+        if api_key:
+            kwargs["fireworks_api_key"] = api_key
+        logger.info(f"Creating ChatFireworks: model={model_name}")
+        model = ChatFireworks(**kwargs)
+
+        # The Fireworks SDK's _max_retries is a no-op — patch _agenerate with
+        # tenacity for real retry behavior.  This preserves bind_tools() and all
+        # model attributes (unlike .with_retry() which wraps the entire Runnable).
+        if effective_retries > 0:
+            logger.info(f"Patching ChatFireworks._agenerate with retry (max_attempts={effective_retries + 1})")
+            original_agenerate = model._agenerate
+
+            @tenacity.retry(
+                retry=tenacity.retry_if_exception_type((
+                    httpx.HTTPStatusError,
+                    httpx.ConnectError,
+                    httpx.ReadTimeout,
+                    ConnectionError,
+                    TimeoutError,
+                )),
+                stop=tenacity.stop_after_attempt(effective_retries + 1),
+                wait=tenacity.wait_exponential_jitter(initial=1, max=60),
+                before_sleep=tenacity.before_sleep_log(logger, logging.WARNING),
+                reraise=True,
+            )
+            async def _agenerate_with_retry(*args: Any, **kw: Any) -> Any:
+                return await original_agenerate(*args, **kw)
+
+            model._agenerate = _agenerate_with_retry  # type: ignore[method-assign]
+
+        return model
 
     raise ValueError(
         f"Unsupported model provider: '{provider}'. "
-        f"Supported: openai, anthropic, bedrock_converse, xai"
+        f"Supported: openai, anthropic, bedrock_converse, xai, fireworks"
     )
 
 
@@ -225,6 +290,13 @@ class AgentRunner:
         self._middleware = middleware or []
         self.channel_logging_enabled = channel_logging_enabled
 
+        # Capture max_tokens for truncation detection after runs
+        self._max_output_tokens: int | None = self.extra_model_kwargs.get("max_tokens")
+
+        # Log label for distinguishing main agent from sub-agents.
+        # Defaults to workspace name; sub-agent runner overrides with profile label.
+        self._log_label: str = workspace.name
+
         # Per-invocation tracking (populated after each run)
         self._last_metrics: InvocationMetrics | None = None
         self._last_tools_used: list[str] = []
@@ -241,6 +313,15 @@ class AgentRunner:
             self.strip_thinking = True
 
         self._agent = self._build_agent()
+
+    @property
+    def max_output_tokens(self) -> int | None:
+        """Get the configured output token cap for this runner.
+
+        Returns:
+            The max_tokens value passed via extra_model_kwargs, or None if uncapped.
+        """
+        return self._max_output_tokens
 
     @property
     def last_metrics(self) -> InvocationMetrics | None:
@@ -635,7 +716,7 @@ class AgentRunner:
                             tool_calls = getattr(msg, "tool_calls", [])
                             if tool_calls:
                                 tool_names = [tc.get("name", "?") for tc in tool_calls]
-                                logger.info(f"[{self.workspace.name}] Tool calls: {tool_names}")
+                                logger.info(f"[{self._log_label}] Tool calls: {tool_names}")
                                 # Track last tool called for timeout reporting
                                 self._current_tool_name = tool_calls[-1].get("name")
                             for tc in tool_calls:
@@ -657,7 +738,7 @@ class AgentRunner:
 
             logger.warning(
                 f"Agent timed out after {self.timeout_seconds}s "
-                f"(workspace: {self.workspace.name})"
+                f"(workspace: {self._log_label})"
             )
 
             # Use rich notification if we know what tool was executing
@@ -681,6 +762,15 @@ class AgentRunner:
             usage_callback, duration_ms, self.model_id
         )
 
+        # Warn when output token cap may have caused response truncation
+        if self._max_output_tokens and self._last_metrics:
+            if self._last_metrics.output_tokens >= self._max_output_tokens:
+                logger.warning(
+                    f"Output token cap reached: "
+                    f"{self._last_metrics.output_tokens}/{self._max_output_tokens} tokens "
+                    f"— response may be truncated (workspace: {self._log_label})"
+                )
+
         # Extract response from final messages
         if final_messages:
             last_message = final_messages[-1]
@@ -693,7 +783,7 @@ class AgentRunner:
             if self.strip_thinking and "<think>" in raw_response.lower():
                 logger.warning(
                     f"Fallback thinking stripping triggered "
-                    f"(workspace: {self.workspace.name}, model: {self.model_id})"
+                    f"(workspace: {self._log_label}, model: {self.model_id})"
                 )
                 return self._strip_thinking_tokens(raw_response)
             return raw_response
@@ -738,7 +828,7 @@ class AgentRunner:
             if self.strip_thinking and "<think>" in raw_response.lower():
                 logger.warning(
                     f"Fallback thinking stripping triggered "
-                    f"(workspace: {self.workspace.name}, model: {self.model_id})"
+                    f"(workspace: {self._log_label}, model: {self.model_id})"
                 )
                 return self._strip_thinking_tokens(raw_response)
             return raw_response
