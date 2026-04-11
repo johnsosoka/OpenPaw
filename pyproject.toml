@@ -45,6 +45,11 @@ web = [
 memory = [
     "sqlite-vec (>=0.1.6)",  # Semantic search over conversation archives
 ]
+memory-local = [
+    "sqlite-vec (>=0.1.6)",
+    "langchain-huggingface (>=0.1.0)",  # Local embeddings via sentence-transformers
+    "sentence-transformers (>=3.0.0)",
+]
 all-builtins = [
     "openai (>=1.0.0)",
     "elevenlabs (>=1.0.0)",

@@ -171,3 +171,32 @@ class TestCreateEmbeddingProvider:
 
         call_kwargs = mock_openai_class.call_args[1]
         assert call_kwargs["api_key"] == "sk-nested-key"
+
+    def test_local_returns_local_embedding_provider(self):
+        """Test create_embedding_provider with 'local' returns a LocalEmbeddingProvider instance."""
+        from openpaw.stores.vector.embeddings import LocalEmbeddingProvider
+
+        config = {"model": "all-MiniLM-L6-v2"}
+        provider = create_embedding_provider("local", config)
+
+        assert isinstance(provider, LocalEmbeddingProvider)
+
+    def test_local_passes_model_config(self):
+        """Test create_embedding_provider passes the model name to LocalEmbeddingProvider."""
+        from openpaw.stores.vector.embeddings import LocalEmbeddingProvider
+
+        config = {"model": "all-mpnet-base-v2"}
+        provider = create_embedding_provider("local", config)
+
+        assert isinstance(provider, LocalEmbeddingProvider)
+        assert provider._model_name == "all-mpnet-base-v2"
+
+    def test_local_uses_default_model_when_none_specified(self):
+        """Test create_embedding_provider falls back to all-MiniLM-L6-v2 when model is absent."""
+        from openpaw.stores.vector.embeddings import LocalEmbeddingProvider
+
+        config = {}
+        provider = create_embedding_provider("local", config)
+
+        assert isinstance(provider, LocalEmbeddingProvider)
+        assert provider._model_name == "all-MiniLM-L6-v2"
