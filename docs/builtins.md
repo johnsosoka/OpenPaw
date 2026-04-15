@@ -8,14 +8,15 @@ Builtins are optional capabilities conditionally loaded based on API key availab
 
 ## Overview
 
-OpenPaw ships with 15 built-in tools and 4 message processors. Builtins are discovered at runtime — if prerequisites (API keys, packages) are missing, the builtin is unavailable. The allow/deny system provides fine-grained control over which capabilities are active in each workspace.
+OpenPaw ships with 16 built-in tools and 4 message processors. Builtins are discovered at runtime — if prerequisites (API keys, packages) are missing, the builtin is unavailable. The allow/deny system provides fine-grained control over which capabilities are active in each workspace.
 
 **Architecture:**
 
 ```
 BuiltinRegistry
-├─ Tools (15)
+├─ Tools (16)
 │  ├─ browser          Web automation via Playwright
+│  ├─ email            Email send/receive via Gmail
 │  ├─ brave_search     Web search
 │  ├─ spawn            Sub-agent spawning
 │  ├─ cron             Agent self-scheduling
@@ -664,6 +665,78 @@ To find voice IDs, visit the [ElevenLabs Voice Library](https://elevenlabs.io/vo
 
 ---
 
+### email
+
+**Group:** `communication`
+**Type:** Tool (8 functions)
+**Prerequisites:** `poetry install --extras email` (google-auth, google-api-python-client)
+
+Send and receive email via Google service account with domain-wide delegation. Designed with an abstract provider interface for future SMTP/SES support.
+
+**Security Model:**
+
+The email builtin enforces a **safe-by-default** outbound policy via `RecipientPolicy`:
+- An **empty `allowed_recipients` list blocks ALL outbound email** — sending must be explicitly enabled
+- Recipient patterns use fnmatch glob syntax (e.g., `*@company.com`)
+- All recipients (to, cc, bcc) are validated before sending
+- Max recipients per message is configurable (default: 10)
+
+**Available Functions:**
+- `send_email` — Send email with recipient policy validation and optional file attachments
+- `check_email` — List recent messages from a Gmail label (default: INBOX)
+- `get_email` — Retrieve full content of a specific email by message ID
+- `search_email` — Search using Gmail query syntax (from:, subject:, is:unread, etc.)
+- `reply_email` — Reply to an email thread with proper In-Reply-To/References headers
+- `download_attachment` — Download email attachment to workspace `downloads/email/`
+- `mark_as_read` — Remove UNREAD label from a message
+- `mark_as_unread` — Add UNREAD label to a message
+
+**Configuration:**
+
+```yaml
+builtins:
+  email:
+    enabled: true
+    config:
+      provider: gmail
+      service_account_file: config/service-account.json  # Relative to workspace root
+      delegated_user: agent@yourdomain.com
+      allowed_recipients:                     # Empty = block all sends (safe default)
+        - "*@yourdomain.com"
+        - "partner@external.com"
+      max_recipients: 10
+```
+
+**Provider Setup (Gmail):**
+
+1. Create a Google Cloud project with Gmail API enabled
+2. Create a service account and download the JSON key file
+3. Enable domain-wide delegation on the service account
+4. In Google Workspace Admin, authorize the service account with scopes:
+   - `https://www.googleapis.com/auth/gmail.readonly`
+   - `https://www.googleapis.com/auth/gmail.send`
+   - `https://www.googleapis.com/auth/gmail.modify`
+5. Place the JSON key file in your workspace (e.g., `config/service-account.json`)
+6. Set `delegated_user` to the email address the agent should impersonate
+
+**Usage Example:**
+
+```
+User: "Check my email for anything from Alice"
+Agent: [Calls search_email(query="from:alice@example.com")]
+Agent: "Found 3 emails from Alice. The most recent is about the Q4 report..."
+
+User: "Download the PDF attachment from that email"
+Agent: [Calls download_attachment(message_id="...", attachment_id="...", filename="q4-report.pdf")]
+Agent: "Saved to downloads/email/q4-report.pdf"
+
+User: "Reply and tell her I'll review it by Friday"
+Agent: [Calls reply_email(message_id="...", body="Thanks Alice, I'll review the Q4 report by Friday.")]
+Agent: "Reply sent to alice@example.com"
+```
+
+---
+
 ### status_reminder
 
 **Group:** `agent`
@@ -974,6 +1047,7 @@ builtins:
 | `agent` | spawn, cron, task_tracker, send_message, followup, send_file |
 | `automation` | cron_manager, acknowledge |
 | `browser` | browser |
+| `communication` | email |
 | `memory` | memory_search |
 | `document` | md2pdf |
 
@@ -1010,6 +1084,12 @@ Installs: `langchain-community`
 poetry install -E memory
 ```
 Installs: `sqlite-vec`
+
+**Email capabilities:**
+```bash
+poetry install -E email
+```
+Installs: `google-auth`, `google-api-python-client`
 
 **All optional builtins:**
 ```bash

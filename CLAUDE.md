@@ -946,6 +946,61 @@ poetry install --extras researcher
 - Agent calls `research(query="WebAssembly adoption in server-side applications", report_type="detailed_report")`
 - GPT-Researcher streams progress logs, then returns full report with citations
 
+### Email Integration
+
+Agents can send and receive email via the `email` builtin. All 8 tools cover the full email workflow — from listing inbox messages to replying and downloading attachments. Only Gmail (via Google service account + domain-wide delegation) is supported in this release.
+
+**Available Tools**:
+- `send_email` - Send an email to one or more recipients with optional file attachments
+- `check_email` - List recent messages from a Gmail label (default: INBOX)
+- `get_email` - Retrieve the full content of a message by ID (body, headers, attachment metadata)
+- `search_email` - Search messages using Gmail search syntax (`from:`, `subject:`, `is:unread`, etc.)
+- `reply_email` - Reply to an existing thread (automatically sets In-Reply-To and References headers)
+- `download_attachment` - Download an email attachment and save it to `downloads/email/` in the workspace
+- `mark_as_read` - Remove the UNREAD label from a message
+- `mark_as_unread` - Add the UNREAD label to a message
+
+**Security Model**: `RecipientPolicy` validates all outbound recipients (to, cc, bcc) against a glob allowlist before any email is sent. An **empty `allowed_recipients` list blocks ALL outbound email** — this is the safe default. Configure the allowlist explicitly before agents can send. `max_recipients` caps the number of addresses per message (default: 10).
+
+**Configuration** (in `agent.yaml` or global config):
+
+```yaml
+builtins:
+  email:
+    enabled: true
+    config:
+      provider: gmail                                    # Only "gmail" is supported
+      service_account_file: config/service-account.json # Relative to workspace root
+      delegated_user: agent@yourdomain.com               # Email to impersonate via domain-wide delegation
+      allowed_recipients:                                # Empty = block all sends (safe default)
+        - "*@yourdomain.com"
+        - "partner@external.com"
+      max_recipients: 10                                 # Max recipients per outbound message
+```
+
+**Prerequisites**: Requires optional Google API packages:
+
+```bash
+poetry install --extras email
+```
+
+**Provider Setup**:
+1. Create a Google Cloud service account with a JSON key file
+2. Enable the Gmail API in your Google Cloud project
+3. Configure domain-wide delegation on the service account
+4. Grant the service account the `https://www.googleapis.com/auth/gmail.modify` OAuth scope
+5. Set `service_account_file` (workspace-relative path) and `delegated_user` in config
+
+**Attachment Handling**: `send_email` and `reply_email` accept `attachment_paths` — workspace-relative file paths validated through the sandbox. Downloaded attachments are saved to `downloads/email/` with deduplicated filenames. The workspace-relative path is returned for immediate `read_file()` access.
+
+**Example Usage** (by agent):
+- User: "Check my inbox and summarize the unread messages"
+- Agent calls `check_email(label="INBOX", max_results=20)`
+- Agent calls `search_email(query="is:unread")` to narrow to unread
+- Agent calls `get_email(message_id="...")` to read a specific message
+- User: "Reply to that invoice email and attach the signed PDF"
+- Agent calls `reply_email(message_id="...", body="...", attachment_paths=["uploads/invoice-signed.pdf"])`
+
 ### Sub-Agent Spawning
 
 Agents can spawn background workers for concurrent task execution using the `spawn` builtin. Sub-agents run in isolated contexts with filtered tools to prevent recursion and unsolicited messaging.
@@ -1363,6 +1418,7 @@ OpenPaw provides optional built-in capabilities that are conditionally available
 - `plan` - Session-scoped planning tool for multi-step work externalization (no API key required)
 - `browser` - Web automation via Playwright with accessibility tree navigation (requires `playwright` package, see "Web Browsing" section)
 - `gpt_researcher` - Deep research via self-hosted GPT-Researcher instance (requires `websockets` package, see "GPT-Researcher" section)
+- `email` - Send and receive email via Gmail service account (requires `email` extras, see "Email Integration" section)
 
 **Processors** - Channel-layer message transformers:
 - `file_persistence` - Saves all uploaded files to workspace uploads/ directory (no API key required)
@@ -1383,6 +1439,10 @@ builtins/
 │   ├── spawn.py      # Sub-agent spawning (spawn_agent, list, get_result, cancel)
 │   ├── browser.py    # Web automation with Playwright + accessibility tree
 │   ├── gpt_researcher.py  # Deep research via GPT-Researcher WebSocket API
+│   ├── email/        # Email integration (send/receive via Gmail service account)
+│   │   ├── __init__.py    # EmailToolBuiltin + 8 tools
+│   │   ├── base.py        # EmailProvider ABC, EmailMessage, RecipientPolicy
+│   │   └── gmail.py       # GmailProvider (service account + domain-wide delegation)
 │   ├── _channel_context.py # Shared contextvars for channel/session state
 │   ├── send_message.py  # Mid-execution messaging
 │   ├── send_file.py     # Send workspace files to users
