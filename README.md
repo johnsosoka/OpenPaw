@@ -33,6 +33,8 @@ Agents can ingest documents, browse the web, search the internet, and manage the
 
 **Browser automation** -- Playwright-driven web interaction via accessibility tree. Agents reference page elements by number, not CSS selectors.
 
+**Deep research** -- Integrate with a self-hosted GPT-Researcher instance for multi-source research reports with citations. Agents submit queries via WebSocket and receive comprehensive markdown reports.
+
 **Approval gates** -- Human-in-the-loop authorization for dangerous operations, with configurable timeouts and channel-native UI.
 
 **Multi-channel support** -- Connect agents to Telegram, Discord, or both simultaneously. Trigger-based activation lets agents respond to @mentions, keyword triggers, or both in group chats. On-demand context fetch gives agents awareness of recent channel history when triggered.

@@ -283,6 +283,20 @@ class ChannelHistoryBuiltinConfig(BuiltinItemConfig):
     )
 
 
+class GptResearcherBuiltinConfig(BuiltinItemConfig):
+    """Configuration for the GPT-Researcher integration tool."""
+
+    endpoint: str = Field(default="", description="WebSocket endpoint URL (e.g., wss://researcher.example.com/ws)")
+    upload_endpoint: str = Field(default="", description="REST upload endpoint URL (e.g., https://researcher.example.com/upload/)")
+    timeout_seconds: int = Field(default=300, description="Max seconds to wait for research completion")
+    default_report_type: str = Field(
+        default="research_report",
+        description="Default report type: research_report, outline_report, detailed_report, resource_report",
+    )
+    default_report_source: str = Field(default="web", description="Default report source: web or local")
+    default_tone: str = Field(default="Objective", description="Default writing tone for reports")
+
+
 class FilePersistenceBuiltinConfig(BuiltinItemConfig):
     """Configuration for the file persistence processor."""
 
@@ -324,6 +338,7 @@ class BuiltinsConfig(BaseModel):
     file_persistence: FilePersistenceBuiltinConfig = Field(default_factory=FilePersistenceBuiltinConfig)
     md2pdf: Md2pdfBuiltinConfig = Field(default_factory=Md2pdfBuiltinConfig)
     channel_history: ChannelHistoryBuiltinConfig = Field(default_factory=ChannelHistoryBuiltinConfig)
+    gpt_researcher: GptResearcherBuiltinConfig = Field(default_factory=GptResearcherBuiltinConfig)
 
     model_config = {"extra": "allow"}
 
@@ -355,6 +370,7 @@ class WorkspaceBuiltinsConfig(BaseModel):
     file_persistence: FilePersistenceBuiltinConfig | None = None
     md2pdf: Md2pdfBuiltinConfig | None = None
     channel_history: ChannelHistoryBuiltinConfig | None = None
+    gpt_researcher: GptResearcherBuiltinConfig | None = None
 
     model_config = {"extra": "allow"}
 

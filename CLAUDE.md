@@ -902,6 +902,50 @@ poetry run playwright install chromium
 - Agent calls `browser_click(42)` to click the "Schedule" button (element #42)
 - Agent fills in meeting details and confirms booking
 
+### GPT-Researcher
+
+Agents can conduct deep research via a self-hosted GPT-Researcher instance. The builtin communicates over WebSocket for streaming research reports and REST for document uploads.
+
+**Available Tools**:
+- `research` - Submit a research query and receive a comprehensive report with citations (1-5 min)
+- `upload_research_document` - Upload a workspace file for local document research (only available when `upload_endpoint` is configured)
+
+**Report Types**:
+- `research_report` (default) - Comprehensive research with citations
+- `outline_report` - Structured outline of the topic
+- `detailed_report` - In-depth analysis
+- `resource_report` - Curated list of resources
+
+**Configuration** (in `agent.yaml` or global config):
+
+```yaml
+builtins:
+  gpt_researcher:
+    enabled: true
+    config:
+      endpoint: "wss://researcher.example.com/ws"           # WebSocket endpoint (required)
+      upload_endpoint: "https://researcher.example.com/upload/"  # REST upload endpoint (optional)
+      timeout_seconds: 300            # Max seconds to wait for research (default: 300)
+      default_report_type: "research_report"   # Default report type
+      default_report_source: "web"             # Default source: web or local
+      default_tone: "Objective"                # Default writing tone
+```
+
+**Prerequisites**: Requires optional `websockets` package:
+
+```bash
+poetry install --extras researcher
+```
+
+**Protocol**: Connects to GPT-Researcher WebSocket API, sends `"start " + JSON payload`, and streams back JSON messages: `logs` (progress), `report` (content chunks), `path` (completion signal). Report chunks are concatenated into the final markdown report.
+
+**Document Upload**: Upload workspace files via REST (`POST /upload/` with multipart form), then use `report_source='local'` in research queries to analyze uploaded documents. File paths are validated through the sandbox to prevent path traversal.
+
+**Example Usage** (by agent):
+- User: "Research the current state of WebAssembly adoption in server-side applications"
+- Agent calls `research(query="WebAssembly adoption in server-side applications", report_type="detailed_report")`
+- GPT-Researcher streams progress logs, then returns full report with citations
+
 ### Sub-Agent Spawning
 
 Agents can spawn background workers for concurrent task execution using the `spawn` builtin. Sub-agents run in isolated contexts with filtered tools to prevent recursion and unsolicited messaging.
@@ -1318,6 +1362,7 @@ OpenPaw provides optional built-in capabilities that are conditionally available
 - `spawn` - Sub-agent spawning for background tasks (no API key required, see "Sub-Agent Spawning" section)
 - `plan` - Session-scoped planning tool for multi-step work externalization (no API key required)
 - `browser` - Web automation via Playwright with accessibility tree navigation (requires `playwright` package, see "Web Browsing" section)
+- `gpt_researcher` - Deep research via self-hosted GPT-Researcher instance (requires `websockets` package, see "GPT-Researcher" section)
 
 **Processors** - Channel-layer message transformers:
 - `file_persistence` - Saves all uploaded files to workspace uploads/ directory (no API key required)
@@ -1337,6 +1382,7 @@ builtins/
 │   ├── cron_manager.py  # Persistent YAML cron management (create/list/update/delete)
 │   ├── spawn.py      # Sub-agent spawning (spawn_agent, list, get_result, cancel)
 │   ├── browser.py    # Web automation with Playwright + accessibility tree
+│   ├── gpt_researcher.py  # Deep research via GPT-Researcher WebSocket API
 │   ├── _channel_context.py # Shared contextvars for channel/session state
 │   ├── send_message.py  # Mid-execution messaging
 │   ├── send_file.py     # Send workspace files to users
