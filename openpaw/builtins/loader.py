@@ -206,12 +206,6 @@ class BuiltinLoader:
                 if allowed_users:
                     config["default_target_id"] = allowed_users[0]
 
-        # Resolve service_account_file relative to workspace for email tool
-        if name == "email":
-            sa_file = config.get("service_account_file")
-            if sa_file and self.workspace_path and not Path(sa_file).is_absolute():
-                config["service_account_file"] = str(self.workspace_path / sa_file)
-
         # Inject channel routing config for send_message tool
         if name == "send_message" and self.channel_config:
             channel_type = self.channel_config.get("type", "telegram")
@@ -233,6 +227,12 @@ class BuiltinLoader:
             cfg_dict = self._get_field(workspace_cfg, "config")
             if cfg_dict:
                 config.update(cfg_dict)
+
+        # Post-merge: resolve service_account_file relative to workspace
+        if name == "email":
+            sa_file = config.get("service_account_file")
+            if sa_file and self.workspace_path and not Path(sa_file).is_absolute():
+                config["service_account_file"] = str(self.workspace_path / sa_file)
 
         return config
 
