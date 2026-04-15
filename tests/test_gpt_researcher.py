@@ -13,6 +13,20 @@ import pytest
 from openpaw.builtins.base import BuiltinType
 from openpaw.builtins.tools.gpt_researcher import GptResearcherTool
 
+try:
+    import websockets.exceptions as _ws_exc
+
+    _has_websockets = True
+except ImportError:
+    _has_websockets = False
+
+try:
+    import httpx as _httpx  # noqa: F401
+
+    _has_httpx = True
+except ImportError:
+    _has_httpx = False
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -34,10 +48,8 @@ def _ws_mock(messages: list[str]) -> MagicMock:
 
     # Each call to recv() returns the next message, then ConnectionClosedOK.
     recv_side_effects = list(messages)
-    import websockets.exceptions
-
     recv_side_effects.append(
-        websockets.exceptions.ConnectionClosedOK(None, None)
+        _ws_exc.ConnectionClosedOK(None, None)  # type: ignore[union-attr]
     )
     ws.recv = AsyncMock(side_effect=recv_side_effects)
 
@@ -231,6 +243,7 @@ class TestToolCreation:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(not _has_websockets, reason="websockets not installed")
 class TestResearchExecution:
     """Test _run_research via mocked WebSocket connection."""
 
@@ -494,6 +507,7 @@ class TestResearchExecution:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(not _has_httpx, reason="httpx not installed")
 class TestDocumentUpload:
     """Test _upload_document via mocked httpx."""
 
