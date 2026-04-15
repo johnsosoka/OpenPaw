@@ -160,6 +160,13 @@ class BuiltinRegistry:
         except ImportError as e:
             logger.debug(f"Acknowledge tool not available: {e}")
 
+        try:
+            from openpaw.builtins.tools.gpt_researcher import GptResearcherTool
+
+            self.register_tool(GptResearcherTool)
+        except ImportError as e:
+            logger.debug(f"GPT-Researcher not available: {e}")
+
         # Processors (sorted by metadata.priority in BuiltinLoader.load_processors)
         try:
             from openpaw.builtins.processors.file_persistence import FilePersistenceProcessor

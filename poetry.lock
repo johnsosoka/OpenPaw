@@ -7185,7 +7185,7 @@ description = "An implementation of the WebSocket Protocol (RFC 6455 & 7692)"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"voice\" or extra == \"all-builtins\""
+markers = "extra == \"voice\" or extra == \"all-builtins\" or extra == \"researcher\""
 files = [
     {file = "websockets-15.0.1-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:d63efaa0cd96cf0c5fe4d581521d9fa87744540d4bc999ae6e08595a1014b45b"},
     {file = "websockets-15.0.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:ac60e3b188ec7574cb761b08d50fcedf9d77f1530352db4eef1707fe9dee7205"},
@@ -7724,12 +7724,13 @@ files = [
 cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and python_version < \"3.14\"", "cffi (>=2.0.0b) ; platform_python_implementation != \"PyPy\" and python_version >= \"3.14\""]
 
 [extras]
-all-builtins = ["elevenlabs", "langchain-community", "openai", "sqlite-vec"]
+all-builtins = ["elevenlabs", "httpx", "langchain-community", "openai", "sqlite-vec", "websockets"]
 memory = ["sqlite-vec"]
+researcher = ["httpx", "websockets"]
 voice = ["elevenlabs", "openai"]
 web = ["langchain-community"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "ab63be92f36a29c586bd77f00f22209f883f8046e23b6ffc2fd298b5865b2623"
+content-hash = "a2045244d211e4694222eb9c3937056212be21458bd804f0797ed507770432c9"

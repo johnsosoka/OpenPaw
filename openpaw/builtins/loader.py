@@ -40,6 +40,10 @@ class BuiltinLoader:
         "file_persistence": ["max_file_size", "clear_data_after_save"],
         "channel_history": ["max_messages_per_request", "content_truncation"],
         "md2pdf": ["theme", "max_diagram_width", "self_heal", "self_heal_model", "max_heal_iterations"],
+        "gpt_researcher": [
+            "endpoint", "upload_endpoint", "timeout_seconds",
+            "default_report_type", "default_report_source", "default_tone",
+        ],
     }
 
     def __init__(
