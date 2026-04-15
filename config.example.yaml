@@ -118,6 +118,19 @@ builtins:
   #     max_concurrent: 8           # Maximum simultaneous sub-agents
   #     default_progress_interval: 0  # Minutes between progress updates (0 = disabled)
 
+  # Email integration — send and receive email via Gmail service account
+  # (requires: poetry install --extras email)
+  # email:
+  #   enabled: true
+  #   config:
+  #     provider: gmail
+  #     service_account_file: config/service-account.json  # Relative to workspace root
+  #     delegated_user: agent@yourdomain.com               # Email to impersonate (domain-wide delegation)
+  #     allowed_recipients:                                 # Empty = block all sends (safe default)
+  #       - "*@yourdomain.com"
+  #       - "partner@external.com"
+  #     max_recipients: 10                                  # Max recipients per outbound message
+
   # Browser automation via Playwright with accessibility tree navigation
   # (requires: poetry add playwright && poetry run playwright install chromium)
   # browser:

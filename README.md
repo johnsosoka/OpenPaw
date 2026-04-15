@@ -33,6 +33,8 @@ Agents can ingest documents, browse the web, search the internet, and manage the
 
 **Browser automation** -- Playwright-driven web interaction via accessibility tree. Agents reference page elements by number, not CSS selectors.
 
+**Email integration** -- Send and receive email via Gmail with safe-by-default recipient policies. Read inbox, search, reply with threading, and manage attachments.
+
 **Deep research** -- Integrate with a self-hosted GPT-Researcher instance for multi-source research reports with citations. Agents submit queries via WebSocket and receive comprehensive markdown reports.
 
 **Approval gates** -- Human-in-the-loop authorization for dangerous operations, with configurable timeouts and channel-native UI.
@@ -153,7 +155,7 @@ Once running, agents respond to framework commands in chat:
 - [Configuration](docs/configuration.md) -- Global and per-workspace configuration reference
 - [Workspaces](docs/workspaces.md) -- Workspace structure, identity files, and custom tools
 - [Scheduling](docs/scheduling.md) -- Cron jobs, heartbeats, and dynamic scheduling
-- [Built-ins](docs/builtins.md) -- Web search, browser automation, voice, sub-agents, and more
+- [Built-ins](docs/builtins.md) -- Web search, browser automation, email, voice, sub-agents, and more
 - [Channels](docs/channels.md) -- Channel adapters and access control
 - [Queue System](docs/queue-system.md) -- Queue modes and message handling
 - [Architecture](docs/architecture.md) -- System design, data flows, and architectural decisions

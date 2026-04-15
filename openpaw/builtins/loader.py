@@ -44,6 +44,10 @@ class BuiltinLoader:
             "endpoint", "upload_endpoint", "timeout_seconds",
             "default_report_type", "default_report_source", "default_tone",
         ],
+        "email": [
+            "provider", "service_account_file", "delegated_user",
+            "allowed_recipients", "max_recipients",
+        ],
     }
 
     def __init__(
@@ -201,6 +205,12 @@ class BuiltinLoader:
                 allowed_users = self.channel_config.get("allowed_users", [])
                 if allowed_users:
                     config["default_target_id"] = allowed_users[0]
+
+        # Resolve service_account_file relative to workspace for email tool
+        if name == "email":
+            sa_file = config.get("service_account_file")
+            if sa_file and self.workspace_path and not Path(sa_file).is_absolute():
+                config["service_account_file"] = str(self.workspace_path / sa_file)
 
         # Inject channel routing config for send_message tool
         if name == "send_message" and self.channel_config:

@@ -167,6 +167,13 @@ class BuiltinRegistry:
         except ImportError as e:
             logger.debug(f"GPT-Researcher not available: {e}")
 
+        try:
+            from openpaw.builtins.tools.email import EmailToolBuiltin
+
+            self.register_tool(EmailToolBuiltin)
+        except ImportError as e:
+            logger.debug(f"Email tool not available: {e}")
+
         # Processors (sorted by metadata.priority in BuiltinLoader.load_processors)
         try:
             from openpaw.builtins.processors.file_persistence import FilePersistenceProcessor
