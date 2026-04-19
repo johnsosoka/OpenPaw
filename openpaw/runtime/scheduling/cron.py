@@ -16,7 +16,11 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from openpaw.agent.metrics import TokenUsageLogger
 from openpaw.agent.session_logger import SessionLogger
-from openpaw.builtins.tools._channel_context import set_invocation_origin
+from openpaw.builtins.tools._channel_context import (
+    clear_channel_context,
+    set_channel_context,
+    set_invocation_origin,
+)
 from openpaw.channels.base import ChannelAdapter
 from openpaw.core.config.models import CronDefinition, CronOutputConfig
 from openpaw.core.paths import CRON_LOG_JSONL
@@ -194,6 +198,12 @@ class CronScheduler:
         logger.info(f"Executing cron job: {cron.name}")
         set_invocation_origin(f"cron:{cron.name}")
 
+        # Set up channel context so send_message/send_file work during cron execution
+        cron_channel = self.channels.get(cron.output.channel)
+        cron_session_key = self._resolve_session_key(cron_channel, cron.output) if cron_channel else None
+        if cron_channel and cron_session_key:
+            set_channel_context(cron_channel, cron_session_key)
+
         try:
             # Resolve max_output_tokens: per-cron definition takes precedence over
             # the workspace-level default already baked into the factory's
@@ -312,7 +322,7 @@ class CronScheduler:
             )
         finally:
             self._running_jobs.discard(job_id)
-            set_invocation_origin(None)
+            clear_channel_context()
 
     @staticmethod
     def _resolve_session_key(channel: ChannelAdapter, output: CronOutputConfig) -> str | None:
@@ -490,6 +500,12 @@ class CronScheduler:
         logger.info(f"Executing dynamic task: {task.id}")
         set_invocation_origin(f"dynamic_cron:{task.id[:8]}")
 
+        # Set up channel context so send_message/send_file work during execution
+        if task.channel and task.chat_id:
+            dyn_channel = self.channels.get(task.channel)
+            if dyn_channel:
+                set_channel_context(dyn_channel, dyn_channel.build_session_key(task.chat_id))
+
         try:
             agent_runner = self.agent_factory()
             start_time = time_module.monotonic()
@@ -593,7 +609,7 @@ class CronScheduler:
             )
         finally:
             self._running_jobs.discard(job_id)
-            set_invocation_origin(None)
+            clear_channel_context()
 
     def _prune_expired_tasks(self, tasks: list[DynamicCronTask]) -> list[DynamicCronTask]:
         """Remove expired one-time tasks that will never execute.
