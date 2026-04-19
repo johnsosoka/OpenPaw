@@ -79,6 +79,9 @@ jobs:
           - "3.11"
           - "3.12"
 
+    env:
+      CUDA_VISIBLE_DEVICES: ""  # Disable CUDA to prevent torch segfault on CPU-only runners
+
     steps:
       - uses: actions/checkout@v4
         if: needs.changes.outputs.code == 'true'
