@@ -40,6 +40,14 @@ class BuiltinLoader:
         "file_persistence": ["max_file_size", "clear_data_after_save"],
         "channel_history": ["max_messages_per_request", "content_truncation"],
         "md2pdf": ["theme", "max_diagram_width", "self_heal", "self_heal_model", "max_heal_iterations"],
+        "gpt_researcher": [
+            "endpoint", "upload_endpoint", "timeout_seconds",
+            "default_report_type", "default_report_source", "default_tone",
+        ],
+        "email": [
+            "provider", "service_account_file", "delegated_user",
+            "allowed_recipients", "max_recipients",
+        ],
     }
 
     def __init__(
@@ -219,6 +227,12 @@ class BuiltinLoader:
             cfg_dict = self._get_field(workspace_cfg, "config")
             if cfg_dict:
                 config.update(cfg_dict)
+
+        # Post-merge: resolve service_account_file relative to workspace
+        if name == "email":
+            sa_file = config.get("service_account_file")
+            if sa_file and self.workspace_path and not Path(sa_file).is_absolute():
+                config["service_account_file"] = str(self.workspace_path / sa_file)
 
         return config
 

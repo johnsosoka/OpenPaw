@@ -88,6 +88,16 @@ builtins:
     config:
       max_file_size: 52428800  # 50 MB
       clear_data_after_save: false
+
+  # email:
+  #   enabled: true
+  #   config:
+  #     provider: gmail
+  #     service_account_file: config/service-account.json
+  #     delegated_user: agent@yourdomain.com
+  #     allowed_recipients:
+  #       - "*@yourdomain.com"
+  #     max_recipients: 10
 ```
 
 ### Configuration Sections
@@ -609,6 +619,7 @@ These are automatically loaded via `python-dotenv` when the workspace starts.
 - `BRAVE_API_KEY` — Web search capability
 - `OPENAI_API_KEY` — Whisper audio transcription (also used for GPT models)
 - `ELEVENLABS_API_KEY` — Text-to-speech
+- Google service account JSON file — Email integration (see [Builtins - Email](builtins.md#email))
 
 ---
 
