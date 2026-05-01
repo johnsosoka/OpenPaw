@@ -1,5 +1,6 @@
 """Browser automation builtin for OpenPaw."""
 
+import json
 import logging
 from typing import Any
 
@@ -27,6 +28,15 @@ class BrowserClickInput(BaseModel):
     """Input schema for clicking elements."""
 
     ref: int = Field(description="Element reference number from browser_snapshot")
+    keep_refs: bool = Field(
+        default=False,
+        description=(
+            "When True, auto-refresh the snapshot after clicking and return "
+            "updated element refs. Use this for multi-selection in custom "
+            "dropdowns where the DOM re-renders after each click — you can "
+            "click the next element immediately without calling browser_snapshot."
+        ),
+    )
 
 
 class BrowserTypeInput(BaseModel):
@@ -61,6 +71,26 @@ class BrowserScreenshotInput(BaseModel):
     full_page: bool = Field(
         default=False,
         description="Capture entire scrollable page (default: viewport only)",
+    )
+
+
+class BrowserExecuteJsInput(BaseModel):
+    """Input schema for executing JavaScript."""
+
+    script: str = Field(
+        description=(
+            "JavaScript to evaluate in the page. Can be an expression "
+            "(e.g. 'document.title') or an arrow function body "
+            "(e.g. '...args => document.querySelectorAll(args[0])'). "
+            "If `arg` is provided, the script receives it as a parameter."
+        )
+    )
+    arg: str | None = Field(
+        default=None,
+        description=(
+            "Optional JSON value passed into the script. "
+            "Useful for parameterised queries like CSS selectors."
+        ),
     )
 
 
@@ -128,6 +158,7 @@ class BrowserToolBuiltin(BaseBuiltinTool):
             self._create_type_tool(),
             self._create_select_tool(),
             self._create_scroll_tool(),
+            self._create_execute_js_tool(),
             self._create_back_tool(),
             self._create_screenshot_tool(),
             self._create_close_tool(),
@@ -229,21 +260,22 @@ class BrowserToolBuiltin(BaseBuiltinTool):
     def _create_click_tool(self) -> StructuredTool:
         """Create browser_click tool."""
 
-        def click_sync(ref: int) -> str:
+        def click_sync(ref: int, keep_refs: bool = False) -> str:
             """Not implemented (browser is async-only)."""
             raise NotImplementedError("Browser click requires async execution")
 
-        async def click_async(ref: int) -> str:
+        async def click_async(ref: int, keep_refs: bool = False) -> str:
             """Click an element by reference number.
 
             Args:
                 ref: Element reference from browser_snapshot.
+                keep_refs: Auto-refresh snapshot after click (for multi-selection).
 
             Returns:
                 Confirmation or error message.
             """
             session = self._get_session()
-            return await session.click(ref)
+            return await session.click(ref, keep_refs=keep_refs)
 
         return StructuredTool.from_function(
             func=click_sync,
@@ -252,7 +284,12 @@ class BrowserToolBuiltin(BaseBuiltinTool):
             description=(
                 "Click an element by reference number from browser_snapshot. "
                 "The page may change after clicking, so use browser_snapshot again "
-                "to see the updated state."
+                "to see the updated state.\n\n"
+                "For multi-selection in custom dropdowns (React/Vue components "
+                "that re-render after each click), use keep_refs=True. This "
+                "auto-refreshes the snapshot after clicking so you can immediately "
+                "click the next element without a separate browser_snapshot call. "
+                "Example: click(3, keep_refs=True) → click(5, keep_refs=True) → ..."
             ),
             args_schema=BrowserClickInput,
         )
@@ -351,6 +388,51 @@ class BrowserToolBuiltin(BaseBuiltinTool):
                 "browser_snapshot to see newly visible content."
             ),
             args_schema=BrowserScrollInput,
+        )
+
+    def _create_execute_js_tool(self) -> StructuredTool:
+        """Create browser_execute_js tool."""
+
+        def execute_js_sync(script: str, arg: str | None = None) -> str:
+            raise NotImplementedError("Browser JS execution requires async execution")
+
+        async def execute_js_async(script: str, arg: str | None = None) -> str:
+            """Execute JavaScript in the browser page.
+
+            Use this when accessibility-tree interaction is unreliable — for example,
+            custom React/Vue dropdowns that re-render after every click, or elements
+            that lack stable ARIA roles. You can directly manipulate the DOM, query
+            element state, or dispatch events.
+
+            Examples:
+                - document.querySelectorAll('input[type=checkbox]').length
+                - [...document.querySelectorAll('.item')].map(e => e.textContent)
+                - (els) => els.forEach(e => e.click())  with arg='.my-checkbox'
+
+            Args:
+                script: JavaScript expression or arrow-function body to evaluate.
+                arg: Optional JSON value passed into the script.
+
+            Returns:
+                Result of the script (string, or JSON for objects/arrays).
+            """
+            session = self._get_session()
+            parsed_arg = json.loads(arg) if arg else None
+            return await session.execute_js(script, parsed_arg)
+
+        return StructuredTool.from_function(
+            func=execute_js_sync,
+            coroutine=execute_js_async,
+            name="browser_execute_js",
+            description=(
+                "Execute JavaScript code in the browser page context. "
+                "Use this when accessibility-tree interaction is unreliable — "
+                "for example, custom React/Vue dropdowns that re-render after "
+                "every click, or elements that lack stable ARIA roles. "
+                "You can directly manipulate the DOM, query element state, or "
+                "dispatch events. Returns the script result as a string or JSON."
+            ),
+            args_schema=BrowserExecuteJsInput,
         )
 
     def _create_back_tool(self) -> StructuredTool:

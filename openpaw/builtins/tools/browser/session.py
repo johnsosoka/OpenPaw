@@ -442,14 +442,18 @@ class BrowserSession:
             logger.error(f"Snapshot failed: {e}")
             return f"Snapshot failed: {str(e)}"
 
-    async def click(self, ref: int) -> str:
+    async def click(self, ref: int, keep_refs: bool = False) -> str:
         """Click element by reference number.
 
         Args:
             ref: Element reference from snapshot.
+            keep_refs: When True, auto-refresh the snapshot after clicking
+                and return updated element refs. Useful for multi-selection
+                in custom dropdowns where the DOM re-renders after each click.
 
         Returns:
-            Confirmation message or error.
+            Confirmation message or error. When keep_refs=True, includes
+            a refreshed snapshot so you can immediately click the next element.
         """
         if not self.is_active:
             return "Browser not active. Use browser_navigate first."
@@ -465,7 +469,7 @@ class BrowserSession:
             role = node.get("role", "")
             name = node.get("name", "")
 
-            logger.info(f"Clicking element {ref}: {name} ({role})")
+            logger.info(f"Clicking element {ref}: {name} ({role}) keep_refs={keep_refs}")
 
             # Try to locate element by role and name
             try:
@@ -478,6 +482,19 @@ class BrowserSession:
                     await locator.first.click(timeout=self.timeout_seconds * 1000)
                 else:
                     raise
+
+            if keep_refs:
+                # Wait for DOM to settle, then refresh snapshot
+                try:
+                    await self._page.wait_for_load_state("domcontentloaded", timeout=5000)
+                except Exception:
+                    pass  # Best-effort wait; DOM may already be stable
+
+                refreshed = await self.snapshot()
+                return (
+                    f"Clicked: {name} ({role})\n\n"
+                    f"--- Refreshed snapshot ---\n{refreshed}"
+                )
 
             # Invalidate refs (page may have changed)
             self._ref_map = {}
@@ -581,6 +598,45 @@ class BrowserSession:
         except Exception as e:
             logger.error(f"Select failed: {e}")
             return f"Select failed: {str(e)}\nThe element may not be a dropdown or the option may not exist."
+
+    async def execute_js(self, script: str, arg: Any = None) -> str:
+        """Execute JavaScript in the browser page context.
+
+        Use this for direct DOM manipulation when accessibility tree interaction
+        is unreliable (custom React/Vue components, dynamic dropdowns, etc.).
+
+        Args:
+            script: JavaScript expression or arrow function body to evaluate.
+                If the script references ``arg``, the value is passed as the
+                second parameter to ``page.evaluate()`` and available as the
+                function argument.
+            arg: Optional JSON-serializable value passed into the script.
+
+        Returns:
+            JSON-serialized result string, or error message.
+        """
+        if not self.is_active:
+            return "Browser not active. Use browser_navigate first."
+
+        try:
+            logger.info(f"Executing JS (length={len(script)})")
+
+            if arg is not None:
+                result = await self._page.evaluate(script, arg)
+            else:
+                result = await self._page.evaluate(script)
+
+            if result is None:
+                return "Script executed (returned null/undefined)"
+
+            if isinstance(result, str):
+                return result
+
+            return json.dumps(result, default=str, ensure_ascii=False)
+
+        except Exception as e:
+            logger.error(f"JS execution failed: {e}")
+            return f"JS execution failed: {str(e)}"
 
     async def scroll(self, direction: str, amount: str = "page") -> str:
         """Scroll the page.
