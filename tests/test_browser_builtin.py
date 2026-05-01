@@ -40,12 +40,12 @@ def test_initialization(config: dict):
 
 
 def test_get_langchain_tool_returns_list(config: dict):
-    """Test get_langchain_tool returns list of 11 tools."""
+    """Test get_langchain_tool returns list of 12 tools."""
     builtin = BrowserToolBuiltin(config)
     tools = builtin.get_langchain_tool()
 
     assert isinstance(tools, list)
-    assert len(tools) == 11
+    assert len(tools) == 12
 
 
 def test_tool_names_are_correct(config: dict):
@@ -60,6 +60,7 @@ def test_tool_names_are_correct(config: dict):
         "browser_type",
         "browser_select",
         "browser_scroll",
+        "browser_execute_js",
         "browser_back",
         "browser_screenshot",
         "browser_close",
@@ -143,13 +144,14 @@ def test_navigate_tool_has_url_parameter(config: dict):
 
 
 def test_click_tool_has_ref_parameter(config: dict):
-    """Test click tool accepts ref parameter."""
+    """Test click tool accepts ref and keep_refs parameters."""
     builtin = BrowserToolBuiltin(config)
     tools = builtin.get_langchain_tool()
 
     click_tool = next(t for t in tools if t.name == "browser_click")
     assert click_tool.args_schema is not None
     assert "ref" in click_tool.args_schema.model_fields
+    assert "keep_refs" in click_tool.args_schema.model_fields
 
 
 def test_type_tool_has_required_parameters(config: dict):
@@ -175,6 +177,18 @@ def test_scroll_tool_has_direction_and_amount(config: dict):
     fields = scroll_tool.args_schema.model_fields
     assert "direction" in fields
     assert "amount" in fields
+
+
+def test_execute_js_tool_has_script_parameter(config: dict):
+    """Test execute_js tool has script and optional arg parameters."""
+    builtin = BrowserToolBuiltin(config)
+    tools = builtin.get_langchain_tool()
+
+    js_tool = next(t for t in tools if t.name == "browser_execute_js")
+    assert js_tool.args_schema is not None
+    fields = js_tool.args_schema.model_fields
+    assert "script" in fields
+    assert "arg" in fields
 
 
 def test_screenshot_tool_has_full_page_parameter(config: dict):

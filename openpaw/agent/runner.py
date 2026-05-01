@@ -151,7 +151,7 @@ def create_chat_model(
     if provider == "fireworks":
         import httpx
         import tenacity
-        from fireworks.client.error import FireworksError
+        from fireworks.client.error import FireworksError, InvalidRequestError
         from langchain_fireworks import ChatFireworks
 
         if api_key:
@@ -166,15 +166,23 @@ def create_chat_model(
             logger.info(f"Patching ChatFireworks._agenerate with retry (max_attempts={effective_retries + 1})")
             original_agenerate = model._agenerate
 
+            def _is_retryable_fireworks_error(exc: BaseException) -> bool:
+                if isinstance(exc, InvalidRequestError):
+                    msg = str(exc).lower()
+                    if "prompt is too long" in msg or "maximum context length" in msg:
+                        return False
+                return isinstance(
+                    exc,
+                    httpx.HTTPStatusError
+                    | httpx.ConnectError
+                    | httpx.ReadTimeout
+                    | ConnectionError
+                    | TimeoutError
+                    | FireworksError,
+                )
+
             @tenacity.retry(
-                retry=tenacity.retry_if_exception_type((
-                    httpx.HTTPStatusError,
-                    httpx.ConnectError,
-                    httpx.ReadTimeout,
-                    ConnectionError,
-                    TimeoutError,
-                    FireworksError,
-                )),
+                retry=tenacity.retry_if_exception(_is_retryable_fireworks_error),
                 stop=tenacity.stop_after_attempt(effective_retries + 1),
                 wait=tenacity.wait_exponential_jitter(initial=1, max=60),
                 before_sleep=tenacity.before_sleep_log(logger, logging.WARNING),
