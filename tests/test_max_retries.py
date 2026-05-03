@@ -1,13 +1,9 @@
 """Tests for max_retries retry configuration across model providers."""
 
-from pathlib import Path
 from unittest.mock import Mock, patch
-
-import pytest
 
 from openpaw.agent.runner import create_chat_model
 from openpaw.core.config.models import WorkspaceModelConfig
-
 
 # ---------------------------------------------------------------------------
 # Config model tests
@@ -124,9 +120,92 @@ def test_fireworks_agenerate_patched_with_tenacity() -> None:
     # Model itself is returned (not a wrapper), preserving bind_tools()
     assert result is mock_model
     # _agenerate should be replaced with a tenacity-wrapped version
-    assert result._agenerate is not mock_model._agenerate.__func__ if hasattr(mock_model._agenerate, '__func__') else True
+    assert (
+        result._agenerate is not mock_model._agenerate.__func__
+        if hasattr(mock_model._agenerate, "__func__")
+        else True
+    )
     # The patched function should have tenacity retry attributes
     assert hasattr(result._agenerate, "retry")
+
+
+def test_fireworks_uses_minimum_6_attempts() -> None:
+    """Fireworks retries are floored at 6 attempts regardless of max_retries config."""
+    import tenacity
+
+    mock_model = Mock()
+    mock_model._agenerate = Mock()
+
+    with patch("langchain_fireworks.ChatFireworks", return_value=mock_model):
+        result = create_chat_model(
+            model_str="fireworks:accounts/fireworks/models/deepseek-v3p1",
+            api_key="test-key",
+            temperature=0.7,
+            extra_kwargs={"max_retries": 3},
+        )
+
+    stop_strategy = result._agenerate.retry.stop
+    assert isinstance(stop_strategy, tenacity.stop_after_attempt)
+    assert stop_strategy.max_attempt_number == 7  # 6 retries + 1 initial
+
+
+def test_fireworks_custom_high_retries_preserved() -> None:
+    """When max_retries > 6, Fireworks uses the user's value instead of the floor."""
+    import tenacity
+
+    mock_model = Mock()
+    mock_model._agenerate = Mock()
+
+    with patch("langchain_fireworks.ChatFireworks", return_value=mock_model):
+        result = create_chat_model(
+            model_str="fireworks:accounts/fireworks/models/deepseek-v3p1",
+            api_key="test-key",
+            temperature=0.7,
+            extra_kwargs={"max_retries": 10},
+        )
+
+    stop_strategy = result._agenerate.retry.stop
+    assert isinstance(stop_strategy, tenacity.stop_after_attempt)
+    assert stop_strategy.max_attempt_number == 11  # 10 retries + 1 initial
+
+
+def test_fireworks_rate_limit_wait_longer() -> None:
+    """Rate limit errors get longer backoff (initial=5s) than transient errors (initial=1s)."""
+    import tenacity
+    from fireworks.client.error import RateLimitError
+
+    mock_model = Mock()
+    mock_model._agenerate = Mock()
+
+    with patch("langchain_fireworks.ChatFireworks", return_value=mock_model):
+        result = create_chat_model(
+            model_str="fireworks:accounts/fireworks/models/deepseek-v3p1",
+            api_key="test-key",
+            temperature=0.7,
+            extra_kwargs={"max_retries": 3},
+        )
+
+    wait_fn = result._agenerate.retry.wait
+
+    # Simulate a RateLimitError retry state (3rd attempt)
+    rl_state = Mock(spec=tenacity.RetryCallState)
+    rl_state.outcome = Mock()
+    rl_state.outcome.failed = True
+    rl_state.outcome.exception = Mock(return_value=RateLimitError("rate limit exceeded"))
+    rl_state.attempt_number = 3
+
+    rl_wait = wait_fn(rl_state)
+    assert rl_wait >= 5  # initial=5 for rate limit errors
+
+    # Simulate a transient error retry state (3rd attempt)
+    trans_state = Mock(spec=tenacity.RetryCallState)
+    trans_state.outcome = Mock()
+    trans_state.outcome.failed = True
+    trans_state.outcome.exception = Mock(return_value=ConnectionError("connection reset"))
+    trans_state.attempt_number = 3
+
+    trans_wait = wait_fn(trans_state)
+    assert trans_wait >= 1  # initial=1 for transient errors
 
 
 def test_fireworks_no_patch_when_retries_disabled() -> None:

@@ -99,7 +99,7 @@ def deduplicate_path(path: Path) -> Path:
 
 def resolve_user_name(
     user_id: str,
-    metadata: dict,
+    metadata: dict[str, object],
     user_aliases: dict[int, str] | None,
 ) -> str | None:
     """Resolve display name for a user from aliases or metadata.
@@ -139,6 +139,32 @@ def resolve_user_name(
     return None
 
 
+_CONTEXT_OVERFLOW_PATTERNS = (
+    "prompt is too long",
+    "maximum context length",
+    "context_length_exceeded",
+    "too many tokens",
+    "context window is full",
+)
+
+
+def is_context_overflow_error(error: Exception) -> bool:
+    """Detect context window overflow errors across providers.
+
+    Checks for known error patterns from Anthropic, OpenAI, Fireworks,
+    Bedrock, and xAI that indicate the conversation exceeds the model's
+    input context window.
+
+    Args:
+        error: The caught exception.
+
+    Returns:
+        True if the error is a context overflow, False otherwise.
+    """
+    msg = str(error).lower()
+    return any(p in msg for p in _CONTEXT_OVERFLOW_PATTERNS)
+
+
 def sanitize_error_for_user(error: Exception) -> str:
     """Convert an exception to a user-safe error message.
 
@@ -155,4 +181,9 @@ def sanitize_error_for_user(error: Exception) -> str:
         return "The request timed out. Please try again."
     if isinstance(error, ConnectionError):
         return "A connection error occurred. Please try again shortly."
+    if is_context_overflow_error(error):
+        return (
+            "The conversation grew too long for the model's context window. "
+            "Starting a fresh conversation."
+        )
     return "Something went wrong processing your message. Please try again."

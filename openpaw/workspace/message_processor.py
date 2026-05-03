@@ -16,7 +16,7 @@ from openpaw.core.prompts.system_events import (
     INTERRUPT_NOTIFICATION,
     TOOL_DENIED_TEMPLATE,
 )
-from openpaw.core.utils import resolve_user_name, sanitize_error_for_user
+from openpaw.core.utils import is_context_overflow_error, resolve_user_name, sanitize_error_for_user
 from openpaw.model.message import Message
 from openpaw.runtime.approval import ApprovalGateManager
 from openpaw.runtime.queue.lane import QueueMode
@@ -370,6 +370,19 @@ class MessageProcessor:
 
             except Exception as e:
                 self._logger.error(f"Error processing messages for {session_key}: {e}", exc_info=True)
+
+                if is_context_overflow_error(e):
+                    new_tid = await self._recover_context_overflow(
+                        session_key, thread_id, channel
+                    )
+                    if new_tid:
+                        thread_id = new_tid
+                        combined_content = (
+                            "[SYSTEM] The previous conversation was too long and has been archived. "
+                            "A fresh conversation has started. Please continue from where you left off."
+                        )
+                        continue
+
                 if channel:
                     await channel.send_message(session_key, sanitize_error_for_user(e))
                 break  # Don't continue followup chain on error
@@ -615,6 +628,86 @@ class MessageProcessor:
 
         except Exception as e:
             self._logger.error(f"Auto-compact failed for {session_key}: {e}", exc_info=True)
+            return None
+
+    async def _recover_context_overflow(
+        self,
+        session_key: str,
+        thread_id: str,
+        channel: ChannelAdapter | None,
+    ) -> str | None:
+        """Recover from a context window overflow by force-rotating the conversation.
+
+        Unlike _check_auto_compact (preventive, pre-run), this is an emergency
+        recovery triggered after a context overflow error. It always rotates,
+        regardless of auto_compact config, because the alternative is a
+        permanently stuck workspace.
+
+        Best-effort: archives the old conversation if possible, rotates to
+        a fresh thread, and notifies the user.
+
+        Args:
+            session_key: The session identifier.
+            thread_id: The current (overflowed) thread ID.
+            channel: Channel adapter for sending notifications.
+
+        Returns:
+            New thread_id if recovery succeeded, None on failure.
+        """
+        self._logger.warning(
+            f"Context overflow detected for {session_key}, "
+            f"force-rotating conversation"
+        )
+
+        try:
+            # Best-effort archive of the overflowed conversation
+            if self._conversation_archiver and self._agent_runner.checkpointer:
+                try:
+                    parts = thread_id.rsplit(":", 1)
+                    conversation_id = parts[-1] if len(parts) == 2 else thread_id
+                    await self._conversation_archiver.archive(
+                        checkpointer=self._agent_runner.checkpointer,
+                        thread_id=thread_id,
+                        session_key=session_key,
+                        conversation_id=conversation_id,
+                        tags=["context_overflow"],
+                    )
+                except Exception as archive_err:
+                    self._logger.warning(
+                        f"Failed to archive overflowed conversation: {archive_err}"
+                    )
+
+            # Rotate to fresh conversation
+            self._session_manager.new_conversation(session_key)
+            new_thread_id = self._session_manager.get_thread_id(session_key)
+
+            # Notify user
+            if channel:
+                try:
+                    notify = getattr(
+                        self._lifecycle_config, "notify_auto_compact", True
+                    )
+                    if notify:
+                        await channel.send_message(
+                            session_key,
+                            "The conversation grew too long and has been archived. "
+                            "Starting a fresh conversation.",
+                        )
+                except Exception as e:
+                    self._logger.debug(
+                        f"Failed to send overflow recovery notification: {e}"
+                    )
+
+            self._logger.info(
+                f"Context overflow recovery: rotated {thread_id} -> {new_thread_id}"
+            )
+            return new_thread_id
+
+        except Exception as e:
+            self._logger.error(
+                f"Context overflow recovery failed for {session_key}: {e}",
+                exc_info=True,
+            )
             return None
 
     async def _send_pending_audio(self, channel: ChannelAdapter, session_key: str) -> None:
