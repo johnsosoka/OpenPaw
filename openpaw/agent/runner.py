@@ -151,7 +151,7 @@ def create_chat_model(
     if provider == "fireworks":
         import httpx
         import tenacity
-        from fireworks.client.error import FireworksError, InvalidRequestError
+        from fireworks.client.error import FireworksError, InvalidRequestError, RateLimitError
         from langchain_fireworks import ChatFireworks
 
         if api_key:
@@ -162,8 +162,21 @@ def create_chat_model(
         # The Fireworks SDK's _max_retries is a no-op — patch _agenerate with
         # tenacity for real retry behavior.  This preserves bind_tools() and all
         # model attributes (unlike .with_retry() which wraps the entire Runnable).
+        #
+        # Fireworks changed their rate limit error format (Apr 2025): the code
+        # field shifted from "too_many_requests" (transient overload) to
+        # "invalid_request_error" (hard rate limit).  Hard rate limits need much
+        # longer backoff than transient 5xx errors, so we use a composite wait
+        # strategy that applies longer delays specifically for RateLimitError.
         if effective_retries > 0:
-            logger.info(f"Patching ChatFireworks._agenerate with retry (max_attempts={effective_retries + 1})")
+            # Use more attempts for Fireworks — the default of 3 is too few when
+            # multiple workspaces share one API key (rate limits may need 30-60s
+            # to clear, and 3 retries only yields ~8s total backoff).
+            fireworks_attempts = max(effective_retries, 6)
+            logger.info(
+                f"Patching ChatFireworks._agenerate with retry "
+                f"(max_attempts={fireworks_attempts + 1}, effective_retries={effective_retries})"
+            )
             original_agenerate = model._agenerate
 
             def _is_retryable_fireworks_error(exc: BaseException) -> bool:
@@ -181,10 +194,17 @@ def create_chat_model(
                     | FireworksError,
                 )
 
+            def _fireworks_wait(retry_state: tenacity.RetryCallState) -> float:
+                """Rate-limit-aware backoff: longer delays for RateLimitError."""
+                exc = retry_state.outcome.exception() if retry_state.outcome and retry_state.outcome.failed else None
+                if isinstance(exc, RateLimitError):
+                    return tenacity.wait_exponential_jitter(initial=5, max=120)(retry_state)
+                return tenacity.wait_exponential_jitter(initial=1, max=60)(retry_state)
+
             @tenacity.retry(
                 retry=tenacity.retry_if_exception(_is_retryable_fireworks_error),
-                stop=tenacity.stop_after_attempt(effective_retries + 1),
-                wait=tenacity.wait_exponential_jitter(initial=1, max=60),
+                stop=tenacity.stop_after_attempt(fireworks_attempts + 1),
+                wait=_fireworks_wait,
                 before_sleep=tenacity.before_sleep_log(logger, logging.WARNING),
                 reraise=True,
             )
