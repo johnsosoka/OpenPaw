@@ -4,6 +4,7 @@
   <p>
     <a href="https://github.com/johnsosoka/OpenPaw/actions/workflows/ci.yml"><img src="https://github.com/johnsosoka/OpenPaw/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
     <a href="https://github.com/johnsosoka/OpenPaw/actions/workflows/docs.yml"><img src="https://github.com/johnsosoka/OpenPaw/actions/workflows/docs.yml/badge.svg?branch=main" alt="Docs"></a>
+    <img src="https://github.com/johnsosoka/OpenPaw/actions/workflows/ai-code-review.yml/badge.svg" alt="AI Code Review">
     <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
     <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-green" alt="License">
   </p>
@@ -169,6 +170,12 @@ Development follows a GitFlow branching model:
 - **Feature branches** -- Branch from `develop` as `feature/`, `bugfix/`, `docs/`, or `chore/`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
+
+## AI Code Review
+
+All pull requests are automatically reviewed by GPT-4o via [ai-code-review](https://github.com/AleksandrFurmenkovOfficial/ai-code-review). The AI checks for code quality, security issues, performance concerns, and maintainability.
+
+Reviews run on every PR open and update. Results are posted as inline comments on the pull request.
 
 ## Prerequisites
 
