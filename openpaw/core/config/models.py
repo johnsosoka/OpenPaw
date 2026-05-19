@@ -154,6 +154,22 @@ class WorkspaceChannelConfig(BaseModel):
         default_factory=ChannelLogConfig,
         description="Persistent channel message logging configuration",
     )
+    primary: bool = Field(
+        default=False,
+        description=(
+            "Mark this channel as the primary (preferred) channel for the workspace owner. "
+            "Cross-channel escalations route detailed briefings here. "
+            "Exactly one channel must be primary when 2+ channels are configured."
+        ),
+    )
+    default_target_id: int | None = Field(
+        default=None,
+        description=(
+            "Default target ID for cross-channel messaging. "
+            "When another channel sends a message here without an explicit target_id, "
+            "this value is used. Falls back to first allowed_users entry if not set."
+        ),
+    )
 
     @field_validator("context_messages")
     @classmethod
@@ -722,6 +738,24 @@ class WorkspaceConfig(BaseModel):
         default_factory=StatusReminderConfig,
         description="Status reminder middleware configuration",
     )
+
+    @model_validator(mode="after")
+    def validate_primary_channel(self) -> "WorkspaceConfig":
+        """Validate exactly one channel is marked primary when 2+ channels configured."""
+        if len(self.channels) >= 2:
+            primary_count = sum(1 for ch in self.channels if ch.primary)
+            if primary_count == 0:
+                raise ValueError(
+                    "Exactly one channel must be marked 'primary: true' when multiple "
+                    "channels are configured. The primary channel receives cross-channel "
+                    "escalations and detailed briefings."
+                )
+            if primary_count > 1:
+                raise ValueError(
+                    f"Only one channel can be marked 'primary: true', but {primary_count} "
+                    f"channels have primary set."
+                )
+        return self
 
     @field_validator("session_ttl_minutes")
     @classmethod

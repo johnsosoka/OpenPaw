@@ -840,6 +840,7 @@ class WorkspaceRunner:
         )
         self._connect_spawn_tool_to_runner()
         self._connect_channel_history_tool()
+        self._connect_cross_channel_registry()
 
         self._running = True
         self._queue_processor_task = asyncio.create_task(self._queue_processor())
@@ -907,6 +908,44 @@ class WorkspaceRunner:
             )
         except Exception as e:
             self.logger.warning(f"Failed to connect ChannelHistoryTool: {e}")
+
+    def _connect_cross_channel_registry(self) -> None:
+        """Wire channel registry into send_message and send_file for cross-channel messaging.
+
+        Only wires when two or more channels are present — single-channel workspaces
+        have no need for cross-channel routing.
+        """
+        if len(self._channels) < 2:
+            return
+
+        # Build default target map from merged config.
+        # Priority: explicit default_target_id > first entry in allowed_users.
+        channel_targets: dict[str, int] = {}
+        for ch_cfg in self._merged_config.get("channels", []):
+            ch_name = ch_cfg.get("name") or ch_cfg.get("type", "telegram")
+            default_target = ch_cfg.get("default_target_id")
+            if default_target is not None:
+                channel_targets[ch_name] = default_target
+            elif ch_cfg.get("allowed_users"):
+                channel_targets[ch_name] = ch_cfg["allowed_users"][0]
+
+        send_msg = self._builtin_loader.get_tool_instance("send_message")
+        if send_msg and hasattr(send_msg, "set_channel_registry"):
+            send_msg.set_channel_registry(
+                self._channels, channel_targets, self._inject_system_event
+            )
+            self.logger.info(
+                "Connected cross-channel registry to send_message (%d channels)",
+                len(self._channels),
+            )
+
+        send_file = self._builtin_loader.get_tool_instance("send_file")
+        if send_file and hasattr(send_file, "set_channel_registry"):
+            send_file.set_channel_registry(self._channels, channel_targets)
+            self.logger.info(
+                "Connected cross-channel registry to send_file (%d channels)",
+                len(self._channels),
+            )
 
     def _connect_memory_search_tool(self) -> None:
         """Connect MemorySearchTool builtin to vector store and embedding provider.
