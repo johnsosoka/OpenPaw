@@ -207,8 +207,7 @@ class LifecycleManager:
 
         # Connect approval callback to channels
         for channel in self._channels.values():
-            if hasattr(channel, "on_approval"):
-                channel.on_approval(self._approval_handler)
+            channel.on_approval(self._approval_handler)
 
     async def stop_channels(self) -> None:
         """Stop all configured channels."""
