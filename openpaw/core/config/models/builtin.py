@@ -37,7 +37,7 @@ class SendFileBuiltinConfig(BuiltinItemConfig):
     """Configuration for the send_file tool."""
 
     max_file_size: int = Field(
-        default=50 * 1024 * 1024,
+        default=(50 * 1024 * 1024),
         description="Maximum file size in bytes (default 50MB for Telegram)"
     )
 
@@ -46,7 +46,7 @@ class DoclingBuiltinConfig(BuiltinItemConfig):
     """Configuration for the Docling document processor."""
 
     max_file_size: int = Field(
-        default=50 * 1024 * 1024,
+        default=(50 * 1024 * 1024),
         description="Maximum file size in bytes (default 50MB)"
     )
     ocr_backend: str = Field(
@@ -155,7 +155,7 @@ class FilePersistenceBuiltinConfig(BuiltinItemConfig):
     """Configuration for the file persistence processor."""
 
     max_file_size: int = Field(
-        default=50 * 1024 * 1024,
+        default=(50 * 1024 * 1024),
         description="Maximum file size in bytes (default 50MB)",
     )
     clear_data_after_save: bool = Field(default=False, description="Free memory after saving")

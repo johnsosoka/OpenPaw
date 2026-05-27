@@ -1,6 +1,7 @@
 """Per-workspace configuration models for OpenPaw."""
 
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -189,8 +190,6 @@ class WorkspaceConfig(BaseModel):
     @classmethod
     def validate_timezone(cls, v: str) -> str:
         """Validate timezone is a valid IANA timezone identifier."""
-        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
         try:
             ZoneInfo(v)
         except (ZoneInfoNotFoundError, KeyError):
