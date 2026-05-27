@@ -255,8 +255,8 @@ class CronScheduler:
 
             delivery = cron.output.delivery
 
-            # Channel delivery
-            if delivery == "channel":
+            # Channel delivery ("channel" or "both")
+            if delivery in ("channel", "both"):
                 channel = self.channels.get(cron.output.channel)
                 if not channel:
                     logger.error(f"Channel not found for cron {cron.name}: {cron.output.channel}")
@@ -267,8 +267,8 @@ class CronScheduler:
                     else:
                         logger.warning(f"Unsupported output config for cron {cron.name}: {cron.output}")
 
-            # Agent queue injection
-            elif delivery == "agent" and self._result_callback and session_path:
+            # Agent queue injection ("agent" or "both")
+            if delivery in ("agent", "both") and self._result_callback and session_path:
                 try:
                     channel = self.channels.get(cron.output.channel)
                     session_key = self._resolve_session_key(channel, cron.output) if channel else None

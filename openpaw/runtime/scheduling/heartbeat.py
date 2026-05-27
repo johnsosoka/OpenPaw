@@ -12,6 +12,11 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from openpaw.agent.session_logger import SessionLogger
+from openpaw.builtins.tools._channel_context import (
+    clear_channel_context,
+    set_channel_context,
+    set_invocation_origin,
+)
 from openpaw.channels.base import ChannelAdapter
 from openpaw.core.config import HeartbeatConfig
 from openpaw.core.paths import HEARTBEAT_LOG_JSONL, HEARTBEAT_MD, TASKS_YAML
@@ -353,6 +358,18 @@ class HeartbeatScheduler:
             return
 
         logger.info(f"Running heartbeat check for workspace: {self.workspace_name}")
+        set_invocation_origin(f"heartbeat:{self.workspace_name}")
+
+        # Set up channel context so send_message/send_file work during heartbeat execution
+        heartbeat_channel = self.channels.get(self.config.target_channel)
+        heartbeat_session_key = (
+            self._resolve_heartbeat_session_key(heartbeat_channel, self.config)
+            if heartbeat_channel
+            else None
+        )
+        if heartbeat_channel and heartbeat_session_key:
+            set_channel_context(heartbeat_channel, heartbeat_session_key)
+
         start_time = time_module.monotonic()
 
         try:
@@ -458,8 +475,7 @@ class HeartbeatScheduler:
                     )
                 return
 
-            channel = self.channels.get(self.config.target_channel)
-            if not channel:
+            if not heartbeat_channel:
                 logger.error(
                     f"Heartbeat channel not found: {self.config.target_channel} "
                     f"(workspace: {self.workspace_name})"
@@ -487,19 +503,17 @@ class HeartbeatScheduler:
                     )
                 return
 
-            session_key = self._resolve_heartbeat_session_key(channel, self.config)
-
-            if session_key:
+            if heartbeat_session_key:
                 # Delivery routing
                 delivery = self.config.delivery
 
-                # Channel delivery
-                if delivery == "channel":
-                    await channel.send_message(session_key=session_key, content=response)
-                    logger.info(f"Heartbeat notification sent to {self.config.target_channel}/{session_key}")
+                # Channel delivery ("channel" or "both")
+                if delivery in ("channel", "both"):
+                    await heartbeat_channel.send_message(session_key=heartbeat_session_key, content=response)
+                    logger.info(f"Heartbeat notification sent to {self.config.target_channel}/{heartbeat_session_key}")
 
-                # Agent queue injection
-                elif delivery == "agent" and self._result_callback and session_path:
+                # Agent queue injection ("agent" or "both")
+                if delivery in ("agent", "both") and self._result_callback and session_path:
                     try:
                         # Build injection content with truncation
                         output = response
@@ -512,8 +526,8 @@ class HeartbeatScheduler:
                             injection_content = HEARTBEAT_RESULT_TEMPLATE.format(
                                 output=output, session_path=session_path,
                             )
-                        await self._result_callback(session_key, injection_content)
-                        logger.info(f"Heartbeat result injected into agent queue for {session_key}")
+                        await self._result_callback(heartbeat_session_key, injection_content)
+                        logger.info(f"Heartbeat result injected into agent queue for {heartbeat_session_key}")
                     except Exception as e:
                         logger.warning(f"Failed to inject heartbeat result: {e}")
 
@@ -535,12 +549,12 @@ class HeartbeatScheduler:
                         metrics=metrics,
                         workspace=self.workspace_name,
                         invocation_type="heartbeat",
-                        session_key=session_key,
+                        session_key=heartbeat_session_key,
                     )
             else:
                 # No routing configured (no target ID or unsupported channel)
                 delivery = self.config.delivery
-                if delivery == "agent" and self._result_callback:
+                if delivery in ("agent", "both") and self._result_callback:
                     logger.warning(
                         f"Heartbeat delivery configured for agent injection but no session_key available "
                         f"(workspace: {self.workspace_name}, delivery: {delivery})"
@@ -586,6 +600,7 @@ class HeartbeatScheduler:
                 task_count=task_count,
             )
         finally:
+            clear_channel_context()
             # Clear any stale acknowledge state so a failed run cannot bleed
             # into the next heartbeat cycle.
             if self._ack_tool:
