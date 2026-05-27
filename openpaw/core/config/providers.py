@@ -7,7 +7,7 @@ connection details that AgentRunner and create_chat_model() expect.
 from dataclasses import dataclass, field
 from typing import Any
 
-from openpaw.core.config.models import ProviderDefinition
+from openpaw.core.config.models.base import ProviderDefinition
 
 
 @dataclass(frozen=True)
