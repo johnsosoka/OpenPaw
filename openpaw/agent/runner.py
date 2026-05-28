@@ -15,7 +15,7 @@ from openpaw.agent.middleware.approval import ApprovalRequiredError
 from openpaw.agent.middleware.llm_hooks import THINKING_TAG_PATTERN
 from openpaw.agent.middleware.queue_aware import InterruptSignalError
 from openpaw.agent.model_factory import THINKING_MODELS
-from openpaw.agent.tools.filesystem import FilesystemTools  # noqa: F401
+from openpaw.agent.tools.filesystem import FilesystemTools
 from openpaw.core.prompts.system_events import (
     TIMEOUT_NOTIFICATION_GENERIC,
     TIMEOUT_NOTIFICATION_TEMPLATE,
@@ -148,7 +148,7 @@ class AgentRunner:
 
         self._builder = AgentBuilder(
             workspace=self.workspace,
-            model=self.model_id,
+            model_id=self.model_id,
             api_key=self.api_key,
             temperature=self.temperature,
             max_turns=self.max_turns,
@@ -160,8 +160,8 @@ class AgentRunner:
             extra_model_kwargs=self.extra_model_kwargs,
             middleware=self._middleware,
             channel_logging_enabled=self.channel_logging_enabled,
-            create_model_func=self._create_model,
             create_agent_func=create_agent,
+            filesystem_tools_cls=FilesystemTools,
         )
         self._agent = self._build_agent()
 
@@ -257,6 +257,7 @@ class AgentRunner:
         (AGENT.md, HEARTBEAT.md, etc.) during the previous conversation.
         """
         self.workspace.reload_files()
+        self._builder.workspace = self.workspace
         self._agent, self._model_instance = self._builder.build()
         logger.info(f"Rebuilt agent with fresh workspace files: {self.workspace.name}")
 
@@ -382,19 +383,29 @@ class AgentRunner:
         )
 
     def _create_model(self) -> BaseChatModel:
-        """Create the chat model instance.
+        """Create the appropriate chat model based on provider.
 
-        Backwards-compatible wrapper that delegates to AgentBuilder.
+        Thin wrapper around AgentBuilder.create_model() for backward compatibility.
+
+        Returns:
+            Configured BaseChatModel instance.
+
+        Raises:
+            ValueError: If provider is not supported.
         """
-        return self._builder._create_model()
+        return self._builder.create_model()
 
     def _build_agent(self) -> Any:
         """Build the LangGraph agent with workspace configuration.
 
-        Backwards-compatible wrapper that delegates to AgentBuilder.
+        Backward-compatible wrapper that calls _create_model() first (to honor
+        test patches), then delegates the rest of construction to AgentBuilder.
+        Updates self._agent and self._model_instance.
         """
         self._builder.additional_tools = self.additional_tools
-        self._agent, self._model_instance = self._builder.build()
+        model = self._create_model()
+        self._model_instance = model
+        self._agent, _ = self._builder.build(model=model)
         return self._agent
 
     async def run(
