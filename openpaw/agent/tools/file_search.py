@@ -124,6 +124,11 @@ class FileSearchTools:
                 Matching lines with file path and line number
             """
             try:
+                re.compile(pattern)
+            except re.error as e:
+                return f"Error: Invalid regex pattern: {e}"
+
+            try:
                 search_path = self._resolve_path(path)
             except ValueError as e:
                 error_msg = f"Error: {e}"

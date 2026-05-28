@@ -115,8 +115,8 @@ class FileWriteTools:
                     f"Error: File '{file_path}' not found"
                     "\nUse ls('.') to see available files in your workspace."
                 )
-            except OSError as e:
-                return f"Error writing file '{file_path}': {e}"
+            except OSError:
+                return f"Error: Unable to write file '{file_path}'"
 
         @tool
         def overwrite_file(file_path: str, content: str) -> str:
@@ -167,8 +167,8 @@ class FileWriteTools:
                     f"Error: File '{file_path}' not found"
                     "\nUse ls('.') to see available files in your workspace."
                 )
-            except OSError as e:
-                return f"Error writing file '{file_path}': {e}"
+            except OSError:
+                return f"Error: Unable to write file '{file_path}'"
 
         @tool
         def edit_file(file_path: str, old_text: str, new_text: str, replace_all: bool = False) -> str:
@@ -244,7 +244,7 @@ class FileWriteTools:
                 )
             except UnicodeDecodeError:
                 return f"Error: File '{file_path}' is not a text file"
-            except OSError as e:
-                return f"Error editing file '{file_path}': {e}"
+            except OSError:
+                return f"Error: Unable to edit file '{file_path}'"
 
         return [write_file, overwrite_file, edit_file]

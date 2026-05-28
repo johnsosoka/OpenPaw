@@ -15,6 +15,8 @@ from langchain_core.tools import BaseTool, tool
 from openpaw.agent.tools.helpers.formatting import format_content_with_line_numbers, format_file_listing
 from openpaw.agent.tools.sandbox import resolve_sandboxed_path
 
+_MAX_READ_LINES = 5_000  # Safety cap for read_file limit
+
 
 class FileReadTools:
     """Read-only filesystem tools for agent workspace access."""
@@ -136,11 +138,14 @@ class FileReadTools:
             Args:
                 file_path: File path relative to workspace root
                 offset: Line offset to start reading from (0-indexed, default: 0)
-                limit: Maximum number of lines to read (default: 2000)
+                limit: Maximum number of lines to read (default: 2000, max: 5000)
 
             Returns:
                 File content with line numbers, or error message
             """
+            if limit > _MAX_READ_LINES:
+                return f"Error: limit exceeds maximum of {_MAX_READ_LINES} lines"
+
             try:
                 resolved_path = self._resolve_path(file_path)
             except ValueError as e:
@@ -201,8 +206,8 @@ class FileReadTools:
                 )
             except UnicodeDecodeError:
                 return f"Error: File '{file_path}' is not a text file (binary content detected)"
-            except OSError as e:
-                return f"Error reading file '{file_path}': {e}"
+            except OSError:
+                return f"Error: Unable to read file '{file_path}'"
 
         @tool
         def file_info(path: str) -> str:

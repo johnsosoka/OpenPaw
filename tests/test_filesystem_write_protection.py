@@ -473,3 +473,73 @@ class TestRaceConditionHandling:
         assert "Error:" in result
         assert "File 'workspace/report.md' not found" in result
         assert "Use ls('.')" in result
+
+    def test_read_file_limit_cap_rejects_excessive_values(self, tmp_path: Path):
+        """read_file rejects limit values above the safety cap."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        (ws / "report.md").write_text("line 1\nline 2\n")
+
+        fs = make_fs(tmp_path)
+        tools = get_tools(fs)
+
+        result = tools["read_file"].invoke({"file_path": "report.md", "limit": 10_000})
+
+        assert "Error:" in result
+        assert "5000" in result
+        assert "limit" in result.lower()
+
+    def test_write_file_sanitized_error_on_oserror(self, tmp_path: Path):
+        """OSError in write_file returns a sanitized message without raw path."""
+        fs = make_fs(tmp_path)
+        tools = get_tools(fs)
+
+        with patch(
+            "openpaw.agent.tools.file_write.os.open",
+            side_effect=OSError(30, "Read-only file system"),
+        ):
+            result = tools["write_file"].invoke({"file_path": "new.md", "content": "hello"})
+
+        assert "Error:" in result
+        assert "Unable to write" in result
+        assert "Read-only file system" not in result
+        assert str(tmp_path) not in result
+
+    def test_edit_file_sanitized_error_on_oserror(self, tmp_path: Path):
+        """OSError in edit_file returns a sanitized message without raw path."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        (ws / "draft.md").write_text("hello world")
+
+        fs = make_fs(tmp_path)
+        tools = get_tools(fs)
+
+        with patch(
+            "openpaw.agent.tools.file_write.os.open",
+            side_effect=OSError(30, "Read-only file system"),
+        ):
+            result = tools["edit_file"].invoke({
+                "file_path": "draft.md",
+                "old_text": "world",
+                "new_text": "there",
+            })
+
+        assert "Error:" in result
+        assert "Unable to edit" in result
+        assert "Read-only file system" not in result
+        assert str(tmp_path) not in result
+
+    def test_grep_files_rejects_invalid_regex(self, tmp_path: Path):
+        """grep_files returns clear error for malformed regex patterns."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        (ws / "test.py").write_text("def hello(): pass\n")
+
+        fs = make_fs(tmp_path)
+        tools = get_tools(fs)
+
+        result = tools["grep_files"].invoke({"pattern": "[unclosed", "path": "workspace"})
+
+        assert "Error:" in result
+        assert "Invalid regex" in result
+        assert "unterminated" in result
