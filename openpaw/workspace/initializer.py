@@ -158,10 +158,6 @@ class WorkspaceInitializer:
         workspace_tools = load_workspace_tools(
             self._workspace.tools_path, workspace_root=self._workspace.path
         )
-        if workspace_tools is None:
-            workspace_tools = load_workspace_tools(
-                self._workspace.tools_path, workspace_root=self._workspace.path
-            )
         if workspace_tools:
             tool_names = [t.name for t in workspace_tools]
             self._logger.info(
