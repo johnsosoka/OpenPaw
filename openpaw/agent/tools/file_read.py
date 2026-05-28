@@ -194,6 +194,11 @@ class FileReadTools:
 
                 return result
 
+            except FileNotFoundError:
+                return (
+                    f"Error: File '{file_path}' not found"
+                    "\nUse ls('.') to see available files in your workspace."
+                )
             except UnicodeDecodeError:
                 return f"Error: File '{file_path}' is not a text file (binary content detected)"
             except OSError as e:

@@ -110,6 +110,11 @@ class FileWriteTools:
                     success_msg += f" (workspace: {self._workspace_name})"
                 return success_msg
 
+            except FileNotFoundError:
+                return (
+                    f"Error: File '{file_path}' not found"
+                    "\nUse ls('.') to see available files in your workspace."
+                )
             except OSError as e:
                 return f"Error writing file '{file_path}': {e}"
 
@@ -157,6 +162,11 @@ class FileWriteTools:
                     success_msg += f" (workspace: {self._workspace_name})"
                 return success_msg
 
+            except FileNotFoundError:
+                return (
+                    f"Error: File '{file_path}' not found"
+                    "\nUse ls('.') to see available files in your workspace."
+                )
             except OSError as e:
                 return f"Error writing file '{file_path}': {e}"
 
@@ -227,6 +237,11 @@ class FileWriteTools:
 
                 return f"Successfully replaced {occurrences} occurrence(s) in '{file_path}'"
 
+            except FileNotFoundError:
+                return (
+                    f"Error: File '{file_path}' not found"
+                    "\nUse ls('.') to see available files in your workspace."
+                )
             except UnicodeDecodeError:
                 return f"Error: File '{file_path}' is not a text file"
             except OSError as e:
