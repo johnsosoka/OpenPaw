@@ -11,43 +11,33 @@ from dotenv import load_dotenv
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from openpaw.agent.metrics import TokenUsageLogger
-from openpaw.agent.middleware import (
-    ApprovalToolMiddleware,
-    QueueAwareToolMiddleware,
-    ToolTimeoutMiddleware,
-)
-from openpaw.agent.middleware.status_reminder import StatusReminderMiddleware
 from openpaw.agent.session_logger import SessionLogger
-from openpaw.builtins.base import BaseBuiltinProcessor
 from openpaw.builtins.loader import BuiltinLoader
 from openpaw.channels.base import ChannelAdapter
 from openpaw.channels.commands.base import CommandContext
 from openpaw.channels.commands.handlers import get_framework_commands
 from openpaw.channels.commands.router import CommandRouter
 from openpaw.core.channel_context import format_channel_context
-from openpaw.core.config import Config, merge_configs
-from openpaw.core.config.models import ApprovalGatesConfig, ToolTimeoutsConfig
+from openpaw.core.config import Config
 from openpaw.core.logging import setup_workspace_logger
 from openpaw.core.paths import CONVERSATIONS_DB, DOT_ENV, TEAM_DIR
 from openpaw.core.utils import resolve_user_name
 from openpaw.model.message import Message, MessageDirection
 from openpaw.model.spawn_profile import SpawnProfile
-from openpaw.runtime.approval import ApprovalGateManager
 from openpaw.runtime.queue.lane import LaneQueue, QueueItem, QueueMode
 from openpaw.runtime.queue.manager import QueueManager
-from openpaw.runtime.session.archiver import ConversationArchiver
 from openpaw.runtime.session.manager import SessionManager
 from openpaw.runtime.subagent import SubAgentRunner
-from openpaw.stores.subagent import SubAgentStore
-from openpaw.stores.task import TaskStore
-from openpaw.workspace.agent_factory import AgentFactory, filter_workspace_tools
+from openpaw.workspace.connector import BuiltinToolConnector
+from openpaw.workspace.initializer import WorkspaceInitializer
 from openpaw.workspace.lifecycle import LifecycleManager
+from openpaw.workspace.lifecycle_notifier import _notify_lifecycle_impl
 from openpaw.workspace.loader import WorkspaceLoader
-from openpaw.workspace.message_processor import MessageProcessor
 from openpaw.workspace.profile_loader import load_spawn_profiles
 from openpaw.workspace.profile_resolver import SpawnProfileResolver
 from openpaw.workspace.roster import TeamRosterBuilder
-from openpaw.workspace.tool_loader import load_workspace_tools
+from openpaw.workspace.task_service import TaskMaintenanceService
+from openpaw.workspace.tool_loader import load_workspace_tools  # noqa: F401
 
 
 class WorkspaceRunner:
@@ -82,13 +72,27 @@ class WorkspaceRunner:
             load_dotenv(workspace_env, override=True)
             self.logger.info(f"Loaded environment from: {workspace_env}")
         self._workspace = self._workspace_loader.load(workspace_name)
-        self._merged_config = self._merge_workspace_config(config, self._workspace)
+        self._merged_config = WorkspaceInitializer.merge_workspace_config(
+            config, self._workspace
+        )
         self._workspace_timezone: str = (
             self._workspace.config.timezone if self._workspace.config else "UTC"
         )
 
         # Initialize persistence stores and token logger
-        self._init_stores()
+        self._initializer = WorkspaceInitializer(
+            config=config,
+            workspace=self._workspace,
+            merged_config=self._merged_config,
+            logger=self.logger,
+        )
+        self._task_store, self._subagent_store, self._token_logger = (
+            self._initializer.init_stores()
+        )
+
+        # Initialize task maintenance service
+        self._task_service = TaskMaintenanceService(self._task_store, self.logger)
+        self._task_service.cleanup_old_tasks()
 
         # Initialize queue system
         self._lane_queue = LaneQueue(
@@ -100,9 +104,13 @@ class WorkspaceRunner:
         self._queue_manager = QueueManager(
             lane_queue=self._lane_queue,
             default_mode=QueueMode(queue_config.get("mode", config.queue.mode)),
-            default_debounce_ms=queue_config.get("debounce_ms", config.queue.debounce_ms),
+            default_debounce_ms=queue_config.get(
+                "debounce_ms", config.queue.debounce_ms
+            ),
             default_cap=queue_config.get("cap", config.queue.cap),
-            default_drop_policy=queue_config.get("drop_policy", config.queue.drop_policy),
+            default_drop_policy=queue_config.get(
+                "drop_policy", config.queue.drop_policy
+            ),
         )
 
         # Checkpointer placeholder (initialized in start())
@@ -115,17 +123,79 @@ class WorkspaceRunner:
         self._session_manager = SessionManager(self._workspace.path)
 
         # Memory search infrastructure and conversation archiver
-        self._init_memory()
+        (
+            self._vector_store,
+            self._embedding_provider,
+            self._indexer,
+            self._conversation_archiver,
+        ) = self._initializer.init_memory()
 
         # Command routing
         self._command_router = CommandRouter()
         self._register_framework_commands()
 
         # Builtin tools, processors, and workspace tools
-        self._init_builtins()
+        workspace_builtins_config = None
+        if self._workspace.config and self._workspace.config.builtins:
+            workspace_builtins_config = self._workspace.config.builtins
+
+        workspace_channel_config = (
+            self._merged_config.get("channels") or [{}]
+        )[0]
+
+        builtin_loader = BuiltinLoader(
+            global_config=self.config.builtins,
+            workspace_config=workspace_builtins_config,
+            workspace_path=self._workspace.path,
+            channel_config=workspace_channel_config,
+            workspace_timezone=self._workspace_timezone,
+            task_store=self._task_store,
+        )
+        (
+            self._builtin_loader,
+            self._builtin_tools,
+            self._processors,
+            self._workspace_tools,
+            self._enabled_builtin_names,
+            self._user_aliases,
+            self._channel_logging_enabled,
+        ) = self._initializer.init_builtins(
+            self._task_store,
+            builtin_loader=builtin_loader,
+        )
 
         # Middleware, agent factory, agent runner, and message processor
-        self._init_agent()
+        (
+            self._queue_middleware,
+            self._approval_middleware,
+            self._approval_manager,
+            self._agent_factory,
+            self._agent_runner,
+            self._message_processor,
+            self._tool_timeout_middleware,
+            self._status_reminder_middleware,
+        ) = self._initializer.init_agent(
+            builtin_loader=self._builtin_loader,
+            builtin_tools=self._builtin_tools,
+            workspace_tools=self._workspace_tools,
+            enabled_builtin_names=self._enabled_builtin_names,
+            user_aliases=self._user_aliases,
+            token_logger=self._token_logger,
+            conversation_archiver=self._conversation_archiver,
+            session_manager=self._session_manager,
+            queue_manager=self._queue_manager,
+            channel_logging_enabled=self._channel_logging_enabled,
+        )
+
+        # Tool connector (channels updated in start())
+        self._tool_connector = BuiltinToolConnector(
+            builtin_loader=self._builtin_loader,
+            agent_factory=self._agent_factory,
+            agent_runner=self._agent_runner,
+            message_processor=self._message_processor,
+            channels={},
+            logger=self.logger,
+        )
 
         # Lifecycle manager
         self._lifecycle_manager = LifecycleManager(
@@ -147,7 +217,9 @@ class WorkspaceRunner:
 
         # Session TTL config (used by _inject_channel_context to skip context
         # for sessions that are about to be rotated)
-        self._session_ttl_minutes: int = self._merged_config.get("session_ttl_minutes", 180)
+        self._session_ttl_minutes: int = self._merged_config.get(
+            "session_ttl_minutes", 180
+        )
 
         # Build a channel-name → context_messages limit mapping so
         # _inject_channel_context() can look up the limit without re-parsing
@@ -166,273 +238,10 @@ class WorkspaceRunner:
         self._cleanup_task: asyncio.Task[None] | None = None
         self._running = False
 
-    def _init_stores(self) -> None:
-        """Initialize persistence stores and token logger."""
-        self._task_store = TaskStore(self._workspace.path)
-        self._cleanup_old_tasks()
-        self._subagent_store = SubAgentStore(self._workspace.path)
-        self._token_logger = TokenUsageLogger(self._workspace.path)
-
-    def _init_memory(self) -> None:
-        """Initialize memory search infrastructure and conversation archiver."""
-        self._vector_store: Any | None = None
-        self._embedding_provider: Any | None = None
-        self._indexer: Any | None = None
-
-        memory_config = self._workspace.config.memory if self._workspace.config else None
-        if memory_config and memory_config.enabled:
-            try:
-                from openpaw.stores.vector.factory import (
-                    create_embedding_provider,
-                    create_vector_store,
-                )
-                from openpaw.stores.vector.indexer import ConversationIndexer
-
-                self._vector_store = create_vector_store(
-                    provider=memory_config.vector_store.provider,
-                    config=memory_config.vector_store.model_dump(),
-                    workspace_path=self._workspace.path,
-                )
-                self._embedding_provider = create_embedding_provider(
-                    provider=memory_config.embedding.provider,
-                    config=memory_config.embedding.model_dump(),
-                )
-                self._indexer = ConversationIndexer(
-                    vector_store=self._vector_store,
-                    embedding_provider=self._embedding_provider,
-                )
-                self.logger.info("Memory search infrastructure initialized")
-            except Exception as e:
-                self.logger.error(f"Failed to initialize memory search: {e}")
-                self._vector_store = None
-                self._embedding_provider = None
-                self._indexer = None
-
-        self._conversation_archiver = ConversationArchiver(
-            workspace_path=self._workspace.path,
-            workspace_name=self.workspace_name,
-            timezone=self._workspace_timezone,
-            indexer=self._indexer,
-        )
-
-    def _init_builtins(self) -> None:
-        """Load builtin tools, processors, and workspace tools."""
-        workspace_builtins_config = None
-        if self._workspace.config and self._workspace.config.builtins:
-            workspace_builtins_config = self._workspace.config.builtins
-
-        # Aggregate user_aliases from all channels (first-wins on conflict)
-        self._user_aliases: dict[int, str] = {}
-        for ch_config in self._merged_config.get("channels", []):
-            for uid, name in ch_config.get("user_aliases", {}).items():
-                if uid not in self._user_aliases:
-                    self._user_aliases[uid] = name
-
-        # Use first channel config for builtin loader compatibility
-        workspace_channel_config = (self._merged_config.get("channels") or [{}])[0]
-
-        self._builtin_loader = BuiltinLoader(
-            global_config=self.config.builtins,
-            workspace_config=workspace_builtins_config,
-            workspace_path=self._workspace.path,
-            channel_config=workspace_channel_config,
-            workspace_timezone=self._workspace_timezone,
-            task_store=self._task_store,
-        )
-
-        self._builtin_tools = self._builtin_loader.load_tools()
-        self._processors: list[BaseBuiltinProcessor] = self._builtin_loader.load_processors()
-        self._enabled_builtin_names = self._builtin_loader.get_loaded_tool_names()
-
-        # Determine if any channel has persistent logging enabled
-        self._channel_logging_enabled = any(
-            ch.get("channel_log", {}).get("enabled", False)
-            for ch in self._merged_config.get("channels", [])
-        )
-
-        if self._builtin_tools:
-            self.logger.info(
-                f"Loaded {len(self._builtin_tools)} builtin tools for workspace: {self.workspace_name}"
-            )
-        if self._processors:
-            self.logger.info(
-                f"Loaded {len(self._processors)} builtin processors for workspace: {self.workspace_name}"
-            )
-
-        self._workspace_tools = load_workspace_tools(
-            self._workspace.tools_path, workspace_root=self._workspace.path
-        )
-        if self._workspace_tools:
-            tool_names = [t.name for t in self._workspace_tools]
-            self.logger.info(f"Loaded {len(self._workspace_tools)} workspace tools: {tool_names}")
-
-        if self._workspace_tools and self._workspace.config:
-            self._workspace_tools = filter_workspace_tools(
-                self._workspace_tools,
-                self._workspace.config.workspace_tools,
-                self.logger,
-            )
-
-    def _init_agent(self) -> None:
-        """Set up middleware, agent factory, agent runner, and message processor."""
-        # Create middleware
-        self._queue_middleware = QueueAwareToolMiddleware()
-        self._approval_middleware = ApprovalToolMiddleware()
-        self._approval_manager: ApprovalGateManager | None = None
-
-        approval_config = self._get_approval_config()
-        if approval_config and approval_config.enabled:
-            self._approval_manager = ApprovalGateManager(approval_config)
-            self.logger.info("Approval gates enabled")
-
-        # Resolve model string from merged config
-        agent_config = self._merged_config.get("model", {})
-        model_str = agent_config.get("model", self.config.agent.model)
-        if agent_config.get("provider"):
-            model_str = f"{agent_config['provider']}:{agent_config['model']}"
-        self.logger.info(f"Initializing agent with model: {model_str}")
-
-        # Extract extra model kwargs beyond the known set.
-        # max_output_tokens is excluded here and handled separately below
-        # so it maps to the LangChain constructor kwarg name "max_tokens".
-        # max_retries is excluded here and forwarded explicitly so create_chat_model()
-        # can apply it per-provider (native for OpenAI/Anthropic/xAI, .with_retry()
-        # for Fireworks, and skipped entirely for Bedrock).
-        known_model_keys = {
-            "provider", "model", "api_key", "temperature", "max_turns",
-            "region", "timeout_seconds", "max_output_tokens", "max_retries",
-        }
-        extra_model_kwargs = {
-            k: v for k, v in agent_config.items() if k not in known_model_keys and v is not None
-        }
-
-        # Workspace-level max_output_tokens becomes "max_tokens" for LangChain providers
-        workspace_max_output_tokens = agent_config.get("max_output_tokens")
-        if workspace_max_output_tokens is not None:
-            extra_model_kwargs["max_tokens"] = workspace_max_output_tokens
-            self.logger.info(f"Applying workspace max_output_tokens cap: {workspace_max_output_tokens}")
-
-        # Forward max_retries explicitly (default 3 from WorkspaceModelConfig).
-        # create_chat_model() applies it per-provider: native for OpenAI/Anthropic/xAI,
-        # .with_retry() for Fireworks, and skipped for Bedrock (boto3 handles its own retry).
-        workspace_max_retries = agent_config.get("max_retries", 3)
-        extra_model_kwargs["max_retries"] = workspace_max_retries
-        if workspace_max_retries and workspace_max_retries > 0:
-            self.logger.info(f"Retry config: max_retries={workspace_max_retries}")
-
-        if extra_model_kwargs:
-            self.logger.info(f"Passing extra model kwargs: {list(extra_model_kwargs.keys())}")
-
-        # Build middleware list (order matters: timeout → status_reminder → queue → approval)
-        tool_timeouts_config = self._get_tool_timeouts_config()
-        self._tool_timeout_middleware = ToolTimeoutMiddleware(tool_timeouts_config)
-        middlewares = [
-            self._tool_timeout_middleware.get_middleware(),
-            self._queue_middleware.get_middleware(),
-        ]
-        if self._approval_manager:
-            middlewares.append(self._approval_middleware.get_middleware())
-
-        # Create status reminder middleware only when send_message builtin is active.
-        # There is no point reminding the agent to use a tool it doesn't have.
-        self._status_reminder_middleware: StatusReminderMiddleware | None = None
-        if "send_message" in self._enabled_builtin_names:
-            status_reminder_config = (
-                self._workspace.config.status_reminder
-                if self._workspace.config
-                else None
-            )
-            if status_reminder_config is None:
-                from openpaw.core.config.models import StatusReminderConfig
-                status_reminder_config = StatusReminderConfig()
-            self._status_reminder_middleware = StatusReminderMiddleware(status_reminder_config)
-            # Insert after timeout middleware, before queue/approval
-            middlewares.insert(1, self._status_reminder_middleware)
-            self.logger.info("Status reminder middleware enabled (threshold=%d)", status_reminder_config.threshold)
-
-        # Create agent factory and initial agent runner (checkpointer added in start())
-        self._agent_factory = AgentFactory(
-            workspace=self._workspace,
-            model=model_str,
-            api_key=agent_config.get("api_key", self.config.agent.api_key),
-            max_turns=agent_config.get("max_turns", self.config.agent.max_turns),
-            temperature=agent_config.get("temperature", self.config.agent.temperature),
-            region=agent_config.get("region"),
-            timeout_seconds=agent_config.get("timeout_seconds", 300.0),
-            builtin_tools=self._builtin_tools,
-            workspace_tools=self._workspace_tools,
-            enabled_builtin_names=self._enabled_builtin_names,
-            extra_model_kwargs=extra_model_kwargs,
-            middleware=middlewares,
-            logger=self.logger,
-            provider_catalog=self.config.providers,
-            channel_logging_enabled=self._channel_logging_enabled,
-        )
-        self._agent_runner = self._agent_factory.create_agent(checkpointer=None)
-
-        # Create message processor
-        self._message_processor = MessageProcessor(
-            agent_runner=self._agent_runner,
-            session_manager=self._session_manager,
-            queue_manager=self._queue_manager,
-            builtin_loader=self._builtin_loader,
-            queue_middleware=self._queue_middleware,
-            approval_middleware=self._approval_middleware,
-            approval_manager=self._approval_manager,
-            workspace_name=self.workspace_name,
-            token_logger=self._token_logger,
-            logger=self.logger,
-            conversation_archiver=self._conversation_archiver,
-            auto_compact_config=self._workspace.config.auto_compact if self._workspace.config else None,
-            user_aliases=self._user_aliases,
-            session_ttl_minutes=self._merged_config.get("session_ttl_minutes", 180),
-            lifecycle_config=self._workspace.config.lifecycle if self._workspace.config else None,
-            status_reminder_middleware=self._status_reminder_middleware,
-        )
-
     @property
     def token_logger(self) -> TokenUsageLogger:
         """Get the token usage logger for this workspace."""
         return self._token_logger
-
-    def _merge_workspace_config(self, global_config: Config, workspace: Any) -> dict[str, Any]:
-        """Merge workspace config over global config."""
-        if not workspace.config:
-            return {}
-
-        global_dict: dict[str, Any] = {
-            "model": {
-                "provider": None,
-                "model": global_config.agent.model,
-                "api_key": global_config.agent.api_key,
-                "temperature": global_config.agent.temperature,
-                "max_turns": global_config.agent.max_turns,
-                "region": None,
-            },
-            "queue": {
-                "mode": global_config.queue.mode,
-                "debounce_ms": global_config.queue.debounce_ms,
-            },
-        }
-
-        workspace_dict: dict[str, Any] = {}
-        if workspace.config.model:
-            model_dict = workspace.config.model.model_dump(exclude_none=True)
-            if model_dict:
-                workspace_dict["model"] = model_dict
-
-        if workspace.config.queue:
-            queue_dict = workspace.config.queue.model_dump(exclude_none=True)
-            if queue_dict:
-                workspace_dict["queue"] = queue_dict
-
-        # Channels: list of channel configs (already normalized by model_validator)
-        if workspace.config.channels:
-            workspace_dict["channels"] = [
-                ch.model_dump(exclude_none=True) for ch in workspace.config.channels
-            ]
-
-        return merge_configs(global_dict, workspace_dict)
 
     def _register_framework_commands(self) -> None:
         """Register all framework command handlers."""
@@ -441,26 +250,6 @@ class WorkspaceRunner:
         self.logger.info(
             f"Registered {len(self._command_router.list_commands(include_hidden=True))} framework commands"
         )
-
-    def _get_approval_config(self) -> ApprovalGatesConfig | None:
-        """Get approval gates config from workspace or global."""
-        if self._workspace.config and self._workspace.config.approval_gates:
-            if self._workspace.config.approval_gates.enabled:
-                return self._workspace.config.approval_gates
-        if hasattr(self.config, "approval_gates") and self.config.approval_gates:
-            if self.config.approval_gates.enabled:
-                return self.config.approval_gates
-        return None
-
-    def _get_tool_timeouts_config(self) -> ToolTimeoutsConfig:
-        """Get tool timeouts config from workspace or global.
-
-        Returns:
-            ToolTimeoutsConfig (always returns a valid config, uses defaults if not configured).
-        """
-        if self._workspace.config:
-            return self._workspace.config.tool_timeouts
-        return self.config.tool_timeouts
 
     async def _handle_approval_resolution(
         self, approval_id: str, approved: bool
@@ -475,36 +264,13 @@ class WorkspaceRunner:
             else:
                 self.logger.warning(f"Failed to resolve approval {approval_id}")
 
-    def _cleanup_old_tasks(self) -> None:
-        """Clean up old completed tasks from TaskStore on startup."""
-        try:
-            removed = self._task_store.cleanup_old_tasks(max_age_days=3, stale_threshold_hours=48)
-            if removed > 0:
-                self.logger.info(f"Cleaned up {removed} old task(s) from TaskStore")
-
-            from openpaw.model.task import TaskStatus
-
-            active_tasks = self._task_store.list(status=TaskStatus.IN_PROGRESS)
-            pending_tasks = self._task_store.list(status=TaskStatus.PENDING)
-            awaiting_tasks = self._task_store.list(status=TaskStatus.AWAITING_CHECK)
-
-            total_active = len(active_tasks) + len(pending_tasks) + len(awaiting_tasks)
-            if total_active > 0:
-                self.logger.info(
-                    f"TaskStore has {total_active} active task(s) "
-                    f"(pending: {len(pending_tasks)}, in_progress: {len(active_tasks)}, "
-                    f"awaiting_check: {len(awaiting_tasks)})"
-                )
-        except FileNotFoundError:
-            self.logger.debug("TaskStore file not found (new workspace)")
-        except Exception as e:
-            self.logger.warning(f"Failed to cleanup TaskStore: {e}")
-
     def _build_command_context(self, message: Message) -> CommandContext:
         """Build command execution context for the current message."""
         channel = self._channels.get(message.channel)
         if not channel:
-            raise RuntimeError(f"No channel found for message.channel: {message.channel}")
+            raise RuntimeError(
+                f"No channel found for message.channel: {message.channel}"
+            )
         return CommandContext(
             channel=channel,
             session_manager=self._session_manager,
@@ -533,7 +299,9 @@ class WorkspaceRunner:
                 if command_result.response:
                     channel = self._channels.get(message.channel)
                     if channel:
-                        await channel.send_message(message.session_key, command_result.response)
+                        await channel.send_message(
+                            message.session_key, command_result.response
+                        )
 
                 # Rebuild agent on conversation rotation (/new, /compact)
                 # so the agent picks up any workspace file changes (AGENT.md, etc.)
@@ -558,7 +326,9 @@ class WorkspaceRunner:
                 result = await processor.process_inbound(processed_message)
                 processed_message = result.message
                 if result.skip_agent:
-                    self.logger.debug(f"Processor {processor.metadata.name} handled message, skipping agent")
+                    self.logger.debug(
+                        f"Processor {processor.metadata.name} handled message, skipping agent"
+                    )
                     return
             except Exception as e:
                 self.logger.error(f"Processor {processor.metadata.name} failed: {e}")
@@ -566,8 +336,12 @@ class WorkspaceRunner:
         # Inject channel history context for group messages (best-effort)
         processed_message = await self._inject_channel_context(processed_message)
 
-        content_preview = processed_message.content[:50] if processed_message.content else "(empty)"
-        self.logger.info(f"Received message from {processed_message.channel}: {content_preview}...")
+        content_preview = (
+            processed_message.content[:50] if processed_message.content else "(empty)"
+        )
+        self.logger.info(
+            f"Received message from {processed_message.channel}: {content_preview}..."
+        )
 
         await self._queue_manager.submit(
             session_key=processed_message.session_key,
@@ -629,7 +403,11 @@ class WorkspaceRunner:
                 return message
 
             channel_label = str(message.metadata.get("channel_label", "unknown"))
-            source = message.channel.split("-")[0] if "-" in message.channel else message.channel
+            source = (
+                message.channel.split("-")[0]
+                if "-" in message.channel
+                else message.channel
+            )
 
             context_xml = format_channel_context(
                 entries,
@@ -662,6 +440,7 @@ class WorkspaceRunner:
 
     async def _queue_processor(self) -> None:
         """Background task processing the lane queue."""
+
         async def handler(item: QueueItem) -> None:
             channel_name, messages = item.payload
             handler_func = self._queue_manager.get_handler(channel_name)
@@ -669,19 +448,6 @@ class WorkspaceRunner:
                 await handler_func(item.session_key, messages)
 
         await self._lane_queue.process("main", handler)
-
-    async def _periodic_task_cleanup(self) -> None:
-        """Run task cleanup every 6 hours."""
-        while self._running:
-            await asyncio.sleep(6 * 3600)  # 6 hours
-            if not self._running:
-                break
-            try:
-                removed = self._task_store.cleanup_old_tasks(max_age_days=3, stale_threshold_hours=48)
-                if removed > 0:
-                    self.logger.info(f"Periodic cleanup: removed {removed} old/stale tasks")
-            except Exception as e:
-                self.logger.warning(f"Periodic task cleanup failed: {e}")
 
     async def start(self) -> None:
         """Start workspace runner."""
@@ -725,11 +491,18 @@ class WorkspaceRunner:
             self.logger.info("Vector store initialized")
 
         # Wire memory search tool
-        self._connect_memory_search_tool()
+        self._tool_connector.connect_memory_search_tool(
+            self._vector_store,
+            self._embedding_provider,
+            self._checkpointer,
+        )
 
         # Setup channels
         self._channels = await self._lifecycle_manager.setup_channels()
         await self._lifecycle_manager.start_channels()
+
+        # Update connector channels reference
+        self._tool_connector._channels = self._channels
 
         # Register framework commands with channels (e.g., Discord slash commands)
         command_defs = self._command_router.list_commands()
@@ -737,7 +510,9 @@ class WorkspaceRunner:
             await channel.register_commands(command_defs)
 
         # Start schedulers if needed
-        cron_tool_loaded = self._builtin_loader.get_tool_instance("cron") is not None
+        cron_tool_loaded = (
+            self._builtin_loader.get_tool_instance("cron") is not None
+        )
         if self._workspace.crons or cron_tool_loaded:
             agent_factory = self._agent_factory.get_agent_factory_closure()
             await self._lifecycle_manager.setup_cron_scheduler(
@@ -760,14 +535,20 @@ class WorkspaceRunner:
             system_profiles = load_spawn_profiles(
                 Path(self.config.team_profiles_path), source="system"
             )
-        profile_resolver = SpawnProfileResolver(workspace_profiles, system_profiles)
+        profile_resolver = SpawnProfileResolver(
+            workspace_profiles, system_profiles
+        )
 
         # Inject team roster into the workspace system prompt
         if len(profile_resolver) > 0:
-            self._workspace.team_roster = TeamRosterBuilder(profile_resolver).build()
+            self._workspace.team_roster = TeamRosterBuilder(
+                profile_resolver
+            ).build()
 
         # Start sub-agent runner
-        subagent_session_logger = SessionLogger(self._workspace.path, session_type="subagent")
+        subagent_session_logger = SessionLogger(
+            self._workspace.path, session_type="subagent"
+        )
         self._subagent_runner = SubAgentRunner(
             agent_factory=self._agent_factory.get_agent_factory_closure(),
             store=self._subagent_store,
@@ -780,108 +561,70 @@ class WorkspaceRunner:
             profile_resolver=profile_resolver,
             agent_factory_instance=self._agent_factory,
         )
-        self._connect_spawn_tool_to_runner()
-        self._connect_channel_history_tool()
+        self._tool_connector.connect_spawn_tool(self._subagent_runner)
+        self._tool_connector.connect_channel_history_tool(self._checkpointer)
 
         self._running = True
+        self._task_service.start()
         self._queue_processor_task = asyncio.create_task(self._queue_processor())
-        self._cleanup_task = asyncio.create_task(self._periodic_task_cleanup())
+        self._cleanup_task = asyncio.create_task(
+            self._task_service.periodic_cleanup()
+        )
 
         self.logger.info(f"Workspace runner '{self.workspace_name}' is running")
 
         # Lifecycle notification: startup
-        lifecycle = self._workspace.config.lifecycle if self._workspace.config else None
+        lifecycle = (
+            self._workspace.config.lifecycle if self._workspace.config else None
+        )
         if lifecycle and lifecycle.notify_startup:
             await self._notify_lifecycle("Started")
 
     def _connect_spawn_tool_to_runner(self) -> None:
         """Connect SpawnTool builtin to the live SubAgentRunner."""
-        try:
-            spawn_tool = self._builtin_loader.get_tool_instance("spawn")
-            if spawn_tool:
-                spawn_tool.set_runner(self._subagent_runner)
-                self.logger.info("Connected SpawnTool to SubAgentRunner")
-            else:
-                self.logger.debug("SpawnTool not loaded for this workspace")
-        except Exception as e:
-            self.logger.warning(f"Failed to connect SpawnTool to runner: {e}")
+        BuiltinToolConnector._connect_spawn_tool_impl(
+            self._builtin_loader,
+            self._subagent_runner,
+            self.logger,
+        )
 
     def _connect_channel_history_tool(self) -> None:
-        """Connect ChannelHistoryTool to live channel adapters.
-
-        Checks whether any channel supports history browsing. If none do,
-        removes the tool from the agent to avoid presenting a broken
-        capability to the LLM. If at least one does, wires the adapter
-        references into the tool instance.
-        """
-        try:
-            history_tool = self._builtin_loader.get_tool_instance("channel_history")
-            if not history_tool:
-                self.logger.debug("ChannelHistoryTool not loaded for this workspace")
-                return
-
-            # Find channels that support history browsing
-            history_channels = {
-                name: ch
-                for name, ch in self._channels.items()
-                if ch.supports_history_browsing
-            }
-
-            if not history_channels:
-                # No history-capable channels — remove the tool so the LLM never
-                # sees a broken capability
-                self._agent_factory.remove_builtin_tools({"browse_channel_history"})
-                self._agent_factory.remove_enabled_builtin("channel_history")
-                self._agent_runner = self._agent_factory.create_agent(
-                    checkpointer=self._checkpointer
-                )
-                self._message_processor.update_agent_runner(self._agent_runner)
-                self.logger.info(
-                    "Removed channel_history tool (no history-capable channels)"
-                )
-                return
-
-            history_tool.set_channels(history_channels)
-            self.logger.info(
-                "Connected ChannelHistoryTool to %d channel(s): %s",
-                len(history_channels),
-                list(history_channels.keys()),
-            )
-        except Exception as e:
-            self.logger.warning(f"Failed to connect ChannelHistoryTool: {e}")
+        """Connect ChannelHistoryTool to live channel adapters."""
+        new_runner = BuiltinToolConnector._connect_channel_history_tool_impl(
+            self._builtin_loader,
+            self._agent_factory,
+            self._agent_runner,
+            self._message_processor,
+            self._channels,
+            self._checkpointer,
+            self.logger,
+        )
+        if new_runner is not None:
+            self._agent_runner = new_runner
+            self._message_processor.update_agent_runner(new_runner)
 
     def _connect_memory_search_tool(self) -> None:
-        """Connect MemorySearchTool builtin to vector store and embedding provider.
-
-        If the vector store is not available (e.g., missing API key), removes the
-        memory search tools from the agent so the LLM never sees a broken tool.
-        """
-        try:
-            memory_tool = self._builtin_loader.get_tool_instance("memory_search")
-            if memory_tool and self._vector_store and self._embedding_provider:
-                memory_tool.set_context(self._vector_store, self._embedding_provider)
-                self.logger.info("Connected MemorySearchTool to vector store")
-            elif memory_tool:
-                # Vector store not available — remove broken tool from agent
-                self._agent_factory.remove_builtin_tools({"search_conversations"})
-                self._agent_factory.remove_enabled_builtin("memory_search")
-                # Rebuild agent without the broken tool and propagate to all holders.
-                # If additional agent_runner holders are added, update them here too.
-                self._agent_runner = self._agent_factory.create_agent(
-                    checkpointer=self._checkpointer
-                )
-                self._message_processor.update_agent_runner(self._agent_runner)
-                self.logger.info(
-                    "Removed memory_search tools from agent (vector store not initialized)"
-                )
-            else:
-                self.logger.debug("MemorySearchTool not loaded for this workspace")
-        except Exception as e:
-            self.logger.warning(f"Failed to connect MemorySearchTool: {e}")
+        """Connect MemorySearchTool builtin to vector store and embedding provider."""
+        new_runner = BuiltinToolConnector._connect_memory_search_tool_impl(
+            self._builtin_loader,
+            self._agent_factory,
+            self._agent_runner,
+            self._message_processor,
+            self._vector_store,
+            self._embedding_provider,
+            self._checkpointer,
+            self.logger,
+        )
+        if new_runner is not None:
+            self._agent_runner = new_runner
+            self._message_processor.update_agent_runner(new_runner)
 
     def _resolve_user_name(self, message: Message) -> str:
         """Resolve display name, defaulting to 'Unknown' (guaranteed non-None)."""
-        return resolve_user_name(message.user_id, message.metadata, self._user_aliases) or "Unknown"
+        return (
+            resolve_user_name(message.user_id, message.metadata, self._user_aliases)
+            or "Unknown"
+        )
 
     async def _inject_new_session_prompt(
         self, session_key: str, user_name: str = "Unknown"
@@ -907,7 +650,9 @@ class WorkspaceRunner:
         """Inject a system event into the queue for agent processing."""
         parts = session_key.split(":", 1)
         if len(parts) != 2 or not parts[0]:
-            self.logger.error(f"Invalid session_key format for system event: {session_key}")
+            self.logger.error(
+                f"Invalid session_key format for system event: {session_key}"
+            )
             return
 
         channel_name = parts[0]
@@ -930,7 +675,9 @@ class WorkspaceRunner:
                 steer_eligible=False,
             )
 
-            self.logger.info(f"Injected system event into queue for session: {session_key}")
+            self.logger.info(
+                f"Injected system event into queue for session: {session_key}"
+            )
 
         except Exception as e:
             self.logger.error(
@@ -977,7 +724,7 @@ class WorkspaceRunner:
 
     def _get_browser_builtin(self) -> Any | None:
         """Get the browser builtin instance if loaded."""
-        return self._builtin_loader.get_tool_instance("browser")
+        return BuiltinToolConnector._get_browser_builtin_impl(self._builtin_loader)
 
     async def _notify_lifecycle(self, event: str, detail: str | None = None) -> None:
         """Send a lifecycle notification to all channels.
@@ -986,23 +733,17 @@ class WorkspaceRunner:
             event: Event name (startup, shutdown, auto_compact).
             detail: Optional detail message.
         """
-        message = f"[{self.workspace_name}] {event}"
-        if detail:
-            message += f": {detail}"
-
-        for channel in self._channels.values():
-            try:
-                # Send to first allowed user in each channel
-                allowed_users = getattr(channel, '_allowed_users', [])
-                if allowed_users:
-                    session_key = f"{channel.name}:{allowed_users[0]}"
-                    await channel.send_message(session_key, message)
-            except Exception as e:
-                self.logger.debug(f"Failed to send lifecycle notification via {channel}: {e}")
+        await _notify_lifecycle_impl(
+            self._channels,
+            self.workspace_name,
+            self.logger,
+            event,
+            detail,
+        )
 
     async def _archive_active_conversations(self) -> None:
         """Archive all active conversations on shutdown."""
-        if not self._checkpointer or not hasattr(self, '_conversation_archiver'):
+        if not self._checkpointer or not hasattr(self, "_conversation_archiver"):
             return
 
         sessions = self._session_manager.list_sessions()
@@ -1027,7 +768,10 @@ class WorkspaceRunner:
                         f"Archived conversation {state.conversation_id} ({archive.message_count} messages)"
                     )
             except Exception as e:
-                self.logger.warning(f"Failed to archive conversation {state.conversation_id}: {e}", exc_info=True)
+                self.logger.warning(
+                    f"Failed to archive conversation {state.conversation_id}: {e}",
+                    exc_info=True,
+                )
 
         if archived_count > 0:
             self.logger.info(f"Archived {archived_count} conversation(s) on shutdown")
@@ -1036,9 +780,14 @@ class WorkspaceRunner:
         """Stop workspace runner gracefully."""
         self.logger.info(f"Stopping workspace runner: {self.workspace_name}")
         self._running = False
+        task_service = getattr(self, "_task_service", None)
+        if task_service:
+            task_service.stop()
 
         # Lifecycle notification: shutdown
-        lifecycle = self._workspace.config.lifecycle if self._workspace.config else None
+        lifecycle = (
+            self._workspace.config.lifecycle if self._workspace.config else None
+        )
         if lifecycle and lifecycle.notify_shutdown:
             await self._notify_lifecycle("Shutting down")
 
