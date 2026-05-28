@@ -12,6 +12,14 @@ import discord
 from discord import app_commands
 
 from openpaw.channels.base import ChannelAdapter
+from openpaw.channels.helpers import (
+    SecurityMixin,
+    check_file_size,
+    format_approval_message,
+    format_unauthorized_response,
+    map_mime_type_to_attachment_type,
+    split_message,
+)
 from openpaw.model.channel import ChannelEvent, ChannelHistoryEntry
 from openpaw.model.message import Attachment, Message, MessageDirection
 
@@ -71,7 +79,7 @@ class _ApprovalView(discord.ui.View):
         self.stop()
 
 
-class DiscordChannel(ChannelAdapter):
+class DiscordChannel(ChannelAdapter, SecurityMixin):
     """Discord channel adapter.
 
     Handles:
@@ -339,12 +347,8 @@ class DiscordChannel(ChannelAdapter):
         if not self._client:
             raise RuntimeError("Discord channel not started")
 
+        check_file_size(file_data, self.MAX_FILE_SIZE, "Discord")
         file_size = len(file_data)
-        if file_size > self.MAX_FILE_SIZE:
-            size_mb = file_size / (1024 * 1024)
-            raise ValueError(
-                f"File size ({size_mb:.1f} MB) exceeds Discord's 25 MB limit"
-            )
 
         channel_id = self._channel_id_from_session_key(session_key)
         channel = await self._resolve_channel(channel_id)
@@ -382,15 +386,7 @@ class DiscordChannel(ChannelAdapter):
             logger.warning("send_approval_request called but no approval callback registered")
             return
 
-        # Build the request message text
-        safe_tool_name = tool_name.replace("`", "'")
-        text = f"**Approval Required**\nTool: `{safe_tool_name}`\n"
-        if show_args and tool_args:
-            args_str = str(tool_args)
-            if len(args_str) > 500:
-                args_str = args_str[:500] + "..."
-            args_str = args_str.replace("`", "'")
-            text += f"Args: `{args_str}`\n"
+        text = format_approval_message(tool_name, tool_args, show_args)
 
         channel_id = self._channel_id_from_session_key(session_key)
         channel = await self._resolve_channel(channel_id)
@@ -492,11 +488,7 @@ class DiscordChannel(ChannelAdapter):
     def _is_allowed(self, message: discord.Message) -> bool:
         """Check whether the message sender is permitted to use this workspace.
 
-        Security model:
-        - allow_all=True  → everyone is allowed (insecure, use with caution)
-        - In a guild + allowed_groups contains the guild → allowed (any user in that guild)
-        - allowed_users non-empty → user.id must be in the set (DMs and non-allowed guilds)
-        - No allowlists match → deny (secure default)
+        Extracts primitive IDs and delegates to SecurityMixin.
 
         Args:
             message: The incoming discord.Message.
@@ -504,36 +496,14 @@ class DiscordChannel(ChannelAdapter):
         Returns:
             True if the sender is allowed, False otherwise.
         """
-        if self.allow_all:
-            return True
-
-        # Guild allowlist: if the message is from an allowed guild, permit it
-        # without requiring the user to be individually allowlisted.
-        if message.guild and self.allowed_groups:
-            if message.guild.id in self.allowed_groups:
-                return True
-            # Message is from a guild not in the allowlist — fall through to
-            # user check (user might be individually allowed for DMs).
-
-        # User allowlist check (DMs and non-allowed guilds)
         user_id = message.author.id
-        if self.allowed_users:
-            if user_id not in self.allowed_users:
-                return False
-            return True
-
-        # No allowlists matched — deny
-        return False
+        guild_id = message.guild.id if message.guild else None
+        return self._check_user_allowed(user_id, guild_id)
 
     def _passes_activation_filter(self, message: discord.Message) -> bool:
         """Check whether the message passes activation filters (mention OR trigger).
 
-        In guild channels, messages must pass at least one activation condition:
-        - Bot is @mentioned (when mention_required is True)
-        - Message contains a trigger keyword (when triggers are configured)
-
-        If neither mention_required nor triggers are configured, all messages pass.
-        DMs always pass through regardless.
+        Extracts primitive flags and delegates to SecurityMixin.
 
         Args:
             message: The incoming discord.Message.
@@ -541,23 +511,16 @@ class DiscordChannel(ChannelAdapter):
         Returns:
             True if the message should be processed.
         """
-        # No activation filters configured — pass everything
-        if not self.mention_required and not self.triggers:
-            return True
-
-        # DMs always pass through
-        if message.guild is None:
-            return True
-
-        # OR logic: either mention or trigger is sufficient
-        if self.mention_required and self._client and self._client.user in message.mentions:
-            return True
-
+        is_dm = message.guild is None
+        is_command = False
         content = message.content or ""
-        if self._passes_trigger_filter(content, self.triggers):
-            return True
-
-        return False
+        is_mentioned = (
+            self._client is not None
+            and self._client.user in message.mentions
+        )
+        return self._check_activation(
+            content, is_dm, is_command, is_mentioned
+        )
 
     async def _send_unauthorized_response(self, message: discord.Message) -> None:
         """Reply to an unauthorized user with their IDs and config instructions.
@@ -568,22 +531,7 @@ class DiscordChannel(ChannelAdapter):
         user_id = message.author.id
         guild_id = message.guild.id if message.guild else None
 
-        text = (
-            f"Access denied.\n\n"
-            f"Your user ID: `{user_id}`\n"
-        )
-        if guild_id:
-            text += f"Guild (server) ID: `{guild_id}`\n"
-
-        text += (
-            f"\nTo gain access, add your ID to the allowlist:\n"
-            f"`agent_workspaces/{self.workspace_name}/agent.yaml`\n\n"
-            f"```yaml\n"
-            f"channel:\n"
-            f"  allowed_users:\n"
-            f"    - {user_id}\n"
-            f"```"
-        )
+        text = format_unauthorized_response(user_id, self.workspace_name, guild_id)
 
         try:
             await message.reply(text)
@@ -636,10 +584,7 @@ class DiscordChannel(ChannelAdapter):
     ) -> list[Attachment]:
         """Download all attachments from a discord.Message.
 
-        Determines the OpenPaw attachment type from the Discord MIME type:
-        - audio/* → "audio"
-        - image/* → "image"
-        - anything else → "document"
+        Determines the OpenPaw attachment type from the Discord MIME type.
 
         Args:
             discord_message: The discord.Message whose attachments to download.
@@ -661,13 +606,7 @@ class DiscordChannel(ChannelAdapter):
                 continue
 
             content_type = discord_attachment.content_type or "application/octet-stream"
-
-            if content_type.startswith("audio/"):
-                attachment_type = "audio"
-            elif content_type.startswith("image/"):
-                attachment_type = "image"
-            else:
-                attachment_type = "document"
+            attachment_type = map_mime_type_to_attachment_type(content_type)
 
             result.append(
                 Attachment(
@@ -695,8 +634,7 @@ class DiscordChannel(ChannelAdapter):
     def _split_message(self, text: str) -> list[str]:
         """Split text into chunks that fit Discord's 2000-char message limit.
 
-        Tries to break at paragraph boundaries (double newline), falls back
-        to single newlines, then hard-splits as a last resort.
+        Delegates to the shared split_message helper.
 
         Args:
             text: The full message text.
@@ -704,32 +642,7 @@ class DiscordChannel(ChannelAdapter):
         Returns:
             List of message chunks, each within MAX_MESSAGE_LENGTH.
         """
-        if len(text) <= self.MAX_MESSAGE_LENGTH:
-            return [text]
-
-        chunks: list[str] = []
-        remaining = text
-
-        while remaining:
-            if len(remaining) <= self.MAX_MESSAGE_LENGTH:
-                chunks.append(remaining)
-                break
-
-            # Prefer paragraph boundary
-            split_at = remaining.rfind("\n\n", 0, self.MAX_MESSAGE_LENGTH)
-
-            # Fall back to single newline
-            if split_at == -1:
-                split_at = remaining.rfind("\n", 0, self.MAX_MESSAGE_LENGTH)
-
-            # Hard split as last resort
-            if split_at == -1:
-                split_at = self.MAX_MESSAGE_LENGTH
-
-            chunks.append(remaining[:split_at])
-            remaining = remaining[split_at:].lstrip("\n")
-
-        return chunks
+        return split_message(text, self.MAX_MESSAGE_LENGTH)
 
     @staticmethod
     def _channel_id_from_session_key(session_key: str) -> int:

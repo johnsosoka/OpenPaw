@@ -10,12 +10,19 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 from openpaw.channels.base import ChannelAdapter
+from openpaw.channels.helpers import (
+    SecurityMixin,
+    check_file_size,
+    format_approval_message,
+    format_unauthorized_response,
+    split_message,
+)
 from openpaw.model.message import Attachment, Message, MessageDirection
 
 logger = logging.getLogger(__name__)
 
 
-class TelegramChannel(ChannelAdapter):
+class TelegramChannel(ChannelAdapter, SecurityMixin):
     """Telegram channel adapter.
 
     Handles:
@@ -212,8 +219,7 @@ class TelegramChannel(ChannelAdapter):
     def _split_message(self, text: str) -> list[str]:
         """Split text into chunks that fit Telegram's message limit.
 
-        Tries to break at paragraph boundaries (double newline), falls back
-        to single newlines, then hard-splits as a last resort.
+        Delegates to the shared split_message helper.
 
         Args:
             text: The full message text.
@@ -221,32 +227,7 @@ class TelegramChannel(ChannelAdapter):
         Returns:
             List of message chunks, each within MAX_MESSAGE_LENGTH.
         """
-        if len(text) <= self.MAX_MESSAGE_LENGTH:
-            return [text]
-
-        chunks: list[str] = []
-        remaining = text
-
-        while remaining:
-            if len(remaining) <= self.MAX_MESSAGE_LENGTH:
-                chunks.append(remaining)
-                break
-
-            # Try to split at paragraph boundary
-            split_at = remaining.rfind("\n\n", 0, self.MAX_MESSAGE_LENGTH)
-
-            # Fall back to single newline
-            if split_at == -1:
-                split_at = remaining.rfind("\n", 0, self.MAX_MESSAGE_LENGTH)
-
-            # Hard split as last resort
-            if split_at == -1:
-                split_at = self.MAX_MESSAGE_LENGTH
-
-            chunks.append(remaining[:split_at])
-            remaining = remaining[split_at:].lstrip("\n")
-
-        return chunks
+        return split_message(text, self.MAX_MESSAGE_LENGTH)
 
     async def send_audio(
         self,
@@ -316,13 +297,8 @@ class TelegramChannel(ChannelAdapter):
         if not self._app:
             raise RuntimeError("Telegram channel not started")
 
-        # Validate file size
+        check_file_size(file_data, self.MAX_FILE_SIZE, "Telegram")
         file_size = len(file_data)
-        if file_size > self.MAX_FILE_SIZE:
-            size_mb = file_size / (1024 * 1024)
-            raise ValueError(
-                f"File size ({size_mb:.1f} MB) exceeds Telegram's 50 MB limit"
-            )
 
         from io import BytesIO
 
@@ -349,46 +325,27 @@ class TelegramChannel(ChannelAdapter):
     def _is_allowed(self, update: Update) -> bool:
         """Check if the message sender is allowed.
 
-        Security model:
-        - If allow_all is True, all users are allowed (insecure)
-        - If in a group chat and allowed_groups contains the group → allowed (any user)
-        - If allowed_users is set, user must be in the list (DMs and non-allowed groups)
-        - If neither allow_all nor allowlists match, deny by default (secure)
+        Extracts primitive IDs and delegates to SecurityMixin.
+
+        Args:
+            update: The Telegram Update object.
+
+        Returns:
+            True if the sender is allowed, False otherwise.
         """
         if not update.effective_user:
             return False
 
-        # Explicit allow-all mode (use with caution)
-        if self.allow_all:
-            return True
-
-        chat_id = update.effective_chat.id if update.effective_chat else None
-
-        # Group allowlist: if the message is from an allowed group, permit it
-        # without requiring the user to be individually allowlisted.
-        if chat_id and chat_id < 0 and self.allowed_groups:
-            if chat_id in self.allowed_groups:
-                return True
-
-        # User allowlist check (DMs and non-allowed groups)
         user_id = update.effective_user.id
-        if self.allowed_users:
-            if user_id not in self.allowed_users:
-                return False
-            return True
-
-        # No allowlists matched — deny
-        return False
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        # In Telegram, negative chat IDs are group chats
+        group_id = chat_id if chat_id is not None and chat_id < 0 else None
+        return self._check_user_allowed(user_id, group_id)
 
     def _passes_activation_filter(self, update: Update) -> bool:
         """Check whether the message passes activation filters (mention OR trigger).
 
-        In group chats, messages must pass at least one activation condition:
-        - Bot is @mentioned (when mention_required is True)
-        - Message contains a trigger keyword (when triggers are configured)
-
-        If neither mention_required nor triggers are configured, all messages pass.
-        DMs and commands always pass through regardless.
+        Extracts primitive flags and delegates to SecurityMixin.
 
         Args:
             update: The Telegram Update object.
@@ -396,27 +353,24 @@ class TelegramChannel(ChannelAdapter):
         Returns:
             True if the message should be processed.
         """
-        # No activation filters configured — pass everything
-        if not self.mention_required and not self.triggers:
-            return True
-
-        # DMs always pass through (positive chat IDs are private chats)
-        if update.effective_chat and update.effective_chat.id > 0:
-            return True
-
-        # Commands always pass through (they're routed via CommandRouter)
-        if update.message and update.message.text and update.message.text.startswith("/"):
-            return True
-
-        # OR logic: either mention or trigger is sufficient
-        if self.mention_required and self._has_bot_mention(update):
-            return True
-
-        content = (update.message.text or update.message.caption or "") if update.message else ""
-        if self._passes_trigger_filter(content, self.triggers):
-            return True
-
-        return False
+        is_dm = (
+            update.effective_chat is not None
+            and update.effective_chat.id > 0
+        )
+        is_command = bool(
+            update.message
+            and update.message.text
+            and update.message.text.startswith("/")
+        )
+        content = (
+            (update.message.text or update.message.caption or "")
+            if update.message
+            else ""
+        )
+        is_mentioned = self._has_bot_mention(update)
+        return self._check_activation(
+            content, is_dm, is_command, is_mentioned
+        )
 
     def _has_bot_mention(self, update: Update) -> bool:
         """Check if the message contains an @mention of this bot."""
@@ -462,26 +416,11 @@ class TelegramChannel(ChannelAdapter):
 
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id if update.effective_chat else None
+        group_id = chat_id if chat_id is not None and chat_id < 0 else None
 
-        message = (
-            f"⛔ Access denied.\n\n"
-            f"Your user ID: `{user_id}`\n"
-        )
+        text = format_unauthorized_response(user_id, self.workspace_name, group_id)
 
-        if chat_id and chat_id < 0:
-            message += f"Group ID: `{chat_id}`\n"
-
-        message += (
-            f"\nTo gain access, add your ID to the allowlist:\n"
-            f"`agent_workspaces/{self.workspace_name}/agent.yaml`\n\n"
-            f"```yaml\n"
-            f"channel:\n"
-            f"  allowed_users:\n"
-            f"    - {user_id}\n"
-            f"```"
-        )
-
-        await update.message.reply_text(message, parse_mode="Markdown")
+        await update.message.reply_text(text, parse_mode="Markdown")
         logger.warning(f"Blocked user {user_id} from workspace '{self.workspace_name}'")
 
     async def _handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -742,15 +681,7 @@ class TelegramChannel(ChannelAdapter):
         """Send approval request with Telegram inline keyboard."""
         chat_id = int(session_key.split(":")[1])
 
-        # Escape backticks to prevent markdown injection
-        safe_tool_name = tool_name.replace("`", "'")
-        text = f"🔒 **Approval Required**\nTool: `{safe_tool_name}`\n"
-        if show_args and tool_args:
-            args_str = str(tool_args)
-            if len(args_str) > 500:
-                args_str = args_str[:500] + "..."
-            args_str = args_str.replace("`", "'")
-            text += f"Args: `{args_str}`\n"
+        text = format_approval_message(tool_name, tool_args, show_args)
 
         keyboard = InlineKeyboardMarkup(
             [
