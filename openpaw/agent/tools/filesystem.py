@@ -10,11 +10,11 @@ import re
 import subprocess
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import Any
 from zoneinfo import ZoneInfo
 
 from langchain_core.tools import BaseTool, tool
 
+from openpaw.agent.tools.helpers.formatting import format_content_with_line_numbers, format_file_listing
 from openpaw.agent.tools.sandbox import resolve_sandboxed_path
 from openpaw.core.paths import TOP_LEVEL_DIRS, WORKSPACE_DIR
 
@@ -87,39 +87,6 @@ class FilesystemTools:
             effective_path = path
 
         return resolve_sandboxed_path(self.root, effective_path, write_mode=True)
-
-    def _format_file_listing(self, file_info: dict[str, Any]) -> str:
-        """Format file info for display."""
-        path = file_info["path"]
-        size = file_info.get("size", 0)
-        modified = file_info.get("modified_at", "unknown")
-        is_dir = file_info.get("is_dir", False)
-
-        # Format size in human-readable form
-        if size < 1024:
-            size_str = f"{size}B"
-        elif size < 1024 * 1024:
-            size_str = f"{size / 1024:.1f}KB"
-        else:
-            size_str = f"{size / (1024 * 1024):.1f}MB"
-
-        type_marker = "/" if is_dir else ""
-        return f"{path}{type_marker:20s} {size_str:>10s}  {modified}"
-
-    def _format_content_with_line_numbers(
-        self, lines: list[str], start_line: int = 1
-    ) -> str:
-        """Format file content with line numbers."""
-        max_line_num = start_line + len(lines) - 1
-        width = len(str(max_line_num))
-
-        formatted_lines = []
-        for i, line in enumerate(lines, start=start_line):
-            # Truncate very long lines to prevent output bloat
-            display_line = line[:2000] + "..." if len(line) > 2000 else line
-            formatted_lines.append(f"{i:>{width}}→{display_line}")
-
-        return "\n".join(formatted_lines)
 
     def get_tools(self) -> list[BaseTool]:
         """Return list of LangChain tools with workspace root captured in closure."""
@@ -202,7 +169,7 @@ class FilesystemTools:
                 if not results:
                     return f"Directory '{path}' is empty"
 
-                listing = "\n".join(self._format_file_listing(r) for r in results)
+                listing = "\n".join(format_file_listing(r) for r in results)
 
                 # Prefix with workspace header when workspace name is set
                 if self._workspace_name:
@@ -262,7 +229,7 @@ class FilesystemTools:
                     return f"Error: Line offset {offset} exceeds file length ({len(lines)} lines)"
 
                 selected_lines = lines[start_idx:end_idx]
-                result = self._format_content_with_line_numbers(selected_lines, start_line=start_idx + 1)
+                result = format_content_with_line_numbers(selected_lines, start_line=start_idx + 1)
 
                 # Add footer if file was truncated
                 if end_idx < len(lines):
