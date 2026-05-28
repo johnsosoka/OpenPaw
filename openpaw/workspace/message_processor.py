@@ -16,12 +16,16 @@ from openpaw.core.prompts.system_events import (
     INTERRUPT_NOTIFICATION,
     TOOL_DENIED_TEMPLATE,
 )
-from openpaw.core.utils import is_context_overflow_error, resolve_user_name, sanitize_error_for_user
+from openpaw.core.utils import sanitize_error_for_user
 from openpaw.model.message import Message
 from openpaw.runtime.approval import ApprovalGateManager
 from openpaw.runtime.queue.lane import QueueMode
 from openpaw.runtime.queue.manager import QueueManager
 from openpaw.runtime.session.manager import SessionManager
+from openpaw.workspace.processors.combiner import ContentCombiner
+from openpaw.workspace.processors.compactor import AutoCompactor
+from openpaw.workspace.processors.response_handler import ResponseHandler
+from openpaw.workspace.processors.ttl_checker import SessionTTLChecker
 
 
 class MessageProcessor:
@@ -78,10 +82,32 @@ class MessageProcessor:
         self._workspace_name = workspace_name
         self._token_logger = token_logger
         self._logger = logger
+
+        # Extracted processors
+        self._combiner = ContentCombiner(user_aliases=user_aliases)
+        self._ttl_checker = SessionTTLChecker(
+            session_manager=session_manager,
+            conversation_archiver=conversation_archiver,
+            session_ttl_minutes=session_ttl_minutes,
+            lifecycle_config=lifecycle_config,
+            logger=logger,
+        )
+        self._compactor = AutoCompactor(
+            session_manager=session_manager,
+            conversation_archiver=conversation_archiver,
+            auto_compact_config=auto_compact_config,
+            lifecycle_config=lifecycle_config,
+            logger=logger,
+        )
+        self._response_handler = ResponseHandler(
+            builtin_loader=builtin_loader,
+            session_manager=session_manager,
+            logger=logger,
+        )
+
+        # Retained direct dependencies (used by process_messages loop)
         self._conversation_archiver = conversation_archiver
         self._auto_compact_config = auto_compact_config
-        self._user_aliases = user_aliases or {}
-        self._session_ttl_minutes = session_ttl_minutes
         self._lifecycle_config = lifecycle_config
         self._status_reminder_middleware = status_reminder_middleware
 
@@ -95,50 +121,96 @@ class MessageProcessor:
         """
         self._agent_runner = runner
 
+    # ------------------------------------------------------------------
+    # Backward-compatible wrappers (delegate to extracted processors)
+    # ------------------------------------------------------------------
+
     def _resolve_user_name(self, message: Message) -> str | None:
         """Resolve display name for a message's user."""
-        return resolve_user_name(message.user_id, message.metadata, self._user_aliases)
+        return self._combiner.resolve_user_name(
+            message.user_id, message.metadata
+        )
 
     def _build_combined_content(self, messages: list[Message]) -> str:
-        """Build combined content from messages with optional user name prefixes.
+        """Build combined content from messages with optional user name prefixes."""
+        return self._combiner.build_combined_content(messages)
 
-        Args:
-            messages: List of messages to combine.
+    def _build_combined_content_from_tuples(
+        self, tuples: list[tuple[str, Any]]
+    ) -> str:
+        """Build combined content from (channel_name, msg) tuples."""
+        return self._combiner.build_combined_content_from_tuples(
+            [(ch, msg) for ch, msg in tuples]
+        )
 
-        Returns:
-            Combined message content with optional [Name] prefixes.
-        """
-        lines = []
-        for msg in messages:
-            name = self._resolve_user_name(msg)
-            if name:
-                lines.append(f"[{name}]: {msg.content}")
-            else:
-                lines.append(msg.content)
-        return "\n".join(lines)
+    @staticmethod
+    def _is_system_event_batch(messages: list[Message]) -> bool:
+        """Check if all messages in the batch are system events."""
+        return ResponseHandler.is_system_event_batch(messages)
 
-    def _build_combined_content_from_tuples(self, tuples: list[tuple[str, Any]]) -> str:
-        """Build combined content from (channel_name, msg) tuples.
+    @staticmethod
+    def _is_group_session(messages: list[Message] | None) -> bool:
+        """Determine if the current session is a group chat (not a DM)."""
+        return SessionTTLChecker.is_group_session(messages)
 
-        Args:
-            tuples: List of (channel_name, msg) tuples where msg is Message or str.
+    async def _check_session_ttl(
+        self,
+        session_key: str,
+        thread_id: str,
+        channel: ChannelAdapter | None,
+        messages: list[Message] | None = None,
+    ) -> str | None:
+        """Check if the session TTL has expired and rotate the conversation if so."""
+        return await self._ttl_checker.check(
+            session_key=session_key,
+            thread_id=thread_id,
+            channel=channel,
+            messages=messages,
+            agent_runner=self._agent_runner,
+            logger=self._logger,
+        )
 
-        Returns:
-            Combined message content with optional [Name] prefixes.
-        """
-        lines = []
-        for _channel_name, msg in tuples:
-            if hasattr(msg, 'content'):
-                # It's a Message object
-                name = self._resolve_user_name(msg)
-                if name:
-                    lines.append(f"[{name}]: {msg.content}")
-                else:
-                    lines.append(msg.content)
-            else:
-                # Raw string
-                lines.append(str(msg))
-        return "\n".join(lines)
+    async def _check_auto_compact(
+        self,
+        session_key: str,
+        thread_id: str,
+        channel: ChannelAdapter | None,
+    ) -> str | None:
+        """Check if auto-compact should trigger and perform it if needed."""
+        if not self._auto_compact_config or not self._auto_compact_config.enabled:
+            return None
+        if not self._conversation_archiver:
+            return None
+        return await self._compactor.check_compact(
+            session_key=session_key,
+            thread_id=thread_id,
+            channel=channel,
+            agent_runner=self._agent_runner,
+        )
+
+    async def _recover_context_overflow(
+        self,
+        session_key: str,
+        thread_id: str,
+        channel: ChannelAdapter | None,
+    ) -> str | None:
+        """Recover from a context window overflow by force-rotating the conversation."""
+        return await self._compactor.recover_overflow(
+            session_key=session_key,
+            thread_id=thread_id,
+            channel=channel,
+            agent_runner=self._agent_runner,
+        )
+
+    async def _send_pending_audio(
+        self, channel: ChannelAdapter, session_key: str
+    ) -> None:
+        """Check for and send any pending TTS audio."""
+        await self._response_handler._send_pending_audio(channel, session_key)
+
+    # ------------------------------------------------------------------
+    # Main processing loop
+    # ------------------------------------------------------------------
 
     async def process_messages(
         self,
@@ -157,7 +229,6 @@ class MessageProcessor:
         thread_id = self._session_manager.get_thread_id(session_key)
         followup_depth = 0
         max_followup_depth = 5
-        is_system_batch = self._is_system_event_batch(messages)
 
         # Check session TTL first — may rotate conversation before any further checks
         # TTL only applies to group sessions (not DMs)
@@ -262,30 +333,12 @@ class MessageProcessor:
 
                 # Send response if not steered
                 if not steered and channel:
-                    # Check for silent acknowledgment on system events
-                    ack_tool = self._builtin_loader.get_tool_instance("acknowledge")
-                    ack = ack_tool.get_pending_ack() if ack_tool else None
-
-                    if is_system_batch and ack:
-                        self._logger.info(
-                            f"System event acknowledged for {session_key}: {ack.reason} "
-                            f"(suppressing channel delivery, {len(response or '')} chars)"
-                        )
-                        self._session_manager.increment_message_count(session_key)
-                    elif response and response.strip():
-                        resp_preview = response[:120].replace("\n", " ")
-                        self._logger.info(
-                            f"Sending response ({len(response)} chars): {resp_preview}..."
-                        )
-                        await channel.send_message(session_key, response)
-                        self._session_manager.increment_message_count(session_key)
-                        await self._send_pending_audio(channel, session_key)
-                    else:
-                        self._logger.warning(
-                            f"Agent produced empty response for {session_key}, sending fallback"
-                        )
-                        fallback = "I processed your message but my response was empty. Please try again."
-                        await channel.send_message(session_key, fallback)
+                    await self._response_handler.send_response(
+                        session_key=session_key,
+                        response=response,
+                        channel=channel,
+                        messages=messages,
+                    )
 
             except ApprovalRequiredError as e:
                 # Log partial metrics if available
@@ -371,7 +424,7 @@ class MessageProcessor:
             except Exception as e:
                 self._logger.error(f"Error processing messages for {session_key}: {e}", exc_info=True)
 
-                if is_context_overflow_error(e):
+                if self._compactor.is_context_overflow(e):
                     new_tid = await self._recover_context_overflow(
                         session_key, thread_id, channel
                     )
@@ -440,293 +493,6 @@ class MessageProcessor:
         ack_tool = self._builtin_loader.get_tool_instance("acknowledge")
         if ack_tool:
             ack_tool.reset()
-
-    @staticmethod
-    def _is_system_event_batch(messages: list[Message]) -> bool:
-        """Check if all messages in the batch are system events.
-
-        System events have user_id == "system" and are injected by the
-        framework (cron results, heartbeat injections, sub-agent completions).
-        Only a system-only batch allows acknowledge_event to suppress delivery —
-        this prevents user messages from ever being silently swallowed.
-
-        Args:
-            messages: The message batch to inspect.
-
-        Returns:
-            True only if the list is non-empty and every message has user_id "system".
-        """
-        if not messages:
-            return False
-        return all(msg.user_id == "system" for msg in messages)
-
-    @staticmethod
-    def _is_group_session(messages: list[Message] | None) -> bool:
-        """Determine if the current session is a group chat (not a DM).
-
-        Checks message metadata for platform-specific group indicators:
-        - Telegram: ``chat_type`` is not ``"private"``
-        - Discord: ``guild_id`` is not None
-        """
-        if not messages:
-            return False
-        for msg in messages:
-            meta = msg.metadata or {}
-            # Discord: guild_id present means server (group) message
-            if meta.get("guild_id") is not None:
-                return True
-            # Telegram: chat_type "group" or "supergroup"
-            chat_type = meta.get("chat_type")
-            if chat_type and chat_type != "private":
-                return True
-        return False
-
-    async def _check_session_ttl(
-        self,
-        session_key: str,
-        thread_id: str,
-        channel: ChannelAdapter | None,
-        messages: list[Message] | None = None,
-    ) -> str | None:
-        """Check if the session TTL has expired and rotate the conversation if so.
-
-        TTL only applies to group sessions (not DMs). A session is considered
-        a group session if any message has ``guild_id`` (Discord) or a
-        ``chat_type`` other than ``"private"`` (Telegram).
-
-        When TTL triggers, the current conversation is archived (tagged
-        "ttl_expired"), a fresh conversation is started, and an optional
-        notification is sent to the user.
-
-        Returns:
-            New thread_id if the conversation was rotated, None otherwise.
-        """
-        if self._session_ttl_minutes <= 0:
-            return None
-
-        # TTL only applies to group sessions — skip for DMs
-        if not self._is_group_session(messages):
-            return None
-
-        if not self._session_manager.is_session_expired(session_key, self._session_ttl_minutes):
-            return None
-
-        # Retrieve current conversation metadata for archiving
-        old_state = self._session_manager.get_state(session_key)
-        old_conv_id = old_state.conversation_id if old_state else "unknown"
-
-        # Archive the expired conversation (best-effort)
-        if self._conversation_archiver and self._agent_runner.checkpointer:
-            try:
-                await self._conversation_archiver.archive(
-                    checkpointer=self._agent_runner.checkpointer,
-                    thread_id=thread_id,
-                    session_key=session_key,
-                    conversation_id=old_conv_id,
-                    tags=["ttl_expired"],
-                )
-            except Exception as e:
-                self._logger.warning(f"Failed to archive TTL-expired conversation: {e}")
-
-        # Rotate to a fresh conversation
-        self._session_manager.new_conversation(session_key)
-        new_thread_id = self._session_manager.get_thread_id(session_key)
-
-        # Notify user if channel is available and notifications are enabled
-        notify = getattr(self._lifecycle_config, "notify_session_ttl", True)
-        if channel and notify:
-            try:
-                await channel.send_message(
-                    session_key,
-                    "Session expired after inactivity — starting fresh conversation.",
-                )
-            except Exception as e:
-                self._logger.debug(f"Failed to send TTL notification for {session_key}: {e}")
-
-        self._logger.info(f"Session TTL expired for {session_key}, conversation rotated")
-        return new_thread_id
-
-    async def _check_auto_compact(
-        self,
-        session_key: str,
-        thread_id: str,
-        channel: ChannelAdapter | None,
-    ) -> str | None:
-        """Check if auto-compact should trigger and perform it if needed.
-
-        Returns:
-            New thread_id if compaction occurred, None otherwise.
-        """
-        if not self._auto_compact_config or not self._auto_compact_config.enabled:
-            return None
-        if not self._conversation_archiver:
-            return None
-
-        try:
-            context_info = await self._agent_runner.get_context_info(thread_id)
-            utilization = context_info.get("utilization", 0.0)
-
-            if utilization < self._auto_compact_config.trigger:
-                return None
-
-            self._logger.info(
-                f"Auto-compact triggered: {utilization:.1%} utilization "
-                f"(threshold: {self._auto_compact_config.trigger:.0%}) "
-                f"for session {session_key}"
-            )
-
-            # Parse conversation_id from thread_id (format: "{session_key}:{conversation_id}")
-            # session_key contains one colon (e.g., "telegram:123"), so split from the right
-            parts = thread_id.rsplit(":", 1)
-            conversation_id = parts[-1] if len(parts) == 2 else thread_id
-
-            # Archive the current conversation
-            await self._conversation_archiver.archive(
-                checkpointer=self._agent_runner.checkpointer,
-                thread_id=thread_id,
-                session_key=session_key,
-                conversation_id=conversation_id,
-                tags=["auto-compact"],
-            )
-
-            # Generate summary using agent
-            from openpaw.core.prompts.commands import SUMMARIZE_PROMPT
-            summary = await self._agent_runner.run(
-                message=SUMMARIZE_PROMPT,
-                thread_id=thread_id,
-            )
-
-            # Rotate to new conversation
-            new_conversation_id = self._session_manager.new_conversation(session_key)
-            new_thread_id = f"{session_key}:{new_conversation_id}"
-
-            # Inject summary into new thread
-            from openpaw.core.prompts.commands import AUTO_COMPACT_TEMPLATE
-            summary_message = AUTO_COMPACT_TEMPLATE.format(summary=summary)
-            await self._agent_runner.run(
-                message=summary_message,
-                thread_id=new_thread_id,
-            )
-
-            # Notify user if configured
-            if channel:
-                msg_count = context_info.get("message_count", 0)
-                approx_tokens = context_info.get("approximate_tokens", 0)
-                await channel.send_message(
-                    session_key,
-                    f"Conversation auto-compacted ({msg_count} messages, ~{approx_tokens:,} tokens). "
-                    f"Summary preserved in new conversation."
-                )
-
-            self._logger.info(
-                f"Auto-compact complete: {conversation_id} -> {new_conversation_id} "
-                f"({context_info.get('message_count', 0)} messages, "
-                f"~{context_info.get('approximate_tokens', 0):,} tokens)"
-            )
-
-            return new_thread_id
-
-        except Exception as e:
-            self._logger.error(f"Auto-compact failed for {session_key}: {e}", exc_info=True)
-            return None
-
-    async def _recover_context_overflow(
-        self,
-        session_key: str,
-        thread_id: str,
-        channel: ChannelAdapter | None,
-    ) -> str | None:
-        """Recover from a context window overflow by force-rotating the conversation.
-
-        Unlike _check_auto_compact (preventive, pre-run), this is an emergency
-        recovery triggered after a context overflow error. It always rotates,
-        regardless of auto_compact config, because the alternative is a
-        permanently stuck workspace.
-
-        Best-effort: archives the old conversation if possible, rotates to
-        a fresh thread, and notifies the user.
-
-        Args:
-            session_key: The session identifier.
-            thread_id: The current (overflowed) thread ID.
-            channel: Channel adapter for sending notifications.
-
-        Returns:
-            New thread_id if recovery succeeded, None on failure.
-        """
-        self._logger.warning(
-            f"Context overflow detected for {session_key}, "
-            f"force-rotating conversation"
-        )
-
-        try:
-            # Best-effort archive of the overflowed conversation
-            if self._conversation_archiver and self._agent_runner.checkpointer:
-                try:
-                    parts = thread_id.rsplit(":", 1)
-                    conversation_id = parts[-1] if len(parts) == 2 else thread_id
-                    await self._conversation_archiver.archive(
-                        checkpointer=self._agent_runner.checkpointer,
-                        thread_id=thread_id,
-                        session_key=session_key,
-                        conversation_id=conversation_id,
-                        tags=["context_overflow"],
-                    )
-                except Exception as archive_err:
-                    self._logger.warning(
-                        f"Failed to archive overflowed conversation: {archive_err}"
-                    )
-
-            # Rotate to fresh conversation
-            self._session_manager.new_conversation(session_key)
-            new_thread_id = self._session_manager.get_thread_id(session_key)
-
-            # Notify user
-            if channel:
-                try:
-                    notify = getattr(
-                        self._lifecycle_config, "notify_auto_compact", True
-                    )
-                    if notify:
-                        await channel.send_message(
-                            session_key,
-                            "The conversation grew too long and has been archived. "
-                            "Starting a fresh conversation.",
-                        )
-                except Exception as e:
-                    self._logger.debug(
-                        f"Failed to send overflow recovery notification: {e}"
-                    )
-
-            self._logger.info(
-                f"Context overflow recovery: rotated {thread_id} -> {new_thread_id}"
-            )
-            return new_thread_id
-
-        except Exception as e:
-            self._logger.error(
-                f"Context overflow recovery failed for {session_key}: {e}",
-                exc_info=True,
-            )
-            return None
-
-    async def _send_pending_audio(self, channel: ChannelAdapter, session_key: str) -> None:
-        """Check for and send any pending TTS audio."""
-        if not hasattr(channel, "send_audio"):
-            return
-
-        try:
-            from openpaw.builtins.tools._audio_context import clear_pending_audio, get_pending_audio
-
-            audio_data = get_pending_audio()
-            if audio_data:
-                await channel.send_audio(session_key, audio_data, filename="response.mp3")
-                clear_pending_audio()
-                self._logger.info(f"Sent TTS audio to {session_key}")
-        except ImportError:
-            pass  # Audio context not available
-        except Exception as e:
-            self._logger.error(f"Failed to send TTS audio: {e}")
 
     def _schedule_delayed_followup(self, followup: Any, session_key: str) -> None:
         """Schedule a delayed followup via the cron system."""
