@@ -95,3 +95,55 @@ def test_format_content_single_digit() -> None:
     lines = ["a"]
     result = format_content_with_line_numbers(lines)
     assert result == "1→a"
+
+
+def test_format_file_listing_missing_path_returns_empty() -> None:
+    """Missing 'path' key returns empty string and logs a warning."""
+    info = {"size": 1234, "modified_at": "2026-05-27 14:30:00"}
+    result = format_file_listing(info)
+    assert result == ""
+
+
+def test_format_file_listing_non_dict_returns_empty() -> None:
+    """Non-dict input returns empty string and logs a warning."""
+    result = format_file_listing("not a dict")  # type: ignore[arg-type]
+    assert result == ""
+
+
+def test_format_file_listing_invalid_size_type_falls_back() -> None:
+    """Invalid size type falls back to 0 and logs a warning."""
+    info = {
+        "path": "bad_size.txt",
+        "size": "huge",
+        "modified_at": "2026-05-27 14:30:00",
+        "is_dir": False,
+    }
+    result = format_file_listing(info)
+    assert "bad_size.txt" in result
+    assert "0B" in result
+
+
+def test_format_file_listing_invalid_modified_at_converts() -> None:
+    """Invalid modified_at type is converted to string."""
+    info = {
+        "path": "bad_date.txt",
+        "size": 100,
+        "modified_at": 1234567890,
+        "is_dir": False,
+    }
+    result = format_file_listing(info)
+    assert "bad_date.txt" in result
+    assert "1234567890" in result
+
+
+def test_format_file_listing_invalid_is_dir_converts() -> None:
+    """Invalid is_dir type is converted to bool."""
+    info = {
+        "path": "maybe_dir",
+        "size": 0,
+        "modified_at": "unknown",
+        "is_dir": "yes",
+    }
+    result = format_file_listing(info)
+    # "yes" is truthy, so is_dir becomes True → trailing slash
+    assert "maybe_dir/" in result
