@@ -1,8 +1,9 @@
 # OpenPaw Structural Cleanup — Session Handoff
 
 **Last Updated:** 2026-05-28
-**Sprint:** Structural Refactor Q2 2026 — **COMPLETE**
-**Holding Branch:** `refactor/structural-cleanup-2026` ← **READY FOR FINAL MERGE TO `develop`**
+**Sprint:** Structural Refactor Q2 2026 — **PHASE A COMPLETE**
+**Holding Branch:** `refactor/structural-cleanup-2026` ← **PR #118 OPENED → `develop` (PENDING HUMAN REVIEW)**
+**Status:** Phase A structural refactor complete. Phase B research in progress.
 
 ---
 
@@ -296,17 +297,21 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 ## How to Resume (Step-by-Step)
 
 ### For Human (John):
-1. ✅ All 16 structural refactor MRs are complete and merged
-2. Read this handoff file
-3. **Decision needed:** Approve final merge of `refactor/structural-cleanup-2026` → `develop`
-4. Point me at `SESSION_HANDOFF.md` in the next session
+1. ✅ All 16 Phase A structural refactor MRs are complete and merged
+2. ✅ PR #118 opened: Final merge `refactor/structural-cleanup-2026` → `develop` (pending your review)
+3. ✅ Phase B research complete — see `llm_memory/openpaw_refactor/12_phase_b_plan.md`
+4. **Decision needed:**
+   a. Approve PR #118 merge to `develop`
+   b. Approve/scope Phase B cleanup sprint (10 MRs, ~3 weeks)
+5. Point me at `SESSION_HANDOFF.md` in the next session
 
 ### For AI Team (Me / Subagents):
 1. `git checkout refactor/structural-cleanup-2026 && git pull origin refactor/structural-cleanup-2026`
 2. Read this handoff file
-3. **Structural refactor is COMPLETE** — all 16 MRs merged
-4. Wait for human approval before merging holding branch to `develop`
-5. After merge to `develop`, resume normal feature branch workflow (branch from `develop`)
+3. **Phase A is COMPLETE** — all 16 MRs merged
+4. **Phase B plan ready** — `llm_memory/openpaw_refactor/12_phase_b_plan.md`
+5. Wait for human approval on both PR #118 and Phase B scope
+6. After merge to `develop`, Phase B branches from `refactor/structural-cleanup-2026` (or `develop` if merged)
 
 ---
 
@@ -316,7 +321,51 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 
 **Future risks to watch:**
 - Final merge to `develop` — need to verify no regressions across all 16 MRs
-- Human review of holding branch before merging to `develop`
+- Phase B scope: 10 MRs, several touch core pipeline (MessageProcessor, SubAgentRunner)
+- Test file explosion: 18 test files >600 lines need splitting alongside source decomposition
+
+## Phase B Plan (Ready)
+
+**Full plan:** `llm_memory/openpaw_refactor/12_phase_b_plan.md`
+**Research:** `llm_memory/openpaw_refactor/11_phase_b_research.md`
+
+### Why Phase A Missed Targets
+
+| Metric | Target | Actual | Root Cause |
+|--------|--------|--------|------------|
+| Files >700 lines | 4 | **8** | 4 files never scoped; 3 partially decomposed; 1 data file |
+| Files >500 lines | 10 | **17** | 6 files never scoped; 7 partially decomposed; 2 new files grew; 1 decomposition byproduct |
+| Max methods/class | 15 | **25** | Channel adapters (Telegram 25, Discord 22) and BrowserSession (19) never scoped |
+
+### Phase B MRs (10 total)
+
+| Phase | MR | Target | Risk |
+|-------|-----|--------|------|
+| **B1** | SubAgentRunner decomposition | `runtime/subagent/runner.py` (946 → 300) | Medium |
+| **B1** | Email builtin package | `email/__init__.py` + `email/gmail.py` (601+775 → 150+300) | Medium |
+| **B1** | Browser session decomposition | `browser/session.py` (812 → 250) | Medium |
+| **B1** | Md2pdf package | `md2pdf.py` (767 → 200) | Low |
+| **B2** | MessageProcessor final cleanup | `message_processor.py` (541 → 280) | **Critical** |
+| **B2** | Channel adapter handlers | `telegram.py` + `discord.py` (735+759 → 420 each) | Medium |
+| **B2** | FileSearch backend extraction | `file_search.py` (585 → 250) | Low |
+| **B3** | AgentFactory/Runner slimming | `agent_factory.py` + `agent/runner.py` (458+586 → 250+380) | Medium |
+| **B3** | Scheduler slimming | `cron.py` + `heartbeat.py` (669+607 → 380+350) | Medium |
+| **B3** | Small cleanup (cron/history/cli) | `cron.py` + `channel_history.py` + `cli_init.py` (552+509+540 → 300+250+250) | Low |
+
+### Expected Metrics After Phase B
+
+| Metric | Current | After B1–B5 (top 5) | After All 10 |
+|--------|---------|---------------------|--------------|
+| Files >700 lines | 8 | **3** | **0** |
+| Files >500 lines | 17 | **10** | **~4** |
+| Max methods/class | 25 | **~18** | **≤15** |
+
+### Timeline
+- **B1:** 5 days (4 MRs, parallel tracks)
+- **B2:** 4 days (3 MRs, sequential on message processor)
+- **B3:** 3 days (3 MRs, parallel)
+- **Integration:** 2 days
+- **Total: ~2 weeks** (vs 3 weeks for Phase A)
 
 ---
 
@@ -362,7 +411,9 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 | 2026-05-28 | **MR #14 implemented** — 4 processors extracted, 46 new tests, backward-compatible wrappers |
 | 2026-05-28 | **PR #117 opened** — MR #14 (message processor) → `refactor/structural-cleanup-2026` |
 | 2026-05-28 | **PR #117 merged** — MR #14 squash-merged into holding branch (AI review: no blocking issues) |
-| 2026-05-28 | **16/16 MRs COMPLETE** — structural refactor sprint finished. Ready for final merge to `develop`. |
+| 2026-05-28 | **16/16 MRs COMPLETE** — structural refactor sprint finished. |
+| 2026-05-28 | **PR #118 opened** — Final merge `refactor/structural-cleanup-2026` → `develop` (pending human review, do NOT merge) |
+| 2026-05-28 | **Phase B research started** — investigating remaining large files for next cleanup sprint |
 
 ---
 
