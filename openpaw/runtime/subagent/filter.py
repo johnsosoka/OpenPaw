@@ -115,7 +115,13 @@ def filter_subagent_tools(
     # Step 2: Apply allowed_tools whitelist (if specified)
     if allowed_tools is not None:
         allowed_set = _resolve_tool_names(allowed_tools)
-        # Warn about unknown tools in allowed list
+        # Warn about tools that are in both allowed and excluded (silently denied)
+        excluded_but_allowed = allowed_set & SUBAGENT_EXCLUDED_TOOLS
+        if excluded_but_allowed:
+            logger.warning(
+                f"Tools in allowed_tools are excluded by floor set: {sorted(excluded_but_allowed)}"
+            )
+        # Warn about unknown tools in allowed list (excluding excluded tools)
         unknown_allowed = allowed_set - tool_names - SUBAGENT_EXCLUDED_TOOLS
         if unknown_allowed:
             logger.warning(
@@ -128,8 +134,8 @@ def filter_subagent_tools(
     # Step 3: Apply denied_tools blocklist (if specified)
     if denied_tools is not None:
         denied_set = _resolve_tool_names(denied_tools)
-        # Warn about unknown tools in denied list
-        unknown_denied = denied_set - tool_names
+        # Warn about unknown tools in denied list (excluding already-excluded tools)
+        unknown_denied = denied_set - tool_names - SUBAGENT_EXCLUDED_TOOLS
         if unknown_denied:
             logger.warning(
                 f"Unknown tools in denied_tools list: {sorted(unknown_denied)}"

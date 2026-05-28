@@ -167,6 +167,59 @@ class SubAgentExecutor:
 
         return result
 
+    async def _finalize_failure(
+        self,
+        request: SubAgentRequest,
+        start_time: float,
+        status: SubAgentStatus,
+        error_msg: str,
+        response: str,
+        log_level: int,
+    ) -> SubAgentResult:
+        """Common failure path for timeout and error handling.
+
+        Args:
+            request: The sub-agent request.
+            start_time: Monotonic start time.
+            status: Final status (TIMED_OUT or FAILED).
+            error_msg: Human-readable error message.
+            response: Session log response text.
+            log_level: Logging level for the failure message.
+
+        Returns:
+            SubAgentResult in the specified terminal state.
+        """
+        duration_ms = (time.monotonic() - start_time) * 1000
+        self._store.update_status(
+            request.id, status, completed_at=datetime.now(UTC)
+        )
+
+        result = SubAgentResult(
+            request_id=request.id,
+            output="",
+            error=error_msg,
+            duration_ms=duration_ms,
+        )
+        self._store.save_result(result)
+
+        log_path = await self._write_session_log(
+            request=request,
+            response=response,
+            tools_used=[],
+            metrics=None,
+            duration_ms=duration_ms,
+        )
+        if log_path:
+            result.session_log_path = log_path
+            self._store.save_result(result)
+
+        logger.log(
+            log_level,
+            f"Sub-agent {request.id} {status.value}: {error_msg}",
+            exc_info=(log_level >= logging.ERROR),
+        )
+        return result
+
     async def _handle_timeout(
         self, request: SubAgentRequest, start_time: float
     ) -> SubAgentResult:
@@ -179,34 +232,15 @@ class SubAgentExecutor:
         Returns:
             SubAgentResult in TIMED_OUT state.
         """
-        duration_ms = (time.monotonic() - start_time) * 1000
-        self._store.update_status(
-            request.id, SubAgentStatus.TIMED_OUT, completed_at=datetime.now(UTC)
-        )
-
         error_msg = f"Sub-agent timed out after {request.timeout_minutes} minutes"
-        result = SubAgentResult(
-            request_id=request.id,
-            output="",
-            error=error_msg,
-            duration_ms=duration_ms,
+        return await self._finalize_failure(
+            request,
+            start_time,
+            SubAgentStatus.TIMED_OUT,
+            error_msg,
+            "(timed out)",
+            logging.WARNING,
         )
-        self._store.save_result(result)
-
-        # Write session log even on timeout
-        log_path = await self._write_session_log(
-            request=request,
-            response="(timed out)",
-            tools_used=[],
-            metrics=None,
-            duration_ms=duration_ms,
-        )
-        if log_path:
-            result.session_log_path = log_path
-            self._store.save_result(result)
-
-        logger.warning(f"Sub-agent {request.id} timed out")
-        return result
 
     async def _handle_error(
         self, request: SubAgentRequest, start_time: float, error: Exception
@@ -221,34 +255,15 @@ class SubAgentExecutor:
         Returns:
             SubAgentResult in FAILED state.
         """
-        duration_ms = (time.monotonic() - start_time) * 1000
-        self._store.update_status(
-            request.id, SubAgentStatus.FAILED, completed_at=datetime.now(UTC)
-        )
-
         error_msg = f"Sub-agent failed: {error!s}"
-        result = SubAgentResult(
-            request_id=request.id,
-            output="",
-            error=error_msg,
-            duration_ms=duration_ms,
+        return await self._finalize_failure(
+            request,
+            start_time,
+            SubAgentStatus.FAILED,
+            error_msg,
+            f"(failed: {error_msg})",
+            logging.ERROR,
         )
-        self._store.save_result(result)
-
-        # Write session log for failure path
-        log_path = await self._write_session_log(
-            request=request,
-            response=f"(failed: {error_msg})",
-            tools_used=[],
-            metrics=None,
-            duration_ms=duration_ms,
-        )
-        if log_path:
-            result.session_log_path = log_path
-            self._store.save_result(result)
-
-        logger.error(f"Sub-agent {request.id} failed: {error}", exc_info=True)
-        return result
 
     async def _progress_timer(
         self,
@@ -291,7 +306,9 @@ class SubAgentExecutor:
                 await self._result_callback(request.session_key, content)
                 logger.debug(f"Sent progress update for sub-agent {request.id}")
             except Exception as e:
-                logger.warning(f"Failed to send progress for {request.id}: {e}")
+                logger.warning(
+                    f"Failed to send progress for {request.id}: {e}", exc_info=True
+                )
 
     async def _write_session_log(
         self,
@@ -329,5 +346,8 @@ class SubAgentExecutor:
             )
             return log_path
         except Exception as e:
-            logger.warning(f"Failed to write session log for sub-agent {request.id}: {e}")
+            logger.warning(
+                f"Failed to write session log for sub-agent {request.id}: {e}",
+                exc_info=True,
+            )
             return None

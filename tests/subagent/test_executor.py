@@ -1,7 +1,8 @@
 """Tests for SubAgentExecutor execution behavior."""
 
 import asyncio
-from unittest.mock import AsyncMock, Mock
+import logging
+from unittest.mock import ANY, AsyncMock, Mock
 
 import pytest
 
@@ -10,6 +11,7 @@ from openpaw.agent.runner import AgentRunner
 from openpaw.agent.session_logger import SessionLogger
 from openpaw.channels.base import ChannelAdapter
 from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
+from openpaw.runtime.subagent.executor import SubAgentExecutor
 from openpaw.runtime.subagent.runner import SubAgentRunner
 from openpaw.stores.subagent import SubAgentStore
 
@@ -558,5 +560,89 @@ async def test_session_log_path_appears_in_notification(
     mock_callback.assert_called_once()
     content = mock_callback.call_args[0][1]
     assert "Full session log:" in content
+
+
+@pytest.mark.asyncio
+async def test_finalize_failure_consolidates_timeout_and_error_paths(mock_store):
+    """Test that _finalize_failure produces correct result for both timeout and error."""
+    executor = SubAgentExecutor(
+        store=mock_store,
+        token_logger=None,
+        session_logger=None,
+        workspace_name="test",
+        result_callback=None,
+    )
+
+    request = SubAgentRequest(
+        id="test-req",
+        task="test",
+        label="test",
+        status=SubAgentStatus.RUNNING,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+    )
+
+    # Test timeout path
+    result = await executor._finalize_failure(
+        request, 0.0, SubAgentStatus.TIMED_OUT, "timed out", "(timed out)", logging.WARNING
+    )
+    assert result.error == "timed out"
+    assert result.request_id == "test-req"
+    mock_store.update_status.assert_called_with(
+        "test-req", SubAgentStatus.TIMED_OUT, completed_at=ANY
+    )
+
+    # Test error path
+    mock_store.reset_mock()
+    result = await executor._finalize_failure(
+        request, 0.0, SubAgentStatus.FAILED, "failed", "(failed: failed)", logging.ERROR
+    )
+    assert result.error == "failed"
+    mock_store.update_status.assert_called_with(
+        "test-req", SubAgentStatus.FAILED, completed_at=ANY
+    )
+
+
+@pytest.mark.asyncio
+async def test_exc_info_passed_to_warning_logs(mock_store):
+    """Test that exception warnings include exc_info=True."""
+    from unittest.mock import patch
+
+    executor = SubAgentExecutor(
+        store=mock_store,
+        token_logger=None,
+        session_logger=None,
+        workspace_name="test",
+        result_callback=None,
+    )
+
+    with patch("openpaw.runtime.subagent.executor.logger") as mock_logger:
+        # Simulate progress callback failure
+        executor._result_callback = AsyncMock(side_effect=RuntimeError("boom"))
+        request = SubAgentRequest(
+            id="test-req",
+            task="test",
+            label="test",
+            status=SubAgentStatus.RUNNING,
+            session_key="telegram:12345",
+            timeout_minutes=30,
+            progress_interval_minutes=0,
+        )
+        # Trigger the warning via _progress_timer (cancel immediately)
+        from unittest.mock import patch as mock_patch
+        mock_runner = Mock(spec=AgentRunner)
+        mock_runner._last_tools_used = None
+        mock_runner._current_tool_name = None
+        with mock_patch("asyncio.sleep", side_effect=[None, asyncio.CancelledError()]):
+            try:
+                await executor._progress_timer(request, mock_runner, 0.0)
+            except asyncio.CancelledError:
+                pass
+
+        # Verify the warning was called with exc_info=True
+        warning_calls = [c for c in mock_logger.warning.call_args_list]
+        assert len(warning_calls) > 0
+        for call in warning_calls:
+            assert call.kwargs.get("exc_info") is True
 
 

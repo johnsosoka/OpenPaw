@@ -336,3 +336,30 @@ def test_format_notification_no_log_path_when_not_set():
 
     content = runner._format_notification(request, result)
     assert "Full session log:" not in content
+
+
+@pytest.mark.asyncio
+async def test_send_notification_includes_exc_info_on_failure():
+    """Test that notification send warnings include exc_info=True."""
+    from unittest.mock import patch
+    from openpaw.runtime.subagent.notifier import SubAgentNotifier
+
+    request = SubAgentRequest(
+        id="test-req",
+        task="test",
+        label="test",
+        status=SubAgentStatus.RUNNING,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+    )
+    result = SubAgentResult(request_id="test-req", output="done")
+
+    # Callback that raises
+    failing_callback = AsyncMock(side_effect=RuntimeError("boom"))
+    notifier = SubAgentNotifier(channels={}, result_callback=failing_callback)
+
+    with patch("openpaw.runtime.subagent.notifier.logger") as mock_logger:
+        await notifier.send_notification(request, result)
+
+        mock_logger.warning.assert_called_once()
+        assert mock_logger.warning.call_args.kwargs.get("exc_info") is True

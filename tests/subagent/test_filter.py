@@ -136,3 +136,59 @@ async def test_tool_filtering_removes_excluded_tools(
 
     # Verify _build_agent was called to rebuild with filtered tools
     mock_runner._build_agent.assert_called_once()
+
+
+import logging
+from unittest.mock import patch
+
+
+def test_filter_warns_when_allowed_tools_includes_excluded():
+    """Test that filter_subagent_tools warns when allowed_tools includes excluded tools."""
+    tool = Mock()
+    tool.name = "read_file"
+
+    with patch("openpaw.runtime.subagent.filter.logger") as mock_logger:
+        result = filter_subagent_tools(
+            [tool],
+            allowed_tools=["spawn_agent", "read_file"],
+        )
+
+        assert len(result) == 1
+        assert result[0].name == "read_file"
+        mock_logger.warning.assert_called_once()
+        call_args = mock_logger.warning.call_args[0][0]
+        assert "spawn_agent" in call_args
+
+
+def test_filter_does_not_warn_for_excluded_tools_in_denied():
+    """Test that filter_subagent_tools does not produce false warning for excluded tools in denied_tools."""
+    tool = Mock()
+    tool.name = "read_file"
+
+    with patch("openpaw.runtime.subagent.filter.logger") as mock_logger:
+        result = filter_subagent_tools(
+            [tool],
+            denied_tools=["spawn_agent", "read_file"],
+        )
+
+        assert len(result) == 0
+        # Should only warn about unknown tools, not excluded ones
+        calls = [c[0][0] for c in mock_logger.warning.call_args_list]
+        assert not any("spawn_agent" in c for c in calls)
+
+
+def test_filter_warns_for_unknown_tools_in_denied():
+    """Test that filter_subagent_tools warns for genuinely unknown tools in denied_tools."""
+    tool = Mock()
+    tool.name = "read_file"
+
+    with patch("openpaw.runtime.subagent.filter.logger") as mock_logger:
+        result = filter_subagent_tools(
+            [tool],
+            denied_tools=["nonexistent_tool"],
+        )
+
+        assert len(result) == 1
+        mock_logger.warning.assert_called_once()
+        call_args = mock_logger.warning.call_args[0][0]
+        assert "nonexistent_tool" in call_args

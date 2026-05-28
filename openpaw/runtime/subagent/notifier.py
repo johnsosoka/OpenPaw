@@ -135,4 +135,7 @@ class SubAgentNotifier:
                 logger.debug(f"Sent notification for sub-agent {request.id}")
 
         except Exception as e:
-            logger.warning(f"Failed to send notification for sub-agent {request.id}: {e}")
+            logger.warning(
+                f"Failed to send notification for sub-agent {request.id}: {e}",
+                exc_info=True,
+            )

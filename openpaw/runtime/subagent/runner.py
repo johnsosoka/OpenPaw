@@ -372,7 +372,8 @@ class SubAgentRunner:
                     self._store.save_result(result)
                 except Exception as log_err:
                     logger.warning(
-                        f"Failed to write cancel session log for sub-agent {request.id}: {log_err}"
+                        f"Failed to write cancel session log for sub-agent {request.id}: {log_err}",
+                        exc_info=True,
                     )
 
             logger.info(f"Sub-agent {request.id} was cancelled")
@@ -415,7 +416,8 @@ class SubAgentRunner:
                     self._store.save_result(result)
                 except Exception as log_err:
                     logger.warning(
-                        f"Failed to write failure session log for sub-agent {request.id}: {log_err}"
+                        f"Failed to write failure session log for sub-agent {request.id}: {log_err}",
+                        exc_info=True,
                     )
 
             logger.error(f"Sub-agent {request.id} failed: {e}", exc_info=True)
