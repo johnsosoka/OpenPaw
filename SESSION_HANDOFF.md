@@ -10,7 +10,7 @@
 
 1. ✅ Holding branch is `refactor/structural-cleanup-2026` on origin — **always branch from this**
 2. ✅ 5 MRs merged, 2,771 tests passing on holding branch
-3. 📋 Next work: MR #5 (team roster) + MR #6 (browser tool package)
+3. 📋 Next work: MR #9 (WorkspaceRunner services) + MR #10 (AgentBuilder)
 4. 📁 All research/artifacts: `llm_memory/openpaw_refactor/`
 5. 📋 Sprint plan: `llm_memory/openpaw_refactor/00_sprint_plan.md`
 
@@ -25,8 +25,10 @@ origin/develop (frozen for refactor duration)
        ├─ origin/refactor/02-model-factory      ✅ MERGED
        ├─ origin/refactor/03-stdio-channel      ✅ MERGED
        ├─ origin/refactor/04-fs-formatting      ✅ MERGED
-       ├─ local refactor/05-team-roster         📋 NEXT
-       ├─ local refactor/06-browser-package     📋 NEXT
+       ├─ origin/refactor/05-team-roster      ✅ MERGED
+       ├─ origin/refactor/06-browser-package    ✅ MERGED
+       ├─ origin/refactor/07-task-package       ✅ MERGED
+       ├─ origin/refactor/08-scheduler-base     ✅ MERGED
        └─ ... (see sprint plan)
 ```
 
@@ -116,22 +118,71 @@ poetry run pytest --tb=short
 - Added `tests/test_filesystem_helpers.py` with 16 unit tests
 - **Tests: 2,771 passed (16 new), ruff clean**
 
+### MR #5: Team Roster Extraction
+**Branch:** `refactor/05-team-roster` → merged into holding  
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/107  
+**Scope:** Move `_build_team_roster()` from `workspace/runner.py` to `workspace/roster.py`  
+**Commit:** `3a70de7`
+
+- Created `workspace/roster.py` with `TeamRosterBuilder` class
+- Removed 57-line function from `workspace/runner.py`
+- Added `tests/test_team_roster.py` with 6 unit tests
+- **Tests: 2,777 passed, ruff clean**
+
+### MR #6: Browser Tool Package
+**Branch:** `refactor/06-browser-package` → merged into holding  
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/108  
+**Scope:** Convert `builtins/tools/browser/__init__.py` (578 lines) into proper package  
+**Commit:** `cc24fac`
+
+- Created `builtins/tools/browser/models.py` (84 lines) — 8 Pydantic input schemas
+- Created `builtins/tools/browser/tools.py` (422 lines) — 12 tool factory functions
+- `__init__.py` reduced to 116-line facade
+- All 102 browser tests pass
+- **Tests: 2,777 passed, ruff clean**
+
+### MR #7: Task Tool Package
+**Branch:** `refactor/07-task-package` → merged into holding  
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/110  
+**Scope:** Convert `builtins/tools/task.py` (612 lines) into proper package  
+**Commit:** `ddd0b52`
+
+- Created `builtins/tools/task/models.py` — 4 Pydantic input schemas
+- Created `builtins/tools/task/tools.py` — 5 tool factory functions
+- `__init__.py` created as facade
+- All 24 task tests pass
+- **Tests: 2,777 passed, ruff clean**
+
+### MR #8: Scheduler Base Class
+**Branch:** `refactor/08-scheduler-base` → merged into holding  
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/109  
+**Scope:** Extract shared orchestration from `cron.py` (669) and `heartbeat.py` (592)  
+**Commit:** `3e236a8`
+
+- Created `runtime/scheduling/base.py` with `BaseScheduler` abstract class
+- `CronScheduler` and `HeartbeatScheduler` now extend `BaseScheduler`
+- Removed ~200 lines of duplicated logic from each scheduler
+- Implemented `delivery: "both"` mode (Phase 0 bugfix)
+- Fixed heartbeat channel context (Phase 0 bugfix)
+- **Tests: 2,777 passed, ruff clean**
+
 ---
 
 ## Next Batch of Work (Ready to Start)
 
-### MR #5: Team Roster Extraction
+### MR #9: WorkspaceRunner Services (Part 1)
 **Base:** `refactor/structural-cleanup-2026`  
-**Scope:** Move `_build_team_roster()` from `workspace/runner.py` to `workspace/roster.py`  
-**Risk:** Low  
-**Est. Lines:** ~60 moved
+**Scope:** Extract 4 safe services from `workspace/runner.py` (1,158 lines)  
+**Risk:** Medium (touches initialization order and lifecycle)  
+**Est. Lines:** ~700 reorganized  
+**Analysis:** `llm_memory/openpaw_refactor/03_workspace_runner_depth.md`
 
-### MR #6: Browser Tool Package
+### MR #10: AgentBuilder Extraction
 **Base:** `refactor/structural-cleanup-2026`  
-**Scope:** Convert `builtins/tools/browser/__init__.py` into proper package  
-**Risk:** Low  
-**Est. Lines:** ~450 reorganized  
-**Analysis:** `llm_memory/openpaw_refactor/05_builtin_tools_depth.md`
+**Scope:** Extract `_build_agent()` from `agent/runner.py` to `agent/builder.py`  
+**Risk:** Medium (agent construction is complex)  
+**Est. Lines:** ~250 moved  
+**Analysis:** `llm_memory/openpaw_refactor/04_agent_runner_and_fs_depth.md`
 
 ---
 
@@ -160,12 +211,12 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 
 | Metric | Start | Current | Target |
 |--------|-------|---------|--------|
-| Files >700 lines | 12 | 10 | 4 |
-| Files >500 lines | 22 | 20 | 10 |
+| Files >700 lines | 12 | 8 | 4 |
+| Files >500 lines | 22 | 18 | 10 |
 | Max classes/file | 39 | 8 | 8 |
 | Max methods/class | 27 | 27 | 15 |
-| Tests | 2,707 | 2,771 | — |
-| MRs Complete | 0 | 5/16 | 16/16 |
+| Tests | 2,707 | 2,777 | — |
+| MRs Complete | 0 | 9/16 | 16/16 |
 
 ---
 
@@ -213,6 +264,15 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 | 2026-05-27 | MR #4 completed (filesystem formatting helpers) — ready to merge |
 | 2026-05-28 | MR #2 merged into holding branch (PR #105) |
 | 2026-05-28 | MR #4 merged into holding branch (PR #106) — with AI review safety fix |
+| 2026-05-28 | MR #5 completed (team roster extraction) — PR #107 opened, AI review approved |
+| 2026-05-28 | MR #6 completed (browser tool package) — PR #108 opened, AI review approved |
+| 2026-05-28 | MR #5 merged into holding branch (PR #107 squash merge) |
+| 2026-05-28 | MR #6 merged into holding branch (PR #108 squash merge) |
+| 2026-05-28 | MR #7 completed (task tool package) — PR #110 opened |
+| 2026-05-28 | MR #8 completed (scheduler base class) — PR #109 opened |
+| 2026-05-28 | MR #7 merged into holding branch (PR #110 squash merge) |
+| 2026-05-28 | MR #8 merged into holding branch (PR #109 squash merge) |
+| 2026-05-28 | **Tests after merge: 2,777 passed, ruff clean** |
 | 2026-05-28 | **Session handoff saved** — ready for next session |
 
 ---
