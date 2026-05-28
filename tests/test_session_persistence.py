@@ -219,13 +219,10 @@ class TestConfigModels:
         config2 = HeartbeatConfig(delivery="agent")
         assert config2.delivery == "agent"
 
-    def test_heartbeat_config_delivery_both_rejected(self):
-        """delivery='both' raises ValidationError with migration message."""
-        with pytest.raises(ValidationError) as exc_info:
-            HeartbeatConfig(delivery="both")
-
-        error_text = str(exc_info.value)
-        assert "delivery: 'both' has been removed" in error_text
+    def test_heartbeat_config_delivery_both_accepted(self):
+        """delivery='both' is now valid (Phase 0 bugfix)."""
+        config = HeartbeatConfig(delivery="both")
+        assert config.delivery == "both"
 
     def test_cron_output_delivery_default(self):
         """Verify default is 'channel'."""
@@ -237,13 +234,10 @@ class TestConfigModels:
         with pytest.raises(ValidationError):
             CronOutputConfig(channel="telegram", chat_id=123, delivery="invalid")
 
-    def test_cron_output_delivery_both_rejected(self):
-        """delivery='both' raises ValidationError with migration message."""
-        with pytest.raises(ValidationError) as exc_info:
-            CronOutputConfig(channel="telegram", chat_id=123, delivery="both")
-
-        error_text = str(exc_info.value)
-        assert "delivery: 'both' has been removed" in error_text
+    def test_cron_output_delivery_both_accepted(self):
+        """delivery='both' is now valid (Phase 0 bugfix)."""
+        output = CronOutputConfig(channel="telegram", chat_id=123, delivery="both")
+        assert output.delivery == "both"
 
 
 # --- System Event Template Tests ---
