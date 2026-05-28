@@ -135,7 +135,7 @@ Key metrics:
 git checkout refactor/structural-cleanup-2026
 git pull origin refactor/structural-cleanup-2026
 poetry run pytest --tb=short
-# Expected: 2890 passed
+# Expected: 2896 passed
 ```
 
 **Last known state:** 2,896 tests passing, ruff clean.
