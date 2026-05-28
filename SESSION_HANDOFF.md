@@ -1,7 +1,7 @@
 # OpenPaw Structural Cleanup — Session Handoff
 
-**Last Updated:** 2026-05-28  
-**Sprint:** Structural Refactor Q2 2026  
+**Last Updated:** 2026-05-28
+**Sprint:** Structural Refactor Q2 2026
 **Holding Branch:** `refactor/structural-cleanup-2026` ← **ALL FUTURE BRANCHES ORIGINATE HERE**
 
 ---
@@ -9,10 +9,11 @@
 ## Quick Resume Checklist (for next session)
 
 1. ✅ Holding branch is `refactor/structural-cleanup-2026` on origin — **always branch from this**
-2. ✅ 11 MRs merged, 2,777 tests passing on holding branch
-3. 📋 Next work: MR #11 (Channel Helpers) + MR #12 (Builtin Template + Spawn Package)
-4. 📁 All research/artifacts: `llm_memory/openpaw_refactor/`
-5. 📋 Sprint plan: `llm_memory/openpaw_refactor/00_sprint_plan.md`
+2. ✅ 13 MRs merged, 2,834 tests passing on holding branch
+3. 📋 Next work: MR #13 (Filesystem Split) + MR #14 (Message Processor) + MR #15 (Cron Manager)
+4. ⚠️ **CRITICAL PROCESS REMINDER**: Wait for AI pipeline review before merging. The `review / review` CI job is just a test runner, not the AI review. Do NOT merge until actual AI feedback comments are posted on the PR.
+5. 📁 All research/artifacts: `llm_memory/openpaw_refactor/`
+6. 📋 Sprint plan: `llm_memory/openpaw_refactor/00_sprint_plan.md`
 
 ---
 
@@ -31,6 +32,8 @@ origin/develop (frozen for refactor duration)
        ├─ origin/refactor/08-scheduler-base     ✅ MERGED
        ├─ origin/refactor/09-runner-services    ✅ MERGED
        ├─ origin/refactor/10-agent-builder      ✅ MERGED
+       ├─ origin/refactor/11-channel-helpers    ✅ MERGED
+       ├─ origin/refactor/12-builtin-template   ✅ MERGED
        └─ ... (see sprint plan)
 ```
 
@@ -44,8 +47,8 @@ origin/develop (frozen for refactor duration)
 ## Completed Work
 
 ### Phase 0: Bugfixes
-**Branch:** `refactor/00-bugfixes-and-shim` → merged into holding branch  
-**PR:** N/A (committed directly to branch)  
+**Branch:** `refactor/00-bugfixes-and-shim` → merged into holding branch
+**PR:** N/A (committed directly to branch)
 **Commit:** `7a52632`
 
 - Fixed `delivery: "both"` in `cron.py` and `heartbeat.py`
@@ -54,8 +57,8 @@ origin/develop (frozen for refactor duration)
 - Tests: 2,707 passed
 
 ### MR #1: Config Models Package
-**Branch:** `refactor/01-config-models` → merged into holding  
-**PR:** https://github.com/johnsosoka/OpenPaw/pull/103  
+**Branch:** `refactor/01-config-models` → merged into holding
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/103
 **Commit:** `89ce111`
 
 - Decomposed `core/config/models.py` (794 lines, 39 classes) into `core/config/models/` package (8 submodules)
@@ -64,8 +67,8 @@ origin/develop (frozen for refactor duration)
 - Tests: 2,707 passed, ruff clean, mypy clean
 
 ### MR #3: Stdio Channel Adapter
-**Branch:** `refactor/03-stdio-channel` → merged into holding  
-**PR:** https://github.com/johnsosoka/OpenPaw/pull/104  
+**Branch:** `refactor/03-stdio-channel` → merged into holding
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/104
 **Commit:** `552f99d`
 
 - Created `StdioChannel` (267 lines) for local CLI testing
@@ -82,7 +85,7 @@ origin/develop (frozen for refactor duration)
 git checkout refactor/structural-cleanup-2026
 git pull origin refactor/structural-cleanup-2026
 poetry run pytest --tb=short
-# Expected: 2777 passed
+# Expected: 2834 passed
 ```
 
 ---
@@ -90,9 +93,9 @@ poetry run pytest --tb=short
 ## Completed Work (New)
 
 ### MR #2: Model Factory Extraction
-**Branch:** `refactor/02-model-factory` → merged into holding  
-**PR:** https://github.com/johnsosoka/OpenPaw/pull/105  
-**Scope:** Extract `create_chat_model()` from `agent/runner.py` to `agent/model_factory.py`  
+**Branch:** `refactor/02-model-factory` → merged into holding
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/105
+**Scope:** Extract `create_chat_model()` from `agent/runner.py` to `agent/model_factory.py`
 **Commit:** `e77b5ce`
 
 - Created `agent/model_factory.py` with `create_chat_model()` and `validate_tool_names()`
@@ -101,9 +104,9 @@ poetry run pytest --tb=short
 - **Tests: 2,755 passed, ruff clean**
 
 ### MR #4: Filesystem Formatting Utilities
-**Branch:** `refactor/04-fs-formatting` → merged into holding  
-**PR:** https://github.com/johnsosoka/OpenPaw/pull/106  
-**Scope:** Extract formatting from `agent/tools/filesystem.py` (1,184 lines)  
+**Branch:** `refactor/04-fs-formatting` → merged into holding
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/106
+**Scope:** Extract formatting from `agent/tools/filesystem.py` (1,184 lines)
 **Commit:** `63d7c6e` + `a5770b4` (safety fix)
 
 - Created `agent/tools/helpers/formatting.py` with `format_file_listing()` and `format_content_with_line_numbers()`
@@ -113,9 +116,9 @@ poetry run pytest --tb=short
 - **Tests: 2,771 passed (16 new), ruff clean**
 
 ### MR #5: Team Roster Extraction
-**Branch:** `refactor/05-team-roster` → merged into holding  
-**PR:** https://github.com/johnsosoka/OpenPaw/pull/107  
-**Scope:** Move `_build_team_roster()` from `workspace/runner.py` to `workspace/roster.py`  
+**Branch:** `refactor/05-team-roster` → merged into holding
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/107
+**Scope:** Move `_build_team_roster()` from `workspace/runner.py` to `workspace/roster.py`
 **Commit:** `3a70de7`
 
 - Created `workspace/roster.py` with `TeamRosterBuilder` class
@@ -124,9 +127,9 @@ poetry run pytest --tb=short
 - **Tests: 2,777 passed, ruff clean**
 
 ### MR #6: Browser Tool Package
-**Branch:** `refactor/06-browser-package` → merged into holding  
-**PR:** https://github.com/johnsosoka/OpenPaw/pull/108  
-**Scope:** Convert `builtins/tools/browser/__init__.py` (578 lines) into proper package  
+**Branch:** `refactor/06-browser-package` → merged into holding
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/108
+**Scope:** Convert `builtins/tools/browser/__init__.py` (578 lines) into proper package
 **Commit:** `cc24fac`
 
 - Created `builtins/tools/browser/models.py` (84 lines) — 8 Pydantic input schemas
@@ -136,9 +139,9 @@ poetry run pytest --tb=short
 - **Tests: 2,777 passed, ruff clean**
 
 ### MR #7: Task Tool Package
-**Branch:** `refactor/07-task-package` → merged into holding  
-**PR:** https://github.com/johnsosoka/OpenPaw/pull/110  
-**Scope:** Convert `builtins/tools/task.py` (612 lines) into proper package  
+**Branch:** `refactor/07-task-package` → merged into holding
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/110
+**Scope:** Convert `builtins/tools/task.py` (612 lines) into package
 **Commit:** `ddd0b52`
 
 - Created `builtins/tools/task/models.py` — 4 Pydantic input schemas
@@ -148,9 +151,9 @@ poetry run pytest --tb=short
 - **Tests: 2,777 passed, ruff clean**
 
 ### MR #8: Scheduler Base Class
-**Branch:** `refactor/08-scheduler-base` → merged into holding  
-**PR:** https://github.com/johnsosoka/OpenPaw/pull/109  
-**Scope:** Extract shared orchestration from `cron.py` (669) and `heartbeat.py` (592)  
+**Branch:** `refactor/08-scheduler-base` → merged into holding
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/109
+**Scope:** Extract shared orchestration from `cron.py` (669) and `heartbeat.py` (592)
 **Commit:** `3e236a8`
 
 - Created `runtime/scheduling/base.py` with `BaseScheduler` abstract class
@@ -161,9 +164,9 @@ poetry run pytest --tb=short
 - **Tests: 2,777 passed, ruff clean**
 
 ### MR #9: WorkspaceRunner Services (Part 1)
-**Branch:** `refactor/09-runner-services` → merged into holding  
-**PR:** https://github.com/johnsosoka/OpenPaw/pull/112  
-**Scope:** Extract 4 safe services from `workspace/runner.py` (1,100 → ~850 lines)  
+**Branch:** `refactor/09-runner-services` → merged into holding
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/112
+**Scope:** Extract 4 safe services from `workspace/runner.py` (1,100 → ~850 lines)
 **Commit:** `c6ab7f2` + `be51971` (fix) + `2582b12` (merge fix)
 
 - Created `workspace/initializer.py` — `WorkspaceInitializer` (init_stores, init_memory, init_builtins, init_agent, config resolution)
@@ -174,9 +177,9 @@ poetry run pytest --tb=short
 - **Tests: 2,777 passed, ruff clean**
 
 ### MR #10: AgentBuilder Extraction
-**Branch:** `refactor/10-agent-builder` → merged into holding  
-**PR:** https://github.com/johnsosoka/OpenPaw/pull/111  
-**Scope:** Extract `_build_agent()` from `agent/runner.py` to `agent/builder.py`  
+**Branch:** `refactor/10-agent-builder` → merged into holding
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/111
+**Scope:** Extract `_build_agent()` from `agent/runner.py` to `agent/builder.py`
 **Commit:** `7fc46e7` + `b9ac21d` (fix)
 
 - Created `agent/builder.py` — `AgentBuilder` class with `build()` and `create_model()`
@@ -185,22 +188,57 @@ poetry run pytest --tb=short
 - Kept `_build_agent()` and `_create_model()` as thin wrappers for test compatibility
 - **Tests: 2,777 passed, ruff clean**
 
+### MR #11: Channel Helper Extraction
+**Branch:** `refactor/11-channel-helpers` → merged into holding
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/113
+**Commit:** `8816692`
+
+- Created `channels/helpers/` package with 4 focused modules
+  - `splitting.py` — `split_message()` (pure function, platform-agnostic)
+  - `formatting.py` — `format_approval_message()`, `format_unauthorized_response()`, `check_file_size()`
+  - `attachments.py` — `map_mime_type_to_attachment_type()`
+  - `security.py` — `SecurityMixin` with `_check_user_allowed()`, `_check_activation()`, `_build_unauthorized_text()`
+- `DiscordChannel` and `TelegramChannel` now inherit `SecurityMixin`, delegate allowlist/activation/filtering
+- Added 57 tests in `tests/channels/test_helpers.py`
+- **Tests: 2,834 passed, ruff clean**
+
+### MR #12: Builtin Template + Spawn Package
+**Branch:** `refactor/12-builtin-template` → merged into holding
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/114
+**Commit:** `48ec3e0`
+
+- Deleted monolithic `builtins/tools/spawn.py` (595 lines)
+- Created `builtins/tools/spawn/` package with standard 4-file structure
+  - `__init__.py` — `SpawnToolBuiltin` facade (185 lines)
+  - `models.py` — Pydantic input schemas
+  - `formatters.py` — `format_time_ago()`, `format_duration()`, `format_spawn_success()`
+  - `tools.py` — 5 LangChain `StructuredTool` factory functions
+- Registry import path unchanged; backward-compatible wrappers preserved
+- **Tests: 2,834 passed, ruff clean**
+
 ---
 
 ## Next Batch of Work (Ready to Start)
 
-### MR #11: Channel Helper Extraction
-**Base:** `refactor/structural-cleanup-2026`  
-**Scope:** Extract duplicated logic from Discord (846) and Telegram (804)  
-**Risk:** Medium (shared behavior must stay identical across both platforms)  
-**Est. Lines:** ~200 moved  
-**Analysis:** `llm_memory/openpaw_refactor/06_channels_and_schedulers_depth.md`
+### MR #13: Filesystem Tool Split
+**Base:** `refactor/structural-cleanup-2026`
+**Scope:** Split `FilesystemTools` (1,184 lines, 18 methods) into Read/Write/Search classes
+**Risk:** High (security-critical write protection — needs dedicated audit)
+**Est. Lines:** ~900 reorganized
+**Analysis:** `llm_memory/openpaw_refactor/04_agent_runner_and_fs_depth.md`
 
-### MR #12: Builtin Template and Spawn Package
-**Base:** `refactor/structural-cleanup-2026`  
-**Scope:** Apply standard package pattern to `spawn.py` and establish template  
-**Risk:** Medium (spawn is heavily tested — 1,558 lines of tests)  
-**Est. Lines:** ~550 reorganized  
+### MR #14: Message Processor Decomposition
+**Base:** `refactor/structural-cleanup-2026`
+**Scope:** Split `MessageProcessor` (775 lines) into focused processors
+**Risk:** High (touches the core message pipeline)
+**Est. Lines:** ~700 reorganized
+**Analysis:** `llm_memory/openpaw_refactor/03_workspace_runner_depth.md`
+
+### MR #15: Cron Manager Package
+**Base:** `refactor/structural-cleanup-2026`
+**Scope:** Convert `builtins/tools/cron_manager.py` (585 lines, 21 methods) into package
+**Risk:** Medium
+**Est. Lines:** ~550 reorganized
 **Analysis:** `llm_memory/openpaw_refactor/05_builtin_tools_depth.md`
 
 ---
@@ -218,7 +256,7 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 | `03_workspace_runner_depth.md` | WorkspaceRunner extraction plan (MR #9 done) |
 | `04_agent_runner_and_fs_depth.md` | AgentRunner + filesystem analysis (MR #2/#4/#10/#13 future) |
 | `05_builtin_tools_depth.md` | Builtin tools decomposition analysis (MR #6/#7/#12/#15 future) |
-| `06_channels_and_schedulers_depth.md` | Channel adapter + scheduler analysis (MR #8/#11 future) |
+| `06_channels_and_schedulers_depth.md` | Channel adapter + scheduler analysis (MR #8/#11 done) |
 | `07_config_models_implementation_notes.md` | Config models implementation spec (MR #1 done) |
 | `08_stdio_channel_design.md` | Stdio channel design spec (MR #3 done) |
 | `09_builtin_package_template.md` | Standard 4-file package template for future builtins |
@@ -230,12 +268,12 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 
 | Metric | Start | Current | Target |
 |--------|-------|---------|--------|
-| Files >700 lines | 12 | 6 | 4 |
-| Files >500 lines | 22 | 16 | 10 |
+| Files >700 lines | 12 | 5 | 4 |
+| Files >500 lines | 22 | 15 | 10 |
 | Max classes/file | 39 | 8 | 8 |
 | Max methods/class | 27 | 27 | 15 |
-| Tests | 2,707 | 2,777 | — |
-| MRs Complete | 0 | 11/16 | 16/16 |
+| Tests | 2,707 | 2,834 | — |
+| MRs Complete | 0 | 13/16 | 16/16 |
 
 ---
 
@@ -257,6 +295,9 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 6. Run tests: `poetry run pytest --tb=short`
 7. **Push branch and open PR** via `gh pr create --base refactor/structural-cleanup-2026`
 8. **Wait for AI pipeline review** — GitHub will trigger automated code review. **Do NOT merge until AI feedback is addressed.**
+   - The `review / review` CI job is **just a test runner**, not the AI review
+   - AI review comments will appear as PR comments from `github-actions` or a bot account
+   - **Do NOT merge just because CI passes** — wait for actual review comments
 9. After AI review passes, merge via `gh pr merge --squash --delete-branch`
 
 ---
@@ -299,7 +340,10 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 | 2026-05-28 | MR #9 merged into holding branch (PR #112 squash merge) |
 | 2026-05-28 | AI review fixes applied: duplicate load_workspace_tools, additional_tools sync |
 | 2026-05-28 | **Tests after merge: 2,777 passed, ruff clean** |
-| 2026-05-28 | **Session handoff saved** — ready for next session |
+| 2026-05-28 | **MR #11 merged**: PR #113 squash-merged (channel helpers) — 2,834 passed |
+| 2026-05-28 | **MR #12 merged**: PR #114 squash-merged (spawn package) — 2,834 passed |
+| 2026-05-28 | **⚠️ Process violation**: Both MR #11 and #12 merged before AI review feedback received. The `review / review` CI job was misinterpreted as AI approval. **Future MRs must wait for actual AI review comments.** |
+| 2026-05-28 | **Session handoff saved** — 13/16 MRs complete, ready for Phase 4 |
 
 ---
 
