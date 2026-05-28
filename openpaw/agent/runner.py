@@ -9,17 +9,17 @@ from langchain.agents import create_agent
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.language_models import BaseChatModel
 
+from openpaw.agent.builder import AgentBuilder
 from openpaw.agent.metrics import InvocationMetrics, extract_metrics_from_callback
 from openpaw.agent.middleware.approval import ApprovalRequiredError
-from openpaw.agent.middleware.llm_hooks import THINKING_TAG_PATTERN, ThinkingTokenMiddleware
+from openpaw.agent.middleware.llm_hooks import THINKING_TAG_PATTERN
 from openpaw.agent.middleware.queue_aware import InterruptSignalError
-from openpaw.agent.model_factory import THINKING_MODELS, create_chat_model, validate_tool_names
-from openpaw.agent.tools.filesystem import FilesystemTools
+from openpaw.agent.model_factory import THINKING_MODELS
+from openpaw.agent.tools.filesystem import FilesystemTools  # noqa: F401
 from openpaw.core.prompts.system_events import (
     TIMEOUT_NOTIFICATION_GENERIC,
     TIMEOUT_NOTIFICATION_TEMPLATE,
 )
-from openpaw.core.timezone import workspace_now
 from openpaw.core.workspace import AgentWorkspace
 
 logger = logging.getLogger(__name__)
@@ -146,6 +146,23 @@ class AgentRunner:
             )
             self.strip_thinking = True
 
+        self._builder = AgentBuilder(
+            workspace=self.workspace,
+            model=self.model_id,
+            api_key=self.api_key,
+            temperature=self.temperature,
+            max_turns=self.max_turns,
+            checkpointer=self.checkpointer,
+            tools=self.additional_tools,
+            region=self.region,
+            strip_thinking=self.strip_thinking,
+            enabled_builtins=self.enabled_builtins,
+            extra_model_kwargs=self.extra_model_kwargs,
+            middleware=self._middleware,
+            channel_logging_enabled=self.channel_logging_enabled,
+            create_model_func=self._create_model,
+            create_agent_func=create_agent,
+        )
         self._agent = self._build_agent()
 
     @property
@@ -193,7 +210,8 @@ class AgentRunner:
             checkpointer: New checkpointer instance (e.g., AsyncSqliteSaver).
         """
         self.checkpointer = checkpointer
-        self._agent = self._build_agent()
+        self._builder.checkpointer = checkpointer
+        self._agent, self._model_instance = self._builder.build()
         logger.info(f"Updated checkpointer for workspace: {self.workspace.name}")
 
     def update_model(
@@ -223,7 +241,12 @@ class AgentRunner:
             for thinking_model in THINKING_MODELS
         )
 
-        self._agent = self._build_agent()
+        self._builder.model_id = self.model_id
+        self._builder.api_key = self.api_key
+        self._builder.temperature = self.temperature
+        self._builder.strip_thinking = self.strip_thinking
+
+        self._agent, self._model_instance = self._builder.build()
         logger.info(f"Model updated to {model} for workspace: {self.workspace.name}")
 
     def rebuild_agent(self) -> None:
@@ -234,7 +257,7 @@ class AgentRunner:
         (AGENT.md, HEARTBEAT.md, etc.) during the previous conversation.
         """
         self.workspace.reload_files()
-        self._agent = self._build_agent()
+        self._agent, self._model_instance = self._builder.build()
         logger.info(f"Rebuilt agent with fresh workspace files: {self.workspace.name}")
 
     async def get_context_info(self, thread_id: str) -> dict[str, Any]:
@@ -359,106 +382,19 @@ class AgentRunner:
         )
 
     def _create_model(self) -> BaseChatModel:
-        """Create the appropriate chat model based on provider.
+        """Create the chat model instance.
 
-        Delegates to create_chat_model() module-level function.
-
-        Returns:
-            Configured BaseChatModel instance.
-
-        Raises:
-            ValueError: If provider is not supported.
+        Backwards-compatible wrapper that delegates to AgentBuilder.
         """
-        return create_chat_model(
-            model_str=self.model_id,
-            api_key=self.api_key,
-            temperature=self.temperature,
-            region=self.region,
-            extra_kwargs=self.extra_model_kwargs,
-        )
+        return self._builder._create_model()
 
     def _build_agent(self) -> Any:
         """Build the LangGraph agent with workspace configuration.
 
-        Creates an agent with:
-        - Direct provider-specific model instantiation
-        - Sandboxed filesystem tools for workspace access
-        - Workspace-specific tools from tools/ directory
-        - System prompt from workspace markdown files
-        - Empty middleware list (populated in future sprints for steer/interrupt)
-        - Thinking token stripping handled via fallback logic in run()
+        Backwards-compatible wrapper that delegates to AgentBuilder.
         """
-        # 1. Initialize model directly via provider class
-        model = self._create_model()
-        self._model_instance = model
-
-        # 2. Create FilesystemTools for workspace
-        workspace_root = self.workspace.path.resolve()
-        if not workspace_root.exists():
-            raise ValueError(f"Workspace does not exist: {workspace_root}")
-        if not workspace_root.is_dir():
-            raise ValueError(f"Workspace is not a directory: {workspace_root}")
-
-        logger.debug(f"Sandboxing agent to workspace: {workspace_root}")
-
-        # Get timezone from workspace config, defaulting to UTC
-        timezone = self.workspace.config.timezone if self.workspace.config else "UTC"
-
-        fs_tools_manager = FilesystemTools(
-            workspace_root=workspace_root,
-            timezone=timezone,
-            workspace_name=self.workspace.name,
-        )
-        filesystem_tools = fs_tools_manager.get_tools()
-
-        # 3. Combine all tools (filesystem + additional tools)
-        all_tools = filesystem_tools + self.additional_tools
-
-        # 4. Validate tool names (especially important for Bedrock)
-        if "bedrock" in self.model_id.lower():
-            logger.debug("Validating tool names for Bedrock compatibility")
-            validate_tool_names(all_tools)
-
-        # 5. Get system prompt from workspace (with dynamic current date)
-        try:
-            timezone = getattr(self.workspace.config, "timezone", "UTC") if self.workspace.config else "UTC"
-            current_dt = workspace_now(timezone).strftime("%A, %Y-%m-%d %H:%M %Z")
-        except (TypeError, AttributeError):
-            current_dt = None
-        system_prompt = self.workspace.build_system_prompt(
-            enabled_builtins=self.enabled_builtins,
-            current_datetime=current_dt,
-            channel_logging_enabled=self.channel_logging_enabled,
-        )
-
-        # 6. Wire middleware in dependency order:
-        #    - ThinkingTokenMiddleware (first): strips reasoning before other middleware sees it
-        #    - Custom middleware (after): queue-aware, approval gates, etc.
-        if self.strip_thinking:
-            middleware = [ThinkingTokenMiddleware(), *self._middleware]
-        else:
-            middleware = list(self._middleware)
-
-        # 7. Call create_agent (successor to create_react_agent)
-        # Note: create_agent handles tool binding internally - do NOT pre-bind
-        logger.info(
-            f"Creating agent with {len(all_tools)} tools "
-            f"({len(filesystem_tools)} filesystem, {len(self.additional_tools)} additional)"
-        )
-
-        # Log all tool names for debugging
-        tool_names = [getattr(t, 'name', str(t)) for t in all_tools]
-        logger.info(f"Tool names: {tool_names}")
-
-        agent = create_agent(
-            model=model,
-            tools=all_tools,
-            system_prompt=system_prompt,
-            checkpointer=self.checkpointer,
-            middleware=middleware,  # Thinking tokens + steer/interrupt + approval gates
-        )
-
-        return agent
+        self._agent, self._model_instance = self._builder.build()
+        return self._agent
 
     async def run(
         self,
