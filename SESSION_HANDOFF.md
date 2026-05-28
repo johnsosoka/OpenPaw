@@ -11,8 +11,8 @@
 1. ✅ Holding branch is `refactor/structural-cleanup-2026` on origin — **always branch from this**
 2. ✅ 13 MRs merged, 2,834 tests passing on holding branch
 3. ✅ **MR #15 merged** — PR #116 squash-merged into holding branch
-4. 🔍 **MR #13 in PR review** — PR #115 updated with AI feedback fixes (FileNotFoundError race conditions)
-5. 📋 Next work after merge: MR #14 (Message Processor Decomposition)
+4. ✅ **MR #13 merged** — PR #115 squash-merged into holding branch (AI feedback addressed + bonus fixes)
+5. 📋 Next work: MR #14 (Message Processor Decomposition) — the final structural refactor
 6. ⚠️ **CRITICAL PROCESS REMINDER**: Wait for AI pipeline review before merging. The `review / review` CI job is just a test runner, not the AI review. Do NOT merge until actual AI feedback comments are posted on the PR.
 5. 📁 All research/artifacts: `llm_memory/openpaw_refactor/`
 6. 📋 Sprint plan: `llm_memory/openpaw_refactor/00_sprint_plan.md`
@@ -220,18 +220,7 @@ poetry run pytest --tb=short
 
 ---
 
-## In Progress / In Review
-
-### MR #13: Filesystem Tool Split
-**Branch:** `refactor/13-fs-split` → **PR #115** (awaiting re-review after feedback fixes)
-**Scope:** Split `FilesystemTools` (1,151 → 218 lines) into Read/Write/Search classes
-**Risk:** High (security-critical write protection — needs dedicated audit)
-**Status:** ✅ Implemented, AI feedback addressed (FileNotFoundError race conditions), **in PR review**
-**Analysis:** `llm_memory/openpaw_refactor/13_mr13_filesystem_context.md`
-
----
-
-## Next Batch of Work (After MR #13 Merge)
+## In Progress / Ready to Start
 
 ### MR #14: Message Processor Decomposition
 **Base:** `refactor/structural-cleanup-2026`
@@ -239,6 +228,23 @@ poetry run pytest --tb=short
 **Risk:** High (touches the core message pipeline)
 **Est. Lines:** ~700 reorganized
 **Analysis:** `llm_memory/openpaw_refactor/03_workspace_runner_depth.md`
+**Status:** 📋 Ready to start — create branch `refactor/14-message-processor` from holding branch
+
+### MR #13: Filesystem Tool Split
+**Branch:** `refactor/13-fs-split` → **PR #115** ✅ **MERGED**
+**Scope:** Split `FilesystemTools` (1,151 → 218 lines) into Read/Write/Search classes
+**Status:** ✅ Merged into holding branch (2,844 tests pass)
+**Bonus fixes included:**
+  - Sanitized OSError messages (no raw system paths exposed)
+  - Added `_MAX_READ_LINES = 5,000` cap to `read_file`
+  - Added regex validation to `grep_files`
+  - 6 new race-condition tests added
+
+### MR #15: Cron Manager Package
+**Branch:** `refactor/15-cron-manager` → **PR #116** ✅ **MERGED**
+**Scope:** Convert `builtins/tools/cron_manager.py` (585 lines) into package
+**Status:** ✅ Merged into holding branch (2,834 tests pass)
+**Analysis:** `llm_memory/openpaw_refactor/12_mr15_cron_manager_context.md`
 
 ---
 
@@ -271,8 +277,8 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 | Files >500 lines | 22 | 15 | 10 |
 | Max classes/file | 39 | 8 | 8 |
 | Max methods/class | 27 | 27 | 15 |
-| Tests | 2,707 | 2,834 | — |
-| MRs Complete | 0 | 14/16 | 16/16 |
+| Tests | 2,707 | 2,844 | — |
+| MRs Complete | 0 | 15/16 | 16/16 |
 
 ---
 
@@ -303,12 +309,11 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 
 ## Risk & Blockers
 
-**None currently.** All tests green. Holding branch is clean.
+**None currently.** All tests green (2,844 pass). Holding branch is clean.
 
 **Future risks to watch:**
-- MR #13 (filesystem split) is security-critical — needs dedicated audit
-- MR #14 (message processor decomposition) touches core pipeline
-- MR #15 (cron-manager package) is the last builtin package refactor
+- MR #14 (message processor decomposition) touches core pipeline — highest risk of the sprint
+- Final merge to `develop` after MR #14 — need to verify no regressions across all 16 MRs
 
 ---
 
@@ -348,8 +353,9 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 | 2026-05-28 | **PR #116 opened** — MR #15 (cron manager) → `refactor/structural-cleanup-2026` |
 | 2026-05-28 | **PR #115 opened** — MR #13 (filesystem split) → `refactor/structural-cleanup-2026` |
 | 2026-05-28 | **PR #116 merged** — MR #15 squash-merged into holding branch (2,834 tests pass) |
-| 2026-05-28 | **PR #115 updated** — AI review feedback addressed: FileNotFoundError race conditions in read_file, write_file, overwrite_file, edit_file |
-| 2026-05-28 | **Waiting for AI re-review** — PR #115 queued for re-review after feedback fixes |
+| 2026-05-28 | **PR #115 updated** — AI review feedback addressed: FileNotFoundError race conditions, sanitized errors, limit cap, regex validation |
+| 2026-05-28 | **PR #115 merged** — MR #15 squash-merged into holding branch (2,844 tests pass) |
+| 2026-05-28 | **15/16 MRs complete** — holding branch ready for MR #14 (Message Processor) |
 
 ---
 
