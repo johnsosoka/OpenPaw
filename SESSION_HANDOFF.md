@@ -3,7 +3,7 @@
 **Last Updated:** 2026-05-28
 **Sprint:** Structural Refactor Q2 2026 — **PHASE B IN PROGRESS**
 **Holding Branch:** `refactor/structural-cleanup-2026` ← **ALL NEW MRs BRANCH FROM HERE**
-**Status:** Phase A complete (16/16 MRs). MR B1 merged. Next: MR B2 (Email package).
+**Status:** Phase A complete (16/16 MRs). B1 and B2 merged. Next: MR B3 (Browser session).
 
 ---
 
@@ -14,7 +14,7 @@
 3. ✅ Phase B plan: `llm_memory/openpaw_refactor/12_phase_b_plan.md`
 4. ✅ Phase B research: `llm_memory/openpaw_refactor/11_phase_b_research.md`
 5. ✅ MR B1 complete: SubAgentRunner decomposed (946→454 lines), 2,896 tests passing
-6. 📋 **Next:** MR B2 — Email package decomposition (`email/__init__.py` + `email/gmail.py`)
+6. 📋 **Next:** MR B3 — Browser session decomposition (`browser/session.py`)
 
 ---
 
@@ -138,7 +138,7 @@ poetry run pytest --tb=short
 # Expected: 2896 passed
 ```
 
-**Last known state:** 2,896 tests passing, ruff clean.
+**Last known state:** 2,913 tests passing on holding branch (after B2 merge), ruff clean.
 
 ---
 
@@ -157,8 +157,8 @@ poetry run pytest --tb=short
 | MR | Branch | Status | PR | Tests |
 |----|--------|--------|-----|-------|
 | B1 SubAgentRunner | `refactor/b1-subagent-runner` | ✅ Merged | #119 | 2,896 passed |
-| B2 Email package | — | 🔵 **Next** | — | — |
-| B3 Browser session | — | 🔵 Not started | — | — |
+| B2 Email package | `refactor/b2-email-package` | ✅ **Merged** | #120 | 2,913 passed |
+| B3 Browser session | — | 🔵 **Next** | — | — |
 | B4 Md2pdf | — | 🔵 Not started | — | — |
 | B5 Small cleanup | — | 🔵 Not started | — | — |
 | B6 MessageProcessor | — | 🔵 Not started | — | — |
@@ -181,6 +181,8 @@ poetry run pytest --tb=short
 | 2026-05-28 | **Session handoff updated** — slate wiped clean, ready for Phase B work |
 | 2026-05-28 | **MR B1 opened** — SubAgentRunner decomposition (946→454 lines), PR #119 |
 | 2026-05-28 | **MR B1 merged** — AI feedback addressed (3 items), 2,896 tests passing |
+| 2026-05-28 | **MR B2 opened** — Email package decomposition (601+775 → 302+99+298+221+70+79+398+68+67), PR #120 |
+| 2026-05-28 | **MR B2 merged** — AI review clean (no blocking issues), 2,913 tests passing |
 
 ---
 
