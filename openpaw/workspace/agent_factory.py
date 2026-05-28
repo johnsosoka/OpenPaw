@@ -182,7 +182,7 @@ class AgentFactory:
         Resolves through the catalog first so that catalog providers (e.g.
         ``moonshot``) are validated against their underlying LangChain type.
         """
-        from openpaw.agent.runner import create_chat_model
+        from openpaw.agent.model_factory import create_chat_model
 
         resolved = self._resolve_for_model(model_str)
         lc_model = resolved.model_str
