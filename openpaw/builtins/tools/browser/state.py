@@ -21,14 +21,20 @@ class BrowserState:
         """
         self._session: Any = session
 
+    def _check_active(self) -> str | None:
+        """Return error message if browser is not active, else None."""
+        if not self._session.is_active:
+            return "Browser not active. Use browser_navigate first."
+        return None
+
     async def snapshot(self) -> str:
         """Take accessibility snapshot with numbered element refs.
 
         Returns:
             Formatted snapshot text with [ref] annotations.
         """
-        if not self._session.is_active:
-            return "Browser not active. Use browser_navigate first."
+        if error := self._check_active():
+            return error
 
         try:
             # Get accessibility snapshot via CDP
@@ -61,8 +67,8 @@ class BrowserState:
         Returns:
             Formatted list of tabs with indices.
         """
-        if not self._session.is_active:
-            return "Browser not active. Use browser_navigate first."
+        if error := self._check_active():
+            return error
 
         try:
             pages = self._session._context.pages

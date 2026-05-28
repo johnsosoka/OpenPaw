@@ -36,6 +36,12 @@ class BrowserInteraction:
     def _workspace_path(self) -> Path:
         return Path(self._session.workspace_path)
 
+    def _check_active(self) -> str | None:
+        """Return error message if browser is not active, else None."""
+        if not self._session.is_active:
+            return "Browser not active. Use browser_navigate first."
+        return None
+
     async def click(self, ref: int, keep_refs: bool = False) -> str:
         """Click element by reference number.
 
@@ -49,8 +55,8 @@ class BrowserInteraction:
             Confirmation message or error. When keep_refs=True, includes
             a refreshed snapshot so you can immediately click the next element.
         """
-        if not self._session.is_active:
-            return "Browser not active. Use browser_navigate first."
+        if error := self._check_active():
+            return error
 
         if ref not in self._session._ref_map:
             return (
@@ -113,8 +119,8 @@ class BrowserInteraction:
         Returns:
             Confirmation message or error.
         """
-        if not self._session.is_active:
-            return "Browser not active. Use browser_navigate first."
+        if error := self._check_active():
+            return error
 
         if ref not in self._session._ref_map:
             return (
@@ -162,8 +168,8 @@ class BrowserInteraction:
         Returns:
             Confirmation message or error.
         """
-        if not self._session.is_active:
-            return "Browser not active. Use browser_navigate first."
+        if error := self._check_active():
+            return error
 
         if ref not in self._session._ref_map:
             return (
@@ -209,8 +215,8 @@ class BrowserInteraction:
         Returns:
             JSON-serialized result string, or error message.
         """
-        if not self._session.is_active:
-            return "Browser not active. Use browser_navigate first."
+        if error := self._check_active():
+            return error
 
         try:
             logger.info(f"Executing JS (length={len(script)})")
@@ -241,8 +247,8 @@ class BrowserInteraction:
         Returns:
             Relative path to screenshot file or error.
         """
-        if not self._session.is_active:
-            return "Browser not active. Use browser_navigate first."
+        if error := self._check_active():
+            return error
 
         try:
             # Generate filename with timestamp

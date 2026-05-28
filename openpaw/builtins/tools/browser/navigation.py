@@ -25,6 +25,12 @@ class BrowserNavigation:
     def _timeout_seconds(self) -> int:
         return int(self._session.timeout_seconds)
 
+    def _check_active(self) -> str | None:
+        """Return error message if browser is not active, else None."""
+        if not self._session.is_active:
+            return "Browser not active. Use browser_navigate first."
+        return None
+
     async def navigate(self, url: str) -> str:
         """Navigate to URL with domain validation.
 
@@ -78,8 +84,8 @@ class BrowserNavigation:
         Returns:
             Status message or error.
         """
-        if not self._session.is_active:
-            return "Browser not active. Use browser_navigate first."
+        if error := self._check_active():
+            return error
 
         try:
             await self._session._page.go_back(wait_until="domcontentloaded")
@@ -101,8 +107,8 @@ class BrowserNavigation:
         Returns:
             Confirmation message or error.
         """
-        if not self._session.is_active:
-            return "Browser not active. Use browser_navigate first."
+        if error := self._check_active():
+            return error
 
         try:
             # Calculate scroll distance
@@ -134,8 +140,8 @@ class BrowserNavigation:
         Returns:
             Confirmation message or error.
         """
-        if not self._session.is_active:
-            return "Browser not active. Use browser_navigate first."
+        if error := self._check_active():
+            return error
 
         try:
             pages = self._session._context.pages
