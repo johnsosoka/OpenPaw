@@ -3,7 +3,7 @@
 **Last Updated:** 2026-05-28
 **Sprint:** Structural Refactor Q2 2026 — **PHASE B IN PROGRESS**
 **Holding Branch:** `refactor/structural-cleanup-2026` ← **ALL NEW MRs BRANCH FROM HERE**
-**Status:** Phase A complete (16/16 MRs). MR B1 opened, awaiting AI + human review.
+**Status:** Phase A complete (16/16 MRs). MR B1 merged. Next: MR B2 (Email package).
 
 ---
 
@@ -13,7 +13,8 @@
 2. ✅ PR #118 opened: `refactor/structural-cleanup-2026` → `develop` (pending human review)
 3. ✅ Phase B plan: `llm_memory/openpaw_refactor/12_phase_b_plan.md`
 4. ✅ Phase B research: `llm_memory/openpaw_refactor/11_phase_b_research.md`
-5. 📋 **Next:** Begin Phase B MRs — branch from holding branch, target holding branch
+5. ✅ MR B1 complete: SubAgentRunner decomposed (946→454 lines), 2,896 tests passing
+6. 📋 **Next:** MR B2 — Email package decomposition (`email/__init__.py` + `email/gmail.py`)
 
 ---
 
@@ -137,7 +138,7 @@ poetry run pytest --tb=short
 # Expected: 2890 passed
 ```
 
-**Last known state:** 2,890 tests passing, ruff clean.
+**Last known state:** 2,896 tests passing, ruff clean.
 
 ---
 
@@ -155,8 +156,8 @@ poetry run pytest --tb=short
 
 | MR | Branch | Status | PR | Tests |
 |----|--------|--------|-----|-------|
-| B1 SubAgentRunner | `refactor/b1-subagent-runner` | 🟡 Awaiting review | #119 | 2,890 passed |
-| B2 Email package | — | 🔵 Not started | — | — |
+| B1 SubAgentRunner | `refactor/b1-subagent-runner` | ✅ Merged | #119 | 2,896 passed |
+| B2 Email package | — | 🔵 **Next** | — | — |
 | B3 Browser session | — | 🔵 Not started | — | — |
 | B4 Md2pdf | — | 🔵 Not started | — | — |
 | B5 Small cleanup | — | 🔵 Not started | — | — |
@@ -179,6 +180,7 @@ poetry run pytest --tb=short
 | 2026-05-28 | **Phase B plan finalized** — `12_phase_b_plan.md` ready for execution |
 | 2026-05-28 | **Session handoff updated** — slate wiped clean, ready for Phase B work |
 | 2026-05-28 | **MR B1 opened** — SubAgentRunner decomposition (946→454 lines), PR #119 |
+| 2026-05-28 | **MR B1 merged** — AI feedback addressed (3 items), 2,896 tests passing |
 
 ---
 
