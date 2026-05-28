@@ -1,9 +1,9 @@
 # OpenPaw Structural Cleanup — Session Handoff
 
 **Last Updated:** 2026-05-28
-**Sprint:** Structural Refactor Q2 2026 — **PHASE B BEGINNING**
+**Sprint:** Structural Refactor Q2 2026 — **PHASE B IN PROGRESS**
 **Holding Branch:** `refactor/structural-cleanup-2026` ← **ALL NEW MRs BRANCH FROM HERE**
-**Status:** Phase A complete (16/16 MRs). Phase B plan ready. New work begins.
+**Status:** Phase A complete (16/16 MRs). MR B1 opened, awaiting AI + human review.
 
 ---
 
@@ -146,9 +146,25 @@ poetry run pytest --tb=short
 **None currently.** All tests green. Holding branch is clean.
 
 **Phase B risks to watch:**
-- SubAgentRunner (946 lines) is the largest remaining file — highest architectural debt
 - MessageProcessor final cleanup touches the core pipeline — highest regression risk
 - Test file explosion: 18 test files >600 lines need splitting alongside source
+
+---
+
+## Phase B Progress
+
+| MR | Branch | Status | PR | Tests |
+|----|--------|--------|-----|-------|
+| B1 SubAgentRunner | `refactor/b1-subagent-runner` | 🟡 Awaiting review | #119 | 2,890 passed |
+| B2 Email package | — | 🔵 Not started | — | — |
+| B3 Browser session | — | 🔵 Not started | — | — |
+| B4 Md2pdf | — | 🔵 Not started | — | — |
+| B5 Small cleanup | — | 🔵 Not started | — | — |
+| B6 MessageProcessor | — | 🔵 Not started | — | — |
+| B7 Channel handlers | — | 🔵 Not started | — | — |
+| B8 FileSearch | — | 🔵 Not started | — | — |
+| B9 AgentRunner | — | 🔵 Not started | — | — |
+| B10 Schedulers | — | 🔵 Not started | — | — |
 
 ---
 
@@ -162,6 +178,7 @@ poetry run pytest --tb=short
 | 2026-05-28 | Phase B research complete — agents dispatched, 2 reports generated |
 | 2026-05-28 | **Phase B plan finalized** — `12_phase_b_plan.md` ready for execution |
 | 2026-05-28 | **Session handoff updated** — slate wiped clean, ready for Phase B work |
+| 2026-05-28 | **MR B1 opened** — SubAgentRunner decomposition (946→454 lines), PR #119 |
 
 ---
 
