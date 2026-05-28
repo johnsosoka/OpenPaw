@@ -10,8 +10,10 @@
 
 1. ✅ Holding branch is `refactor/structural-cleanup-2026` on origin — **always branch from this**
 2. ✅ 13 MRs merged, 2,834 tests passing on holding branch
-3. 📋 Next work: MR #13 (Filesystem Split) + MR #14 (Message Processor) + MR #15 (Cron Manager)
-4. ⚠️ **CRITICAL PROCESS REMINDER**: Wait for AI pipeline review before merging. The `review / review` CI job is just a test runner, not the AI review. Do NOT merge until actual AI feedback comments are posted on the PR.
+3. ✅ **MR #15 merged** — PR #116 squash-merged into holding branch
+4. 🔍 **MR #13 in PR review** — PR #115 updated with AI feedback fixes (FileNotFoundError race conditions)
+5. 📋 Next work after merge: MR #14 (Message Processor Decomposition)
+6. ⚠️ **CRITICAL PROCESS REMINDER**: Wait for AI pipeline review before merging. The `review / review` CI job is just a test runner, not the AI review. Do NOT merge until actual AI feedback comments are posted on the PR.
 5. 📁 All research/artifacts: `llm_memory/openpaw_refactor/`
 6. 📋 Sprint plan: `llm_memory/openpaw_refactor/00_sprint_plan.md`
 
@@ -218,14 +220,18 @@ poetry run pytest --tb=short
 
 ---
 
-## Next Batch of Work (Ready to Start)
+## In Progress / In Review
 
 ### MR #13: Filesystem Tool Split
-**Base:** `refactor/structural-cleanup-2026`
-**Scope:** Split `FilesystemTools` (1,184 lines, 18 methods) into Read/Write/Search classes
+**Branch:** `refactor/13-fs-split` → **PR #115** (awaiting re-review after feedback fixes)
+**Scope:** Split `FilesystemTools` (1,151 → 218 lines) into Read/Write/Search classes
 **Risk:** High (security-critical write protection — needs dedicated audit)
-**Est. Lines:** ~900 reorganized
-**Analysis:** `llm_memory/openpaw_refactor/04_agent_runner_and_fs_depth.md`
+**Status:** ✅ Implemented, AI feedback addressed (FileNotFoundError race conditions), **in PR review**
+**Analysis:** `llm_memory/openpaw_refactor/13_mr13_filesystem_context.md`
+
+---
+
+## Next Batch of Work (After MR #13 Merge)
 
 ### MR #14: Message Processor Decomposition
 **Base:** `refactor/structural-cleanup-2026`
@@ -233,13 +239,6 @@ poetry run pytest --tb=short
 **Risk:** High (touches the core message pipeline)
 **Est. Lines:** ~700 reorganized
 **Analysis:** `llm_memory/openpaw_refactor/03_workspace_runner_depth.md`
-
-### MR #15: Cron Manager Package
-**Base:** `refactor/structural-cleanup-2026`
-**Scope:** Convert `builtins/tools/cron_manager.py` (585 lines, 21 methods) into package
-**Risk:** Medium
-**Est. Lines:** ~550 reorganized
-**Analysis:** `llm_memory/openpaw_refactor/05_builtin_tools_depth.md`
 
 ---
 
@@ -273,7 +272,7 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 | Max classes/file | 39 | 8 | 8 |
 | Max methods/class | 27 | 27 | 15 |
 | Tests | 2,707 | 2,834 | — |
-| MRs Complete | 0 | 13/16 | 16/16 |
+| MRs Complete | 0 | 14/16 | 16/16 |
 
 ---
 
@@ -344,6 +343,13 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 | 2026-05-28 | **MR #12 merged**: PR #114 squash-merged (spawn package) — 2,834 passed |
 | 2026-05-28 | **⚠️ Process violation**: Both MR #11 and #12 merged before AI review feedback received. The `review / review` CI job was misinterpreted as AI approval. **Future MRs must wait for actual AI review comments.** |
 | 2026-05-28 | **Session handoff saved** — 13/16 MRs complete, ready for Phase 4 |
+| 2026-05-28 | **MR #15 implemented** (cron manager package) — 6 new files, 43 tests pass, ruff clean |
+| 2026-05-28 | **MR #13 implemented** (filesystem split) — 3 new files + facade, 105 tests pass, security audit clean |
+| 2026-05-28 | **PR #116 opened** — MR #15 (cron manager) → `refactor/structural-cleanup-2026` |
+| 2026-05-28 | **PR #115 opened** — MR #13 (filesystem split) → `refactor/structural-cleanup-2026` |
+| 2026-05-28 | **PR #116 merged** — MR #15 squash-merged into holding branch (2,834 tests pass) |
+| 2026-05-28 | **PR #115 updated** — AI review feedback addressed: FileNotFoundError race conditions in read_file, write_file, overwrite_file, edit_file |
+| 2026-05-28 | **Waiting for AI re-review** — PR #115 queued for re-review after feedback fixes |
 
 ---
 
