@@ -9,7 +9,7 @@
 ## Quick Resume Checklist (for next session)
 
 1. ✅ Holding branch is `refactor/structural-cleanup-2026` on origin — **always branch from this**
-2. ✅ 5 MRs merged, 2,771 tests passing on holding branch
+2. ✅ 9 MRs merged, 2,777 tests passing on holding branch
 3. 📋 Next work: MR #9 (WorkspaceRunner services) + MR #10 (AgentBuilder)
 4. 📁 All research/artifacts: `llm_memory/openpaw_refactor/`
 5. 📋 Sprint plan: `llm_memory/openpaw_refactor/00_sprint_plan.md`
