@@ -393,6 +393,7 @@ class AgentRunner:
 
         Backwards-compatible wrapper that delegates to AgentBuilder.
         """
+        self._builder.additional_tools = self.additional_tools
         self._agent, self._model_instance = self._builder.build()
         return self._agent
 
