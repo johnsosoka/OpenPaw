@@ -110,6 +110,12 @@ def test_format_file_listing_non_dict_returns_empty() -> None:
     assert result == ""
 
 
+def test_format_file_listing_none_returns_empty() -> None:
+    """None input returns empty string and logs a warning."""
+    result = format_file_listing(None)  # type: ignore[arg-type]
+    assert result == ""
+
+
 def test_format_file_listing_invalid_size_type_falls_back() -> None:
     """Invalid size type falls back to 0 and logs a warning."""
     info = {
