@@ -402,6 +402,7 @@ class AgentRunner:
         test patches), then delegates the rest of construction to AgentBuilder.
         Updates self._agent and self._model_instance.
         """
+        self._builder.additional_tools = self.additional_tools
         model = self._create_model()
         self._model_instance = model
         self._agent, _ = self._builder.build(model=model)
