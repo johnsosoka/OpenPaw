@@ -1,21 +1,22 @@
 # OpenPaw Structural Cleanup — Session Handoff
 
 **Last Updated:** 2026-05-28
-**Sprint:** Structural Refactor Q2 2026
-**Holding Branch:** `refactor/structural-cleanup-2026` ← **ALL FUTURE BRANCHES ORIGINATE HERE**
+**Sprint:** Structural Refactor Q2 2026 — **COMPLETE**
+**Holding Branch:** `refactor/structural-cleanup-2026` ← **READY FOR FINAL MERGE TO `develop`**
 
 ---
 
 ## Quick Resume Checklist (for next session)
 
-1. ✅ Holding branch is `refactor/structural-cleanup-2026` on origin — **always branch from this**
-2. ✅ 13 MRs merged, 2,834 tests passing on holding branch
-3. ✅ **MR #15 merged** — PR #116 squash-merged into holding branch
-4. ✅ **MR #13 merged** — PR #115 squash-merged into holding branch (AI feedback addressed + bonus fixes)
-5. 📋 Next work: MR #14 (Message Processor Decomposition) — the final structural refactor
-6. ⚠️ **CRITICAL PROCESS REMINDER**: Wait for AI pipeline review before merging. The `review / review` CI job is just a test runner, not the AI review. Do NOT merge until actual AI feedback comments are posted on the PR.
-5. 📁 All research/artifacts: `llm_memory/openpaw_refactor/`
-6. 📋 Sprint plan: `llm_memory/openpaw_refactor/00_sprint_plan.md`
+1. ✅ Holding branch is `refactor/structural-cleanup-2026` on origin — **all 16 MRs merged**
+2. ✅ **16/16 MRs complete**, 2,890 tests passing on holding branch
+3. ✅ **MR #14 merged** — PR #117 squash-merged into holding branch (AI review: no blocking issues)
+4. ✅ **MR #15 merged** — PR #116 squash-merged into holding branch
+5. ✅ **MR #13 merged** — PR #115 squash-merged into holding branch (AI feedback addressed + bonus fixes)
+6. 📋 Next work: **Final merge to `develop`** — human review needed before merging holding branch
+7. ⚠️ **CRITICAL PROCESS REMINDER**: Wait for AI pipeline review before merging. The `review / review` CI job is just a test runner, not the AI review. Do NOT merge until actual AI feedback comments are posted on the PR.
+8. 📁 All research/artifacts: `llm_memory/openpaw_refactor/`
+9. 📋 Sprint plan: `llm_memory/openpaw_refactor/00_sprint_plan.md`
 
 ---
 
@@ -34,9 +35,11 @@ origin/develop (frozen for refactor duration)
        ├─ origin/refactor/08-scheduler-base     ✅ MERGED
        ├─ origin/refactor/09-runner-services    ✅ MERGED
        ├─ origin/refactor/10-agent-builder      ✅ MERGED
-       ├─ origin/refactor/11-channel-helpers    ✅ MERGED
-       ├─ origin/refactor/12-builtin-template   ✅ MERGED
-       └─ ... (see sprint plan)
+        ├─ origin/refactor/11-channel-helpers    ✅ MERGED
+        ├─ origin/refactor/12-builtin-template   ✅ MERGED
+        ├─ origin/refactor/13-fs-split           ✅ MERGED
+        ├─ origin/refactor/14-message-processor  ✅ MERGED
+        └─ origin/refactor/15-cron-manager       ✅ MERGED
 ```
 
 **Rule:** Every new feature/refactor branch is created from `refactor/structural-cleanup-2026`.
@@ -223,12 +226,20 @@ poetry run pytest --tb=short
 ## In Progress / Ready to Start
 
 ### MR #14: Message Processor Decomposition
-**Base:** `refactor/structural-cleanup-2026`
+**Branch:** `refactor/14-message-processor` → merged into holding
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/117
 **Scope:** Split `MessageProcessor` (775 lines) into focused processors
-**Risk:** High (touches the core message pipeline)
-**Est. Lines:** ~700 reorganized
-**Analysis:** `llm_memory/openpaw_refactor/03_workspace_runner_depth.md`
-**Status:** 📋 Ready to start — create branch `refactor/14-message-processor` from holding branch
+**Commit:** `65b0d1d`
+
+- Created `workspace/processors/` package with 4 focused processors
+  - `combiner.py` — `ContentCombiner` (76 lines) — message combining + user name resolution
+  - `ttl_checker.py` — `SessionTTLChecker` (142 lines) — TTL detection + group session rotation
+  - `compactor.py` — `AutoCompactor` (221 lines) — preventive compaction + context overflow recovery
+  - `response_handler.py` — `ResponseHandler` (117 lines) — response sending + ack suppression + audio
+- `MessageProcessor` slimmed from 775 → 292 lines (main loop + orchestration)
+- All extracted methods have backward-compatible wrappers delegating to new processors
+- AI review: no blocking issues (3 non-blocking defensive coding observations)
+- **Tests: 2,890 passed (46 new), ruff clean, mypy clean on target files**
 
 ### MR #13: Filesystem Tool Split
 **Branch:** `refactor/13-fs-split` → **PR #115** ✅ **MERGED**
@@ -269,51 +280,43 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 
 ---
 
-## Sprint Metrics (Current)
+## Sprint Metrics (Final)
 
-| Metric | Start | Current | Target |
-|--------|-------|---------|--------|
-| Files >700 lines | 12 | 5 | 4 |
-| Files >500 lines | 22 | 15 | 10 |
-| Max classes/file | 39 | 8 | 8 |
-| Max methods/class | 27 | 27 | 15 |
-| Tests | 2,707 | 2,844 | — |
-| MRs Complete | 0 | 15/16 | 16/16 |
+| Metric | Start | Current | Target | Met? |
+|--------|-------|---------|--------|------|
+| Files >700 lines | 12 | 5 | 4 | ⚠️ Close |
+| Files >500 lines | 22 | 15 | 10 | ⚠️ Close |
+| Max classes/file | 39 | 8 | 8 | ✅ |
+| Max methods/class | 27 | 27 | 15 | ❌ |
+| Tests | 2,707 | 2,890 | — | ✅ |
+| MRs Complete | 0 | 16/16 | 16/16 | ✅ |
 
 ---
 
 ## How to Resume (Step-by-Step)
 
 ### For Human (John):
-1. Review merged MRs if desired: [#103](https://github.com/johnsosoka/OpenPaw/pull/103), [#104](https://github.com/johnsosoka/OpenPaw/pull/104)
+1. ✅ All 16 structural refactor MRs are complete and merged
 2. Read this handoff file
-3. Read `llm_memory/openpaw_refactor/00_sprint_plan.md` for full plan
-4. Decide which MRs to prioritize next
-5. Point me at `SESSION_HANDOFF.md` in the next session
+3. **Decision needed:** Approve final merge of `refactor/structural-cleanup-2026` → `develop`
+4. Point me at `SESSION_HANDOFF.md` in the next session
 
 ### For AI Team (Me / Subagents):
 1. `git checkout refactor/structural-cleanup-2026 && git pull origin refactor/structural-cleanup-2026`
 2. Read this handoff file
-3. Read `llm_memory/openpaw_refactor/00_sprint_plan.md`
-4. Create new branch: `git checkout -b refactor/{NN}-{name}`
-5. Execute MR per sprint plan
-6. Run tests: `poetry run pytest --tb=short`
-7. **Push branch and open PR** via `gh pr create --base refactor/structural-cleanup-2026`
-8. **Wait for AI pipeline review** — GitHub will trigger automated code review. **Do NOT merge until AI feedback is addressed.**
-   - The `review / review` CI job is **just a test runner**, not the AI review
-   - AI review comments will appear as PR comments from `github-actions` or a bot account
-   - **Do NOT merge just because CI passes** — wait for actual review comments
-9. After AI review passes, merge via `gh pr merge --squash --delete-branch`
+3. **Structural refactor is COMPLETE** — all 16 MRs merged
+4. Wait for human approval before merging holding branch to `develop`
+5. After merge to `develop`, resume normal feature branch workflow (branch from `develop`)
 
 ---
 
 ## Risk & Blockers
 
-**None currently.** All tests green (2,844 pass). Holding branch is clean.
+**None currently.** All tests green (2,890 pass). Holding branch is clean.
 
 **Future risks to watch:**
-- MR #14 (message processor decomposition) touches core pipeline — highest risk of the sprint
-- Final merge to `develop` after MR #14 — need to verify no regressions across all 16 MRs
+- Final merge to `develop` — need to verify no regressions across all 16 MRs
+- Human review of holding branch before merging to `develop`
 
 ---
 
@@ -356,6 +359,10 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 | 2026-05-28 | **PR #115 updated** — AI review feedback addressed: FileNotFoundError race conditions, sanitized errors, limit cap, regex validation |
 | 2026-05-28 | **PR #115 merged** — MR #15 squash-merged into holding branch (2,844 tests pass) |
 | 2026-05-28 | **15/16 MRs complete** — holding branch ready for MR #14 (Message Processor) |
+| 2026-05-28 | **MR #14 implemented** — 4 processors extracted, 46 new tests, backward-compatible wrappers |
+| 2026-05-28 | **PR #117 opened** — MR #14 (message processor) → `refactor/structural-cleanup-2026` |
+| 2026-05-28 | **PR #117 merged** — MR #14 squash-merged into holding branch (AI review: no blocking issues) |
+| 2026-05-28 | **16/16 MRs COMPLETE** — structural refactor sprint finished. Ready for final merge to `develop`. |
 
 ---
 
