@@ -20,26 +20,14 @@ class HeartbeatConfig(BaseModel):
     target_id: int | None = Field(default=None, description="Target ID for output routing (preferred)")
     target_chat_id: int | None = Field(default=None, description="Telegram chat ID (deprecated, use target_id)")
     target_channel_id: int | None = Field(default=None, description="Discord channel ID (deprecated, use target_id)")
-    delivery: Literal["channel", "agent"] = Field(
+    delivery: Literal["channel", "agent", "both"] = Field(
         default="channel",
-        description="Where to deliver results: channel (direct) or agent (queue injection)",
+        description="Delivery mode: channel (direct), agent (queue injection), or both",
     )
     max_output_tokens: int | None = Field(
         default=None,
         description="Max output tokens for heartbeat runs (overrides workspace model default)",
     )
-
-    @field_validator("delivery", mode="before")
-    @classmethod
-    def validate_delivery(cls, v: str) -> str:
-        """Validate delivery mode and reject removed 'both' option."""
-        if v == "both":
-            raise ValueError(
-                "delivery: 'both' has been removed. Use 'agent' to have the main agent "
-                "process heartbeat results (it can use acknowledge_event to suppress "
-                "routine output), or 'channel' for direct delivery."
-            )
-        return v
 
 
 class CronOutputConfig(BaseModel):
@@ -50,22 +38,10 @@ class CronOutputConfig(BaseModel):
     chat_id: int | None = Field(default=None, description="Telegram chat ID (deprecated, use target_id)")
     guild_id: int | None = Field(default=None, description="Discord guild ID")
     channel_id: int | None = Field(default=None, description="Discord channel ID (deprecated, use target_id)")
-    delivery: Literal["channel", "agent"] = Field(
+    delivery: Literal["channel", "agent", "both"] = Field(
         default="channel",
-        description="Delivery mode: channel (direct) or agent (queue injection)",
+        description="Where to deliver results: channel (direct), agent (queue injection), or both",
     )
-
-    @field_validator("delivery", mode="before")
-    @classmethod
-    def validate_delivery(cls, v: str) -> str:
-        """Validate delivery mode and reject removed 'both' option."""
-        if v == "both":
-            raise ValueError(
-                "delivery: 'both' has been removed. Use 'agent' to have the main agent "
-                "process cron results (it can use acknowledge_event to suppress "
-                "routine output), or 'channel' for direct delivery."
-            )
-        return v
 
 
 class CronDefinition(BaseModel):
