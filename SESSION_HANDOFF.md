@@ -255,7 +255,9 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 4. Create new branch: `git checkout -b refactor/{NN}-{name}`
 5. Execute MR per sprint plan
 6. Run tests: `poetry run pytest --tb=short`
-7. Push branch, open PR via `gh pr create --base refactor/structural-cleanup-2026`
+7. **Push branch and open PR** via `gh pr create --base refactor/structural-cleanup-2026`
+8. **Wait for AI pipeline review** — GitHub will trigger automated code review. **Do NOT merge until AI feedback is addressed.**
+9. After AI review passes, merge via `gh pr merge --squash --delete-branch`
 
 ---
 
