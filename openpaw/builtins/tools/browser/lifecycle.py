@@ -158,7 +158,7 @@ class BrowserLifecycle:
             # Save storage state
             storage_state = await self._session._context.storage_state()
             with open(self._cookie_file, "w") as f:
-                json.dump(storage_state, f, indent=2)
+                json.dump(storage_state, f, indent=2, default=str)
 
             logger.info(f"Cookies saved to {self._cookie_file}")
 

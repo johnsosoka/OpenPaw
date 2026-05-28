@@ -98,7 +98,11 @@ class BrowserState:
         """
         try:
             # Create CDP session
-            client = await self._session._page.context.new_cdp_session(self._session._page)
+            try:
+                client = await self._session._page.context.new_cdp_session(self._session._page)
+            except Exception as e:
+                logger.warning(f"Failed to create CDP session: {e}")
+                return None
 
             try:
                 # Get full accessibility tree from CDP
