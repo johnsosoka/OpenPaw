@@ -9,8 +9,8 @@
 ## Quick Resume Checklist (for next session)
 
 1. ✅ Holding branch is `refactor/structural-cleanup-2026` on origin — **always branch from this**
-2. ✅ 9 MRs merged, 2,777 tests passing on holding branch
-3. 📋 Next work: MR #9 (WorkspaceRunner services) + MR #10 (AgentBuilder)
+2. ✅ 11 MRs merged, 2,777 tests passing on holding branch
+3. 📋 Next work: MR #11 (Channel Helpers) + MR #12 (Builtin Template + Spawn Package)
 4. 📁 All research/artifacts: `llm_memory/openpaw_refactor/`
 5. 📋 Sprint plan: `llm_memory/openpaw_refactor/00_sprint_plan.md`
 
@@ -29,6 +29,8 @@ origin/develop (frozen for refactor duration)
        ├─ origin/refactor/06-browser-package    ✅ MERGED
        ├─ origin/refactor/07-task-package       ✅ MERGED
        ├─ origin/refactor/08-scheduler-base     ✅ MERGED
+       ├─ origin/refactor/09-runner-services    ✅ MERGED
+       ├─ origin/refactor/10-agent-builder      ✅ MERGED
        └─ ... (see sprint plan)
 ```
 
@@ -80,16 +82,8 @@ origin/develop (frozen for refactor duration)
 git checkout refactor/structural-cleanup-2026
 git pull origin refactor/structural-cleanup-2026
 poetry run pytest --tb=short
-# Expected: 2771 passed
+# Expected: 2777 passed
 ```
-
-**Commits on holding branch:**
-- `d8dfcdb` merge: MR #4 filesystem formatting helpers
-- `e77b5ce` merge: MR #2 model factory extraction
-- `552f99d` feat: add stdio channel adapter for local testing
-- `89ce111` refactor: decompose core/config/models.py into package
-- `e7e0a6a` merge: Phase 0 bugfixes into holding branch
-- `7a52632` fix: delivery 'both' mode and heartbeat channel context
 
 ---
 
@@ -166,23 +160,48 @@ poetry run pytest --tb=short
 - Fixed heartbeat channel context (Phase 0 bugfix)
 - **Tests: 2,777 passed, ruff clean**
 
+### MR #9: WorkspaceRunner Services (Part 1)
+**Branch:** `refactor/09-runner-services` → merged into holding  
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/112  
+**Scope:** Extract 4 safe services from `workspace/runner.py` (1,100 → ~850 lines)  
+**Commit:** `c6ab7f2` + `be51971` (fix) + `2582b12` (merge fix)
+
+- Created `workspace/initializer.py` — `WorkspaceInitializer` (init_stores, init_memory, init_builtins, init_agent, config resolution)
+- Created `workspace/connector.py` — `BuiltinToolConnector` (connect spawn, channel history, memory search tools)
+- Created `workspace/lifecycle_notifier.py` — `LifecycleNotifier` (notify on startup/shutdown)
+- Created `workspace/task_service.py` — `TaskMaintenanceService` (cleanup old tasks, periodic cleanup)
+- AI review found: duplicate `load_workspace_tools()` call in `init_builtins()` — fixed
+- **Tests: 2,777 passed, ruff clean**
+
+### MR #10: AgentBuilder Extraction
+**Branch:** `refactor/10-agent-builder` → merged into holding  
+**PR:** https://github.com/johnsosoka/OpenPaw/pull/111  
+**Scope:** Extract `_build_agent()` from `agent/runner.py` to `agent/builder.py`  
+**Commit:** `7fc46e7` + `b9ac21d` (fix)
+
+- Created `agent/builder.py` — `AgentBuilder` class with `build()` and `create_model()`
+- `AgentRunner` now delegates to `AgentBuilder` internally
+- AI review found: `additional_tools` not synced to builder before rebuild — fixed
+- Kept `_build_agent()` and `_create_model()` as thin wrappers for test compatibility
+- **Tests: 2,777 passed, ruff clean**
+
 ---
 
 ## Next Batch of Work (Ready to Start)
 
-### MR #9: WorkspaceRunner Services (Part 1)
+### MR #11: Channel Helper Extraction
 **Base:** `refactor/structural-cleanup-2026`  
-**Scope:** Extract 4 safe services from `workspace/runner.py` (1,158 lines)  
-**Risk:** Medium (touches initialization order and lifecycle)  
-**Est. Lines:** ~700 reorganized  
-**Analysis:** `llm_memory/openpaw_refactor/03_workspace_runner_depth.md`
+**Scope:** Extract duplicated logic from Discord (846) and Telegram (804)  
+**Risk:** Medium (shared behavior must stay identical across both platforms)  
+**Est. Lines:** ~200 moved  
+**Analysis:** `llm_memory/openpaw_refactor/06_channels_and_schedulers_depth.md`
 
-### MR #10: AgentBuilder Extraction
+### MR #12: Builtin Template and Spawn Package
 **Base:** `refactor/structural-cleanup-2026`  
-**Scope:** Extract `_build_agent()` from `agent/runner.py` to `agent/builder.py`  
-**Risk:** Medium (agent construction is complex)  
-**Est. Lines:** ~250 moved  
-**Analysis:** `llm_memory/openpaw_refactor/04_agent_runner_and_fs_depth.md`
+**Scope:** Apply standard package pattern to `spawn.py` and establish template  
+**Risk:** Medium (spawn is heavily tested — 1,558 lines of tests)  
+**Est. Lines:** ~550 reorganized  
+**Analysis:** `llm_memory/openpaw_refactor/05_builtin_tools_depth.md`
 
 ---
 
@@ -196,8 +215,8 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 | `00_sprint_plan.md` | **Living sprint plan** — update this as work progresses |
 | `01_breadth_assessment.md` | Full codebase scan, file size leaderboard, SRP violations |
 | `02_config_models_depth.md` | Config models decomposition analysis (MR #1 done) |
-| `03_workspace_runner_depth.md` | WorkspaceRunner extraction plan (MR #9 future) |
-| `04_agent_runner_and_fs_depth.md` | AgentRunner + filesystem analysis (MR #2/#4/#13 future) |
+| `03_workspace_runner_depth.md` | WorkspaceRunner extraction plan (MR #9 done) |
+| `04_agent_runner_and_fs_depth.md` | AgentRunner + filesystem analysis (MR #2/#4/#10/#13 future) |
 | `05_builtin_tools_depth.md` | Builtin tools decomposition analysis (MR #6/#7/#12/#15 future) |
 | `06_channels_and_schedulers_depth.md` | Channel adapter + scheduler analysis (MR #8/#11 future) |
 | `07_config_models_implementation_notes.md` | Config models implementation spec (MR #1 done) |
@@ -211,12 +230,12 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 
 | Metric | Start | Current | Target |
 |--------|-------|---------|--------|
-| Files >700 lines | 12 | 8 | 4 |
-| Files >500 lines | 22 | 18 | 10 |
+| Files >700 lines | 12 | 6 | 4 |
+| Files >500 lines | 22 | 16 | 10 |
 | Max classes/file | 39 | 8 | 8 |
 | Max methods/class | 27 | 27 | 15 |
 | Tests | 2,707 | 2,777 | — |
-| MRs Complete | 0 | 9/16 | 16/16 |
+| MRs Complete | 0 | 11/16 | 16/16 |
 
 ---
 
@@ -246,8 +265,8 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 
 **Future risks to watch:**
 - MR #13 (filesystem split) is security-critical — needs dedicated audit
-- MR #9 (WorkspaceRunner services) touches initialization order
 - MR #14 (message processor decomposition) touches core pipeline
+- MR #15 (cron-manager package) is the last builtin package refactor
 
 ---
 
@@ -272,6 +291,11 @@ All research and planning artifacts are in `llm_memory/openpaw_refactor/`:
 | 2026-05-28 | MR #8 completed (scheduler base class) — PR #109 opened |
 | 2026-05-28 | MR #7 merged into holding branch (PR #110 squash merge) |
 | 2026-05-28 | MR #8 merged into holding branch (PR #109 squash merge) |
+| 2026-05-28 | MR #9 completed (WorkspaceRunner services) — PR #112 opened |
+| 2026-05-28 | MR #10 completed (AgentBuilder) — PR #111 opened |
+| 2026-05-28 | MR #10 merged into holding branch (PR #111 squash merge) |
+| 2026-05-28 | MR #9 merged into holding branch (PR #112 squash merge) |
+| 2026-05-28 | AI review fixes applied: duplicate load_workspace_tools, additional_tools sync |
 | 2026-05-28 | **Tests after merge: 2,777 passed, ruff clean** |
 | 2026-05-28 | **Session handoff saved** — ready for next session |
 
