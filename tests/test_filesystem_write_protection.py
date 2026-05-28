@@ -8,6 +8,7 @@ Phase 1 additions:
 """
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -343,3 +344,132 @@ class TestReadFromProtectedDirs:
 
         assert "Error:" not in result
         assert "TASKS.yaml" in result
+
+
+# ---------------------------------------------------------------------------
+# Race condition: file deleted between exists() check and os.open()
+# ---------------------------------------------------------------------------
+
+
+class TestRaceConditionHandling:
+    """Verify graceful handling of FileNotFoundError race conditions.
+
+    When a file is deleted between the ``exists()`` check and the ``os.open()``
+    call, the tools should return a clear user-facing error rather than letting
+    the exception bubble up.
+    """
+
+    def test_read_file_handles_file_not_found_race(self, tmp_path: Path):
+        """Simulate race: file exists during check, then deleted before open."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        (ws / "report.md").write_text("content")
+
+        fs = make_fs(tmp_path)
+        tools = get_tools(fs)
+
+        # Patch os.open to raise FileNotFoundError after exists() returns True
+        with patch(
+            "openpaw.agent.tools.file_read.os.open",
+            side_effect=FileNotFoundError(2, "No such file or directory"),
+        ):
+            result = tools["read_file"].invoke({"file_path": "workspace/report.md"})
+
+        assert "Error:" in result
+        assert "File 'workspace/report.md' not found" in result
+        assert "Use ls('.')" in result
+
+    def test_write_file_handles_file_not_found_race(self, tmp_path: Path):
+        """Simulate race: path resolved, but parent dir deleted before mkdir."""
+        fs = make_fs(tmp_path)
+        tools = get_tools(fs)
+
+        with patch(
+            "openpaw.agent.tools.file_write.os.open",
+            side_effect=FileNotFoundError(2, "No such file or directory"),
+        ):
+            result = tools["write_file"].invoke({"file_path": "new.md", "content": "hello"})
+
+        assert "Error:" in result
+        assert "File 'new.md' not found" in result
+        assert "Use ls('.')" in result
+
+    def test_overwrite_file_handles_file_not_found_race(self, tmp_path: Path):
+        """Simulate race: path resolved, but parent dir deleted before mkdir."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        (ws / "existing.md").write_text("old")
+
+        fs = make_fs(tmp_path)
+        tools = get_tools(fs)
+
+        with patch(
+            "openpaw.agent.tools.file_write.os.open",
+            side_effect=FileNotFoundError(2, "No such file or directory"),
+        ):
+            result = tools["overwrite_file"].invoke({"file_path": "existing.md", "content": "new"})
+
+        assert "Error:" in result
+        assert "File 'existing.md' not found" in result
+        assert "Use ls('.')" in result
+
+    def test_edit_file_handles_file_not_found_race(self, tmp_path: Path):
+        """Simulate race: file exists during check, then deleted before open."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        (ws / "draft.md").write_text("hello world")
+
+        fs = make_fs(tmp_path)
+        tools = get_tools(fs)
+
+        with patch(
+            "openpaw.agent.tools.file_write.os.open",
+            side_effect=FileNotFoundError(2, "No such file or directory"),
+        ):
+            result = tools["edit_file"].invoke({
+                "file_path": "draft.md",
+                "old_text": "world",
+                "new_text": "there",
+            })
+
+        assert "Error:" in result
+        assert "File 'draft.md' not found" in result
+        assert "Use ls('.')" in result
+
+    def test_file_info_handles_file_not_found_race(self, tmp_path: Path):
+        """Simulate race: file exists during check, then deleted before stat."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        (ws / "report.md").write_text("content")
+
+        fs = make_fs(tmp_path)
+        tools = get_tools(fs)
+
+        # Patch Path.stat to raise FileNotFoundError after exists() returns True
+        with patch("pathlib.Path.stat", side_effect=FileNotFoundError(2, "No such file or directory")):
+            result = tools["file_info"].invoke({"path": "workspace/report.md"})
+
+        # file_info returns JSON, not plain text
+        assert "exists" in result
+        assert "false" in result
+        assert "not found" in result
+        assert "Use ls('.')" in result
+
+    def test_read_file_with_workspace_name_hint(self, tmp_path: Path):
+        """FileNotFoundError message includes workspace name hint when set."""
+        ws = tmp_path / "workspace"
+        ws.mkdir()
+        (ws / "report.md").write_text("content")
+
+        fs = make_fs(tmp_path, workspace_name="test-workspace")
+        tools = get_tools(fs)
+
+        with patch(
+            "openpaw.agent.tools.file_read.os.open",
+            side_effect=FileNotFoundError(2, "No such file or directory"),
+        ):
+            result = tools["read_file"].invoke({"file_path": "workspace/report.md"})
+
+        assert "Error:" in result
+        assert "File 'workspace/report.md' not found" in result
+        assert "Use ls('.')" in result
