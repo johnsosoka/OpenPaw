@@ -10,11 +10,10 @@ from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.language_models import BaseChatModel
 
 from openpaw.agent.builder import AgentBuilder
-from openpaw.agent.metrics import InvocationMetrics, extract_metrics_from_callback
 from openpaw.agent.middleware.approval import ApprovalRequiredError
-from openpaw.agent.middleware.llm_hooks import THINKING_TAG_PATTERN
 from openpaw.agent.middleware.queue_aware import InterruptSignalError
 from openpaw.agent.model_factory import THINKING_MODELS
+from openpaw.agent.response_processor import ResponseProcessor
 from openpaw.agent.tools.filesystem import FilesystemTools
 from openpaw.core.prompts.system_events import (
     TIMEOUT_NOTIFICATION_GENERIC,
@@ -32,7 +31,7 @@ class AgentRunner:
     - Workspace-based system prompts (AGENT.md, USER.md, SOUL.md, HEARTBEAT.md)
     - Sandboxed filesystem access for workspace operations
     - LangGraph checkpointing for multi-turn conversations
-    - Automatic stripping of model thinking tokens (<think>...</think>)
+    - Automatic stripping of model thinking tokens (<thinking>...</thinking>)
     - Tool name validation for Bedrock compatibility
     - Streaming execution via astream() for behavioral parity with ainvoke()
     - Middleware support (thinking token stripping, queue awareness, approval gates)
@@ -40,38 +39,21 @@ class AgentRunner:
 
     @staticmethod
     def _strip_thinking_tokens(text: str) -> str:
-        """Strip thinking tokens from string content (fallback).
+        """Strip thinking tokens from string content (backward-compatible delegate).
 
         Handles edge cases where ThinkingTokenMiddleware doesn't catch
-        <think>...</think> tags in string content.
+        <thinking> tags in string content.
         """
-        cleaned = THINKING_TAG_PATTERN.sub("", text)
-        return cleaned.strip()
+        return ResponseProcessor.strip_thinking_tokens(text)
 
     @staticmethod
     def _extract_text_from_content(content: Any) -> str:
-        """Extract text from message content, handling both string and structured formats.
+        """Extract text from message content (backward-compatible delegate).
 
         Bedrock models return content as a list of typed blocks:
         [{"type": "thinking", ...}, {"type": "text", "text": "answer"}]
-
-        Blocks may be dicts or objects with type/text attributes.
-
-        Returns:
-            Extracted text content, or empty string if no text blocks found.
         """
-        if not isinstance(content, list):
-            return str(content)
-
-        text_parts = []
-        for block in content:
-            if isinstance(block, dict):
-                if block.get("type") == "text" and block.get("text"):
-                    text_parts.append(block["text"])
-            elif hasattr(block, "type") and hasattr(block, "text"):
-                if getattr(block, "type") == "text" and getattr(block, "text"):
-                    text_parts.append(block.text)
-        return "\n".join(text_parts)
+        return ResponseProcessor.extract_text_from_content(content)
 
     def __init__(
         self,
@@ -101,13 +83,12 @@ class AgentRunner:
             checkpointer: Optional LangGraph checkpointer for persistence.
             tools: Optional additional tools to provide to the agent.
             region: AWS region for Bedrock models (e.g., us-east-1).
-            strip_thinking: Whether to strip <think>...</think> tokens from responses.
+            strip_thinking: Whether to strip <thinking> tokens from responses.
             timeout_seconds: Wall-clock timeout for agent invocations (default 5 minutes).
             enabled_builtins: List of enabled builtin tool names for conditional prompt sections.
             extra_model_kwargs: Additional kwargs to pass to init_chat_model
                 (e.g., base_url for OpenAI-compatible APIs).
-            middleware: Optional list of middleware functions for tool execution
-                (e.g., queue-aware middleware for steer/interrupt modes).
+            middleware: Optional list of middleware functions for tool execution.
         """
         self.workspace = workspace
         self.model_id = model
@@ -128,11 +109,10 @@ class AgentRunner:
         self._max_output_tokens: int | None = self.extra_model_kwargs.get("max_tokens")
 
         # Log label for distinguishing main agent from sub-agents.
-        # Defaults to workspace name; sub-agent runner overrides with profile label.
         self._log_label: str = workspace.name
 
         # Per-invocation tracking (populated after each run)
-        self._last_metrics: InvocationMetrics | None = None
+        self._last_metrics: Any | None = None
         self._last_tools_used: list[str] = []
         self._current_tool_name: str | None = None
 
@@ -145,6 +125,12 @@ class AgentRunner:
                 f"Auto-enabling thinking token stripping for model: {self.model_id}"
             )
             self.strip_thinking = True
+
+        self._response_processor = ResponseProcessor(
+            strip_thinking=self.strip_thinking,
+            log_label=self._log_label,
+            model_id=self.model_id,
+        )
 
         self._builder = AgentBuilder(
             workspace=self.workspace,
@@ -167,48 +153,26 @@ class AgentRunner:
 
     @property
     def max_output_tokens(self) -> int | None:
-        """Get the configured output token cap for this runner.
-
-        Returns:
-            The max_tokens value passed via extra_model_kwargs, or None if uncapped.
-        """
+        """Get the configured output token cap for this runner."""
         return self._max_output_tokens
 
     @property
-    def last_metrics(self) -> InvocationMetrics | None:
-        """Get token usage metrics from the most recent invocation.
-
-        Returns:
-            InvocationMetrics from the last run() call, or None if no invocations yet.
-        """
+    def last_metrics(self) -> Any | None:
+        """Get token usage metrics from the most recent invocation."""
         return self._last_metrics
 
     @property
     def last_tools_used(self) -> list[str]:
-        """Get list of tool names invoked during the most recent run.
-
-        Returns:
-            List of tool name strings (may contain duplicates if called multiple times).
-        """
+        """Get list of tool names invoked during the most recent run."""
         return self._last_tools_used
 
     @property
     def model_instance(self) -> BaseChatModel | None:
-        """Get the current model instance for profile access.
-
-        Returns:
-            The currently configured BaseChatModel instance, or None if not yet built.
-        """
+        """Get the current model instance for profile access."""
         return getattr(self, '_model_instance', None)
 
     def update_checkpointer(self, checkpointer: Any) -> None:
-        """Update the checkpointer and rebuild the agent graph.
-
-        Used for deferred initialization when checkpointer requires async setup.
-
-        Args:
-            checkpointer: New checkpointer instance (e.g., AsyncSqliteSaver).
-        """
+        """Update the checkpointer and rebuild the agent graph."""
         self.checkpointer = checkpointer
         self._builder.checkpointer = checkpointer
         self._agent, self._model_instance = self._builder.build()
@@ -223,11 +187,6 @@ class AgentRunner:
         """Update model configuration and rebuild the agent graph.
 
         Conversation state is preserved (checkpointer is model-independent).
-
-        Args:
-            model: New model identifier (provider:model format).
-            api_key: Optional new API key for the model provider.
-            temperature: Optional new temperature setting.
         """
         self.model_id = model
         if api_key is not None:
@@ -246,34 +205,24 @@ class AgentRunner:
         self._builder.temperature = self.temperature
         self._builder.strip_thinking = self.strip_thinking
 
+        self._response_processor = ResponseProcessor(
+            strip_thinking=self.strip_thinking,
+            log_label=self._log_label,
+            model_id=self.model_id,
+        )
+
         self._agent, self._model_instance = self._builder.build()
         logger.info(f"Model updated to {model} for workspace: {self.workspace.name}")
 
     def rebuild_agent(self) -> None:
-        """Reload workspace files and rebuild the agent graph.
-
-        Call this after conversation rotation (/new, /compact) so the agent
-        picks up any changes the agent made to its own workspace files
-        (AGENT.md, HEARTBEAT.md, etc.) during the previous conversation.
-        """
+        """Reload workspace files and rebuild the agent graph."""
         self.workspace.reload_files()
         self._builder.workspace = self.workspace
         self._agent, self._model_instance = self._builder.build()
         logger.info(f"Rebuilt agent with fresh workspace files: {self.workspace.name}")
 
     async def get_context_info(self, thread_id: str) -> dict[str, Any]:
-        """Get context window utilization for a conversation thread.
-
-        Args:
-            thread_id: The conversation thread ID to analyze.
-
-        Returns:
-            dict with:
-                - max_input_tokens: Model's maximum input context window
-                - approximate_tokens: Estimated token count in conversation
-                - utilization: Float 0-1 representing context usage
-                - message_count: Number of messages in the thread
-        """
+        """Get context window utilization for a conversation thread."""
         from langchain_core.messages.utils import count_tokens_approximately
 
         config = {"configurable": {"thread_id": thread_id}}
@@ -311,14 +260,6 @@ class AgentRunner:
         When approval middleware raises ApprovalRequiredError, LangGraph has already
         checkpointed an AIMessage with tool_calls but no corresponding ToolMessages.
         This creates an invalid state that OpenAI-compatible APIs reject.
-
-        This method reads the checkpoint, finds orphaned tool_calls, and injects
-        synthetic ToolMessages via aupdate_state() to restore valid message ordering.
-
-        Args:
-            thread_id: Conversation thread with orphaned state.
-            responses: Optional {tool_call_id: content} mapping for specific responses.
-                       Unmapped calls get a generic interruption message.
         """
         if not self.checkpointer:
             return
@@ -375,9 +316,6 @@ class AgentRunner:
         )
 
         # Inject synthetic ToolMessages as if they came from the "tools" node.
-        # as_node="tools" is critical: without it, LangGraph defaults to the last
-        # active node ("model"), leaving the graph in an ambiguous state that hangs
-        # on the next astream() invocation.
         await self._agent.aupdate_state(
             config, {"messages": synthetic_messages}, as_node="tools"
         )
@@ -386,12 +324,6 @@ class AgentRunner:
         """Create the appropriate chat model based on provider.
 
         Thin wrapper around AgentBuilder.create_model() for backward compatibility.
-
-        Returns:
-            Configured BaseChatModel instance.
-
-        Raises:
-            ValueError: If provider is not supported.
         """
         return self._builder.create_model()
 
@@ -400,7 +332,6 @@ class AgentRunner:
 
         Backward-compatible wrapper that calls _create_model() first (to honor
         test patches), then delegates the rest of construction to AgentBuilder.
-        Updates self._agent and self._model_instance.
         """
         self._builder.additional_tools = self.additional_tools
         model = self._create_model()
@@ -422,8 +353,7 @@ class AgentRunner:
             thread_id: Thread identifier for multi-turn conversations.
 
         Returns:
-            Agent's response text. Thinking tokens are stripped by ThinkingTokenMiddleware
-            in the agent graph. Fallback stripping handles edge cases.
+            Agent's response text.
         """
         # Reset per-invocation tracking
         self._last_metrics = None
@@ -449,7 +379,6 @@ class AgentRunner:
 
         try:
             # Use astream with stream_mode="updates" for behavioral parity with ainvoke
-            # Collect all messages from the stream
             final_messages = []
             async with asyncio.timeout(self.timeout_seconds):
                 async for update in self._agent.astream(
@@ -457,30 +386,25 @@ class AgentRunner:
                     config=config,
                     stream_mode="updates",
                 ):
-                    # Updates come as: {"model": {"messages": [...]}} from create_agent v2
                     if "model" in update:
                         messages_in_update = update["model"].get("messages", [])
                         final_messages.extend(messages_in_update)
-                        # Capture tool names from AI messages with tool_calls
                         for msg in messages_in_update:
                             tool_calls = getattr(msg, "tool_calls", [])
                             if tool_calls:
                                 tool_names = [tc.get("name", "?") for tc in tool_calls]
                                 logger.info(f"[{self._log_label}] Tool calls: {tool_names}")
-                                # Track last tool called for timeout reporting
                                 self._current_tool_name = tool_calls[-1].get("name")
                             for tc in tool_calls:
                                 if name := tc.get("name"):
                                     self._last_tools_used.append(name)
-                    # Clear current tool tracking when we see tool results
                     if "tools" in update:
                         self._current_tool_name = None
         except InterruptSignalError:
-            # Re-raise for WorkspaceRunner to handle
             raise
         except TimeoutError:
-            # Extract partial metrics even on timeout
             duration_ms = (time.monotonic() - start_time) * 1000
+            from openpaw.agent.metrics import extract_metrics_from_callback
             self._last_metrics = extract_metrics_from_callback(
                 usage_callback, duration_ms, self.model_id
             )
@@ -491,16 +415,14 @@ class AgentRunner:
                 f"(workspace: {self._log_label})"
             )
 
-            # Use rich notification if we know what tool was executing
             if self._current_tool_name:
                 return TIMEOUT_NOTIFICATION_TEMPLATE.format(
                     timeout=int(self.timeout_seconds),
                     tool_name=self._current_tool_name,
                 )
-            else:
-                return TIMEOUT_NOTIFICATION_GENERIC.format(
-                    timeout=int(self.timeout_seconds),
-                )
+            return TIMEOUT_NOTIFICATION_GENERIC.format(
+                timeout=int(self.timeout_seconds),
+            )
         except ApprovalRequiredError:
             raise
         except Exception:
@@ -508,6 +430,7 @@ class AgentRunner:
 
         # Extract metrics after successful invocation
         duration_ms = (time.monotonic() - start_time) * 1000
+        from openpaw.agent.metrics import extract_metrics_from_callback
         self._last_metrics = extract_metrics_from_callback(
             usage_callback, duration_ms, self.model_id
         )
@@ -522,23 +445,7 @@ class AgentRunner:
                 )
 
         # Extract response from final messages
-        if final_messages:
-            last_message = final_messages[-1]
-            if hasattr(last_message, "content"):
-                raw_response = self._extract_text_from_content(last_message.content)
-            else:
-                raw_response = str(last_message)
-
-            # Fallback: strip <think> tags from string content if middleware missed them
-            if self.strip_thinking and "<think>" in raw_response.lower():
-                logger.warning(
-                    f"Fallback thinking stripping triggered "
-                    f"(workspace: {self._log_label}, model: {self.model_id})"
-                )
-                return self._strip_thinking_tokens(raw_response)
-            return raw_response
-
-        return ""
+        return self._response_processor.process(final_messages)
 
     def run_sync(
         self,
@@ -549,8 +456,7 @@ class AgentRunner:
         """Synchronous version of run for non-async contexts.
 
         Returns:
-            Agent's response text. Thinking tokens are stripped by ThinkingTokenMiddleware
-            in the agent graph. Fallback stripping handles edge cases.
+            Agent's response text.
         """
         # Set recursion_limit for multi-turn execution (2 supersteps per turn)
         config: dict[str, Any] = {"recursion_limit": self.max_turns * 2}
@@ -568,19 +474,4 @@ class AgentRunner:
         )
 
         messages = result.get("messages", [])
-        if messages:
-            last_message = messages[-1]
-            if hasattr(last_message, "content"):
-                raw_response = self._extract_text_from_content(last_message.content)
-            else:
-                raw_response = str(last_message)
-
-            if self.strip_thinking and "<think>" in raw_response.lower():
-                logger.warning(
-                    f"Fallback thinking stripping triggered "
-                    f"(workspace: {self._log_label}, model: {self.model_id})"
-                )
-                return self._strip_thinking_tokens(raw_response)
-            return raw_response
-
-        return ""
+        return self._response_processor.process(messages)
