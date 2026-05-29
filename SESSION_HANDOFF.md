@@ -3,7 +3,7 @@
 **Last Updated:** 2026-05-29
 **Sprint:** Structural Refactor Q2 2026 — **PHASE B IN PROGRESS**
 **Holding Branch:** `refactor/structural-cleanup-2026` ← **ALL NEW MRs BRANCH FROM HERE**
-**Status:** Phase A complete (16/16 MRs). B1, B2, B3, B4, and B5 merged. Next: MR B6 (MessageProcessor).
+**Status:** Phase A complete (16/16 MRs). B1–B6 merged. Next: MR B7 (Channel handlers).
 
 ---
 
@@ -13,8 +13,8 @@
 2. ✅ PR #118 opened: `refactor/structural-cleanup-2026` → `develop` (pending human review)
 3. ✅ Phase B plan: `llm_memory/openpaw_refactor/12_phase_b_plan.md`
 4. ✅ Phase B research: `llm_memory/openpaw_refactor/11_phase_b_research.md`
-5. ✅ MR B1 complete: SubAgentRunner decomposed (946→454 lines), 2,896 tests passing
-6. 📋 **Next:** MR B6 — MessageProcessor final cleanup (`message_processor.py`)
+5. ✅ MR B1–B6 complete: 6/10 MRs merged, 2,969 tests passing
+6. 📋 **Next:** MR B7 — Channel adapter handler extraction (`telegram.py` + `discord.py`)
 
 ---
 
@@ -138,7 +138,7 @@ poetry run pytest --tb=short
 # Expected: 2944 passed
 ```
 
-**Last known state:** 2,944 tests passing on holding branch (after B5 merge), ruff clean.
+**Last known state:** 2,969 tests passing on holding branch (after B6 merge), ruff clean.
 
 ---
 
@@ -147,7 +147,7 @@ poetry run pytest --tb=short
 **None currently.** All tests green. Holding branch is clean.
 
 **Phase B risks to watch:**
-- MessageProcessor final cleanup touches the core pipeline — highest regression risk
+- Channel handler extraction (B7) requires coordinated extraction across both Telegram and Discord adapters
 - Test file explosion: 18 test files >600 lines need splitting alongside source
 
 ---
@@ -161,7 +161,7 @@ poetry run pytest --tb=short
 | B3 Browser session | `refactor/b3-browser-session` | ✅ **Merged** | #121 | 2,944 passed |
 | B4 Md2pdf | `refactor/b4-md2pdf-package` | ✅ **Merged** | #122 | 2,944 passed |
 | B5 Small cleanup | `refactor/b5-small-cleanup` | ✅ **Merged** | #123 | 2,944 passed |
-| B6 MessageProcessor | — | 🔵 Not started | — | — |
+| B6 MessageProcessor | `refactor/b6-message-processor-final` | ✅ **Merged** | #124 | 2,969 passed |
 | B7 Channel handlers | — | 🔵 Not started | — | — |
 | B8 FileSearch | — | 🔵 Not started | — | — |
 | B9 AgentRunner | — | 🔵 Not started | — | — |
@@ -190,6 +190,8 @@ poetry run pytest --tb=short
 | 2026-05-29 | **MR B4 merged** — AI review clean (2 rounds), 2,944 tests passing |
 | 2026-05-29 | **MR B5 opened** — Small cleanup decomposition (cron 552→5, channel_history 509→5, cli_init 540→4 files), PR #123 |
 | 2026-05-29 | **MR B5 merged** — AI review clean (no issues), 2,944 tests passing |
+| 2026-05-29 | **MR B6 opened** — MessageProcessor final cleanup (541→400 lines), PR #124 |
+| 2026-05-29 | **MR B6 merged** — AI review addressed (best-effort error handling on channel sends), 2,969 tests passing |
 
 ---
 
