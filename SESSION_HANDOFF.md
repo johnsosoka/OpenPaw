@@ -3,7 +3,7 @@
 **Last Updated:** 2026-05-29
 **Sprint:** Structural Refactor Q2 2026 — **PHASE B IN PROGRESS**
 **Holding Branch:** `refactor/structural-cleanup-2026` ← **ALL NEW MRs BRANCH FROM HERE**
-**Status:** Phase A complete (16/16 MRs). B1, B2, B3, and B4 merged. Next: MR B5 (Small cleanup).
+**Status:** Phase A complete (16/16 MRs). B1, B2, B3, B4, and B5 merged. Next: MR B6 (MessageProcessor).
 
 ---
 
@@ -14,7 +14,7 @@
 3. ✅ Phase B plan: `llm_memory/openpaw_refactor/12_phase_b_plan.md`
 4. ✅ Phase B research: `llm_memory/openpaw_refactor/11_phase_b_research.md`
 5. ✅ MR B1 complete: SubAgentRunner decomposed (946→454 lines), 2,896 tests passing
-6. 📋 **Next:** MR B5 — Small cleanup (`cron.py` + `channel_history.py` + `cli_init.py`)
+6. 📋 **Next:** MR B6 — MessageProcessor final cleanup (`message_processor.py`)
 
 ---
 
@@ -138,7 +138,7 @@ poetry run pytest --tb=short
 # Expected: 2944 passed
 ```
 
-**Last known state:** 2,944 tests passing on holding branch (after B4 merge), ruff clean.
+**Last known state:** 2,944 tests passing on holding branch (after B5 merge), ruff clean.
 
 ---
 
@@ -160,7 +160,7 @@ poetry run pytest --tb=short
 | B2 Email package | `refactor/b2-email-package` | ✅ **Merged** | #120 | 2,913 passed |
 | B3 Browser session | `refactor/b3-browser-session` | ✅ **Merged** | #121 | 2,944 passed |
 | B4 Md2pdf | `refactor/b4-md2pdf-package` | ✅ **Merged** | #122 | 2,944 passed |
-| B5 Small cleanup | — | 🔵 Not started | — | — |
+| B5 Small cleanup | `refactor/b5-small-cleanup` | ✅ **Merged** | #123 | 2,944 passed |
 | B6 MessageProcessor | — | 🔵 Not started | — | — |
 | B7 Channel handlers | — | 🔵 Not started | — | — |
 | B8 FileSearch | — | 🔵 Not started | — | — |
@@ -188,6 +188,8 @@ poetry run pytest --tb=short
 | 2026-05-28 | **MR B4 opened** — Md2pdf decomposition (767 → 217+56+362+163 lines), PR #122 |
 | 2026-05-29 | **MR B4 AI review addressed** — Improved exception handling in mermaid.py (httpx.HTTPError) and converter.py (OSError, UnicodeDecodeError) |
 | 2026-05-29 | **MR B4 merged** — AI review clean (2 rounds), 2,944 tests passing |
+| 2026-05-29 | **MR B5 opened** — Small cleanup decomposition (cron 552→5, channel_history 509→5, cli_init 540→4 files), PR #123 |
+| 2026-05-29 | **MR B5 merged** — AI review clean (no issues), 2,944 tests passing |
 
 ---
 
