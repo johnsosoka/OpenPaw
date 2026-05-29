@@ -186,5 +186,73 @@ poetry run pytest --tb=short
 
 ---
 
-*End of handoff. Phase B is complete.*
-*Artifacts: `llm_memory/openpaw_refactor/12_phase_b_plan.md` (plan), `11_phase_b_research.md` (research)*
+## Phase C: Integration Testing (In Progress)
+
+**Status:** Phase C kickoff — test plan finalized, test agent workspace created.
+**Goal:** Validate all 26 MRs from Phases A+B introduced no regressions. Exercise every framework feature with a real LLM.
+**Test Model:** Fireworks `accounts/fireworks/models/kimi-k2.6-turbo` via Firepass API
+**Channel:** stdio (for automated testing) or Telegram (for real delivery)
+
+### Phase C Plan
+
+Full plan: `llm_memory/openpaw_refactor/13_phase_c_test_plan.md`
+Test coverage audit: `llm_memory/openpaw_refactor/13_phase_c_test_plan_audit.md`
+
+### 20 Test Scenarios
+
+1. Basic conversation & context retention
+2. File system tools (sandboxed)
+3. Task management (TASKS.yaml)
+4. Sub-agent spawning
+5. Cron & dynamic scheduling
+6. Heartbeat scheduling
+7. Send message & send file
+8. Browser automation
+9. Runtime model switching
+10. Auto-compact & session TTL
+11. Approval gates
+12. Queue modes
+13. Channel history & context
+14. File upload pipeline
+15. Email integration
+16. GPT-Researcher
+17. Plan tool
+18. Token tracking & metrics
+19. Skills system
+20. Error handling & recovery
+
+### Test Agent Workspace
+
+```
+agent_workspaces/test_agent/
+├── AGENT.md      # Full capability list
+├── USER.md       # Test persona
+├── SOUL.md       # Test agent personality
+├── HEARTBEAT.md  # Test tasks to monitor
+├── agent.yaml    # Full framework config (Fireworks kimi-k2.6-turbo)
+├── crons/        # Test cron jobs
+├── .env.example  # API key template
+```
+
+### Acceptance Criteria
+
+- [ ] All 20 scenarios tested
+- [ ] No regressions from Phase A/B
+- [ ] All critical bugs fixed (filed as bugfix MRs)
+- [ ] Test results documented in `llm_memory/openpaw_refactor/14_phase_c_results.md`
+
+### Timeline
+
+- **Week 1:** Core runtime (scenarios 1-4)
+- **Week 2:** Scheduling & messaging (scenarios 5-7)
+- **Week 3:** Advanced features (scenarios 8-12)
+- **Week 4:** Integrations & polish (scenarios 13-20)
+
+---
+
+*End of handoff. Phase C testing in progress.*
+*Artifacts:*
+- `llm_memory/openpaw_refactor/12_phase_b_plan.md` (Phase B plan)
+- `llm_memory/openpaw_refactor/13_phase_c_test_plan.md` (Phase C plan)
+- `llm_memory/openpaw_refactor/13_phase_c_test_plan_audit.md` (Coverage audit)
+- `agent_workspaces/test_agent/` (Test agent workspace)
