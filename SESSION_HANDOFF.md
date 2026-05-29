@@ -234,6 +234,26 @@ agent_workspaces/test_agent/
 └── config/.env          # API key (set)
 ```
 
+### Phase C Bugfix Workflow
+
+**⚠️ Phase C is multi-session. Every bugfix requires a branch + PR + AI review + human approval.**
+
+```
+1. Test scenario (run test_agent)
+2. Find bug → document in SESSION_HANDOFF.md
+3. Create branch: git checkout -b bugfix/{short-description}
+4. Implement minimal fix → tests pass → ruff clean → mypy clean
+5. Retest the scenario locally
+6. Push branch → open PR targeting refactor/structural-cleanup-2026
+7. Wait for AI review comments (blocking issues must be fixed)
+8. Wait for human approval (John)
+9. Merge via squash --delete-branch
+10. Update SESSION_HANDOFF.md and llm_memory/14_phase_c_results.md
+11. Proceed to next scenario
+```
+
+**No direct commits to holding branch.** Every change goes through a bugfix MR.
+
 ### Phase C Findings
 
 | # | Date | Bug | Severity | Fix | Status |
@@ -259,6 +279,27 @@ agent_workspaces/test_agent/
 - **Week 2:** Scheduling & messaging (scenarios 5-7)
 - **Week 3:** Advanced features (scenarios 8-12)
 - **Week 4:** Integrations & polish (scenarios 13-20)
+
+### Resume for Next Session
+
+```bash
+# 1. Pull latest holding branch
+git checkout refactor/structural-cleanup-2026
+git pull origin refactor/structural-cleanup-2026
+
+# 2. Read this handoff
+# 3. Check the next scenario in the test plan
+# 4. Run the test agent
+poetry run openpaw -c config.yaml -w test_agent --all
+
+# 5. If a bug is found, create a bugfix branch
+git checkout -b bugfix/{description}
+
+# 6. After fix, test again, then open PR
+# 7. Wait for AI review + human approval
+# 8. Merge squash, delete branch
+# 9. Update this handoff
+```
 
 ---
 
