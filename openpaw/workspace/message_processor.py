@@ -11,19 +11,17 @@ from openpaw.agent.middleware import (
 )
 from openpaw.builtins.loader import BuiltinLoader
 from openpaw.channels.base import ChannelAdapter
-from openpaw.core.prompts.system_events import (
-    FOLLOWUP_TEMPLATE,
-    INTERRUPT_NOTIFICATION,
-    TOOL_DENIED_TEMPLATE,
-)
-from openpaw.core.utils import sanitize_error_for_user
 from openpaw.model.message import Message
 from openpaw.runtime.approval import ApprovalGateManager
 from openpaw.runtime.queue.lane import QueueMode
 from openpaw.runtime.queue.manager import QueueManager
 from openpaw.runtime.session.manager import SessionManager
+from openpaw.workspace.processors.approval_handler import ApprovalGateHandler
 from openpaw.workspace.processors.combiner import ContentCombiner
 from openpaw.workspace.processors.compactor import AutoCompactor
+from openpaw.workspace.processors.error_handler import ErrorHandler
+from openpaw.workspace.processors.followup_scheduler import FollowupScheduler
+from openpaw.workspace.processors.interrupt_handler import InterruptHandler
 from openpaw.workspace.processors.response_handler import ResponseHandler
 from openpaw.workspace.processors.ttl_checker import SessionTTLChecker
 
@@ -105,6 +103,26 @@ class MessageProcessor:
             logger=logger,
         )
 
+        # New handlers
+        self._approval_handler = ApprovalGateHandler(
+            approval_manager=approval_manager,
+            token_logger=token_logger,
+            workspace_name=workspace_name,
+            logger=logger,
+        )
+        self._interrupt_handler = InterruptHandler(
+            logger=logger,
+            combiner=self._combiner,
+        )
+        self._error_handler = ErrorHandler(
+            logger=logger,
+            compactor=self._compactor,
+        )
+        self._followup_scheduler = FollowupScheduler(
+            builtin_loader=builtin_loader,
+            logger=logger,
+        )
+
         # Retained direct dependencies (used by process_messages loop)
         self._conversation_archiver = conversation_archiver
         self._auto_compact_config = auto_compact_config
@@ -120,93 +138,6 @@ class MessageProcessor:
             runner: The new AgentRunner instance.
         """
         self._agent_runner = runner
-
-    # ------------------------------------------------------------------
-    # Backward-compatible wrappers (delegate to extracted processors)
-    # ------------------------------------------------------------------
-
-    def _resolve_user_name(self, message: Message) -> str | None:
-        """Resolve display name for a message's user."""
-        return self._combiner.resolve_user_name(
-            message.user_id, message.metadata
-        )
-
-    def _build_combined_content(self, messages: list[Message]) -> str:
-        """Build combined content from messages with optional user name prefixes."""
-        return self._combiner.build_combined_content(messages)
-
-    def _build_combined_content_from_tuples(
-        self, tuples: list[tuple[str, Any]]
-    ) -> str:
-        """Build combined content from (channel_name, msg) tuples."""
-        return self._combiner.build_combined_content_from_tuples(
-            [(ch, msg) for ch, msg in tuples]
-        )
-
-    @staticmethod
-    def _is_system_event_batch(messages: list[Message]) -> bool:
-        """Check if all messages in the batch are system events."""
-        return ResponseHandler.is_system_event_batch(messages)
-
-    @staticmethod
-    def _is_group_session(messages: list[Message] | None) -> bool:
-        """Determine if the current session is a group chat (not a DM)."""
-        return SessionTTLChecker.is_group_session(messages)
-
-    async def _check_session_ttl(
-        self,
-        session_key: str,
-        thread_id: str,
-        channel: ChannelAdapter | None,
-        messages: list[Message] | None = None,
-    ) -> str | None:
-        """Check if the session TTL has expired and rotate the conversation if so."""
-        return await self._ttl_checker.check(
-            session_key=session_key,
-            thread_id=thread_id,
-            channel=channel,
-            messages=messages,
-            agent_runner=self._agent_runner,
-            logger=self._logger,
-        )
-
-    async def _check_auto_compact(
-        self,
-        session_key: str,
-        thread_id: str,
-        channel: ChannelAdapter | None,
-    ) -> str | None:
-        """Check if auto-compact should trigger and perform it if needed."""
-        if not self._auto_compact_config or not self._auto_compact_config.enabled:
-            return None
-        if not self._conversation_archiver:
-            return None
-        return await self._compactor.check_compact(
-            session_key=session_key,
-            thread_id=thread_id,
-            channel=channel,
-            agent_runner=self._agent_runner,
-        )
-
-    async def _recover_context_overflow(
-        self,
-        session_key: str,
-        thread_id: str,
-        channel: ChannelAdapter | None,
-    ) -> str | None:
-        """Recover from a context window overflow by force-rotating the conversation."""
-        return await self._compactor.recover_overflow(
-            session_key=session_key,
-            thread_id=thread_id,
-            channel=channel,
-            agent_runner=self._agent_runner,
-        )
-
-    async def _send_pending_audio(
-        self, channel: ChannelAdapter, session_key: str
-    ) -> None:
-        """Check for and send any pending TTS audio."""
-        await self._response_handler._send_pending_audio(channel, session_key)
 
     # ------------------------------------------------------------------
     # Main processing loop
@@ -225,19 +156,31 @@ class MessageProcessor:
             messages: List of messages to process.
             channel: Channel adapter for sending responses.
         """
-        combined_content = self._build_combined_content(messages)
+        combined_content = self._combiner.build_combined_content(messages)
         thread_id = self._session_manager.get_thread_id(session_key)
         followup_depth = 0
         max_followup_depth = 5
 
         # Check session TTL first — may rotate conversation before any further checks
         # TTL only applies to group sessions (not DMs)
-        ttl_thread_id = await self._check_session_ttl(session_key, thread_id, channel, messages)
+        ttl_thread_id = await self._ttl_checker.check(
+            session_key=session_key,
+            thread_id=thread_id,
+            channel=channel,
+            messages=messages,
+            agent_runner=self._agent_runner,
+            logger=self._logger,
+        )
         if ttl_thread_id:
             thread_id = ttl_thread_id
 
         # Check if auto-compact should trigger
-        new_thread_id = await self._check_auto_compact(session_key, thread_id, channel)
+        new_thread_id = await self._compactor.check_compact(
+            session_key=session_key,
+            thread_id=thread_id,
+            channel=channel,
+            agent_runner=self._agent_runner,
+        )
         if new_thread_id:
             thread_id = new_thread_id
 
@@ -341,104 +284,45 @@ class MessageProcessor:
                     )
 
             except ApprovalRequiredError as e:
-                # Log partial metrics if available
-                if self._agent_runner.last_metrics:
-                    self._token_logger.log(
-                        metrics=self._agent_runner.last_metrics,
-                        workspace=self._workspace_name,
-                        invocation_type="user",
-                        session_key=session_key,
-                    )
-
-                # Send approval request to user
-                if channel and self._approval_manager:
-                    tool_config = self._approval_manager.get_tool_config(e.tool_name)
-                    show_args = tool_config.show_args if tool_config else True
-                    await channel.send_approval_request(
-                        session_key=session_key,
-                        approval_id=e.approval_id,
-                        tool_name=e.tool_name,
-                        tool_args=e.tool_args,
-                        show_args=show_args,
-                    )
-
-                    # Wait for user approval
-                    approved = await self._approval_manager.wait_for_resolution(
-                        e.approval_id
-                    )
-
-                    if approved:
-                        self._logger.info(f"Tool {e.tool_name} approved, resuming")
-                        # Fix orphaned tool_calls before re-running
-                        try:
-                            await self._agent_runner.resolve_orphaned_tool_calls(
-                                thread_id,
-                                responses={e.tool_call_id: f"Tool '{e.tool_name}' was approved. Please call it again."},
-                            )
-                        except Exception as resolve_err:
-                            self._logger.error(f"Failed to resolve orphaned tool calls: {resolve_err}", exc_info=True)
-                        continue  # Re-enter loop with same message
-                    else:
-                        self._logger.info(f"Tool {e.tool_name} denied")
-                        # Fix orphaned tool_calls before re-running
-                        try:
-                            await self._agent_runner.resolve_orphaned_tool_calls(
-                                thread_id,
-                                responses={e.tool_call_id: f"Tool '{e.tool_name}' was denied by user."},
-                            )
-                        except Exception as resolve_err:
-                            self._logger.error(f"Failed to resolve orphaned tool calls: {resolve_err}", exc_info=True)
-                        await channel.send_message(
-                            session_key,
-                            f"Tool '{e.tool_name}' was denied. "
-                            f"The agent will be informed.",
-                        )
-                        combined_content = TOOL_DENIED_TEMPLATE.format(tool_name=e.tool_name)
-                        continue  # Re-enter with denial message
-
-                # No channel available, deny by default
-                break
+                self._approval_handler.log_partial_metrics(self._agent_runner, session_key)
+                result = await self._approval_handler.handle(
+                    error=e,
+                    channel=channel,
+                    agent_runner=self._agent_runner,
+                    thread_id=thread_id,
+                    session_key=session_key,
+                )
+                if result.action == "retry":
+                    continue
+                elif result.action == "deny":
+                    combined_content = result.combined_content or ""
+                    continue
+                else:
+                    break
 
             except InterruptSignalError as e:
-                # Log partial metrics if available
-                if self._agent_runner.last_metrics:
-                    self._token_logger.log(
-                        metrics=self._agent_runner.last_metrics,
-                        workspace=self._workspace_name,
-                        invocation_type="user",
-                        session_key=session_key,
-                    )
-
-                # Notify user that run was interrupted
-                if channel:
-                    await channel.send_message(session_key, INTERRUPT_NOTIFICATION)
-
-                # Use the pending messages as the new input
-                pending_msgs = e.pending_messages
-                if pending_msgs:
-                    combined_content = self._build_combined_content_from_tuples(pending_msgs)
-
-                followup_depth = 0  # Reset followup depth on interrupt
-                continue  # Re-enter loop with new message
+                self._log_partial_metrics(session_key)
+                combined_content = await self._interrupt_handler.handle(
+                    error=e,
+                    channel=channel,
+                    session_key=session_key,
+                )
+                followup_depth = 0
+                continue
 
             except Exception as e:
-                self._logger.error(f"Error processing messages for {session_key}: {e}", exc_info=True)
-
-                if self._compactor.is_context_overflow(e):
-                    new_tid = await self._recover_context_overflow(
-                        session_key, thread_id, channel
-                    )
-                    if new_tid:
-                        thread_id = new_tid
-                        combined_content = (
-                            "[SYSTEM] The previous conversation was too long and has been archived. "
-                            "A fresh conversation has started. Please continue from where you left off."
-                        )
-                        continue
-
-                if channel:
-                    await channel.send_message(session_key, sanitize_error_for_user(e))
-                break  # Don't continue followup chain on error
+                error_result = await self._error_handler.handle(
+                    error=e,
+                    channel=channel,
+                    session_key=session_key,
+                    thread_id=thread_id,
+                    agent_runner=self._agent_runner,
+                )
+                if error_result.action == "continue" and error_result.combined_content:
+                    thread_id = self._session_manager.get_thread_id(session_key)
+                    combined_content = error_result.combined_content
+                    continue
+                break
 
             finally:
                 self._disconnect_send_message_tool()
@@ -450,37 +334,23 @@ class MessageProcessor:
 
             # Check steer (captured before reset)
             if steered and steer_messages:
-                combined_content = self._build_combined_content_from_tuples(steer_messages)
-                followup_depth = 0  # Reset followup depth on steer
+                combined_content = self._combiner.build_combined_content_from_tuples(
+                    steer_messages
+                )
+                followup_depth = 0
                 self._logger.info(f"Steer redirect: processing {len(steer_messages)} new message(s)")
                 continue
 
             # Check for followup request
-            if followup_tool:
-                followup = followup_tool.get_pending_followup()
-                if followup and followup.delay_seconds == 0:
-                    followup_depth += 1
-                    if followup_depth > max_followup_depth:
-                        self._logger.warning(
-                            f"Followup chain depth exceeded ({max_followup_depth}) "
-                            f"for session {session_key}"
-                        )
-                        break
-
-                    self._logger.info(
-                        f"Processing immediate followup (depth={followup_depth}): "
-                        f"{followup.prompt[:100]}"
-                    )
-                    combined_content = FOLLOWUP_TEMPLATE.format(
-                        depth=followup_depth, prompt=followup.prompt
-                    )
-                    continue
-                elif followup and followup.delay_seconds > 0:
-                    self._logger.info(
-                        f"Scheduling delayed followup ({followup.delay_seconds}s): "
-                        f"{followup.prompt[:100]}"
-                    )
-                    self._schedule_delayed_followup(followup, session_key)
+            followup_result = self._followup_scheduler.check(
+                session_key=session_key,
+                followup_depth=followup_depth,
+                max_depth=max_followup_depth,
+            )
+            if followup_result.action == "continue":
+                followup_depth = followup_result.new_depth or followup_depth
+                combined_content = followup_result.combined_content or ""
+                continue
 
             break  # No followup or delayed followup scheduled, exit loop
 
@@ -494,31 +364,20 @@ class MessageProcessor:
         if ack_tool:
             ack_tool.reset()
 
-    def _schedule_delayed_followup(self, followup: Any, session_key: str) -> None:
-        """Schedule a delayed followup via the cron system."""
-        from datetime import UTC, datetime, timedelta
+    def _log_partial_metrics(self, session_key: str) -> None:
+        """Log any partial metrics available from an interrupted run.
 
-        cron_tool = self._builtin_loader.get_tool_instance("cron")
-        if not cron_tool or not cron_tool.scheduler:
-            self._logger.warning("Cannot schedule delayed followup: no cron tool/scheduler available")
-            return
-
-        if not cron_tool.default_chat_id:
-            self._logger.warning("Cannot schedule delayed followup: cron tool has no default_chat_id")
-            return
-
-        run_at = datetime.now(UTC) + timedelta(seconds=followup.delay_seconds)
-        from openpaw.stores.cron import create_once_task
-
-        task = create_once_task(
-            prompt=followup.prompt,
-            run_at=run_at,
-            channel=cron_tool.default_channel,
-            chat_id=cron_tool.default_chat_id,
-        )
-        cron_tool.store.add_task(task)
-        cron_tool._add_to_live_scheduler(task)
-        self._logger.info(f"Delayed followup scheduled as cron task {task.id}")
+        Args:
+            session_key: The session identifier for the log entry.
+        """
+        metrics = self._agent_runner.last_metrics
+        if metrics:
+            self._token_logger.log(
+                metrics=metrics,
+                workspace=self._workspace_name,
+                invocation_type="user",
+                session_key=session_key,
+            )
 
     def _connect_send_message_tool(self, channel: Any, session_key: str) -> None:
         """Connect send_message tool to active session context."""

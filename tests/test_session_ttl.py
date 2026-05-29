@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from openpaw.core.config.models import LifecycleConfig, WorkspaceConfig
 from openpaw.model.message import Message
 from openpaw.runtime.session.manager import SessionManager
-from openpaw.workspace.message_processor import MessageProcessor
+from openpaw.workspace.processors.ttl_checker import SessionTTLChecker
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -53,39 +53,19 @@ def _seed_session(
             )
 
 
-def _make_processor(
+def _make_checker(
     session_manager: SessionManager,
     session_ttl_minutes: int = 0,
     lifecycle_config: LifecycleConfig | None = None,
     conversation_archiver: object | None = None,
-    agent_runner: object | None = None,
-) -> MessageProcessor:
-    """Build a MessageProcessor with just enough mocks to test TTL logic.
-
-    When agent_runner is supplied the caller is responsible for configuring
-    its checkpointer attribute; the helper only sets it on internally-created
-    runners so that tests can freely set runner.checkpointer = None.
-    """
-    if agent_runner is not None:
-        runner = agent_runner
-    else:
-        runner = MagicMock()
-        runner.checkpointer = MagicMock()
-
-    return MessageProcessor(
-        agent_runner=runner,
+) -> SessionTTLChecker:
+    """Build a SessionTTLChecker with just enough mocks to test TTL logic."""
+    return SessionTTLChecker(
         session_manager=session_manager,
-        queue_manager=MagicMock(),
-        builtin_loader=MagicMock(),
-        queue_middleware=MagicMock(),
-        approval_middleware=MagicMock(),
-        approval_manager=None,
-        workspace_name="test-workspace",
-        token_logger=MagicMock(),
-        logger=logging.getLogger("test"),
         conversation_archiver=conversation_archiver,
         session_ttl_minutes=session_ttl_minutes,
         lifecycle_config=lifecycle_config,
+        logger=logging.getLogger("test"),
     )
 
 
@@ -262,16 +242,16 @@ class TestIsSessionExpired:
 
 
 class TestCheckSessionTtl:
-    """MessageProcessor._check_session_ttl() end-to-end behaviour."""
+    """SessionTTLChecker.check() end-to-end behaviour."""
 
     @pytest.mark.asyncio
     async def test_returns_none_when_ttl_disabled(self, tmp_path: Path) -> None:
         """Returns None immediately when session_ttl_minutes is 0."""
         manager = _make_manager(tmp_path)
         _seed_session(manager, "telegram:1", timedelta(hours=-5))
-        processor = _make_processor(manager, session_ttl_minutes=0)
+        checker = _make_checker(manager, session_ttl_minutes=0)
 
-        result = await processor._check_session_ttl(
+        result = await checker.check(
             session_key="telegram:1",
             thread_id="telegram:1:conv_old",
             channel=None,
@@ -284,9 +264,9 @@ class TestCheckSessionTtl:
         """Returns None when session is still within TTL window."""
         manager = _make_manager(tmp_path)
         _seed_session(manager, "telegram:1", timedelta(minutes=-10))
-        processor = _make_processor(manager, session_ttl_minutes=60)
+        checker = _make_checker(manager, session_ttl_minutes=60)
 
-        result = await processor._check_session_ttl(
+        result = await checker.check(
             session_key="telegram:1",
             thread_id="telegram:1:conv_current",
             channel=None,
@@ -300,9 +280,9 @@ class TestCheckSessionTtl:
         """Returns None for DM sessions even when expired — TTL is group-only."""
         manager = _make_manager(tmp_path)
         _seed_session(manager, "telegram:123", timedelta(hours=-5))
-        processor = _make_processor(manager, session_ttl_minutes=60)
+        checker = _make_checker(manager, session_ttl_minutes=60)
 
-        result = await processor._check_session_ttl(
+        result = await checker.check(
             session_key="telegram:123",
             thread_id="telegram:123:conv_old",
             channel=None,
@@ -316,13 +296,13 @@ class TestCheckSessionTtl:
         """Returns None for Discord DMs (no guild_id)."""
         manager = _make_manager(tmp_path)
         _seed_session(manager, "discord:999", timedelta(hours=-5))
-        processor = _make_processor(manager, session_ttl_minutes=60)
+        checker = _make_checker(manager, session_ttl_minutes=60)
 
         dm_msg = Message(
             id="4", channel="discord", session_key="discord:999",
             user_id="456", content="hi", metadata={"guild_id": None},
         )
-        result = await processor._check_session_ttl(
+        result = await checker.check(
             session_key="discord:999",
             thread_id="discord:999:conv_old",
             channel=None,
@@ -337,9 +317,9 @@ class TestCheckSessionTtl:
         manager = _make_manager(tmp_path)
         _seed_session(manager, "discord:999", timedelta(hours=-5))
         old_thread = manager.get_thread_id("discord:999")
-        processor = _make_processor(manager, session_ttl_minutes=60)
+        checker = _make_checker(manager, session_ttl_minutes=60)
 
-        result = await processor._check_session_ttl(
+        result = await checker.check(
             session_key="discord:999",
             thread_id=old_thread,
             channel=None,
@@ -356,9 +336,9 @@ class TestCheckSessionTtl:
         _seed_session(manager, "telegram:1", timedelta(hours=-3))
         old_thread_id = manager.get_thread_id("telegram:1")
 
-        processor = _make_processor(manager, session_ttl_minutes=60)
+        checker = _make_checker(manager, session_ttl_minutes=60)
 
-        result = await processor._check_session_ttl(
+        result = await checker.check(
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=None,
@@ -382,18 +362,18 @@ class TestCheckSessionTtl:
         runner = MagicMock()
         runner.checkpointer = MagicMock()  # Non-None checkpointer
 
-        processor = _make_processor(
+        checker = _make_checker(
             manager,
             session_ttl_minutes=60,
             conversation_archiver=archiver,
-            agent_runner=runner,
         )
 
-        await processor._check_session_ttl(
+        await checker.check(
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=None,
             messages=_group_messages(),
+            agent_runner=runner,
         )
 
         archiver.archive.assert_called_once()
@@ -409,13 +389,13 @@ class TestCheckSessionTtl:
         _seed_session(manager, "telegram:1", timedelta(hours=-3))
         old_thread_id = manager.get_thread_id("telegram:1")
 
-        processor = _make_processor(
+        checker = _make_checker(
             manager,
             session_ttl_minutes=60,
             conversation_archiver=None,
         )
 
-        result = await processor._check_session_ttl(
+        result = await checker.check(
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=None,
@@ -439,18 +419,18 @@ class TestCheckSessionTtl:
         runner = MagicMock()
         runner.checkpointer = None  # No checkpointer
 
-        processor = _make_processor(
+        checker = _make_checker(
             manager,
             session_ttl_minutes=60,
             conversation_archiver=archiver,
-            agent_runner=runner,
         )
 
-        await processor._check_session_ttl(
+        await checker.check(
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=None,
             messages=_group_messages(),
+            agent_runner=runner,
         )
 
         archiver.archive.assert_not_called()
@@ -466,11 +446,11 @@ class TestCheckSessionTtl:
 
         channel = AsyncMock()
         lifecycle = LifecycleConfig(notify_session_ttl=True)
-        processor = _make_processor(
+        checker = _make_checker(
             manager, session_ttl_minutes=60, lifecycle_config=lifecycle
         )
 
-        await processor._check_session_ttl(
+        await checker.check(
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=channel,
@@ -498,11 +478,11 @@ class TestCheckSessionTtl:
 
         channel = AsyncMock()
         lifecycle = LifecycleConfig(notify_session_ttl=False)
-        processor = _make_processor(
+        checker = _make_checker(
             manager, session_ttl_minutes=60, lifecycle_config=lifecycle
         )
 
-        result = await processor._check_session_ttl(
+        result = await checker.check(
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=channel,
@@ -527,12 +507,12 @@ class TestCheckSessionTtl:
         channel.send_message.side_effect = RuntimeError("network error")
 
         lifecycle = LifecycleConfig(notify_session_ttl=True)
-        processor = _make_processor(
+        checker = _make_checker(
             manager, session_ttl_minutes=60, lifecycle_config=lifecycle
         )
 
         # Should not raise — notification is best-effort
-        result = await processor._check_session_ttl(
+        result = await checker.check(
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=channel,
@@ -550,10 +530,10 @@ class TestCheckSessionTtl:
         old_thread_id = manager.get_thread_id("telegram:1")
 
         mock_logger = Mock()
-        processor = _make_processor(manager, session_ttl_minutes=60)
-        processor._logger = mock_logger
+        checker = _make_checker(manager, session_ttl_minutes=60)
+        checker._logger = mock_logger
 
-        await processor._check_session_ttl(
+        await checker.check(
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=None,
@@ -579,19 +559,19 @@ class TestCheckSessionTtl:
         runner = MagicMock()
         runner.checkpointer = MagicMock()
 
-        processor = _make_processor(
+        checker = _make_checker(
             manager,
             session_ttl_minutes=60,
             conversation_archiver=archiver,
-            agent_runner=runner,
         )
 
         # Should not raise
-        result = await processor._check_session_ttl(
+        result = await checker.check(
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=None,
             messages=_group_messages(),
+            agent_runner=runner,
         )
 
         # Rotation still succeeded despite archive failure
@@ -609,11 +589,11 @@ class TestCheckSessionTtl:
 
         channel = AsyncMock()
         # lifecycle_config is intentionally None
-        processor = _make_processor(
+        checker = _make_checker(
             manager, session_ttl_minutes=60, lifecycle_config=None
         )
 
-        await processor._check_session_ttl(
+        await checker.check(
             session_key="telegram:1",
             thread_id=old_thread_id,
             channel=channel,
@@ -638,10 +618,10 @@ class TestCheckSessionTtl:
         _seed_session(manager, "telegram:2", timedelta(minutes=-5))
         thread_b_before = manager.get_thread_id("telegram:2")
 
-        processor = _make_processor(manager, session_ttl_minutes=60)
+        checker = _make_checker(manager, session_ttl_minutes=60)
 
         # Expire session A
-        result_a = await processor._check_session_ttl(
+        result_a = await checker.check(
             session_key="telegram:1",
             thread_id=old_thread_a,
             channel=None,
@@ -649,7 +629,7 @@ class TestCheckSessionTtl:
         )
 
         # Session B should be unchanged
-        result_b = await processor._check_session_ttl(
+        result_b = await checker.check(
             session_key="telegram:2",
             thread_id=thread_b_before,
             channel=None,

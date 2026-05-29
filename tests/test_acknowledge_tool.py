@@ -15,7 +15,7 @@ import pytest
 from openpaw.builtins.tools.acknowledge import AcknowledgeTool
 from openpaw.model.message import Message
 from openpaw.workspace.message_processor import MessageProcessor
-
+from openpaw.workspace.processors.response_handler import ResponseHandler
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -176,25 +176,25 @@ class TestAcknowledgeToolFlag:
 
 class TestIsSystemEventBatch:
     def test_empty_list_returns_false(self) -> None:
-        assert MessageProcessor._is_system_event_batch([]) is False
+        assert ResponseHandler.is_system_event_batch([]) is False
 
     def test_all_system_returns_true(self) -> None:
         messages = [_system_message(), _system_message("another [SYSTEM] event")]
-        assert MessageProcessor._is_system_event_batch(messages) is True
+        assert ResponseHandler.is_system_event_batch(messages) is True
 
     def test_all_user_returns_false(self) -> None:
         messages = [_user_message(), _user_message("second")]
-        assert MessageProcessor._is_system_event_batch(messages) is False
+        assert ResponseHandler.is_system_event_batch(messages) is False
 
     def test_mixed_returns_false(self) -> None:
         messages = [_system_message(), _user_message()]
-        assert MessageProcessor._is_system_event_batch(messages) is False
+        assert ResponseHandler.is_system_event_batch(messages) is False
 
     def test_single_system_returns_true(self) -> None:
-        assert MessageProcessor._is_system_event_batch([_system_message()]) is True
+        assert ResponseHandler.is_system_event_batch([_system_message()]) is True
 
     def test_single_user_returns_false(self) -> None:
-        assert MessageProcessor._is_system_event_batch([_user_message()]) is False
+        assert ResponseHandler.is_system_event_batch([_user_message()]) is False
 
 
 # ---------------------------------------------------------------------------
@@ -337,8 +337,6 @@ class TestAcknowledgeIntegration:
     @pytest.mark.asyncio
     async def test_ack_reset_called_after_loop(self) -> None:
         """AcknowledgeTool.reset() is called after process_messages exits."""
-        from openpaw.builtins.tools.acknowledge import AcknowledgeRequest
-
         ack_tool_mock = MagicMock(spec=AcknowledgeTool)
         ack_tool_mock.get_pending_ack.return_value = None
         ack_tool_mock.reset = MagicMock()
