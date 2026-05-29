@@ -188,9 +188,9 @@ poetry run pytest --tb=short
 
 ## Phase C: Integration Testing (In Progress)
 
-**Status:** Phase C active — test agent workspace running, first bug found and fixed.
+**Status:** Phase C active — test agent workspace running, first bug found and fixed, basic conversation verified.
 **Goal:** Validate all 26 MRs from Phases A+B introduced no regressions. Exercise every framework feature with a real LLM.
-**Test Model:** Fireworks `accounts/fireworks/models/kimi-k2.6-turbo` via Firepass API
+**Test Model:** Fireworks `accounts/fireworks/routers/kimi-k2p6-turbo` via Firepass API
 **Channel:** stdio (for automated testing)
 
 ### Phase C Plan
@@ -200,7 +200,7 @@ Test coverage audit: `llm_memory/openpaw_refactor/13_phase_c_test_plan_audit.md`
 
 ### 20 Test Scenarios
 
-1. Basic conversation & context retention
+1. Basic conversation & context retention ✅
 2. File system tools (sandboxed)
 3. Task management (TASKS.yaml)
 4. Sub-agent spawning
@@ -240,6 +240,12 @@ agent_workspaces/test_agent/
 |---|------|-----|----------|-----|--------|
 | 1 | 2026-05-29 | Stdio channel required token (regression from B7 lifecycle refactor) | High | lifecycle.py: token check now only applies to telegram/discord | ✅ Fixed & committed |
 
+### Phase C Test Results
+
+| Scenario | Date | Result | Notes |
+|----------|------|--------|-------|
+| 1. Basic conversation | 2026-05-29 | ✅ PASS | Agent responded correctly: "I'm Test Agent, running in the test_agent workspace" — 11,186 in / 157 out tokens, 1 LLM call |
+
 ### Acceptance Criteria
 
 - [ ] All 20 scenarios tested
@@ -261,4 +267,5 @@ agent_workspaces/test_agent/
 - `llm_memory/openpaw_refactor/12_phase_b_plan.md` (Phase B plan)
 - `llm_memory/openpaw_refactor/13_phase_c_test_plan.md` (Phase C plan)
 - `llm_memory/openpaw_refactor/13_phase_c_test_plan_audit.md` (Coverage audit)
+- `llm_memory/openpaw_refactor/14_phase_c_results.md` (Results - to be created)
 - `agent_workspaces/test_agent/` (Test agent workspace)
