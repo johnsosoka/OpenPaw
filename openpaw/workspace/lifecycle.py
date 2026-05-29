@@ -106,8 +106,9 @@ class LifecycleManager:
                 )
             seen_names.add(channel_name)
 
+            # Token required for bot-based channels; stdio does not need one
             token = channel_config.get("token")
-            if not token:
+            if channel_type in ("telegram", "discord") and not token:
                 raise ValueError(
                     f"Workspace '{self._workspace_name}': channel '{channel_name}' must define a token"
                 )
@@ -207,8 +208,7 @@ class LifecycleManager:
 
         # Connect approval callback to channels
         for channel in self._channels.values():
-            if hasattr(channel, "on_approval"):
-                channel.on_approval(self._approval_handler)
+            channel.on_approval(self._approval_handler)
 
     async def stop_channels(self) -> None:
         """Stop all configured channels."""

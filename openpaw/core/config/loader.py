@@ -12,7 +12,7 @@ from typing import Any
 
 import yaml
 
-from openpaw.core.config.models import Config
+from openpaw.core.config.models.base import Config
 
 
 def expand_env_vars(value: str) -> str:

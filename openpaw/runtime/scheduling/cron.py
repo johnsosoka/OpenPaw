@@ -1,37 +1,23 @@
 """APScheduler-based cron execution for OpenPaw."""
 
-import json
 import logging
-import time as time_module
 from collections.abc import Awaitable, Callable, Mapping
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.date import DateTrigger
-from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger  # noqa: F401
+from apscheduler.triggers.date import DateTrigger  # noqa: F401
+from apscheduler.triggers.interval import IntervalTrigger  # noqa: F401
 
 from openpaw.agent.metrics import TokenUsageLogger
 from openpaw.agent.session_logger import SessionLogger
-from openpaw.builtins.tools._channel_context import (
-    clear_channel_context,
-    set_channel_context,
-    set_invocation_origin,
-)
 from openpaw.channels.base import ChannelAdapter
 from openpaw.core.config.models import CronDefinition, CronOutputConfig
-from openpaw.core.paths import CRON_LOG_JSONL
-from openpaw.core.prompts.system_events import (
-    CRON_RESULT_TEMPLATE,
-    CRON_RESULT_TRUNCATED_TEMPLATE,
-    DYNAMIC_TASK_RESULT_TEMPLATE,
-    DYNAMIC_TASK_RESULT_TRUNCATED_TEMPLATE,
-    INJECTION_TRUNCATION_LIMIT,
-)
 from openpaw.model.cron import DynamicCronTask
+from openpaw.runtime.scheduling.cron_executor import CronExecutor
+from openpaw.runtime.scheduling.cron_job_manager import CronJobManager
 from openpaw.runtime.scheduling.loader import CronLoader
 from openpaw.stores.cron import DynamicCronStore
 
@@ -58,18 +44,7 @@ class CronScheduler:
         result_callback: Callable[[str, str], Awaitable[None]] | None = None,
         session_logger: SessionLogger | None = None,
     ):
-        """Initialize the cron scheduler.
-
-        Args:
-            workspace_path: Path to the agent workspace.
-            agent_factory: Factory function to create fresh agent instances.
-            channels: Dictionary mapping channel types to channel instances for routing.
-            token_logger: Optional token usage logger for tracking cron invocations.
-            workspace_name: Name of the workspace (for logging and token tracking).
-            timezone: IANA timezone string for cron schedules (e.g., "America/New_York").
-            result_callback: Optional callback for queue injection of results.
-            session_logger: Optional SessionLogger for writing session logs.
-        """
+        """Initialize the cron scheduler."""
         self.workspace_path = Path(workspace_path)
         self.agent_factory = agent_factory
         self.channels = channels
@@ -80,10 +55,33 @@ class CronScheduler:
         self._result_callback = result_callback
         self._session_logger = session_logger
         self._scheduler: AsyncIOScheduler | None = None
+        self._job_manager: CronJobManager | None = None
         self._jobs: dict[str, Any] = {}
         self._dynamic_store = DynamicCronStore(workspace_path)
         self._dynamic_jobs: dict[str, Any] = {}
-        self._running_jobs: set[str] = set()
+        self._executor = CronExecutor(
+            workspace_path=self.workspace_path,
+            agent_factory=self.agent_factory,
+            channels=self.channels,
+            workspace_name=self._workspace_name,
+            token_logger=self._token_logger,
+            session_logger=self._session_logger,
+            result_callback=self._result_callback,
+            dynamic_store=self._dynamic_store,
+            dynamic_jobs=self._dynamic_jobs,
+        )
+
+    def _ensure_job_manager(self) -> CronJobManager:
+        if self._job_manager is None:
+            self._job_manager = CronJobManager(
+                scheduler=self._scheduler,
+                tz=self._tz,
+                dynamic_store=self._dynamic_store,
+                executor=self._executor,
+                jobs=self._jobs,
+                dynamic_jobs=self._dynamic_jobs,
+            )
+        return self._job_manager
 
     async def start(self) -> None:
         """Start the scheduler and register all cron jobs."""
@@ -95,6 +93,7 @@ class CronScheduler:
                 "misfire_grace_time": 300,
             },
         )
+        self._ensure_job_manager()
 
         # Load and schedule YAML-defined cron jobs
         loader = CronLoader(self.workspace_path)
@@ -135,535 +134,62 @@ class CronScheduler:
         delivery: str | None = None,
         tools_used: list[str] | None = None,
     ) -> None:
-        """Append cron execution event to workspace JSONL log.
-
-        Args:
-            cron_name: Name of the cron job (or "dynamic_<id[:8]>" for dynamic tasks).
-            outcome: Execution outcome: "completed", "error", or "skipped".
-            duration_ms: Execution duration in milliseconds.
-            error: Error message if outcome is "error".
-            input_tokens: Input token count from the agent invocation.
-            output_tokens: Output token count from the agent invocation.
-            total_tokens: Total token count from the agent invocation.
-            llm_calls: Number of LLM calls made during execution.
-            session_path: Relative path to the session log file, if written.
-            delivery: Delivery mode used ("channel" or "agent").
-            tools_used: List of tool names invoked during execution.
-        """
-        log_path = self.workspace_path / str(CRON_LOG_JSONL)
-        event: dict[str, Any] = {
-            "timestamp": datetime.now(UTC).isoformat(),
-            "workspace": self._workspace_name,
-            "cron_name": cron_name,
-            "outcome": outcome,
-        }
-        if duration_ms is not None:
-            event["duration_ms"] = round(duration_ms, 1)
-        if error:
-            event["error"] = error
-        if input_tokens is not None:
-            event["input_tokens"] = input_tokens
-        if output_tokens is not None:
-            event["output_tokens"] = output_tokens
-        if total_tokens is not None:
-            event["total_tokens"] = total_tokens
-        if llm_calls is not None:
-            event["llm_calls"] = llm_calls
-        if session_path:
-            event["session_path"] = session_path
-        if delivery:
-            event["delivery"] = delivery
-        if tools_used:
-            event["tools_used"] = tools_used
-
-        try:
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            with log_path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps(event) + "\n")
-        except OSError as e:
-            logger.warning(f"Failed to write cron log: {e}")
+        """Append cron execution event to workspace JSONL log."""
+        self._executor.log_cron_event(
+            cron_name=cron_name,
+            outcome=outcome,
+            duration_ms=duration_ms,
+            error=error,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            llm_calls=llm_calls,
+            session_path=session_path,
+            delivery=delivery,
+            tools_used=tools_used,
+        )
 
     async def _execute_cron(self, cron: CronDefinition) -> None:
-        """Execute a cron job.
-
-        Args:
-            cron: The cron definition to execute.
-        """
-        job_id = cron.name
-        if job_id in self._running_jobs:
-            logger.warning(f"Skipping cron job {cron.name}: previous execution still running")
-            return
-
-        self._running_jobs.add(job_id)
-        logger.info(f"Executing cron job: {cron.name}")
-        set_invocation_origin(f"cron:{cron.name}")
-
-        # Set up channel context so send_message/send_file work during cron execution
-        cron_channel = self.channels.get(cron.output.channel)
-        cron_session_key = self._resolve_session_key(cron_channel, cron.output) if cron_channel else None
-        if cron_channel and cron_session_key:
-            set_channel_context(cron_channel, cron_session_key)
-
-        try:
-            # Resolve max_output_tokens: per-cron definition takes precedence over
-            # the workspace-level default already baked into the factory's
-            # extra_model_kwargs. Passing it as extra_overrides lets the
-            # cron-specific cap win without mutating factory state.
-            extra_overrides: dict[str, Any] = {}
-            if cron.max_output_tokens is not None:
-                extra_overrides["max_tokens"] = cron.max_output_tokens
-
-            agent_runner = (
-                self.agent_factory(extra_overrides=extra_overrides)
-                if extra_overrides
-                else self.agent_factory()
-            )
-
-            start_time = time_module.monotonic()
-            response = await agent_runner.run(message=cron.prompt)
-            duration_ms = (time_module.monotonic() - start_time) * 1000
-
-            # Log a warning when the output cap was hit — response is likely truncated
-            cron_metrics_check = agent_runner.last_metrics
-            cron_cap = agent_runner.max_output_tokens
-            if (
-                isinstance(cron_cap, int)
-                and cron_metrics_check
-                and isinstance(cron_metrics_check.output_tokens, int)
-                and cron_metrics_check.output_tokens >= cron_cap
-            ):
-                logger.warning(
-                    f"Cron '{cron.name}' output token cap reached: "
-                    f"{cron_metrics_check.output_tokens}/{cron_cap} tokens "
-                    f"— response likely truncated (workspace: {self._workspace_name})"
-                )
-
-            # Write session log
-            session_path: str | None = None
-            if self._session_logger:
-                try:
-                    session_path = self._session_logger.write_session(
-                        name=cron.name,
-                        prompt=cron.prompt,
-                        response=response,
-                        tools_used=agent_runner.last_tools_used or [],
-                        metrics=agent_runner.last_metrics,
-                        duration_ms=duration_ms,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to write cron session log for {cron.name}: {e}")
-
-            delivery = cron.output.delivery
-
-            # Channel delivery
-            if delivery == "channel":
-                channel = self.channels.get(cron.output.channel)
-                if not channel:
-                    logger.error(f"Channel not found for cron {cron.name}: {cron.output.channel}")
-                else:
-                    session_key = self._resolve_session_key(channel, cron.output)
-                    if session_key:
-                        await channel.send_message(session_key=session_key, content=response)
-                    else:
-                        logger.warning(f"Unsupported output config for cron {cron.name}: {cron.output}")
-
-            # Agent queue injection
-            elif delivery == "agent" and self._result_callback and session_path:
-                try:
-                    channel = self.channels.get(cron.output.channel)
-                    session_key = self._resolve_session_key(channel, cron.output) if channel else None
-                    if channel and session_key:
-                        output = response
-                        if len(output) > INJECTION_TRUNCATION_LIMIT:
-                            output = output[:INJECTION_TRUNCATION_LIMIT]
-                            injection_content = CRON_RESULT_TRUNCATED_TEMPLATE.format(
-                                cron_name=cron.name, output=output, session_path=session_path,
-                            )
-                        else:
-                            injection_content = CRON_RESULT_TEMPLATE.format(
-                                cron_name=cron.name, output=output, session_path=session_path,
-                            )
-                        await self._result_callback(session_key, injection_content)
-                        logger.info(f"Cron {cron.name} result injected into agent queue")
-                except Exception as e:
-                    logger.warning(f"Failed to inject cron result for {cron.name}: {e}")
-
-            # Log token usage for cron invocation
-            metrics = agent_runner.last_metrics
-            if self._token_logger and self._workspace_name and metrics:
-                self._token_logger.log(
-                    metrics=metrics,
-                    workspace=self._workspace_name,
-                    invocation_type="cron",
-                    session_key=None,
-                )
-
-            self._log_cron_event(
-                cron_name=cron.name,
-                outcome="completed",
-                duration_ms=duration_ms,
-                input_tokens=metrics.input_tokens if metrics else None,
-                output_tokens=metrics.output_tokens if metrics else None,
-                total_tokens=metrics.total_tokens if metrics else None,
-                llm_calls=metrics.llm_calls if metrics else None,
-                session_path=session_path,
-                delivery=delivery,
-                tools_used=agent_runner.last_tools_used or None,
-            )
-
-            logger.info(f"Cron job {cron.name} completed successfully")
-
-        except Exception as e:
-            logger.error(f"Failed to execute cron job {cron.name}: {e}", exc_info=True)
-            self._log_cron_event(
-                cron_name=cron.name,
-                outcome="error",
-                error=str(e),
-            )
-        finally:
-            self._running_jobs.discard(job_id)
-            clear_channel_context()
+        """Execute a cron job."""
+        await self._executor.execute_cron(cron)
 
     @staticmethod
     def _resolve_session_key(channel: ChannelAdapter, output: CronOutputConfig) -> str | None:
-        """Resolve session key from cron output config.
-
-        Uses ``target_id`` (preferred) with fallback to legacy ``chat_id``/``channel_id``.
-
-        Args:
-            channel: The channel adapter instance to build the session key against.
-            output: The cron output config specifying channel name and target ID.
-
-        Returns:
-            A session key string, or None if no supported routing config is found.
-        """
-        target = next(
-            (v for v in (output.target_id, output.chat_id, output.channel_id) if v is not None),
-            None,
-        )
-        if target:
-            return channel.build_session_key(target)
-        return None
+        """Resolve session key from cron output config."""
+        return CronExecutor._resolve_session_key(channel, output)
 
     def add_job(self, cron: CronDefinition) -> None:
-        """Add a cron job to the scheduler.
-
-        Args:
-            cron: The cron definition to schedule.
-        """
-        if not self._scheduler:
-            raise RuntimeError("Scheduler not initialized. Call start() first.")
-
-        trigger = CronTrigger.from_crontab(cron.schedule, timezone=self._tz)
-
-        job = self._scheduler.add_job(
-            func=self._execute_cron,
-            trigger=trigger,
-            args=[cron],
-            id=cron.name,
-            name=cron.name,
-            replace_existing=True,
-        )
-
-        self._jobs[cron.name] = job
+        """Add a cron job to the scheduler."""
+        self._ensure_job_manager().add_job(cron)
 
     def remove_job(self, name: str) -> None:
-        """Remove a cron job by name.
-
-        Args:
-            name: The cron job name to remove.
-        """
-        if not self._scheduler:
-            raise RuntimeError("Scheduler not initialized. Call start() first.")
-
-        if name in self._jobs:
-            self._scheduler.remove_job(name)
-            del self._jobs[name]
-            logger.info(f"Removed cron job: {name}")
+        """Remove a cron job by name."""
+        self._ensure_job_manager().remove_job(name)
 
     def reload_cron(self, cron_def: CronDefinition) -> None:
-        """Remove the old job (if present) and re-add it from the updated definition.
-
-        Used by CronManagerBuiltin to apply in-place changes to YAML cron jobs
-        without requiring a workspace restart.
-
-        If the definition has ``enabled=False``, the job is removed and not
-        re-added, effectively pausing it.
-
-        Args:
-            cron_def: Updated cron definition to register.
-        """
-        if cron_def.name in self._jobs:
-            self.remove_job(cron_def.name)
-
-        if cron_def.enabled:
-            self.add_job(cron_def)
-            logger.info(f"Reloaded cron job: {cron_def.name} ({cron_def.schedule})")
-        else:
-            logger.info(f"Cron job '{cron_def.name}' is disabled — skipped re-registration")
+        """Remove the old job (if present) and re-add it from the updated definition."""
+        self._ensure_job_manager().reload_cron(cron_def)
 
     def remove_cron(self, name: str) -> None:
-        """Remove a YAML-defined cron job from the live scheduler.
-
-        Public wrapper around :meth:`remove_job` for use by CronManagerBuiltin.
-        Silently does nothing if the job is not currently registered (e.g., it
-        was disabled and never added to the APScheduler instance) or if the
-        scheduler has not been started yet.
-
-        Args:
-            name: The cron job name to remove.
-        """
-        if not self._scheduler or name not in self._jobs:
-            return
-        self.remove_job(name)
+        """Remove a YAML-defined cron job from the live scheduler."""
+        self._ensure_job_manager().remove_cron(name)
 
     def add_dynamic_job(self, task: DynamicCronTask) -> None:
-        """Add a dynamic task to the scheduler.
-
-        Args:
-            task: DynamicCronTask to schedule.
-        """
-        if not self._scheduler:
-            raise RuntimeError("Scheduler not initialized. Call start() first.")
-
-        if task.task_type == "once":
-            # Use DateTrigger for one-shot execution
-            trigger = DateTrigger(run_date=task.run_at)
-        else:
-            # Use IntervalTrigger for recurring execution
-            trigger = IntervalTrigger(seconds=task.interval_seconds)
-
-        job = self._scheduler.add_job(
-            func=self._execute_dynamic_task,
-            trigger=trigger,
-            args=[task],
-            id=f"dynamic_{task.id}",
-            name=f"Dynamic: {task.prompt[:30]}...",
-            replace_existing=True,
-        )
-
-        self._dynamic_jobs[task.id] = job
-        self._dynamic_store.add_task(task)  # Persist to disk
-        logger.info(f"Added dynamic task: {task.id} ({task.task_type})")
+        """Add a dynamic task to the scheduler."""
+        self._ensure_job_manager().add_dynamic_job(task)
 
     def remove_dynamic_job(self, task_id: str) -> bool:
-        """Remove a dynamic task from the scheduler.
-
-        Note: This method expects a full UUID (used internally). For prefix-based
-        cancellation, use the CronTool's cancel_scheduled which resolves prefixes
-        via DynamicCronStore before calling _remove_from_live_scheduler.
-
-        Args:
-            task_id: Full UUID of the task to remove.
-
-        Returns:
-            True if removed, False if not found.
-        """
-        if not self._scheduler:
-            raise RuntimeError("Scheduler not initialized. Call start() first.")
-
-        job_id = f"dynamic_{task_id}"
-        if task_id in self._dynamic_jobs:
-            self._scheduler.remove_job(job_id)
-            del self._dynamic_jobs[task_id]
-            self._dynamic_store.remove_task(task_id)
-            logger.info(f"Removed dynamic task: {task_id}")
-            return True
-
-        logger.warning(f"Dynamic task not found: {task_id}")
-        return False
+        """Remove a dynamic task from the scheduler."""
+        return self._ensure_job_manager().remove_dynamic_job(task_id)
 
     async def _execute_dynamic_task(self, task: DynamicCronTask) -> None:
-        """Execute a dynamic task.
-
-        For one-shot tasks: remove after execution.
-        For interval tasks: continue recurring.
-
-        Args:
-            task: DynamicCronTask to execute.
-        """
-        job_id = f"dynamic_{task.id}"
-        if job_id in self._running_jobs:
-            logger.warning(f"Skipping dynamic task {task.id}: previous execution still running")
-            return
-
-        self._running_jobs.add(job_id)
-
-        # Remove one-shot tasks from store before execution.
-        # APScheduler DateTrigger guarantees single fire, so this is safe.
-        # Prevents list_scheduled() from showing ghost entries during execution.
-        if task.task_type == "once":
-            self._dynamic_store.remove_task(task.id)
-            if task.id in self._dynamic_jobs:
-                del self._dynamic_jobs[task.id]
-
-        logger.info(f"Executing dynamic task: {task.id}")
-        set_invocation_origin(f"dynamic_cron:{task.id[:8]}")
-
-        # Set up channel context so send_message/send_file work during execution
-        if task.channel and task.chat_id:
-            dyn_channel = self.channels.get(task.channel)
-            if dyn_channel:
-                set_channel_context(dyn_channel, dyn_channel.build_session_key(task.chat_id))
-
-        try:
-            agent_runner = self.agent_factory()
-            start_time = time_module.monotonic()
-            response = await agent_runner.run(message=task.prompt)
-            duration_ms = (time_module.monotonic() - start_time) * 1000
-
-            # Write session log
-            session_path: str | None = None
-            if self._session_logger:
-                try:
-                    session_path = self._session_logger.write_session(
-                        name=f"dynamic_{task.id}",
-                        prompt=task.prompt,
-                        response=response,
-                        tools_used=agent_runner.last_tools_used or [],
-                        metrics=agent_runner.last_metrics,
-                        duration_ms=duration_ms,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to write session log for dynamic task {task.id}: {e}")
-
-            # Log token usage for dynamic cron invocation
-            dyn_metrics = agent_runner.last_metrics
-            if self._token_logger and self._workspace_name and dyn_metrics:
-                self._token_logger.log(
-                    metrics=dyn_metrics,
-                    workspace=self._workspace_name,
-                    invocation_type="cron",
-                    session_key=None,
-                )
-
-            # Route response using task's stored routing info
-            if task.channel and task.chat_id:
-                channel = self.channels.get(task.channel)
-                if channel:
-                    # Guard against empty responses
-                    if response and response.strip():
-                        session_key = channel.build_session_key(task.chat_id)
-                        await channel.send_message(
-                            session_key=session_key,
-                            content=response,
-                        )
-                        logger.info(f"Dynamic task {task.id} response sent to {task.channel}:{task.chat_id}")
-                    else:
-                        logger.warning(f"Dynamic task {task.id} produced empty response, not sending")
-                else:
-                    logger.warning(f"Channel '{task.channel}' not found for dynamic task {task.id}")
-            else:
-                logger.warning(
-                    f"Dynamic task {task.id} has no routing config. "
-                    f"Response ({len(response) if response else 0} chars) not sent."
-                )
-
-            # Inject result into agent queue (dynamic tasks always notify the main agent)
-            if self._result_callback and session_path and task.channel and task.chat_id:
-                try:
-                    channel = self.channels.get(task.channel)
-                    if channel:
-                        session_key = channel.build_session_key(task.chat_id)
-                        output = response
-                        if len(output) > INJECTION_TRUNCATION_LIMIT:
-                            output = output[:INJECTION_TRUNCATION_LIMIT]
-                            injection_content = DYNAMIC_TASK_RESULT_TRUNCATED_TEMPLATE.format(
-                                task_id=task.id[:8],
-                                prompt_preview=task.prompt[:80],
-                                output=output,
-                                session_path=session_path,
-                            )
-                        else:
-                            injection_content = DYNAMIC_TASK_RESULT_TEMPLATE.format(
-                                task_id=task.id[:8],
-                                prompt_preview=task.prompt[:80],
-                                output=output,
-                                session_path=session_path,
-                            )
-                        await self._result_callback(session_key, injection_content)
-                        logger.info(f"Dynamic task {task.id} result injected into agent queue")
-                except Exception as e:
-                    logger.warning(f"Failed to inject dynamic task result for {task.id}: {e}")
-
-            self._log_cron_event(
-                cron_name=f"dynamic_{task.id[:8]}",
-                outcome="completed",
-                duration_ms=duration_ms,
-                input_tokens=dyn_metrics.input_tokens if dyn_metrics else None,
-                output_tokens=dyn_metrics.output_tokens if dyn_metrics else None,
-                total_tokens=dyn_metrics.total_tokens if dyn_metrics else None,
-                llm_calls=dyn_metrics.llm_calls if dyn_metrics else None,
-                session_path=session_path,
-                tools_used=agent_runner.last_tools_used or None,
-            )
-
-            logger.info(f"Dynamic task {task.id} completed successfully")
-
-        except Exception as e:
-            logger.error(f"Dynamic task {task.id} failed: {e}", exc_info=True)
-            self._log_cron_event(
-                cron_name=f"dynamic_{task.id[:8]}",
-                outcome="error",
-                error=str(e),
-            )
-        finally:
-            self._running_jobs.discard(job_id)
-            clear_channel_context()
+        """Execute a dynamic task."""
+        await self._executor.execute_dynamic_task(task)
 
     def _prune_expired_tasks(self, tasks: list[DynamicCronTask]) -> list[DynamicCronTask]:
-        """Remove expired one-time tasks that will never execute.
-
-        Args:
-            tasks: List of tasks to filter.
-
-        Returns:
-            List with expired one-time tasks removed.
-        """
-        now = datetime.now(UTC)
-        valid_tasks = []
-        pruned_count = 0
-
-        for task in tasks:
-            # One-time tasks with run_at in the past are expired
-            if task.task_type == "once" and task.run_at:
-                if task.run_at < now:
-                    self._dynamic_store.remove_task(task.id)
-                    pruned_count += 1
-                    continue
-
-            valid_tasks.append(task)
-
-        if pruned_count > 0:
-            logger.info(f"Pruned {pruned_count} expired one-time task(s)")
-
-        return valid_tasks
+        """Remove expired one-time tasks that will never execute."""
+        return self._ensure_job_manager()._prune_expired_tasks(tasks)
 
     def _schedule_dynamic_task(self, task: DynamicCronTask) -> None:
-        """Schedule a task that was loaded from storage.
-
-        Internal helper that schedules without re-persisting to storage.
-
-        Args:
-            task: DynamicCronTask to schedule.
-        """
-        if not self._scheduler:
-            raise RuntimeError("Scheduler not initialized. Call start() first.")
-
-        if task.task_type == "once":
-            # Use DateTrigger for one-shot execution
-            trigger = DateTrigger(run_date=task.run_at)
-        else:
-            # Use IntervalTrigger for recurring execution
-            trigger = IntervalTrigger(seconds=task.interval_seconds)
-
-        job = self._scheduler.add_job(
-            func=self._execute_dynamic_task,
-            trigger=trigger,
-            args=[task],
-            id=f"dynamic_{task.id}",
-            name=f"Dynamic: {task.prompt[:30]}...",
-            replace_existing=True,
-        )
-
-        self._dynamic_jobs[task.id] = job
+        """Schedule a task that was loaded from storage."""
+        self._ensure_job_manager()._schedule_dynamic_task(task)

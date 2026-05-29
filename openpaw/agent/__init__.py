@@ -8,11 +8,13 @@ This package consolidates agent-related functionality:
 """
 
 from openpaw.agent.metrics import InvocationMetrics, TokenUsageLogger, TokenUsageReader
+from openpaw.agent.response_processor import ResponseProcessor
 from openpaw.agent.runner import AgentRunner
 
 __all__ = [
     "AgentRunner",
     "InvocationMetrics",
+    "ResponseProcessor",
     "TokenUsageLogger",
     "TokenUsageReader",
 ]

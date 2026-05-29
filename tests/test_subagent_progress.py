@@ -8,7 +8,8 @@ import pytest
 
 from openpaw.agent.runner import AgentRunner
 from openpaw.model.subagent import SubAgentRequest, SubAgentStatus
-from openpaw.runtime.subagent.runner import SubAgentRunner, _format_elapsed
+from openpaw.runtime.subagent.formatter import _format_elapsed, build_origin_suffix
+from openpaw.runtime.subagent.runner import SubAgentRunner
 from openpaw.stores.subagent import SubAgentStore, create_subagent_request
 
 
@@ -119,19 +120,19 @@ class TestFormatElapsed:
 class TestBuildOriginSuffix:
     def test_no_origin_returns_empty_string(self):
         request = _make_request(origin=None)
-        assert SubAgentRunner._build_origin_suffix(request) == ""
+        assert build_origin_suffix(request) == ""
 
     def test_simple_origin(self):
         request = _make_request(origin="gilfoyle")
-        assert SubAgentRunner._build_origin_suffix(request) == " (spawned by gilfoyle)"
+        assert build_origin_suffix(request) == " (spawned by gilfoyle)"
 
     def test_colon_separated_origin(self):
         request = _make_request(origin="session:telegram:123456")
-        assert SubAgentRunner._build_origin_suffix(request) == " (spawned by session: telegram:123456)"
+        assert build_origin_suffix(request) == " (spawned by session: telegram:123456)"
 
     def test_simple_colon_origin(self):
         request = _make_request(origin="agent:gilfoyle")
-        assert SubAgentRunner._build_origin_suffix(request) == " (spawned by agent: gilfoyle)"
+        assert build_origin_suffix(request) == " (spawned by agent: gilfoyle)"
 
 
 # ---------------------------------------------------------------------------
@@ -189,8 +190,8 @@ async def _run_timer_once(runner: SubAgentRunner, request: SubAgentRequest, agen
         if call_count >= 2:
             raise asyncio.CancelledError
 
-    with patch("openpaw.runtime.subagent.runner.asyncio.sleep", side_effect=instant_sleep):
-        task = asyncio.create_task(runner._progress_timer(request, agent_runner, 0.0))
+    with patch("openpaw.runtime.subagent.executor.asyncio.sleep", side_effect=instant_sleep):
+        task = asyncio.create_task(runner._executor._progress_timer(request, agent_runner, 0.0))
         try:
             await task
         except asyncio.CancelledError:
@@ -253,8 +254,8 @@ class TestProgressTimer:
             await real_sleep(0)
             raise asyncio.CancelledError
 
-        with patch("openpaw.runtime.subagent.runner.asyncio.sleep", side_effect=capturing_sleep):
-            task = asyncio.create_task(sub_runner._progress_timer(request, mock_agent_runner, 0.0))
+        with patch("openpaw.runtime.subagent.executor.asyncio.sleep", side_effect=capturing_sleep):
+            task = asyncio.create_task(sub_runner._executor._progress_timer(request, mock_agent_runner, 0.0))
             try:
                 await task
             except asyncio.CancelledError:
@@ -285,8 +286,8 @@ class TestProgressTimer:
             if call_count >= 3:
                 raise asyncio.CancelledError
 
-        with patch("openpaw.runtime.subagent.runner.asyncio.sleep", side_effect=fast_sleep):
-            task = asyncio.create_task(runner._progress_timer(request, mock_agent_runner, 0.0))
+        with patch("openpaw.runtime.subagent.executor.asyncio.sleep", side_effect=fast_sleep):
+            task = asyncio.create_task(runner._executor._progress_timer(request, mock_agent_runner, 0.0))
             try:
                 await task
             except asyncio.CancelledError:
