@@ -124,5 +124,7 @@ class DiscordOutboundSender:
                 raise RuntimeError(
                     f"Bot lacks permission to access Discord channel {channel_id}"
                 )
+            except discord.HTTPException as e:
+                raise RuntimeError(f"Discord API error fetching channel {channel_id}: {e}") from e
 
         return channel  # type: ignore[no-any-return]
