@@ -1,9 +1,9 @@
 # OpenPaw Structural Cleanup — Session Handoff
 
 **Last Updated:** 2026-05-29
-**Sprint:** Structural Refactor Q2 2026 — **PHASE B IN PROGRESS**
+**Sprint:** Structural Refactor Q2 2026 — **PHASE B ALMOST COMPLETE**
 **Holding Branch:** `refactor/structural-cleanup-2026` ← **ALL NEW MRs BRANCH FROM HERE**
-**Status:** Phase A complete (16/16 MRs). B1–B8 merged. Next: MR B9 (AgentRunner).
+**Status:** Phase A complete (16/16 MRs). B1–B9 merged. Next: MR B10 (Schedulers).
 
 ---
 
@@ -13,8 +13,8 @@
 2. ✅ PR #118 opened: `refactor/structural-cleanup-2026` → `develop` (pending human review)
 3. ✅ Phase B plan: `llm_memory/openpaw_refactor/12_phase_b_plan.md`
 4. ✅ Phase B research: `llm_memory/openpaw_refactor/11_phase_b_research.md`
-5. ✅ MR B1–B8 complete: 8/10 MRs merged, 2,969 tests passing
-6. 📋 **Next:** MR B9 — AgentRunner slimming (`agent_factory.py` + `agent/runner.py`)
+5. ✅ MR B1–B9 complete: 9/10 MRs merged, 2,969 tests passing
+6. 📋 **Next:** MR B10 — Scheduler slimming (`cron.py` + `heartbeat.py`)
 
 ---
 
@@ -135,10 +135,10 @@ Key metrics:
 git checkout refactor/structural-cleanup-2026
 git pull origin refactor/structural-cleanup-2026
 poetry run pytest --tb=short
-# Expected: 2944 passed
+# Expected: 2969 passed
 ```
 
-**Last known state:** 2,969 tests passing on holding branch (after B7 merge), ruff clean.
+**Last known state:** 2,969 tests passing on holding branch (after B9 merge), ruff clean.
 
 ---
 
@@ -164,8 +164,8 @@ poetry run pytest --tb=short
 | B6 MessageProcessor | `refactor/b6-message-processor-final` | ✅ **Merged** | #124 | 2,969 passed |
 | B7 Channel handlers | `refactor/b7-channel-handlers` | ✅ **Merged** | #125 | 2,969 passed |
 | B8 FileSearch | `refactor/b8-file-search` | ✅ **Merged** | #126 | 2,969 passed |
-| B9 AgentRunner | — | 🔵 Not started | — | — |
-| B10 Schedulers | — | 🔵 Not started | — | — |
+| B9 AgentRunner | `refactor/b9-agent-runner` | ✅ **Merged** | #127 | 2,969 passed |
+| B10 Schedulers | — | 🔵 **Next** | — | — |
 
 ---
 
@@ -197,6 +197,8 @@ poetry run pytest --tb=short
 | 2026-05-29 | **MR B7 merged** — Merge commit, 2,969 tests passing, ruff clean, mypy clean on new files |
 | 2026-05-29 | **MR B8 opened** — FileSearch backend extraction (585→221+168+224+53 lines), PR #126 |
 | 2026-05-29 | **MR B8 merged** — Merge commit, AI review clean, 2,969 tests passing |
+| 2026-05-29 | **MR B9 opened** — AgentRunner/AgentFactory decomposition (458+586→342+477 lines), PR #127 |
+| 2026-05-29 | **MR B9 merged** — Merge commit, AI review clean (5 non-blocking observations), 2,969 tests passing |
 
 ---
 
