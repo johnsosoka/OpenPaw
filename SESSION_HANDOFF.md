@@ -3,7 +3,7 @@
 **Last Updated:** 2026-05-29
 **Sprint:** Structural Refactor Q2 2026 — **PHASE B IN PROGRESS**
 **Holding Branch:** `refactor/structural-cleanup-2026` ← **ALL NEW MRs BRANCH FROM HERE**
-**Status:** Phase A complete (16/16 MRs). B1–B7 merged. Next: MR B8 (FileSearch).
+**Status:** Phase A complete (16/16 MRs). B1–B8 merged. Next: MR B9 (AgentRunner).
 
 ---
 
@@ -13,7 +13,7 @@
 2. ✅ PR #118 opened: `refactor/structural-cleanup-2026` → `develop` (pending human review)
 3. ✅ Phase B plan: `llm_memory/openpaw_refactor/12_phase_b_plan.md`
 4. ✅ Phase B research: `llm_memory/openpaw_refactor/11_phase_b_research.md`
-5. ✅ MR B1–B7 complete: 7/10 MRs merged, 2,969 tests passing
+5. ✅ MR B1–B8 complete: 8/10 MRs merged, 2,969 tests passing
 6. 📋 **Next:** MR B9 — AgentRunner slimming (`agent_factory.py` + `agent/runner.py`)
 
 ---
@@ -163,7 +163,7 @@ poetry run pytest --tb=short
 | B5 Small cleanup | `refactor/b5-small-cleanup` | ✅ **Merged** | #123 | 2,944 passed |
 | B6 MessageProcessor | `refactor/b6-message-processor-final` | ✅ **Merged** | #124 | 2,969 passed |
 | B7 Channel handlers | `refactor/b7-channel-handlers` | ✅ **Merged** | #125 | 2,969 passed |
-| B8 FileSearch | `refactor/b8-file-search` | 🔵 **Opened** | #126 | 2,969 passed |
+| B8 FileSearch | `refactor/b8-file-search` | ✅ **Merged** | #126 | 2,969 passed |
 | B9 AgentRunner | — | 🔵 Not started | — | — |
 | B10 Schedulers | — | 🔵 Not started | — | — |
 
@@ -196,6 +196,7 @@ poetry run pytest --tb=short
 | 2026-05-29 | **MR B7 AI review addressed** — Added discord.HTTPException catch in outbound.py for network resilience |
 | 2026-05-29 | **MR B7 merged** — Merge commit, 2,969 tests passing, ruff clean, mypy clean on new files |
 | 2026-05-29 | **MR B8 opened** — FileSearch backend extraction (585→221+168+224+53 lines), PR #126 |
+| 2026-05-29 | **MR B8 merged** — Merge commit, AI review clean, 2,969 tests passing |
 
 ---
 
