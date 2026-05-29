@@ -188,10 +188,10 @@ poetry run pytest --tb=short
 
 ## Phase C: Integration Testing (In Progress)
 
-**Status:** Phase C kickoff — test plan finalized, test agent workspace created.
+**Status:** Phase C active — test agent workspace running, first bug found and fixed.
 **Goal:** Validate all 26 MRs from Phases A+B introduced no regressions. Exercise every framework feature with a real LLM.
 **Test Model:** Fireworks `accounts/fireworks/models/kimi-k2.6-turbo` via Firepass API
-**Channel:** stdio (for automated testing) or Telegram (for real delivery)
+**Channel:** stdio (for automated testing)
 
 ### Phase C Plan
 
@@ -225,14 +225,20 @@ Test coverage audit: `llm_memory/openpaw_refactor/13_phase_c_test_plan_audit.md`
 
 ```
 agent_workspaces/test_agent/
-├── AGENT.md      # Full capability list
-├── USER.md       # Test persona
-├── SOUL.md       # Test agent personality
-├── HEARTBEAT.md  # Test tasks to monitor
-├── agent.yaml    # Full framework config (Fireworks kimi-k2.6-turbo)
-├── crons/        # Test cron jobs
-├── .env.example  # API key template
+├── agent/AGENT.md      # Full capability list
+├── agent/USER.md       # Test persona
+├── agent/SOUL.md       # Test agent personality
+├── agent/HEARTBEAT.md  # Minimal heartbeat scratchpad
+├── config/agent.yaml    # Full framework config (Fireworks kimi-k2.6-turbo)
+├── config/crons/        # Test cron jobs
+└── config/.env          # API key (set)
 ```
+
+### Phase C Findings
+
+| # | Date | Bug | Severity | Fix | Status |
+|---|------|-----|----------|-----|--------|
+| 1 | 2026-05-29 | Stdio channel required token (regression from B7 lifecycle refactor) | High | lifecycle.py: token check now only applies to telegram/discord | ✅ Fixed & committed |
 
 ### Acceptance Criteria
 
