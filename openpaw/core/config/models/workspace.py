@@ -192,11 +192,11 @@ class WorkspaceConfig(BaseModel):
         """Validate timezone is a valid IANA timezone identifier."""
         try:
             ZoneInfo(v)
-        except (ZoneInfoNotFoundError, KeyError):
+        except (ZoneInfoNotFoundError, KeyError) as exc:
             raise ValueError(
                 f"Invalid timezone '{v}'. Use IANA timezone identifiers "
                 f"(e.g., 'America/Denver', 'Europe/London', 'UTC')."
-            )
+            ) from exc
         return v
 
     model_config = {"extra": "allow"}

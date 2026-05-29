@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from openpaw.channels.base import ChannelAdapter
+from openpaw.model.channel import ChannelEvent
 from openpaw.model.message import Attachment, Message, MessageDirection
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ class StdioChannel(ChannelAdapter):
         self._reader_task: asyncio.Task[None] | None = None
         self._message_callback: Callable[[Message], Coroutine[Any, Any, None]] | None = None
         self._approval_callback: Callable[[str, bool], Coroutine[Any, Any, None]] | None = None
-        self._channel_event_callback: Callable[..., Any] | None = None
+        self._channel_event_callback: Callable[[ChannelEvent], Coroutine[Any, Any, None]] | None = None
         self._pending_approval_id: str | None = None
 
     async def start(self) -> None:

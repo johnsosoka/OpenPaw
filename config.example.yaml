@@ -4,6 +4,9 @@
 # Path to agent workspaces directory
 workspaces_path: agent_workspaces
 
+# Path to system-wide team profiles (shared across all workspaces)
+# team_profiles_path: team_profiles
+
 # Logging
 logging:
   level: INFO
@@ -160,6 +163,14 @@ builtins:
       ocr_languages: [en]
       force_full_page_ocr: true   # Recommended for scanned documents
       do_table_structure: true
+
+  # Conversation memory search via vector store (requires memory embedding config)
+  # memory_search:
+  #   enabled: true
+
+  # Acknowledge message receipt (no API key required)
+  # acknowledge:
+  #   enabled: true
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Approval gates — pause execution and require user confirmation before

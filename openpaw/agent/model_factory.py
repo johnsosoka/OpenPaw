@@ -11,6 +11,8 @@ from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 
+from openpaw.core.utils import is_context_overflow_error
+
 logger = logging.getLogger(__name__)
 
 # Surface retry diagnostics from provider SDKs.
@@ -170,8 +172,7 @@ def create_chat_model(
 
             def _is_retryable_fireworks_error(exc: BaseException) -> bool:
                 if isinstance(exc, InvalidRequestError):
-                    msg = str(exc).lower()
-                    if "prompt is too long" in msg or "maximum context length" in msg:
+                    if is_context_overflow_error(exc):
                         return False
                 return isinstance(
                     exc,

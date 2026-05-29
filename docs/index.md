@@ -34,7 +34,11 @@ Four queue modes handle the reality that users send follow-up messages while age
 
 ### Built-in Tools & Processors
 
-Agents ship with web search, browser automation, sandboxed file operations, sub-agent spawning, task tracking, and self-scheduling. Incoming messages are automatically processed — files are saved, voice messages transcribed, and documents converted to markdown.
+Agents ship with web search (Brave), browser automation (Playwright), sandboxed file operations, sub-agent spawning, task tracking, self-scheduling, and PDF generation from markdown. Incoming messages are automatically processed — files are saved, voice messages transcribed, and documents converted to markdown.
+
+### Stdio Channel
+
+Test and develop agents locally without any bot tokens or platform setup. The `stdio` channel reads from stdin and prints responses to stdout, with full support for file attachments, approval gates, and message splitting.
 
 ### Scheduling & Heartbeats
 
@@ -42,7 +46,11 @@ Define cron jobs for periodic tasks, or enable heartbeats for proactive agent ch
 
 ### Approval Gates
 
-Require human authorization before sensitive tools execute. The agent pauses, the user sees approve/deny buttons in their chat, and the agent resumes or gracefully handles the denial.
+Require human authorization before sensitive tools execute. The agent pauses, the user sees approve/deny buttons in their chat, and the agent resumes or gracefully handles the denial. Use the `acknowledge` builtin to suppress routine results from gated tools when full approval is unnecessary.
+
+### Safe Shell Execution
+
+The `shell` builtin lets agents run whitelisted commands in a controlled environment with configurable timeouts and output limits. Useful for git operations, build scripts, or system checks without opening unrestricted terminal access.
 
 ### Conversation Persistence
 
