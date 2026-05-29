@@ -84,6 +84,11 @@ class ErrorHandler:
                 )
 
         if channel:
-            await channel.send_message(session_key, sanitize_error_for_user(error))
+            try:
+                await channel.send_message(session_key, sanitize_error_for_user(error))
+            except Exception as send_err:
+                self._logger.warning(
+                    f"Failed to send error message to {session_key}: {send_err}"
+                )
 
         return ErrorResult(action="break")

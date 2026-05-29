@@ -96,13 +96,20 @@ class ApprovalGateHandler:
         tool_config = self._approval_manager.get_tool_config(error.tool_name)
         show_args = tool_config.show_args if tool_config else True
 
-        await channel.send_approval_request(
-            session_key=session_key,
-            approval_id=error.approval_id,
-            tool_name=error.tool_name,
-            tool_args=error.tool_args,
-            show_args=show_args,
-        )
+        try:
+            await channel.send_approval_request(
+                session_key=session_key,
+                approval_id=error.approval_id,
+                tool_name=error.tool_name,
+                tool_args=error.tool_args,
+                show_args=show_args,
+            )
+        except Exception as send_err:
+            self._logger.error(
+                f"Failed to send approval request for {error.tool_name}: {send_err}",
+                exc_info=True,
+            )
+            return ApprovalResult(action="break")
 
         approved = await self._approval_manager.wait_for_resolution(error.approval_id)
 
@@ -113,10 +120,15 @@ class ApprovalGateHandler:
 
         self._logger.info(f"Tool {error.tool_name} denied")
         await self._resolve_orphaned(agent_runner, thread_id, error, approved=False)
-        await channel.send_message(
-            session_key,
-            f"Tool '{error.tool_name}' was denied. The agent will be informed.",
-        )
+        try:
+            await channel.send_message(
+                session_key,
+                f"Tool '{error.tool_name}' was denied. The agent will be informed.",
+            )
+        except Exception as send_err:
+            self._logger.warning(
+                f"Failed to send denial notification for {error.tool_name}: {send_err}"
+            )
         return ApprovalResult(
             action="deny",
             combined_content=TOOL_DENIED_TEMPLATE.format(tool_name=error.tool_name),

@@ -42,7 +42,12 @@ class InterruptHandler:
             New combined content built from the pending messages.
         """
         if channel:
-            await channel.send_message(session_key, INTERRUPT_NOTIFICATION)
+            try:
+                await channel.send_message(session_key, INTERRUPT_NOTIFICATION)
+            except Exception as send_err:
+                self._logger.warning(
+                    f"Failed to send interrupt notification to {session_key}: {send_err}"
+                )
 
         pending = error.pending_messages
         if pending:
