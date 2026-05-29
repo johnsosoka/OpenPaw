@@ -63,7 +63,7 @@ Any layer can import from `model/` without introducing a dependency cycle. These
 
 Cross-cutting infrastructure used by all higher layers. Nothing in `core/` imports from `agent/`, `workspace/`, or `runtime/`.
 
-- **`config/models.py`** — Pydantic models for `GlobalConfig`, `WorkspaceConfig`, `CronDefinition`, `ProviderDefinition`, and related nested structures
+- **`config/models/`** — Pydantic models for `GlobalConfig`, `WorkspaceConfig`, `CronDefinition`, `ProviderDefinition`, and related nested structures
 - **`config/loader.py`** — Discovers workspace directories, loads YAML files, performs deep merge of global over workspace config
 - **`config/env_expansion.py`** — Expands `${VAR}` tokens; fails fast with a descriptive error for unresolved references
 - **`config/providers.py`** — `resolve_provider()` maps a catalog provider name to a `ResolvedProvider` (model string, API key, region, extra kwargs)

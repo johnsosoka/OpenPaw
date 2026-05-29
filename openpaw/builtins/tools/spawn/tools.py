@@ -43,11 +43,11 @@ def create_spawn_agent_tool(builtin: Any) -> StructuredTool:
             try:
                 loop = asyncio.get_running_loop()
                 future = asyncio.run_coroutine_threadsafe(
-                    builtin._runner.spawn(request), loop  # type: ignore[union-attr]
+                    builtin._runner.spawn(request), loop
                 )
                 request_id = future.result(timeout=5.0)
             except RuntimeError:
-                request_id = asyncio.run(builtin._runner.spawn(request))  # type: ignore[union-attr]
+                request_id = asyncio.run(builtin._runner.spawn(request))
 
             logger.info(f"Spawned sub-agent: {request_id} ('{label}')")
             return format_spawn_success(request_id, label, timeout_minutes)
@@ -75,7 +75,7 @@ def create_spawn_agent_tool(builtin: Any) -> StructuredTool:
         request = result
 
         try:
-            request_id = await builtin._runner.spawn(request)  # type: ignore[union-attr]
+            request_id = await builtin._runner.spawn(request)
             logger.info(f"Spawned sub-agent: {request_id} ('{label}')")
             return format_spawn_success(request_id, label, timeout_minutes)
         except Exception as e:

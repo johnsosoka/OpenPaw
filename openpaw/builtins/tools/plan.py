@@ -95,13 +95,12 @@ class PlanToolBuiltin(BaseBuiltinTool):
                 Confirmation with plan summary.
             """
             valid_statuses = {"pending", "in_progress", "completed"}
-            normalized = []
-            for s in steps:
-                # s is a PlanStep Pydantic object, not a dict
-                status = s.status
+            normalized: list[dict[str, str]] = []
+            for step in steps:
+                status = step.status
                 if status not in valid_statuses:
                     return f"[Error: Invalid status '{status}'. Valid: pending, in_progress, completed]"
-                normalized.append({"step": s.step, "status": status})
+                normalized.append({"step": step.step, "status": status})
 
             self._plan = normalized
 

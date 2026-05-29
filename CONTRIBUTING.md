@@ -158,7 +158,7 @@ Builtins are the primary extension point. They are optional capabilities (tools 
 2. Define a `metadata` property returning a `BuiltinMetadata` instance. Declare any prerequisites (e.g., API keys, packages) here — the loader will skip the builtin if prerequisites are not met.
 3. Implement `get_langchain_tool()` (for tools) or `process()` (for processors). Tools must return a list, even if it contains a single tool.
 4. Register the class in `openpaw/builtins/registry.py`.
-5. If the builtin has configuration fields, add a typed field to `BuiltinsConfig` / `WorkspaceBuiltinsConfig` in `openpaw/core/config/models.py`.
+5. If the builtin has configuration fields, add a typed field to `BuiltinsConfig` / `WorkspaceBuiltinsConfig` in `openpaw/core/config/models/`.
 6. If the builtin warrants a mention in the framework orientation prompt, add a conditional section in `openpaw/core/prompts/framework.py`.
 
 See `openpaw/builtins/tools/brave_search.py` for a minimal tool example and `openpaw/builtins/processors/whisper.py` for a processor example.

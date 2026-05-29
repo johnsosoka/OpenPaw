@@ -27,12 +27,12 @@ from openpaw.core.config.models.builtin import (
     CronBuiltinConfig,
     DoclingBuiltinConfig,
     SendFileBuiltinConfig,
+    WorkspaceBuiltinsConfig,
 )
 from openpaw.core.config.models.channel import WorkspaceChannelConfig
 from openpaw.core.config.models.cron import HeartbeatConfig
 from openpaw.core.config.models.security import ApprovalGatesConfig, ToolApprovalConfig
 from openpaw.core.config.models.workspace import (
-    WorkspaceBuiltinsConfig,
     WorkspaceConfig,
     WorkspaceModelConfig,
     WorkspaceQueueConfig,

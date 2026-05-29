@@ -12,7 +12,7 @@
 
 ---
 
-> **Alpha Software** -- OpenPaw is in active development and should be considered an alpha release. APIs, configuration formats, and behavior may change between versions. Contributions and feedback are welcome, but expect rough edges.
+> **Pre-1.0 Release (0.4.0)** — OpenPaw is actively developed. The API may evolve as we work towards a stable 1.0.0 release. Contributions and feedback are welcome.
 
 OpenPaw gives each agent its own workspace -- personality files, custom tools, scheduled tasks -- then gets out of the way. It handles the orchestration so you can focus on what your agents actually do.
 
@@ -53,6 +53,12 @@ Agents can ingest documents, browse the web, search the internet, and manage the
 ## Quick Start
 
 ### 1. Install
+
+```bash
+pip install openpaw
+```
+
+For development from source:
 
 ```bash
 git clone https://github.com/johnsosoka/OpenPaw.git
@@ -113,16 +119,18 @@ agent_workspaces/my_agent/
 │   ├── USER.md         # User context and preferences
 │   ├── SOUL.md         # Core personality and values
 │   ├── HEARTBEAT.md    # Session state scratchpad (agent-writable)
-│   ├── tools/          # Custom LangChain @tool functions
-│   └── skills/         # Skill directories
+│   ├── skills/         # Skill directories (SKILL.md format)
+│   ├── team/           # Spawn profiles (sub-agent personas)
+│   └── tools/          # Custom LangChain @tool functions
 ├── config/             # Configuration (write-protected)
 │   ├── agent.yaml      # Per-workspace settings (model, channel, queue)
 │   ├── .env            # API keys and secrets
 │   └── crons/          # Scheduled task definitions
-├── data/               # Framework-managed state (write-protected)
-│   ├── TASKS.yaml      # Persistent task tracking
-│   ├── uploads/        # User-uploaded files
-│   └── ...             # Conversations DB, session state, token logs
+├── .openpaw/           # Framework internals (write-protected)
+│   ├── conversations.db  # AsyncSqliteSaver checkpoint database
+│   ├── sessions.json     # Session/conversation thread state
+│   ├── token_usage.jsonl # Token usage metrics (append-only)
+│   └── subagents.yaml    # Sub-agent requests and results
 ├── memory/             # Archived conversations and session logs
 │   ├── conversations/  # Conversation exports (markdown + JSON)
 │   └── logs/           # Session logs and channel history

@@ -1,11 +1,26 @@
 [project]
 name = "openpaw"
-version = "0.1.0"
+version = "0.4.0"
 description = "OpenPaw - Multi-Channel AI Agent Framework with LangGraph"
 authors = [
     {name = "John Sosoka"}
 ]
+license = "PolyForm Noncommercial 1.0.0"
+license-files = ["LICENSE"]
 readme = "README.md"
+keywords = ["ai", "agent", "langgraph", "telegram", "discord", "bot"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: Other/Proprietary License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Communications :: Chat",
+    "Framework :: AsyncIO",
+]
 requires-python = ">=3.11,<4.0"
 dependencies = [
     # Agent runtime
@@ -32,6 +47,12 @@ dependencies = [
     "opencv-python-headless (>=4.13.0.92,<5.0.0.0)",
     "playwright (>=1.58.0,<2.0.0)",
 ]
+
+[project.urls]
+Homepage = "https://johnsosoka.github.io/OpenPaw/"
+Repository = "https://github.com/johnsosoka/OpenPaw"
+Issues = "https://github.com/johnsosoka/OpenPaw/issues"
+Documentation = "https://johnsosoka.github.io/OpenPaw/"
 
 [project.optional-dependencies]
 # Optional builtins — install extras for specific capabilities

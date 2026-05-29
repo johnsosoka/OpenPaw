@@ -9,6 +9,8 @@ from openpaw.model.message import Message
 if TYPE_CHECKING:
     from openpaw.model.channel import ChannelEvent, ChannelHistoryEntry
 
+__all__ = ["ChannelAdapter", "Message"]
+
 
 class ChannelAdapter(ABC):
     """Abstract base class for channel adapters.

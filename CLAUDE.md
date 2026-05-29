@@ -160,7 +160,7 @@ openpaw/
 
 **`openpaw/agent/metrics.py`** - Token usage tracking infrastructure. `InvocationMetrics` dataclass, `extract_metrics_from_callback()` for `UsageMetadataCallbackHandler`, `TokenUsageLogger` (thread-safe JSONL append to `.openpaw/token_usage.jsonl`), and `TokenUsageReader` for aggregation (today/session).
 
-**`openpaw/core/config/models.py`** - Pydantic models for global and workspace configuration. Includes `CronDefinition` and `CronOutputConfig` (cron scheduling config with APScheduler dependency). Handles environment variable expansion (`${VAR}`) and deep-merging workspace config over global defaults.
+**`openpaw/core/config/models/`** - Pydantic models for global and workspace configuration. Includes `CronDefinition` and `CronOutputConfig` (cron scheduling config with APScheduler dependency). Handles environment variable expansion (`${VAR}`) and deep-merging workspace config over global defaults.
 
 **`openpaw/core/config/loader.py`** - Configuration loading and merging. Discovers workspace directories, loads global and per-workspace config, and performs deep merge.
 
@@ -190,7 +190,7 @@ openpaw/
 
 **`openpaw/channels/telegram.py`** - Telegram bot adapter using `python-telegram-bot`. Converts platform messages to unified `Message` format, handles allowlisting, and supports voice/audio messages, documents, and photo uploads.
 
-**`openpaw/channels/factory.py`** - Channel factory. Decouples `WorkspaceRunner` from concrete channel types via `create_channel(channel_type, config, workspace_name, channel_name)`. Supports `telegram` and `discord`. Optional `channel_name` overrides the adapter's default name for multi-channel session key uniqueness.
+**`openpaw/channels/factory.py`** - Channel factory. Decouples `WorkspaceRunner` from concrete channel types via `create_channel(channel_type, config, workspace_name, channel_name)`. Supports `telegram`, `discord`, and `stdio`. Optional `channel_name` overrides the adapter's default name for multi-channel session key uniqueness.
 
 **`openpaw/runtime/session/manager.py`** - `SessionManager` for tracking conversation threads per session. Thread-safe JSON persistence at `{workspace}/.openpaw/sessions.json`. Provides `get_thread_id()`, `new_conversation()`, `get_state()`, `increment_message_count()`.
 
@@ -445,7 +445,7 @@ channels:
       retention_days: 30        # Archive logs older than 30 days
 ```
 
-**Pydantic models**: `ChannelLogConfig` (`enabled`, `retention_days`) in `openpaw/core/config/models.py`. `context_messages` validated 0–100 on `WorkspaceChannelConfig`.
+**Pydantic models**: `ChannelLogConfig` (`enabled`, `retention_days`) in `openpaw/core/config/models/`. `context_messages` validated 0–100 on `WorkspaceChannelConfig`.
 
 **Lifecycle wiring**: `LifecycleManager._setup_channel_logger()` creates a single `ChannelLogger` per workspace (using the maximum `retention_days` across all logging-enabled channels), registers its `log_event` method as the `on_channel_event` observer on each enabled channel, and calls `archive_old_logs()` at startup.
 
@@ -499,7 +499,7 @@ temperature: 0.6
 - Extra kwargs merge: catalog extras + workspace extras, workspace wins on conflict
 
 **Components**:
-- `ProviderDefinition` Pydantic model in `openpaw/core/config/models.py` — `type`, `api_key`, `base_url`, `region`, plus arbitrary extras via `extra="allow"`
+- `ProviderDefinition` Pydantic model in `openpaw/core/config/models/` — `type`, `api_key`, `base_url`, `region`, plus arbitrary extras via `extra="allow"`
 - `Config.providers: dict[str, ProviderDefinition]` — the catalog field
 - `ResolvedProvider` frozen dataclass in `openpaw/core/config/providers.py` — `model_str`, `display_str`, `api_key`, `region`, `extra_kwargs`
 - `resolve_provider()` — pure function, no side effects, maps catalog name to connection details
@@ -840,7 +840,7 @@ builtins:
 **Components**:
 - `CronManagerBuiltin` in `openpaw/builtins/tools/cron_manager.py` — tool implementation
 - `CronScheduler.reload_cron()` / `remove_cron()` in `openpaw/runtime/scheduling/cron.py` — hot-reload support
-- `CronManagerBuiltinConfig` in `openpaw/core/config/models.py` — typed config
+- `CronManagerBuiltinConfig` in `openpaw/core/config/models/` — typed config
 - Wired via `lifecycle.py._connect_cron_manager_to_scheduler()` (same pattern as CronTool)
 
 ### Web Browsing
