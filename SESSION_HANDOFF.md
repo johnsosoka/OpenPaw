@@ -162,7 +162,7 @@ poetry run pytest --tb=short
 | B4 Md2pdf | `refactor/b4-md2pdf-package` | ✅ **Merged** | #122 | 2,944 passed |
 | B5 Small cleanup | `refactor/b5-small-cleanup` | ✅ **Merged** | #123 | 2,944 passed |
 | B6 MessageProcessor | `refactor/b6-message-processor-final` | ✅ **Merged** | #124 | 2,969 passed |
-| B7 Channel handlers | — | 🔵 Not started | — | — |
+| B7 Channel handlers | `refactor/b7-channel-handlers` | 🟡 **In review** | #125 | 2,969 passed |
 | B8 FileSearch | — | 🔵 Not started | — | — |
 | B9 AgentRunner | — | 🔵 Not started | — | — |
 | B10 Schedulers | — | 🔵 Not started | — | — |
