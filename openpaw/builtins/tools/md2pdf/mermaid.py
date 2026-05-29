@@ -60,9 +60,8 @@ def _render_mermaid_to_svg(source: str, max_width_px: int = 624) -> tuple[str | 
         svg = _scale_svg_to_width(svg, max_width_px)
         return svg, None
 
-    except httpx.HTTPStatusError as e:
-        body_preview = e.response.text[:200] if e.response.text else ""
-        return None, f"Mermaid render failed (HTTP {e.response.status_code}): {body_preview}"
+    except httpx.HTTPError as e:
+        return None, f"Mermaid render failed (network error): {e}"
     except Exception as e:
         return None, f"Mermaid render failed: {e}"
 

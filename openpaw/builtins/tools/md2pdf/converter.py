@@ -129,7 +129,7 @@ def _convert(
     """
     try:
         markdown_source = source_path.read_text(encoding="utf-8")
-    except Exception as e:
+    except (OSError, UnicodeDecodeError) as e:
         return False, f"Could not read source file: {e}", []
 
     # Extract and render Mermaid diagrams
