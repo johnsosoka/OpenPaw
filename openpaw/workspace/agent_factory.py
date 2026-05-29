@@ -6,10 +6,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from openpaw.agent import AgentRunner
-from openpaw.core.config import WorkspaceToolsConfig
 from openpaw.core.config.models import ProviderDefinition
-from openpaw.core.config.providers import ResolvedProvider, resolve_provider
 from openpaw.model.spawn_profile import SpawnProfile
+from openpaw.workspace.model_resolver import ModelResolver
+from openpaw.workspace.tool_filter import filter_workspace_tools
+
+__all__ = ["AgentFactory", "RuntimeModelOverride", "filter_workspace_tools"]
 
 
 @dataclass
@@ -21,16 +23,6 @@ class RuntimeModelOverride:
 
 class AgentFactory:
     """Factory for creating configured AgentRunner instances."""
-
-    # Provider to environment variable mapping for API keys
-    _PROVIDER_KEY_ENV_VARS = {
-        "anthropic": "ANTHROPIC_API_KEY",
-        "openai": "OPENAI_API_KEY",
-        "bedrock_converse": None,
-        "bedrock": None,
-        "xai": "XAI_API_KEY",
-        "fireworks": "FIREWORKS_API_KEY",
-    }
 
     def __init__(
         self,
@@ -74,20 +66,24 @@ class AgentFactory:
         """
         self._workspace = workspace
         self._configured_model = model
-        self._api_key = api_key
         self._max_turns = max_turns
         self._temperature = temperature
-        self._region = region
         self._timeout_seconds = timeout_seconds
         self._builtin_tools = builtin_tools
         self._workspace_tools = workspace_tools
         self._enabled_builtin_names = enabled_builtin_names
-        self._extra_model_kwargs = extra_model_kwargs
         self._middleware = middleware
         self._logger = logger
-        self._provider_catalog: dict[str, ProviderDefinition] = provider_catalog or {}
-        self._runtime_override: RuntimeModelOverride | None = None
         self._channel_logging_enabled = channel_logging_enabled
+
+        self._resolver = ModelResolver(
+            provider_catalog=provider_catalog or {},
+            configured_model=model,
+            api_key=api_key,
+            region=region,
+            extra_model_kwargs=extra_model_kwargs,
+        )
+        self._runtime_override: RuntimeModelOverride | None = None
 
     # ------------------------------------------------------------------
     # Public properties
@@ -99,17 +95,15 @@ class AgentFactory:
 
         When a runtime override is set the override's display string is
         returned; otherwise the configured model's display string is used.
-        Display strings preserve the original catalog name (e.g.
-        ``moonshot:kimi-k2.5``) rather than the underlying LangChain type.
         """
         if self._runtime_override and self._runtime_override.model:
-            return self._resolve_for_model(self._runtime_override.model).display_str
-        return self._resolve_for_model(self._configured_model).display_str
+            return self._resolver.display_str(self._runtime_override.model)
+        return self._resolver.display_str(self._configured_model)
 
     @property
     def configured_model(self) -> str:
         """Return the user-facing display name of the statically configured model."""
-        return self._resolve_for_model(self._configured_model).display_str
+        return self._resolver.display_str(self._configured_model)
 
     # ------------------------------------------------------------------
     # Runtime override management
@@ -122,97 +116,6 @@ class AgentFactory:
     def clear_runtime_override(self) -> None:
         """Clear runtime override, reverting to configured model."""
         self._runtime_override = None
-
-    # ------------------------------------------------------------------
-    # Internal resolution helpers
-    # ------------------------------------------------------------------
-
-    def _resolve_for_model(self, model_str: str) -> ResolvedProvider:
-        """Resolve a model string through the provider catalog.
-
-        Args:
-            model_str: Model identifier, e.g. ``"moonshot:kimi-k2.5"``.
-
-        Returns:
-            ResolvedProvider with LangChain model_str, display_str, api_key,
-            region, and extra_kwargs.
-        """
-        return resolve_provider(model_str, self._provider_catalog)
-
-    def _resolve_api_key(self, model_str: str) -> str | None:
-        """Resolve API key for the given model's provider.
-
-        Catalog resolution takes priority: if the provider is defined in the
-        catalog and carries an api_key, that value is returned immediately.
-        Otherwise the original logic applies (same-provider reuse, then env
-        var lookup).
-        """
-        import os
-
-        resolved = self._resolve_for_model(model_str)
-        if resolved.api_key is not None:
-            return resolved.api_key
-
-        # Extract LangChain provider name from the resolved model string.
-        lc_model = resolved.model_str
-        provider = lc_model.split(":")[0] if ":" in lc_model else "openai"
-        configured_provider = (
-            self._configured_model.split(":")[0]
-            if ":" in self._configured_model
-            else "openai"
-        )
-
-        if provider == configured_provider:
-            return self._api_key
-        if provider in ("bedrock_converse", "bedrock"):
-            return None
-
-        env_var = self._PROVIDER_KEY_ENV_VARS.get(provider)
-        if env_var:
-            return os.environ.get(env_var)
-        return None
-
-    # ------------------------------------------------------------------
-    # Model validation
-    # ------------------------------------------------------------------
-
-    def validate_model(self, model_str: str) -> tuple[bool, str]:
-        """Validate a model string by attempting instantiation.
-
-        Resolves through the catalog first so that catalog providers (e.g.
-        ``moonshot``) are validated against their underlying LangChain type.
-        """
-        from openpaw.agent.model_factory import create_chat_model
-
-        resolved = self._resolve_for_model(model_str)
-        lc_model = resolved.model_str
-
-        if ":" in lc_model:
-            provider, _model_name = lc_model.split(":", 1)
-        else:
-            provider = "openai"
-
-        supported = {"openai", "anthropic", "bedrock_converse", "bedrock", "xai", "fireworks"}
-        if provider not in supported:
-            return False, (
-                f"Unsupported provider: '{provider}'. "
-                f"Supported: {', '.join(sorted(supported))}"
-            )
-
-        api_key = resolved.api_key if resolved.api_key is not None else self._resolve_api_key(model_str)
-        if provider not in ("bedrock_converse", "bedrock") and not api_key:
-            env_var = self._PROVIDER_KEY_ENV_VARS.get(provider, f"{provider.upper()}_API_KEY")
-            return False, f"No API key for provider '{provider}'. Set {env_var} in environment."
-
-        # Merge catalog extras with workspace extras (workspace wins).
-        merged_extra = {**resolved.extra_kwargs, **self._extra_model_kwargs}
-        region = resolved.region or self._region
-
-        try:
-            create_chat_model(lc_model, api_key, self._temperature, region, merged_extra)
-            return True, f"Model validated: {model_str}"
-        except Exception as e:
-            return False, f"Invalid model '{model_str}': {e}"
 
     # ------------------------------------------------------------------
     # Agent creation
@@ -234,12 +137,16 @@ class AgentFactory:
             if self._runtime_override and self._runtime_override.model
             else self._configured_model
         )
-        resolved = self._resolve_for_model(raw_model)
+        resolved = self._resolver.resolve(raw_model)
 
         api_key = (
             resolved.api_key
             if resolved.api_key is not None
-            else (self._resolve_api_key(raw_model) if self._runtime_override else self._api_key)
+            else (
+                self._resolver.resolve_api_key(raw_model)
+                if self._runtime_override
+                else self._resolver.resolve_api_key(self._configured_model)
+            )
         )
 
         temperature = self._temperature
@@ -247,8 +154,8 @@ class AgentFactory:
             temperature = self._runtime_override.temperature
 
         # Merge catalog extras with workspace-level extras; workspace wins.
-        merged_extra = {**resolved.extra_kwargs, **self._extra_model_kwargs}
-        region = resolved.region or self._region
+        merged_extra = {**resolved.extra_kwargs, **self._resolver._extra_model_kwargs}
+        region = resolved.region or self._resolver._region
 
         return AgentRunner(
             workspace=self._workspace,
@@ -272,24 +179,20 @@ class AgentFactory:
         """Create a stateless agent for scheduled tasks (no checkpointer).
 
         Always uses configured model, ignoring runtime overrides.
-
-        Args:
-            extra_overrides: Optional extra model kwargs that take highest precedence,
-                overriding both catalog extras and workspace-level extra_model_kwargs.
-                Used by heartbeat/cron schedulers to apply per-job caps (e.g. max_tokens).
-
-        Returns:
-            AgentRunner without conversation state.
         """
         all_tools = list(self._builtin_tools) + list(self._workspace_tools)
 
-        resolved = self._resolve_for_model(self._configured_model)
-        api_key = resolved.api_key if resolved.api_key is not None else self._api_key
+        resolved = self._resolver.resolve(self._configured_model)
+        api_key = (
+            resolved.api_key
+            if resolved.api_key is not None
+            else self._resolver.resolve_api_key(self._configured_model)
+        )
         # Resolution order: catalog extras < workspace extras < per-call overrides
-        merged_extra = {**resolved.extra_kwargs, **self._extra_model_kwargs}
+        merged_extra = {**resolved.extra_kwargs, **self._resolver._extra_model_kwargs}
         if extra_overrides:
             merged_extra.update(extra_overrides)
-        region = resolved.region or self._region
+        region = resolved.region or self._resolver._region
 
         return AgentRunner(
             workspace=self._workspace,
@@ -297,13 +200,13 @@ class AgentFactory:
             api_key=api_key,
             max_turns=self._max_turns,
             temperature=self._temperature,
-            checkpointer=None,  # No checkpointer for scheduled tasks
+            checkpointer=None,
             tools=all_tools if all_tools else None,
             region=region,
             timeout_seconds=self._timeout_seconds,
             enabled_builtins=self._enabled_builtin_names,
             extra_model_kwargs=merged_extra,
-            middleware=[],  # No middleware for stateless agents
+            middleware=[],
             channel_logging_enabled=self._channel_logging_enabled,
         )
 
@@ -315,32 +218,38 @@ class AgentFactory:
         """Create a stateless agent with profile-driven overrides.
 
         Uses the profile's model, temperature, and max_turns when set,
-        falling back to workspace defaults. No checkpointer or middleware.
-
-        Args:
-            profile: SpawnProfile with optional model/temperature/max_turns overrides.
-            extra_overrides: Optional extra model kwargs applied after all other merging,
-                taking highest precedence (e.g. per-spawn max_tokens caps).
-
-        Returns:
-            AgentRunner configured per the profile.
+        falling back to workspace defaults.
         """
         all_tools = list(self._builtin_tools) + list(self._workspace_tools)
 
         if profile.model is not None:
-            resolved = self._resolve_for_model(profile.model)
-            api_key = resolved.api_key if resolved.api_key is not None else self._resolve_api_key(profile.model)
+            resolved = self._resolver.resolve(profile.model)
+            api_key = (
+                resolved.api_key
+                if resolved.api_key is not None
+                else self._resolver.resolve_api_key(profile.model)
+            )
         else:
-            resolved = self._resolve_for_model(self._configured_model)
-            api_key = resolved.api_key if resolved.api_key is not None else self._api_key
+            resolved = self._resolver.resolve(self._configured_model)
+            api_key = (
+                resolved.api_key
+                if resolved.api_key is not None
+                else self._resolver.resolve_api_key(self._configured_model)
+            )
 
-        temperature = profile.temperature if profile.temperature is not None else self._temperature
-        max_turns = profile.max_turns if profile.max_turns is not None else self._max_turns
+        temperature = (
+            profile.temperature
+            if profile.temperature is not None
+            else self._temperature
+        )
+        max_turns = (
+            profile.max_turns if profile.max_turns is not None else self._max_turns
+        )
         # Resolution order: catalog extras < workspace extras < per-call overrides
-        merged_extra = {**resolved.extra_kwargs, **self._extra_model_kwargs}
+        merged_extra = {**resolved.extra_kwargs, **self._resolver._extra_model_kwargs}
         if extra_overrides:
             merged_extra.update(extra_overrides)
-        region = resolved.region or self._region
+        region = resolved.region or self._resolver._region
 
         return AgentRunner(
             workspace=self._workspace,
@@ -363,14 +272,7 @@ class AgentFactory:
     # ------------------------------------------------------------------
 
     def remove_builtin_tools(self, tool_names: set[str]) -> None:
-        """Remove builtin tools by LangChain tool name.
-
-        Filters tools from the factory's builtin tool list and enabled names.
-        Subsequent create_agent() calls will exclude these tools.
-
-        Args:
-            tool_names: Set of LangChain tool names to remove (e.g., {"search_conversations"}).
-        """
+        """Remove builtin tools by LangChain tool name."""
         before_count = len(self._builtin_tools)
         self._builtin_tools = [t for t in self._builtin_tools if t.name not in tool_names]
         removed = before_count - len(self._builtin_tools)
@@ -380,79 +282,61 @@ class AgentFactory:
             self._logger.debug(f"No matching builtin tools found to remove: {tool_names}")
 
     def remove_enabled_builtin(self, name: str) -> None:
-        """Remove a builtin name from the enabled list.
-
-        This affects framework prompt generation (conditional sections).
-
-        Args:
-            name: Builtin name to remove (e.g., "memory_search").
-        """
+        """Remove a builtin name from the enabled list."""
         if name in self._enabled_builtin_names:
             self._enabled_builtin_names.remove(name)
 
     def get_agent_factory_closure(self) -> Callable[..., AgentRunner]:
-        """Create a closure for spawning stateless agents.
-
-        The returned callable forwards keyword arguments to
-        :meth:`create_stateless_agent`, allowing callers (e.g. heartbeat and
-        cron schedulers) to inject per-invocation overrides such as
-        ``extra_overrides={"max_tokens": N}``.
-
-        Returns:
-            Callable that creates fresh AgentRunner instances.
-        """
+        """Create a closure for spawning stateless agents."""
         return lambda **kwargs: self.create_stateless_agent(**kwargs)
 
+    # ------------------------------------------------------------------
+    # Delegated methods (backward compatibility)
+    # ------------------------------------------------------------------
 
-def filter_workspace_tools(
-    tools: list[Any],
-    config: Any,
-    logger: logging.Logger,
-) -> list[Any]:
-    """Filter workspace tools based on allow/deny lists.
+    # ------------------------------------------------------------------
+    # Backward-compatible internal accessors
+    # ------------------------------------------------------------------
 
-    Args:
-        tools: List of workspace tools to filter.
-        config: WorkspaceToolsConfig with allow/deny lists.
-        logger: Logger for reporting filtered tools.
+    @property
+    def _provider_catalog(self) -> dict[str, Any]:
+        """Backward-compatible accessor for internal provider catalog."""
+        return self._resolver._provider_catalog
 
-    Returns:
-        Filtered list of tools.
-    """
-    # Handle case where config might not be WorkspaceToolsConfig
-    if not isinstance(config, WorkspaceToolsConfig):
-        return tools
+    @_provider_catalog.setter
+    def _provider_catalog(self, value: dict[str, Any]) -> None:
+        """Backward-compatible setter for internal provider catalog."""
+        self._resolver._provider_catalog = value
 
-    deny = config.deny
-    allow = config.allow
+    @property
+    def _extra_model_kwargs(self) -> dict[str, Any]:
+        """Backward-compatible accessor for internal extra model kwargs."""
+        return self._resolver._extra_model_kwargs
 
-    # No filtering if both lists are empty
-    if not deny and not allow:
-        return tools
+    @_extra_model_kwargs.setter
+    def _extra_model_kwargs(self, value: dict[str, Any]) -> None:
+        """Backward-compatible setter for internal extra model kwargs."""
+        self._resolver._extra_model_kwargs = value
 
-    filtered = []
-    filtered_out = []
+    def _resolve_for_model(self, model_str: str) -> Any:
+        """Resolve a model string through the provider catalog.
 
-    for tool in tools:
-        tool_name = tool.name
+        Backward-compatible delegate to ModelResolver.
+        """
+        return self._resolver.resolve(model_str)
 
-        # Deny takes precedence
-        if deny and tool_name in deny:
-            filtered_out.append(tool_name)
-            continue
+    def _resolve_api_key(self, model_str: str) -> str | None:
+        """Resolve API key for the given model's provider.
 
-        # Allow list filtering (if populated)
-        if allow and tool_name not in allow:
-            filtered_out.append(tool_name)
-            continue
+        Backward-compatible delegate to ModelResolver.
+        """
+        return self._resolver.resolve_api_key(model_str)
 
-        filtered.append(tool)
+    def validate_model(self, model_str: str) -> tuple[bool, str]:
+        """Validate a model string by attempting instantiation.
 
-    if filtered_out:
-        logger.info(f"Filtered out workspace tools: {filtered_out}")
+        Backward-compatible delegate to ModelResolver.
+        """
+        return self._resolver.validate(model_str, self._temperature)
 
-    if filtered:
-        tool_names = [t.name for t in filtered]
-        logger.info(f"Active workspace tools after filtering: {tool_names}")
 
-    return filtered
