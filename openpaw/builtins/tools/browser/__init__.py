@@ -77,7 +77,7 @@ class BrowserToolBuiltin(BaseBuiltinTool):
 
         logger.info("BrowserToolBuiltin initialized")
 
-    def get_langchain_tool(self) -> list:
+    def get_langchain_tool(self) -> list[Any]:
         """Return list of browser tools as LangChain StructuredTools."""
         return [
             create_navigate_tool(self),
