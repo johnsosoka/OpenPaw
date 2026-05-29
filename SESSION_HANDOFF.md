@@ -3,7 +3,7 @@
 **Last Updated:** 2026-05-29
 **Sprint:** Structural Refactor Q2 2026 — **PHASE B IN PROGRESS**
 **Holding Branch:** `refactor/structural-cleanup-2026` ← **ALL NEW MRs BRANCH FROM HERE**
-**Status:** Phase A complete (16/16 MRs). B1–B6 merged. Next: MR B7 (Channel handlers).
+**Status:** Phase A complete (16/16 MRs). B1–B7 merged. Next: MR B8 (FileSearch).
 
 ---
 
@@ -13,8 +13,8 @@
 2. ✅ PR #118 opened: `refactor/structural-cleanup-2026` → `develop` (pending human review)
 3. ✅ Phase B plan: `llm_memory/openpaw_refactor/12_phase_b_plan.md`
 4. ✅ Phase B research: `llm_memory/openpaw_refactor/11_phase_b_research.md`
-5. ✅ MR B1–B6 complete: 6/10 MRs merged, 2,969 tests passing
-6. 📋 **Next:** MR B7 — Channel adapter handler extraction (`telegram.py` + `discord.py`)
+5. ✅ MR B1–B7 complete: 7/10 MRs merged, 2,969 tests passing
+6. 📋 **Next:** MR B8 — FileSearch backend extraction (`file_search.py`)
 
 ---
 
@@ -138,7 +138,7 @@ poetry run pytest --tb=short
 # Expected: 2944 passed
 ```
 
-**Last known state:** 2,969 tests passing on holding branch (after B6 merge), ruff clean.
+**Last known state:** 2,969 tests passing on holding branch (after B7 merge), ruff clean.
 
 ---
 
@@ -162,8 +162,8 @@ poetry run pytest --tb=short
 | B4 Md2pdf | `refactor/b4-md2pdf-package` | ✅ **Merged** | #122 | 2,944 passed |
 | B5 Small cleanup | `refactor/b5-small-cleanup` | ✅ **Merged** | #123 | 2,944 passed |
 | B6 MessageProcessor | `refactor/b6-message-processor-final` | ✅ **Merged** | #124 | 2,969 passed |
-| B7 Channel handlers | `refactor/b7-channel-handlers` | 🟡 **In review** | #125 | 2,969 passed |
-| B8 FileSearch | — | 🔵 Not started | — | — |
+| B7 Channel handlers | `refactor/b7-channel-handlers` | ✅ **Merged** | #125 | 2,969 passed |
+| B8 FileSearch | — | 🔵 **Next** | — | — |
 | B9 AgentRunner | — | 🔵 Not started | — | — |
 | B10 Schedulers | — | 🔵 Not started | — | — |
 
@@ -192,6 +192,9 @@ poetry run pytest --tb=short
 | 2026-05-29 | **MR B5 merged** — AI review clean (no issues), 2,944 tests passing |
 | 2026-05-29 | **MR B6 opened** — MessageProcessor final cleanup (541→400 lines), PR #124 |
 | 2026-05-29 | **MR B6 merged** — AI review addressed (best-effort error handling on channel sends), 2,969 tests passing |
+| 2026-05-29 | **MR B7 opened** — Channel adapter handler extraction (telegram 735→310, discord 759→376), PR #125 |
+| 2026-05-29 | **MR B7 AI review addressed** — Added discord.HTTPException catch in outbound.py for network resilience |
+| 2026-05-29 | **MR B7 merged** — Merge commit, 2,969 tests passing, ruff clean, mypy clean on new files |
 
 ---
 
