@@ -1,6 +1,6 @@
 # OpenPaw Structural Cleanup — Session Handoff
 
-**Last Updated:** 2026-05-28
+**Last Updated:** 2026-05-29
 **Sprint:** Structural Refactor Q2 2026 — **PHASE B IN PROGRESS**
 **Holding Branch:** `refactor/structural-cleanup-2026` ← **ALL NEW MRs BRANCH FROM HERE**
 **Status:** Phase A complete (16/16 MRs). B1, B2, and B3 merged. Next: MR B4 (Md2pdf).
@@ -14,7 +14,7 @@
 3. ✅ Phase B plan: `llm_memory/openpaw_refactor/12_phase_b_plan.md`
 4. ✅ Phase B research: `llm_memory/openpaw_refactor/11_phase_b_research.md`
 5. ✅ MR B1 complete: SubAgentRunner decomposed (946→454 lines), 2,896 tests passing
-6. 📋 **Next:** MR B4 — Md2pdf decomposition (`builtins/tools/md2pdf.py`)
+6. 📋 **Next:** MR B4 — Md2pdf decomposition (`builtins/tools/md2pdf.py`) — PR #122 opened, AI review addressed, awaiting human approval
 
 ---
 
@@ -159,7 +159,7 @@ poetry run pytest --tb=short
 | B1 SubAgentRunner | `refactor/b1-subagent-runner` | ✅ Merged | #119 | 2,896 passed |
 | B2 Email package | `refactor/b2-email-package` | ✅ **Merged** | #120 | 2,913 passed |
 | B3 Browser session | `refactor/b3-browser-session` | ✅ **Merged** | #121 | 2,944 passed |
-| B4 Md2pdf | — | 🔵 **Next** | — | — |
+| B4 Md2pdf | `refactor/b4-md2pdf-package` | 🟡 **PR Open** | #122 | 2,944 passed |
 | B5 Small cleanup | — | 🔵 Not started | — | — |
 | B6 MessageProcessor | — | 🔵 Not started | — | — |
 | B7 Channel handlers | — | 🔵 Not started | — | — |
@@ -185,6 +185,8 @@ poetry run pytest --tb=short
 | 2026-05-28 | **MR B2 merged** — AI review clean (no blocking issues), 2,913 tests passing |
 | 2026-05-28 | **MR B3 opened** — Browser session decomposition (812 → 264+174+164+264+231 lines), PR #121 |
 | 2026-05-28 | **MR B3 merged** — AI feedback addressed (3 items: CDP handling, cookie serialization, error message duplication), 2,944 tests passing |
+| 2026-05-28 | **MR B4 opened** — Md2pdf decomposition (767 → 217+56+362+163 lines), PR #122 |
+| 2026-05-29 | **MR B4 AI review addressed** — Improved exception handling in mermaid.py (httpx.HTTPError) and converter.py (OSError, UnicodeDecodeError) |
 
 ---
 
