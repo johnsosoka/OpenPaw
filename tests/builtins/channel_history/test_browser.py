@@ -1,28 +1,12 @@
-"""Tests for ChannelHistoryToolBuiltin."""
+"""Tests for channel history browser tool invocation and async browsing."""
 
-import logging
+import asyncio
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
-from openpaw.builtins.tools.channel_history import (
-    ChannelHistoryToolBuiltin,
-    _build_filter_qualifier,
-    _format_history_output,
-    _format_timestamp,
-    _resolve_adapter,
-    _resolve_channel_id,
-)
-from openpaw.channels.base import ChannelAdapter
+from openpaw.builtins.tools.channel_history import ChannelHistoryToolBuiltin
 from openpaw.channels.discord import DiscordChannel
 from openpaw.model.channel import ChannelHistoryEntry
-from openpaw.workspace.runner import WorkspaceRunner
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 
 def _make_entry(
@@ -58,167 +42,17 @@ def _make_mock_discord_channel(
     return channel
 
 
-def _make_non_history_channel(name: str = "telegram") -> MagicMock:
-    """Build a MagicMock ChannelAdapter that does NOT support history browsing."""
-    channel = MagicMock(spec=ChannelAdapter)
-    channel.name = name
-    channel.supports_history_browsing = False
-    return channel
-
-
-@pytest.fixture
-def tool() -> ChannelHistoryToolBuiltin:
-    """Create an unconnected ChannelHistoryToolBuiltin."""
-    return ChannelHistoryToolBuiltin()
-
-
-@pytest.fixture
-def tool_with_discord(tool: ChannelHistoryToolBuiltin) -> ChannelHistoryToolBuiltin:
-    """Tool connected to a single mock Discord channel."""
-    channel = _make_mock_discord_channel()
-    tool.set_channels({"discord": channel})
-    return tool
-
-
-# ---------------------------------------------------------------------------
-# Metadata and initialization tests
-# ---------------------------------------------------------------------------
-
-
-def test_metadata() -> None:
-    """Metadata fields are correctly defined."""
-    meta = ChannelHistoryToolBuiltin.metadata
-    assert meta.name == "channel_history"
-    assert meta.display_name == "Channel History Browser"
-    assert meta.group == "communication"
-    assert meta.builtin_type.value == "tool"
-    assert len(meta.prerequisites.env_vars) == 0  # Runtime gating, no env vars
-
-
-def test_initialization_defaults() -> None:
-    """Default config values are applied correctly."""
-    t = ChannelHistoryToolBuiltin()
-    assert t.max_messages_per_request == 100
-    assert t.content_truncation == 500
-    assert t._channels is None
-
-
-def test_initialization_with_config() -> None:
-    """Custom config values override defaults."""
-    t = ChannelHistoryToolBuiltin(config={"max_messages_per_request": 50, "content_truncation": 200})
-    assert t.max_messages_per_request == 50
-    assert t.content_truncation == 200
-
-
-def test_get_langchain_tool_returns_list(tool: ChannelHistoryToolBuiltin) -> None:
-    """get_langchain_tool returns a one-element list."""
-    tools = tool.get_langchain_tool()
-    assert isinstance(tools, list)
-    assert len(tools) == 1
-    assert tools[0].name == "browse_channel_history"
-
-
-# ---------------------------------------------------------------------------
-# set_channels tests
-# ---------------------------------------------------------------------------
-
-
-def test_set_channels_stores_reference(tool: ChannelHistoryToolBuiltin) -> None:
-    """set_channels stores the channels dict on the instance."""
-    channels = {"discord": _make_mock_discord_channel()}
-    tool.set_channels(channels)
-    assert tool._channels is channels
-
-
-def test_set_channels_overrides_previous(tool: ChannelHistoryToolBuiltin) -> None:
-    """Calling set_channels twice replaces the previous reference."""
-    ch1 = {"discord": _make_mock_discord_channel()}
-    ch2 = {"discord-work": _make_mock_discord_channel(name="discord-work")}
-    tool.set_channels(ch1)
-    tool.set_channels(ch2)
-    assert tool._channels is ch2
-
-
-# ---------------------------------------------------------------------------
-# supports_history_browsing property tests
-# ---------------------------------------------------------------------------
-
-
-def test_base_adapter_does_not_support_history() -> None:
-    """ChannelAdapter base property returns False by default."""
-    channel = _make_non_history_channel()
-    assert channel.supports_history_browsing is False
-
-
-def test_discord_supports_history() -> None:
-    """DiscordChannel.supports_history_browsing returns True."""
-    channel = _make_mock_discord_channel()
-    assert channel.supports_history_browsing is True
-
-
-# ---------------------------------------------------------------------------
-# Channel resolution tests
-# ---------------------------------------------------------------------------
-
-
-def test_resolve_adapter_single_auto_select() -> None:
-    """Single history-capable channel is auto-selected when channel=None."""
-    ch = _make_mock_discord_channel()
-    channels = {"discord": ch}
-    adapter, error = _resolve_adapter(channels, channel_name=None)
-    assert adapter is ch
-    assert error is None
-
-
-def test_resolve_adapter_multi_requires_explicit() -> None:
-    """Multiple channels require explicit channel= parameter."""
-    channels = {
-        "discord": _make_mock_discord_channel(),
-        "discord-work": _make_mock_discord_channel(name="discord-work"),
-    }
-    adapter, error = _resolve_adapter(channels, channel_name=None)
-    assert adapter is None
-    assert "Multiple history-capable channels" in error
-    assert "discord" in error
-    assert "discord-work" in error
-
-
-def test_resolve_adapter_explicit_found() -> None:
-    """Explicit channel= that exists is returned."""
-    ch = _make_mock_discord_channel()
-    channels = {"discord": ch, "discord-work": _make_mock_discord_channel(name="discord-work")}
-    adapter, error = _resolve_adapter(channels, channel_name="discord")
-    assert adapter is ch
-    assert error is None
-
-
-def test_resolve_adapter_explicit_not_found() -> None:
-    """Explicit channel= that does not exist returns a descriptive error."""
-    channels = {"discord": _make_mock_discord_channel()}
-    adapter, error = _resolve_adapter(channels, channel_name="slack")
-    assert adapter is None
-    assert "slack" in error
-    assert "discord" in error
-
-
-# ---------------------------------------------------------------------------
-# Tool invocation tests — async via pytest-asyncio or sync helper
-# ---------------------------------------------------------------------------
-
-
 def _call_tool_sync(tool_builtin: ChannelHistoryToolBuiltin, **kwargs) -> str:
     """Invoke the browse_channel_history tool synchronously for tests.
 
     Patches the session key context so the channel_id is resolvable.
     Uses the coroutine (async) form of the tool to avoid thread pool issues.
     """
-    import asyncio
-
     lc_tool = tool_builtin.get_langchain_tool()[0]
 
     async def _run() -> str:
         with patch(
-            "openpaw.builtins.tools.channel_history.get_current_session_key",
+            "openpaw.builtins.tools.channel_history.resolver.get_current_session_key",
             return_value="discord:123456789",
         ):
             return await lc_tool.coroutine(**kwargs)
@@ -528,100 +362,8 @@ def test_attachments_summary_in_output() -> None:
     assert "[1 file: report.pdf]" in result
 
 
-# ---------------------------------------------------------------------------
-# Helper unit tests
-# ---------------------------------------------------------------------------
-
-
-def test_format_timestamp_utc_aware() -> None:
-    """UTC-aware datetime is formatted correctly."""
-    ts = datetime(2026, 3, 8, 14, 30, tzinfo=UTC)
-    assert _format_timestamp(ts) == "2026-03-08 14:30 UTC"
-
-
-def test_format_timestamp_naive_treated_as_utc() -> None:
-    """Naive datetime is treated as UTC."""
-    ts = datetime(2026, 3, 8, 9, 0)
-    result = _format_timestamp(ts)
-    assert "2026-03-08 09:00 UTC" == result
-
-
-def test_build_filter_qualifier_empty() -> None:
-    """No filters produces empty qualifier."""
-    assert _build_filter_qualifier(None, None, True) == ""
-
-
-def test_build_filter_qualifier_keyword_only() -> None:
-    """Keyword-only filter shows keyword."""
-    qualifier = _build_filter_qualifier("deploy", None, True)
-    assert "deploy" in qualifier
-
-
-def test_build_filter_qualifier_bots_excluded() -> None:
-    """Bots excluded note appears when include_bots=False."""
-    qualifier = _build_filter_qualifier(None, None, False)
-    assert "bots excluded" in qualifier
-
-
-def test_build_filter_qualifier_all_filters() -> None:
-    """All filters combined."""
-    qualifier = _build_filter_qualifier("deploy", "Alice", False)
-    assert "deploy" in qualifier
-    assert "Alice" in qualifier
-    assert "bots excluded" in qualifier
-
-
-def test_format_history_output_header() -> None:
-    """Output header includes channel name and adapter type."""
-    entries = [_make_entry(message_id="100")]
-    output = _format_history_output(
-        entries=entries,
-        channel_name="general",
-        adapter_type="discord",
-        requested_limit=10,
-        matched_count=1,
-        before_cursor=None,
-        content_truncation=500,
-    )
-    assert "general" in output
-    assert "discord" in output
-
-
-def test_format_history_output_before_cursor_in_header() -> None:
-    """Before cursor appears in header when provided."""
-    entries = [_make_entry(message_id="50")]
-    output = _format_history_output(
-        entries=entries,
-        channel_name="general",
-        adapter_type="discord",
-        requested_limit=10,
-        matched_count=1,
-        before_cursor="12345",
-        content_truncation=500,
-    )
-    assert "12345" in output
-    assert "before" in output.lower()
-
-
-def test_format_history_output_pagination_footer_empty_message_id() -> None:
-    """Pagination footer is skipped when oldest entry has empty message_id."""
-    entries = [_make_entry(message_id="")]
-    output = _format_history_output(
-        entries=entries,
-        channel_name="general",
-        adapter_type="discord",
-        requested_limit=10,
-        matched_count=1,
-        before_cursor=None,
-        content_truncation=500,
-    )
-    assert "Pagination" not in output
-
-
 def test_no_session_key_returns_error() -> None:
     """Missing session key context returns a descriptive error."""
-    import asyncio
-
     channel = _make_mock_discord_channel(entries=[_make_entry()])
     t = ChannelHistoryToolBuiltin()
     t.set_channels({"discord": channel})
@@ -630,7 +372,7 @@ def test_no_session_key_returns_error() -> None:
 
     async def _run() -> str:
         with patch(
-            "openpaw.builtins.tools.channel_history.get_current_session_key",
+            "openpaw.builtins.tools.channel_history.resolver.get_current_session_key",
             return_value=None,
         ):
             return await lc_tool.coroutine()
@@ -638,94 +380,3 @@ def test_no_session_key_returns_error() -> None:
     result = asyncio.run(_run())
     assert "Error" in result
     assert "session" in result.lower()
-
-
-def test_resolve_channel_id_malformed_session_key() -> None:
-    """_resolve_channel_id handles session keys without a colon gracefully."""
-    mock_adapter = MagicMock(spec=ChannelAdapter)
-
-    with patch(
-        "openpaw.builtins.tools.channel_history.get_current_session_key",
-        return_value="nocolonhere",
-    ):
-        channel_id, error = _resolve_channel_id(mock_adapter)
-
-    assert error is not None
-    assert "Error" in error
-    assert channel_id == ""
-
-
-# ---------------------------------------------------------------------------
-# Runner wiring tests
-# ---------------------------------------------------------------------------
-
-
-def _make_mock_runner_for_history(
-    history_tool: Mock | None = None,
-    channels: dict | None = None,
-) -> MagicMock:
-    """Build a minimal mock WorkspaceRunner for _connect_channel_history_tool tests.
-
-    Mirrors the pattern used by test_memory_search_availability.py.
-    """
-    runner = MagicMock(spec=WorkspaceRunner)
-    runner.workspace_name = "test_workspace"
-    runner.logger = MagicMock()
-
-    runner._builtin_loader = MagicMock()
-    runner._builtin_loader.get_tool_instance.return_value = history_tool
-
-    runner._channels = channels if channels is not None else {}
-    runner._agent_factory = MagicMock()
-    runner._agent_factory.create_agent.return_value = MagicMock()
-    runner._agent_runner = MagicMock()
-    runner._message_processor = MagicMock()
-    runner._checkpointer = MagicMock()
-
-    return runner
-
-
-class TestConnectChannelHistoryTool:
-    """Runner wiring tests for WorkspaceRunner._connect_channel_history_tool."""
-
-    def test_no_history_channels_removes_tool(self) -> None:
-        """When no channels support history, the tool is removed from the agent."""
-        history_tool = MagicMock()
-        telegram = MagicMock(spec=ChannelAdapter)
-        telegram.supports_history_browsing = False
-
-        runner = _make_mock_runner_for_history(
-            history_tool=history_tool,
-            channels={"telegram": telegram},
-        )
-
-        WorkspaceRunner._connect_channel_history_tool(runner)
-
-        runner._agent_factory.remove_builtin_tools.assert_called_once_with(
-            {"browse_channel_history"}
-        )
-        runner._agent_factory.remove_enabled_builtin.assert_called_once_with(
-            "channel_history"
-        )
-        runner._agent_factory.create_agent.assert_called_once_with(
-            checkpointer=runner._checkpointer
-        )
-        runner._message_processor.update_agent_runner.assert_called_once()
-
-    def test_history_channels_present_calls_set_channels(self) -> None:
-        """When history-capable channels exist, set_channels is called with only those."""
-        history_tool = MagicMock()
-        discord_ch = _make_mock_discord_channel()
-        telegram_ch = MagicMock(spec=ChannelAdapter)
-        telegram_ch.supports_history_browsing = False
-
-        runner = _make_mock_runner_for_history(
-            history_tool=history_tool,
-            channels={"discord": discord_ch, "telegram": telegram_ch},
-        )
-
-        WorkspaceRunner._connect_channel_history_tool(runner)
-
-        history_tool.set_channels.assert_called_once_with({"discord": discord_ch})
-        runner._agent_factory.remove_builtin_tools.assert_not_called()
-        runner._agent_factory.create_agent.assert_not_called()
