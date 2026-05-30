@@ -51,8 +51,8 @@ jobs:
           TAG_VERSION="${GITHUB_REF#refs/tags/v}"
           echo "tag-version=${TAG_VERSION}" >> "$GITHUB_OUTPUT"
 
-          # Get version from pyproject.toml
-          PROJECT_VERSION=$(grep -E '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          # Get version from pyproject.toml (first occurrence, from [project] section)
+          PROJECT_VERSION=$(grep -E '^version = ' pyproject.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           echo "version=${PROJECT_VERSION}" >> "$GITHUB_OUTPUT"
 
           echo "Tag version: ${TAG_VERSION}"
