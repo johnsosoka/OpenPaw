@@ -66,7 +66,7 @@ class GmailProvider(EmailProvider):
             from google.oauth2 import service_account
             from googleapiclient.discovery import build
 
-            credentials = service_account.Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
+            credentials = service_account.Credentials.from_service_account_file(  # type: ignore
                 self._service_account_file,
                 scopes=_SCOPES,
                 subject=self._delegated_user,

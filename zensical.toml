@@ -14,6 +14,7 @@ nav = [
   { "Configuration" = "configuration.md" },
   { "Workspaces" = "workspaces.md" },
   { "Scheduling" = "scheduling.md" },
+  { "Cron Scheduler" = "cron-scheduler.md" },
   { "Built-ins" = "builtins.md" },
   { "Channels" = "channels.md" },
   { "Queue System" = "queue-system.md" },

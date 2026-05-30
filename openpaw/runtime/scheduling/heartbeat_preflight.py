@@ -4,7 +4,7 @@ import logging
 from datetime import time
 from pathlib import Path
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 from openpaw.core.paths import HEARTBEAT_MD, TASKS_YAML
 from openpaw.core.prompts.heartbeat import build_task_summary

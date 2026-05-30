@@ -6,7 +6,7 @@
 
 OpenPaw uses a two-tier configuration system: global configuration (`config.yaml`) and per-workspace overrides (`agent.yaml`).
 
-Configuration is managed by Pydantic models in `openpaw/core/config/models.py` with loading and merging logic in `openpaw/core/config/loader.py`.
+Configuration is managed by Pydantic models in `openpaw/core/config/models/` with loading and merging logic in `openpaw/core/config/loader.py`.
 
 ## Global Configuration
 
@@ -407,7 +407,7 @@ channels:
 
 **context_messages** — Number of recent channel messages to fetch as context when the bot is triggered in a group channel (default: `25`, set to `0` to disable). Only applies to group/server messages, not DMs.
 
-**channel_log** — Persistent JSONL logging of all visible channel messages (enabled by default):
+**channel_log** — Persistent JSONL logging of all visible channel messages (disabled by default):
 
 ```yaml
 channels:
@@ -417,7 +417,7 @@ channels:
     mention_required: true
     context_messages: 25        # On-demand context fetch (default: 25)
     channel_log:
-      enabled: true             # Enabled by default; set false to disable
+      enabled: false            # Disabled by default; set true to enable
       retention_days: 30        # Days before old logs are archived (default: 30)
 ```
 
@@ -497,15 +497,7 @@ lifecycle:
 
 **session_ttl_minutes** — Auto-resets the conversation (equivalent to `/new`) after the specified minutes of inactivity. Only applies to group/server channels — DMs are never auto-expired. The check is lazy — it only triggers when a new message arrives. When a session expires, channel context history is not injected into the fresh thread. Set to `0` to disable. Archives are tagged `["ttl_expired"]`.
 
-**enabled** — Enable human-in-the-loop authorization for dangerous tools.
-
-**timeout_seconds** — Seconds to wait for user response before applying `default_action`.
-
-**default_action** — Action on timeout: `approve` or `deny`. This prevents agents from hanging indefinitely.
-
-**tools** — Per-tool approval settings.
-
-When a gated tool is called, execution pauses and the user sees approve/deny buttons in their chat. On approval, the agent re-runs with tool execution allowed. On denial, the agent receives a system message and can adjust its approach. See [Concepts](concepts.md) for a detailed walkthrough of the approval flow.
+**lifecycle.notify_session_ttl** — When `true`, the user receives a brief notification when a session expires and is reset.
 
 #### Status Reminder
 

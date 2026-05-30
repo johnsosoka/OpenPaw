@@ -375,6 +375,16 @@ The TTL check runs before auto-compact. If a session expires, auto-compact has n
 session_ttl_minutes: 180    # 3 hours (default); 0 to disable
 ```
 
+### Checkpoint Pruning
+
+Over time, the SQLite checkpoint database accumulates orphaned conversation threads from previous sessions. At workspace startup, the framework automatically prunes checkpoint rows that are no longer active and are older than a configured retention window. This reclaims disk space and keeps the database performant.
+
+```yaml
+checkpoint_retention_days: 7   # Prune orphaned checkpoints older than 7 days (default); 0 to disable
+```
+
+A thread is considered orphaned when it is not the currently active conversation for any session. The pruner scans all thread IDs, compares them against active sessions, and deletes eligible rows from both the `checkpoints` and `writes` tables. After deletion, a `VACUUM` is run to reclaim disk space. Pruning is safe: active conversations are never touched, and the operation is fully automatic with no user intervention required.
+
 ### Conversation Archives
 
 When a conversation ends — whether via `/new`, `/compact`, auto-compact, or workspace shutdown — it is archived to the workspace's `memory/conversations/` directory. Archives are saved in two formats:
@@ -457,6 +467,23 @@ The main agent decides what to do with these updates. It might relay them to you
 You can control the progress interval per spawn by setting `progress_interval_minutes` when the agent calls `spawn_agent`. Set it to `0` to disable progress updates entirely for a specific sub-agent, or configure the workspace default with `default_progress_interval` in the spawn builtin config.
 
 See [Built-ins](builtins.md) for the complete sub-agent configuration, available tools, and guidance on designing effective sub-agent tasks.
+
+---
+
+## Token Usage & Observability
+
+Every agent invocation is instrumented with token usage metrics. The framework tracks input tokens, output tokens, total tokens, LLM call count, and wall-clock duration for each run. These metrics are written to `data/token_usage.jsonl` as an append-only JSONL log.
+
+The `UsageMetadataCallbackHandler` captures per-model token counts from the underlying LLM provider and aggregates them into a single `InvocationMetrics` object. Metrics are recorded for all invocation types: user messages, cron jobs, heartbeats, and sub-agents.
+
+The `/status` command surfaces aggregated metrics for today and the current session. Internally, `TokenUsageReader` aggregates entries from the JSONL log using the workspace timezone day boundary, so "today" means the correct calendar day regardless of where the workspace is configured.
+
+```
+Token Usage (today): 4,230 input / 1,890 output / 6,120 total
+Token Usage (session): 1,200 input / 450 output / 1,650 total
+```
+
+If a provider does not report token counts, the framework gracefully falls back to zeroed metrics and logs a debug message. Partial metadata (e.g., from multi-model calls with missing counts) is flagged as incomplete so totals can be reconciled automatically.
 
 ---
 

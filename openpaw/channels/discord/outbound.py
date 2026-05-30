@@ -8,16 +8,11 @@ from typing import Any
 import discord
 
 from openpaw.channels.discord.approval_view import DiscordApprovalView
+from openpaw.channels.discord.constants import MAX_FILE_SIZE, MAX_MESSAGE_LENGTH
 from openpaw.channels.helpers import check_file_size, format_approval_message, split_message
 from openpaw.model.message import Message, MessageDirection
 
 logger = logging.getLogger(__name__)
-
-# Discord free-tier message length limit
-MAX_MESSAGE_LENGTH = 2000
-
-# Discord free-tier file size limit (25 MB)
-MAX_FILE_SIZE = 25 * 1024 * 1024
 
 
 class DiscordOutboundSender:
@@ -118,12 +113,12 @@ class DiscordOutboundSender:
         if channel is None:
             try:
                 channel = await self._client.fetch_channel(channel_id)
-            except discord.NotFound:
-                raise RuntimeError(f"Discord channel {channel_id} not found")
-            except discord.Forbidden:
+            except discord.NotFound as exc:
+                raise RuntimeError(f"Discord channel {channel_id} not found") from exc
+            except discord.Forbidden as exc:
                 raise RuntimeError(
                     f"Bot lacks permission to access Discord channel {channel_id}"
-                )
+                ) from exc
             except discord.HTTPException as e:
                 raise RuntimeError(f"Discord API error fetching channel {channel_id}: {e}") from e
 

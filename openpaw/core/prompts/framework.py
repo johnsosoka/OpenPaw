@@ -1,5 +1,7 @@
 """Framework orientation and capability sections for agent system prompts."""
 
+from typing import Any
+
 # Core framework orientation - always included
 # NOTE: Keep this constant unchanged for backward compatibility.
 # Tests and __init__.py import it directly.
@@ -350,7 +352,7 @@ SECTION_SCHEDULED_TASKS_HEADER = (
 )
 
 
-def build_cron_context(crons: list) -> str:
+def build_cron_context(crons: list[Any]) -> str:
     """Build a summary of configured cron jobs for the framework prompt.
 
     Args:

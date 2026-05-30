@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class ApprovalRequiredError(Exception):
     """Raised when a tool call requires approval and must pause execution."""
 
-    def __init__(self, approval_id: str, tool_name: str, tool_args: dict, tool_call_id: str):
+    def __init__(self, approval_id: str, tool_name: str, tool_args: dict[str, Any], tool_call_id: str):
         self.approval_id = approval_id
         self.tool_name = tool_name
         self.tool_args = tool_args

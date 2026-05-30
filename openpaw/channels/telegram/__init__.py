@@ -13,6 +13,7 @@ from openpaw.channels.base import ChannelAdapter
 from openpaw.channels.helpers import SecurityMixin, format_unauthorized_response
 from openpaw.channels.telegram.approval import TelegramApprovalSender
 from openpaw.channels.telegram.attachments import TelegramAttachmentConverter
+from openpaw.channels.telegram.constants import MAX_FILE_SIZE, MAX_MESSAGE_LENGTH
 from openpaw.channels.telegram.handlers import TelegramInboundHandler
 from openpaw.channels.telegram.outbound import TelegramOutboundSender
 from openpaw.model.channel import ChannelEvent
@@ -33,11 +34,8 @@ class TelegramChannel(ChannelAdapter, SecurityMixin):
 
     name = "telegram"
 
-    # Telegram maximum message length
-    MAX_MESSAGE_LENGTH = 4096
-
-    # Telegram file size limit
-    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+    MAX_MESSAGE_LENGTH = MAX_MESSAGE_LENGTH
+    MAX_FILE_SIZE = MAX_FILE_SIZE
 
     def __init__(
         self,
@@ -65,7 +63,7 @@ class TelegramChannel(ChannelAdapter, SecurityMixin):
         self._app: Application | None = None  # type: ignore[type-arg]
         self._message_callback: Callable[[Message], Coroutine[Any, Any, None]] | None = None
         self._approval_callback: Callable[[str, bool], Coroutine[Any, Any, None]] | None = None
-        self._channel_event_callback: Callable[[ChannelEvent], Coroutine[Any, Any, None]] | None = None  # type: ignore[assignment]
+        self._channel_event_callback: Callable[[ChannelEvent], Coroutine[Any, Any, None]] | None = None
 
         self._attachment_converter = TelegramAttachmentConverter(
             channel_name=self.name,

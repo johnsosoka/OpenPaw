@@ -41,7 +41,7 @@ def _parse_timestamp(timestamp_str: str, timezone: str) -> datetime:
             f"Invalid ISO 8601 timestamp: {timestamp_str}. "
             f"Expected format: 'YYYY-MM-DDTHH:MM:SS' or 'YYYY-MM-DDTHH:MM:SSZ'. "
             f"Error: {e}"
-        )
+        ) from e
 
 
 def _format_interval(seconds: int) -> str:

@@ -13,6 +13,7 @@ from discord import app_commands
 from openpaw.channels.base import ChannelAdapter
 from openpaw.channels.discord.attachments import DiscordAttachmentDownloader
 from openpaw.channels.discord.commands import DiscordCommandRegistrar
+from openpaw.channels.discord.constants import MAX_FILE_SIZE, MAX_MESSAGE_LENGTH
 from openpaw.channels.discord.history import DiscordHistoryFetcher
 from openpaw.channels.discord.outbound import DiscordOutboundSender
 from openpaw.channels.helpers import SecurityMixin, format_unauthorized_response
@@ -35,11 +36,8 @@ class DiscordChannel(ChannelAdapter, SecurityMixin):
 
     name = "discord"
 
-    # Discord free-tier message length limit
-    MAX_MESSAGE_LENGTH = 2000
-
-    # Discord free-tier file size limit (25 MB)
-    MAX_FILE_SIZE = 25 * 1024 * 1024
+    MAX_MESSAGE_LENGTH = MAX_MESSAGE_LENGTH
+    MAX_FILE_SIZE = MAX_FILE_SIZE
 
     def __init__(
         self,
@@ -73,7 +71,7 @@ class DiscordChannel(ChannelAdapter, SecurityMixin):
 
         self._message_callback: Callable[[Message], Coroutine[Any, Any, None]] | None = None
         self._approval_callback: Callable[[str, bool], Coroutine[Any, Any, None]] | None = None
-        self._channel_event_callback: Callable[[ChannelEvent], Coroutine[Any, Any, None]] | None = None  # type: ignore[assignment]
+        self._channel_event_callback: Callable[[ChannelEvent], Coroutine[Any, Any, None]] | None = None
 
         self._attachment_downloader = DiscordAttachmentDownloader()
         self._history_fetcher: DiscordHistoryFetcher | None = None
@@ -112,9 +110,9 @@ class DiscordChannel(ChannelAdapter, SecurityMixin):
 
         try:
             await asyncio.wait_for(self._ready_event.wait(), timeout=30.0)
-        except TimeoutError:
+        except TimeoutError as exc:
             logger.error("Discord bot did not become ready within 30 seconds")
-            raise RuntimeError("Discord bot failed to connect in time")
+            raise RuntimeError("Discord bot failed to connect in time") from exc
 
         self._outbound_sender = DiscordOutboundSender(
             client=self._client,
