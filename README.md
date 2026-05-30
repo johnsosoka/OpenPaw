@@ -5,6 +5,7 @@
     <a href="https://github.com/johnsosoka/OpenPaw/actions/workflows/ci.yml"><img src="https://github.com/johnsosoka/OpenPaw/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
     <a href="https://github.com/johnsosoka/OpenPaw/actions/workflows/docs.yml"><img src="https://github.com/johnsosoka/OpenPaw/actions/workflows/docs.yml/badge.svg?branch=main" alt="Docs"></a>
     <img src="https://github.com/johnsosoka/OpenPaw/actions/workflows/ai-code-review.yml/badge.svg" alt="AI Code Review">
+    <a href="https://pypi.org/project/openpaw-ai/"><img src="https://img.shields.io/pypi/v/openpaw-ai" alt="PyPI"></a>
     <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
     <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-green" alt="License">
   </p>
