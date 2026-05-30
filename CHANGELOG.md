@@ -11,7 +11,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+### Removed
+
 ### Fixed
+
+## [0.4.1] - 2026-05-30
+
+### Added
+
+- `AGENTS.md` — comprehensive agent guidance covering release process, changelog standards, and coding standards.
+- PyPI badge added to README.
+- GitHub issue templates (bug report, feature request, documentation).
+- GitHub pull request template.
+- `SECURITY.md` — security policy and vulnerability reporting.
+- `CODE_OF_CONDUCT.md` — Contributor Covenant v2.1.
+- Release process documented in `AGENTS.md`.
+- Changelog standards documented in `AGENTS.md`.
+
+### Changed
+
+- `.gitignore` updated to include `*.sh`.
+- `CONTRIBUTING.md` updated to reference `AGENTS.md` and the `holding/*` branching model.
+- `README.md` refined as a first-class landing page with clearer install and quick-start instructions.
+- `pyproject.toml` updated with `Changelog` URL in `[project.urls]`.
+
+### Removed
+
+- `CLAUDE.md` consolidated into `AGENTS.md`.
+- `start.sh` local development script removed.
 
 ## [0.4.0] - 2026-05-29
 
@@ -54,4 +81,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Various race conditions in approval gate resolution and sub-agent cancellation.
 - Path traversal protection hardened across filesystem tools and inbound processors.
 
+[Unreleased]: https://github.com/johnsosoka/OpenPaw/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/johnsosoka/openpaw/releases/tag/v0.4.1
 [0.4.0]: https://github.com/johnsosoka/openpaw/releases/tag/v0.4.0

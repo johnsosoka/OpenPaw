@@ -7,7 +7,7 @@ This file guides AI agents working on the OpenPaw repository. It is the canonica
 OpenPaw is a multi-channel AI agent framework built on LangGraph (`create_react_agent`). Each agent runs in an isolated workspace with its own personality files, custom tools, scheduled tasks, and sandboxed filesystem access. Supports Telegram, Discord, and stdio channels with multi-provider LLM support.
 
 **PyPI:** `pip install openpaw-ai`  
-**Version:** 0.4.0 (pre-1.0, working towards stable 1.0.0)
+**Version:** 0.4.1 (pre-1.0, working towards stable 1.0.0)
 
 ---
 

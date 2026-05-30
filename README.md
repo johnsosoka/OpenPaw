@@ -13,7 +13,7 @@
 
 ---
 
-> **Pre-1.0 Release (0.4.0)** — OpenPaw is actively developed. The API may evolve as we work towards a stable 1.0.0 release. Contributions and feedback are welcome.
+> **Pre-1.0 Release** — OpenPaw is actively developed. The API may evolve as we work towards a stable 1.0.0 release. Contributions and feedback are welcome.
 
 OpenPaw gives each agent its own workspace -- personality files, custom tools, scheduled tasks -- then gets out of the way. It handles the orchestration so you can focus on what your agents actually do.
 
@@ -23,7 +23,7 @@ Agents can ingest documents, browse the web, search the internet, and manage the
 
 ## Highlights
 
-**First Class Document processing** -- Docling OCR/ICR turns scanned PDFs, DOCX, and PPTX into markdown automatically. Whisper transcribes voice messages on arrival.
+**First class document processing** -- Docling OCR/ICR turns scanned PDFs, DOCX, and PPTX into markdown automatically. Whisper transcribes voice messages on arrival.
 
 **Drop-in custom tools** -- Write a `@tool` function, put it in `agent/tools/`, restart. Your agent picks it up with zero wiring.
 
@@ -70,10 +70,12 @@ poetry install
 ### 2. Scaffold a workspace
 
 ```bash
-poetry run openpaw init my_agent \
+openpaw init my_agent \
   --model anthropic:claude-sonnet-4-20250514 \
   --channel telegram
 ```
+
+> When running from the project directory with Poetry, prefix commands with `poetry run`.
 
 ### 3. Configure
 
@@ -91,7 +93,7 @@ TELEGRAM_BOT_TOKEN=your-token-here
 ### 4. Run
 
 ```bash
-poetry run openpaw -c config.yaml -w my_agent
+openpaw -c config.yaml -w my_agent
 ```
 
 ## CLI Commands
@@ -107,7 +109,7 @@ poetry run openpaw -c config.yaml -w my_agent
 | `openpaw -c config.yaml --all` | Run all discovered workspaces |
 | `openpaw -c config.yaml -w <name> -v` | Run with verbose logging |
 
-All commands should be prefixed with `poetry run` when running from the project directory.
+All commands should be prefixed with `poetry run` when running from the project directory with Poetry.
 
 ## Agent Workspace Structure
 
@@ -172,13 +174,9 @@ Once running, agents respond to framework commands in chat:
 
 ## Contributing
 
-Development follows a GitFlow branching model:
+OpenPaw uses a branching model with `main` for stable releases, `develop` for integration, and `holding/<sprint-name>` branches for large efforts. Feature branches merge via pull request; AI code review and human approval are required for changes targeting `develop` or `holding/*`.
 
-- **`main`** -- Stable releases only. Protected branch, requires CI to pass.
-- **`develop`** -- Integration branch. Feature and bugfix PRs target `develop`.
-- **Feature branches** -- Branch from `develop` as `feature/`, `bugfix/`, `docs/`, or `chore/`.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and [AGENTS.md](AGENTS.md) for the canonical agent guide, release process, and coding standards.
 
 ## AI Code Review
 
@@ -195,4 +193,4 @@ Reviews run on every PR open and update. Results are posted as inline comments o
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE)
+OpenPaw is released under the [PolyForm Noncommercial 1.0.0](LICENSE) license. It is free for non-commercial use. Commercial licensing inquiries are welcome.
