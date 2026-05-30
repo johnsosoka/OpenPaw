@@ -1,6 +1,6 @@
 [project]
 name = "openpaw-ai"
-version = "0.4.0"
+version = "0.4.1"
 description = "OpenPaw - Multi-Channel AI Agent Framework with LangGraph"
 authors = [
     {name = "John Sosoka"}
@@ -53,6 +53,7 @@ Homepage = "https://johnsosoka.github.io/OpenPaw/"
 Repository = "https://github.com/johnsosoka/OpenPaw"
 Issues = "https://github.com/johnsosoka/OpenPaw/issues"
 Documentation = "https://johnsosoka.github.io/OpenPaw/"
+Changelog = "https://github.com/johnsosoka/OpenPaw/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # Optional builtins — install extras for specific capabilities
@@ -120,7 +121,7 @@ warn_unused_ignores = false
 
 [tool.poetry]
 name = "openpaw-ai"
-version = "0.4.0"
+version = "0.4.1"
 description = "OpenPaw - Multi-Channel AI Agent Framework with LangGraph"
 authors = ["John Sosoka"]
 packages = [{include = "openpaw"}]

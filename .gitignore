@@ -74,5 +74,4 @@ llm_memory/
 
 # Zip archives
 *.zip
-start.sh
 *.sh

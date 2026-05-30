@@ -2,7 +2,7 @@
 
 Thank you for your interest in contributing. OpenPaw is built with a strong emphasis on clean, readable, and maintainable code. Contributions that share that philosophy are welcome.
 
-Before diving in, it is worth reading through this guide and the [Architecture overview](docs/architecture.md) to understand how the system is structured and where new code belongs.
+Before diving in, read through this guide, the [Architecture overview](docs/architecture.md), and [AGENTS.md](AGENTS.md) — the canonical agent and developer guide covering release process, changelog standards, and coding conventions.
 
 ---
 
@@ -61,18 +61,14 @@ OpenPaw is organized into eight top-level packages:
 
 ## Development Workflow
 
-**Branching**
+**Branching model**
 
-Branch from `develop` using one of these prefixes:
+- **`main`** — Stable releases only. Protected branch; no direct pushes.
+- **`develop`** — Integration branch. Feature and bugfix PRs target `develop`.
+- **`holding/<sprint-name>`** — Integration branch for large efforts (refactors, sprints). Feature branches cut from `holding/*` and merge back via PR.
+- **`feature/<name>`**, **`bugfix/<name>`**, **`docs/<name>`**, **`chore/<name>`** — Branch from `develop` (small fixes) or `holding/<sprint-name>` (sprint work).
 
-```
-feature/short-description
-bugfix/short-description
-docs/short-description
-chore/short-description
-```
-
-Feature and bugfix branches are merged into `develop` via pull request. The `develop` branch is merged into `main` for releases.
+Feature and bugfix branches merge via pull request. AI code review and human approval are required for PRs targeting `develop` or `holding/*`. No direct pushes to `main`, `develop`, or `holding/*`.
 
 **Before submitting**
 
@@ -136,13 +132,15 @@ poetry run pytest -k "test_approval"
 
 ## Pull Request Process
 
-1. Fork the repository and create a branch from `develop`.
+1. Fork the repository and create a branch from `develop` (or `holding/<sprint-name>` for sprint work).
 2. Implement your change with tests.
 3. Run lint, type check, and tests locally — all must pass.
-4. Open a pull request against `develop`. Reference any related issue in the PR description.
+4. Open a pull request against `develop` (or `holding/<sprint-name>`). Reference any related issue in the PR description.
 5. Keep PRs focused: one feature or fix per PR. If your change is large, consider breaking it into a series of smaller PRs.
 
 PRs that introduce unnecessary complexity, skip tests, or deviate from the architectural conventions described above will be asked to revise before merge.
+
+For release procedures, see the release checklist in [AGENTS.md](AGENTS.md).
 
 ---
 
