@@ -118,6 +118,10 @@ strict = true
 ignore_missing_imports = true
 
 [tool.poetry]
+name = "openpaw-ai"
+version = "0.4.0"
+description = "OpenPaw - Multi-Channel AI Agent Framework with LangGraph"
+authors = ["John Sosoka"]
 packages = [{include = "openpaw"}]
 include = ["CHANGELOG.md"]
 
