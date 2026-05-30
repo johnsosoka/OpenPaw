@@ -22,6 +22,7 @@ class ChannelAdapter(ABC):
     """
 
     name: str = "base"
+    _channel_event_callback: Callable[["ChannelEvent"], Coroutine[Any, Any, None]] | None = None
 
     @abstractmethod
     async def start(self) -> None:

@@ -355,6 +355,47 @@ Discord free-tier bots have a 25 MB file size limit. Files exceeding this limit 
 
 ---
 
+## Stdio Channel
+
+The `stdio` channel is a zero-config local interface for testing and development. It reads from stdin and prints agent responses to stdout — no bot tokens, API keys, or external platform setup required.
+
+### Setup
+
+Add the channel to your workspace config:
+
+```yaml
+channel:
+  type: stdio
+```
+
+Or run with the default when no channel is configured. The `stdio` channel is the simplest way to test personality files, tools, and scheduling before connecting to Telegram or Discord.
+
+### Usage
+
+Start the workspace and type messages directly in your terminal:
+
+```bash
+poetry run openpaw -c config.yaml -w my-agent
+```
+
+```
+Hello, what can you do?
+[agent]: I can help with research, file operations, scheduling tasks, and more. What would you like to explore?
+```
+
+### Features
+
+- **File path detection** — Paste a file path (e.g., `./report.pdf`) and the channel automatically loads it as an attachment
+- **Approval gate support** — When a gated tool is requested, the channel prompts `Approve? [y/n]:` in the terminal
+- **Message splitting** — Long responses are automatically split at paragraph boundaries with `--- (continued) ---` separators
+- **EOF / empty line shutdown** — Press `Ctrl+D` or send an empty line to stop the channel gracefully
+
+### Session Keys
+
+Stdio session keys follow the format `"stdio:local_user"`.
+
+---
+
 ## Multi-Channel Configuration
 
 A single workspace can connect to multiple channels simultaneously, receiving messages from Telegram and Discord (or multiple bots of the same type) through a single agent.
@@ -794,7 +835,6 @@ Planned channel support:
 
 - **Slack** - Workspace integration with slash commands
 - **WhatsApp** - Direct messaging via WhatsApp Business API
-- **CLI** - Terminal-based interface for local testing
 - **HTTP** - REST API endpoint for custom integrations
 - **WebSocket** - Real-time web interface
 

@@ -1,7 +1,7 @@
 """Workspace initialization service for OpenPaw."""
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from openpaw.agent.metrics import TokenUsageLogger
 from openpaw.agent.middleware import (
@@ -403,7 +403,7 @@ class WorkspaceInitializer:
         """Get approval gates config from workspace or global."""
         if self._workspace.config and self._workspace.config.approval_gates:
             if self._workspace.config.approval_gates.enabled:
-                return self._workspace.config.approval_gates
+                return cast(ApprovalGatesConfig, self._workspace.config.approval_gates)
         if hasattr(self._config, "approval_gates") and self._config.approval_gates:
             if self._config.approval_gates.enabled:
                 return self._config.approval_gates
@@ -416,7 +416,7 @@ class WorkspaceInitializer:
             ToolTimeoutsConfig (always returns a valid config, uses defaults if not configured).
         """
         if self._workspace.config:
-            return self._workspace.config.tool_timeouts
+            return cast(ToolTimeoutsConfig, self._workspace.config.tool_timeouts)
         return self._config.tool_timeouts
 
     def _workspace_timezone(self) -> str:

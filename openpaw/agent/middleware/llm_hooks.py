@@ -16,9 +16,9 @@ Usage with create_agent:
 
 import logging
 import re
-from typing import Any
+from typing import Any, cast
 
-from langchain.agents.middleware.types import AgentMiddleware
+from langchain.agents.middleware.types import AgentMiddleware, AgentState
 from langchain_core.messages import AIMessage
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 THINKING_TAG_PATTERN = re.compile(r"<think>[\s\S]*?</think>\s*", re.IGNORECASE)
 
 
-def _sanitize_reasoning_content(state: dict[str, Any]) -> dict[str, Any]:
+def _sanitize_reasoning_content(state: AgentState[Any]) -> dict[str, Any]:
     """Strip reasoning_content from all AI messages in conversation history.
 
     Kimi K2.5 (and similar thinking models) populate a `reasoning_content`
@@ -58,10 +58,10 @@ def _sanitize_reasoning_content(state: dict[str, Any]) -> dict[str, Any]:
     if sanitized:
         logger.debug("Stripped reasoning_content from conversation history")
 
-    return state
+    return cast(dict[str, Any], state)
 
 
-def _strip_thinking_tokens(state: dict[str, Any]) -> dict[str, Any]:
+def _strip_thinking_tokens(state: AgentState[Any]) -> dict[str, Any]:
     """Strip thinking tokens from the last AI message (post-model hook).
 
     Removes <think>...</think> tags from string content and thinking-type
@@ -70,11 +70,11 @@ def _strip_thinking_tokens(state: dict[str, Any]) -> dict[str, Any]:
     """
     messages = state.get("messages", [])
     if not messages:
-        return state
+        return cast(dict[str, Any], state)
 
     last_message = messages[-1]
     if not isinstance(last_message, AIMessage):
-        return state
+        return cast(dict[str, Any], state)
 
     # Handle structured content (list of blocks)
     if isinstance(last_message.content, list):
@@ -90,7 +90,7 @@ def _strip_thinking_tokens(state: dict[str, Any]) -> dict[str, Any]:
         cleaned = THINKING_TAG_PATTERN.sub("", last_message.content)
         last_message.content = cleaned.strip()
 
-    return state
+    return cast(dict[str, Any], state)
 
 
 class ThinkingTokenMiddleware(AgentMiddleware):
@@ -104,14 +104,14 @@ class ThinkingTokenMiddleware(AgentMiddleware):
     and clean up reasoning artifacts from final responses.
     """
 
-    def before_model(self, state: dict[str, Any], runtime: Any) -> dict[str, Any] | None:
+    def before_model(self, state: AgentState[Any], runtime: Any) -> dict[str, Any] | None:
         """Strip reasoning_content from all AI messages before model call.
 
         Returns the mutated state for LangGraph to apply.
         """
         return _sanitize_reasoning_content(state)
 
-    def after_model(self, state: dict[str, Any], runtime: Any) -> dict[str, Any] | None:
+    def after_model(self, state: AgentState[Any], runtime: Any) -> dict[str, Any] | None:
         """Strip thinking tokens from the last AI message after model call.
 
         Returns the mutated state for LangGraph to apply.
@@ -139,10 +139,10 @@ def build_pre_model_hook(
     if not strip_reasoning:
         return None
 
-    def pre_model_hook(state: dict[str, Any]) -> dict[str, Any]:
+    def pre_model_hook(state: AgentState[Any]) -> dict[str, Any]:
         if strip_reasoning:
-            state = _sanitize_reasoning_content(state)
-        return state
+            return _sanitize_reasoning_content(state)
+        return cast(dict[str, Any], state)
 
     return pre_model_hook
 
@@ -167,9 +167,9 @@ def build_post_model_hook(
     if not strip_thinking:
         return None
 
-    def post_model_hook(state: dict[str, Any]) -> dict[str, Any]:
+    def post_model_hook(state: AgentState[Any]) -> dict[str, Any]:
         if strip_thinking:
-            state = _strip_thinking_tokens(state)
-        return state
+            return _strip_thinking_tokens(state)
+        return cast(dict[str, Any], state)
 
     return post_model_hook

@@ -5,15 +5,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from openpaw.channels.helpers import check_file_size, split_message
+from openpaw.channels.telegram.constants import MAX_FILE_SIZE, MAX_MESSAGE_LENGTH
 from openpaw.model.message import Message, MessageDirection
 
 logger = logging.getLogger(__name__)
-
-# Telegram maximum message length
-MAX_MESSAGE_LENGTH = 4096
-
-# Telegram file size limit
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 
 
 class TelegramOutboundSender:

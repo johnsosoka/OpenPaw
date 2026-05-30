@@ -21,6 +21,8 @@ Expected instance attributes (set by the adapter's __init__):
     workspace_name: str
 """
 
+from collections.abc import Callable
+
 from openpaw.channels.helpers.formatting import format_unauthorized_response
 
 
@@ -40,6 +42,7 @@ class SecurityMixin:
     mention_required: bool
     triggers: list[str]
     workspace_name: str
+    _passes_trigger_filter: Callable[[str, list[str]], bool]
 
     # --- Allowlist enforcement ---
 

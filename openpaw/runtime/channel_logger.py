@@ -3,8 +3,9 @@
 import json
 import logging
 import threading
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from openpaw.core.paths import CHANNEL_LOGS_DIR
 from openpaw.core.timezone import workspace_now
@@ -178,7 +179,7 @@ class ChannelLogger:
 
         return self._channel_logs_dir / server_dir / channel_dir / f"{date_str}.jsonl"
 
-    def _build_record(self, event: ChannelEvent) -> dict:
+    def _build_record(self, event: ChannelEvent) -> dict[str, Any]:
         """Convert a ChannelEvent into the compact JSONL record dict.
 
         Short keys are intentional — they reduce file size.
@@ -210,7 +211,7 @@ class ChannelLogger:
             return self._file_locks[path]
 
     @staticmethod
-    def _parse_date_from_filename(filename: str) -> "datetime.date | None":
+    def _parse_date_from_filename(filename: str) -> "date | None":
         """Extract the date from a YYYY-MM-DD.jsonl filename.
 
         Returns None if the filename does not match the expected pattern.
