@@ -46,24 +46,99 @@ main
 
 ### Release Process
 
-Tag-based releases with Trusted Publishing (OIDC):
+OpenPaw uses **semantic versioning** and **Keep a Changelog** format. Releases are tag-based with automated Trusted Publishing (OIDC) to PyPI.
+
+#### Release Checklist
+
+Before creating a release, the following **must** be complete:
+
+1. **Update `CHANGELOG.md`** — Add an `[Unreleased]` section or update the version-specific section. Every MR merged since the last release should be documented under the appropriate category:
+   - `Added` for new features
+   - `Changed` for changes in existing functionality
+   - `Deprecated` for soon-to-be removed features
+   - `Removed` for now removed features
+   - `Fixed` for bug fixes
+   - `Security` for vulnerability fixes
+
+2. **Update version in `pyproject.toml`** — Follow semver (e.g., `0.4.0` → `0.4.1` for patch, `0.5.0` for minor, `1.0.0` for major).
+
+3. **Run `scripts/sync_version.py`** — Ensure `openpaw/__init__.py` matches `pyproject.toml`:
+   ```bash
+   python scripts/sync_version.py
+   ```
+
+4. **Verify all tests pass** — `poetry run pytest` (2,969 tests expected).
+
+5. **Verify lint and type check** — `poetry run ruff check openpaw/` and `poetry run mypy openpaw/`.
+
+6. **Build and inspect** — `poetry build` then verify `dist/` contains wheel, sdist, CHANGELOG.md, and README.md.
+
+7. **Commit** — `git commit -m "release: bump version to X.Y.Z"`.
+
+8. **Create and push tag** — `git tag vX.Y.Z && git push origin vX.Y.Z`.
+
+#### Automated Release Pipeline
+
+Once the tag is pushed, GitHub Actions handles the rest:
 
 ```bash
-# Update version in pyproject.toml
-# Commit
-# Create and push tag — workflow handles the rest
-git tag v0.4.1
-git push origin v0.4.1
-
 # GitHub Actions automatically:
-# 1. Validates version matches pyproject.toml
-# 2. Runs tests, lint, mypy
+# 1. Validates version tag matches pyproject.toml
+# 2. Runs tests, lint, and mypy
 # 3. Builds wheel + sdist
 # 4. Publishes to TestPyPI
 # 5. Waits for manual approval (pypi-production environment)
 # 6. Publishes to production PyPI
-# 7. Creates GitHub release
+# 7. Creates GitHub release with changelog
 ```
+
+**Manual approval required** — Go to the GitHub Actions run and click "Approve and deploy" to publish to production PyPI.
+
+#### Post-Release
+
+1. **Verify PyPI** — `pip install openpaw-ai==X.Y.Z` in a fresh virtual environment.
+2. **Verify version** — `openpaw --version` should report `X.Y.Z`.
+3. **Update README badge** — Ensure the PyPI badge shows the new version.
+4. **Merge holding → develop → main** (if releasing from a holding branch).
+
+#### CHANGELOG Format
+
+Follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
+
+```markdown
+## [Unreleased]
+
+### Added
+- New feature or capability.
+
+### Changed
+- Change in existing functionality.
+
+### Fixed
+- Bug fix.
+
+## [X.Y.Z] - YYYY-MM-DD
+
+### Added
+- Specific feature added in this release.
+
+### Fixed
+- Specific bug fixed in this release.
+```
+
+**Categories** (use only if applicable):
+- `Added` — New features, capabilities, builtins, channels, or APIs.
+- `Changed` — Changes to existing functionality, behavior, or configuration.
+- `Deprecated` — Features marked for removal in a future release.
+- `Removed` — Features removed in this release.
+- `Fixed` — Bug fixes, race conditions, security issues, or type errors.
+- `Security` — Vulnerability fixes or security hardening.
+
+**Notes:**
+- Always maintain an `[Unreleased]` section at the top for work-in-progress.
+- Reference specific PRs or issues where possible: `- Fixed race condition in approval gate (#42)`.
+- Keep entries concise but descriptive — one line per change.
+- Do not repeat commit messages verbatim — summarize the user-visible impact.
 
 ---
 
