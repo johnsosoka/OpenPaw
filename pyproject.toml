@@ -116,6 +116,7 @@ select = ["E", "F", "I", "N", "W", "UP"]
 python_version = "3.11"
 strict = true
 ignore_missing_imports = true
+warn_unused_ignores = false
 
 [tool.poetry]
 name = "openpaw-ai"
