@@ -1,5 +1,5 @@
 [project]
-name = "openpaw"
+name = "openpaw-ai"
 version = "0.4.0"
 description = "OpenPaw - Multi-Channel AI Agent Framework with LangGraph"
 authors = [
@@ -118,6 +118,7 @@ strict = true
 ignore_missing_imports = true
 
 [tool.poetry]
+packages = [{include = "openpaw"}]
 include = ["CHANGELOG.md"]
 
 [tool.pytest.ini_options]

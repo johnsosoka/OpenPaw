@@ -1,28 +1,75 @@
 name: Publish to PyPI
 
+# This workflow publishes the package to PyPI when a version tag is pushed.
+# It includes a MANUAL APPROVAL GATE before publishing to production PyPI.
+#
+# Workflow Steps:
+# 1. Validate version tag matches pyproject.toml
+# 2. Run full test suite (linting, type checking, tests)
+# 3. Build package and verify with twine
+# 4. Publish to TestPyPI and verify installation
+# 5. PAUSE for manual approval (requires environment configuration)
+# 6. Publish to production PyPI (only after approval)
+#
+# OIDC Trusted Publishing:
+# This workflow uses OpenID Connect (OIDC) for secure authentication.
+# Configure Trusted Publishers on PyPI:
+# - PyPI: https://pypi.org/manage/account/publishing/
+# - TestPyPI: https://test.pypi.org/manage/account/publishing/
+#
+# Required PyPI Configuration:
+# - PyPI Project Name: openpaw-ai
+# - Owner: johnsosoka
+# - Repository name: OpenPaw
+# - Workflow name: publish.yml
+# - Environment name: pypi-production
+
 on:
-  release:
-    types: [published]
-  workflow_dispatch:
-    inputs:
-      repository:
-        description: "Target repository"
-        required: true
-        default: "pypi"
-        type: choice
-        options:
-          - pypi
-          - testpypi
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  id-token: write
 
 jobs:
-  publish:
-    name: Build & Publish
+  validate-version:
+    name: Validate Version Tag
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+      tag-version: ${{ steps.get-version.outputs.tag-version }}
     steps:
-      - name: Checkout
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag and pyproject.toml
+        id: get-version
+        run: |
+          # Get version from git tag (remove 'v' prefix)
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "tag-version=${TAG_VERSION}" >> "$GITHUB_OUTPUT"
+
+          # Get version from pyproject.toml
+          PROJECT_VERSION=$(grep -E '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "version=${PROJECT_VERSION}" >> "$GITHUB_OUTPUT"
+
+          echo "Tag version: ${TAG_VERSION}"
+          echo "Project version: ${PROJECT_VERSION}"
+
+          # Validate versions match
+          if [ "${TAG_VERSION}" != "${PROJECT_VERSION}" ]; then
+            echo "ERROR: Tag version (${TAG_VERSION}) does not match pyproject.toml version (${PROJECT_VERSION})"
+            exit 1
+          fi
+
+  test:
+    name: Run Full Test Suite
+    runs-on: ubuntu-latest
+    needs: validate-version
+    steps:
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up Python 3.12
@@ -31,19 +78,126 @@ jobs:
           python-version: "3.12"
 
       - name: Install Poetry
-        run: pipx install poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 1.8.5
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install --no-interaction
+
+      - name: Run linting
+        run: poetry run ruff check openpaw/
+
+      - name: Run type checking
+        run: poetry run mypy openpaw/
+
+      - name: Run tests
+        run: poetry run pytest
+
+  build:
+    name: Build Package
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 1.8.5
 
       - name: Build package
         run: poetry build
 
-      - name: Publish to PyPI
-        if: github.event_name == 'release' || inputs.repository == 'pypi'
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Verify package contents
+        run: |
+          poetry run pip install twine
+          poetry run twine check dist/*
+
+          echo "Built packages:"
+          ls -lh dist/
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
         with:
-          repository-url: https://upload.pypi.org/legacy/
+          name: dist-packages
+          path: dist/
+          retention-days: 30
+
+  publish-test-pypi:
+    name: Publish to TestPyPI
+    runs-on: ubuntu-latest
+    needs: [validate-version, build]
+    environment:
+      name: pypi-test
+      url: https://test.pypi.org/project/openpaw-ai/
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-packages
+          path: dist/
 
       - name: Publish to TestPyPI
-        if: github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+          verbose: true
+
+      - name: Wait for package availability on TestPyPI
+        run: |
+          echo "Waiting 60 seconds for package to be available on TestPyPI..."
+          sleep 60
+
+      - name: Test installation from TestPyPI
+        env:
+          VERSION: ${{ needs.validate-version.outputs.version }}
+        run: |
+          python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ "openpaw-ai==${VERSION}"
+          python -c "import openpaw; print(f'Successfully imported openpaw version {openpaw.__version__}')"
+
+  publish-pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [validate-version, publish-test-pypi]
+    # MANUAL APPROVAL GATE: This job uses the 'pypi-production' environment
+    # which requires manual approval before publishing to production PyPI.
+    #
+    # To configure the approval gate in GitHub:
+    # 1. Go to: Settings → Environments → New environment
+    # 2. Create environment named: "pypi-production"
+    # 3. Enable "Required reviewers" and add repo maintainers
+    # 4. Save protection rules
+    environment:
+      name: pypi-production
+      url: https://pypi.org/project/openpaw-ai/
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-packages
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          verbose: true
+
+      - name: Announce release
+        env:
+          VERSION: ${{ needs.validate-version.outputs.version }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          echo "Successfully published openpaw-ai v${VERSION} to PyPI"
+          echo "PyPI: https://pypi.org/project/openpaw-ai/${VERSION}/"
+          echo "GitHub Release: ${REPO_URL}/releases/tag/${TAG_NAME}"

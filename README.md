@@ -55,7 +55,7 @@ Agents can ingest documents, browse the web, search the internet, and manage the
 ### 1. Install
 
 ```bash
-pip install openpaw
+pip install openpaw-ai
 ```
 
 For development from source:
