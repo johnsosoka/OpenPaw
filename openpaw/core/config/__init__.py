@@ -13,23 +13,26 @@ from openpaw.core.config.loader import (
     load_config,
     merge_configs,
 )
-from openpaw.core.config.models import (
+from openpaw.core.config.models.base import (
     AgentConfig,
-    ApprovalGatesConfig,
-    BuiltinItemConfig,
-    BuiltinsConfig,
     Config,
-    CronBuiltinConfig,
-    DoclingBuiltinConfig,
-    HeartbeatConfig,
     LaneConfig,
     LoggingConfig,
     ProviderDefinition,
     QueueConfig,
+)
+from openpaw.core.config.models.builtin import (
+    BuiltinItemConfig,
+    BuiltinsConfig,
+    CronBuiltinConfig,
+    DoclingBuiltinConfig,
     SendFileBuiltinConfig,
-    ToolApprovalConfig,
     WorkspaceBuiltinsConfig,
-    WorkspaceChannelConfig,
+)
+from openpaw.core.config.models.channel import WorkspaceChannelConfig
+from openpaw.core.config.models.cron import HeartbeatConfig
+from openpaw.core.config.models.security import ApprovalGatesConfig, ToolApprovalConfig
+from openpaw.core.config.models.workspace import (
     WorkspaceConfig,
     WorkspaceModelConfig,
     WorkspaceQueueConfig,

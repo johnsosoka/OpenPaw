@@ -10,9 +10,10 @@ This guide walks through installing OpenPaw, creating your first agent workspace
 
 - **Python 3.11+**
 - **Poetry 2.0+** for dependency management ([installation guide](https://python-poetry.org/docs/#installation))
-- **At least one channel bot token:**
-  - Telegram ([create via BotFather](https://core.telegram.org/bots#botfather))
-  - Discord ([create via Developer Portal](https://discord.com/developers/applications))
+- **A channel (choose one):**
+  - **Stdio** — Zero-config terminal channel, no tokens needed (great for testing)
+  - **Telegram** — Bot token from [@BotFather](https://core.telegram.org/bots#botfather)
+  - **Discord** — Bot token from [Developer Portal](https://discord.com/developers/applications)
 - **At least one model provider credential:**
   - Anthropic API key ([get one here](https://console.anthropic.com/))
   - OpenAI API key ([get one here](https://platform.openai.com/api-keys))
@@ -145,6 +146,7 @@ This creates `agent_workspaces/my_agent/` with all required files:
 | `agent/USER.md` | User context and preferences |
 | `agent/SOUL.md` | Core personality and values |
 | `agent/HEARTBEAT.md` | Session state scratchpad |
+| `agent/team/` | Spawn profiles for sub-agents (pre-populated with defaults) |
 | `config/agent.yaml` | Model, channel, and queue config |
 | `config/.env` | API key placeholders |
 
@@ -232,7 +234,15 @@ requests>=2.31.0
 
 Dependencies are auto-installed at workspace startup.
 
-### 5. Optional: Scheduled Tasks
+### 5. Optional: Spawn Profiles
+
+The `agent/team/` directory is pre-populated with default sub-agent profiles when you run `openpaw init`. These YAML files define specialized personas the main agent can spawn as background workers using the `spawn` builtin. Each profile specifies a system prompt, allowed tools, and optional model overrides.
+
+You can edit existing profiles or create new ones. The `spawn` builtin lets the agent delegate independent tasks — such as research or file processing — to these profiles while remaining responsive to you.
+
+See [Builtins](builtins.md) and [Workspaces](workspaces.md) for the full spawn profile format and sub-agent behavior.
+
+### 6. Optional: Scheduled Tasks
 
 Create cron jobs in `config/crons/` directory:
 
@@ -260,19 +270,33 @@ See [scheduling.md](scheduling.md) for detailed configuration.
 
 ## Running Your Agent
 
-### 1. Single Workspace
+### 1. Quick Start with Stdio (No Tokens Required)
+
+The fastest way to test OpenPaw without setting up Telegram or Discord:
+
+```bash
+# Scaffold a workspace with stdio channel
+poetry run openpaw init my_agent --model anthropic:claude-sonnet-4-20250514 --channel stdio
+
+# Run it
+poetry run openpaw -c config.yaml -w my-agent
+```
+
+Type messages directly in your terminal. The agent responds to stdout. Press `Ctrl+D` or send an empty line to stop.
+
+### 2. Single Workspace (Telegram / Discord)
 
 ```bash
 poetry run openpaw -c config.yaml -w my-agent
 ```
 
-### 2. Multiple Workspaces
+### 3. Multiple Workspaces
 
 ```bash
 poetry run openpaw -c config.yaml -w agent1,agent2
 ```
 
-### 3. All Workspaces
+### 4. All Workspaces
 
 ```bash
 # Either syntax works
@@ -280,7 +304,7 @@ poetry run openpaw -c config.yaml --all
 poetry run openpaw -c config.yaml -w "*"
 ```
 
-### 4. Verbose Logging
+### 5. Verbose Logging
 
 ```bash
 poetry run openpaw -c config.yaml -w my-agent -v

@@ -1,0 +1,31 @@
+default_stages: [commit]
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^(openpaw|tests)/
+      - id: ruff-format
+        files: ^(openpaw|tests)/
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.19.1
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - pydantic>=2.12.5
+          - pytest>=9.0.2
+          - types-PyYAML
+        files: ^openpaw/
+        args: [--ignore-missing-imports]
+
+  - repo: local
+    hooks:
+      - id: sync-version
+        name: Check version sync
+        entry: python scripts/sync_version.py --check
+        language: system
+        pass_filenames: false
+        always_run: true

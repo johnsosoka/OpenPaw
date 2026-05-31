@@ -13,9 +13,9 @@ StatusReminderMiddleware wraps it in the AgentMiddleware protocol.
 """
 
 import logging
-from typing import Any
+from typing import Any, cast
 
-from langchain.agents.middleware.types import AgentMiddleware
+from langchain.agents.middleware.types import AgentMiddleware, AgentState
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 logger = logging.getLogger(__name__)
@@ -107,7 +107,7 @@ class StatusReminderDetector:
         self._turns_since_last_reminder = self._cooldown_turns
 
 
-def inject_framework_instruction(state: dict[str, Any], instruction: str) -> dict[str, Any]:
+def inject_framework_instruction(state: AgentState[Any], instruction: str) -> dict[str, Any]:
     """Prepend a framework instruction to the last suitable message in state.
 
     Walks backward through state["messages"] looking for the last ToolMessage
@@ -128,13 +128,16 @@ def inject_framework_instruction(state: dict[str, Any], instruction: str) -> dic
     for i in range(len(messages) - 1, -1, -1):
         msg = messages[i]
         if isinstance(msg, ToolMessage | HumanMessage):
-            messages[i] = msg.model_copy(update={"content": prefix + (msg.content or "")})
+            content = msg.content or ""
+            if isinstance(content, list):
+                content = "\n".join(str(c) for c in content)
+            messages[i] = msg.model_copy(update={"content": prefix + content})
             state["messages"] = messages
             logger.debug("Injected framework instruction into %s", type(msg).__name__)
-            return state
+            return cast(dict[str, Any], state)
 
     logger.debug("inject_framework_instruction: no suitable message found, state unchanged")
-    return state
+    return cast(dict[str, Any], state)
 
 
 class StatusReminderMiddleware(AgentMiddleware):
@@ -164,7 +167,7 @@ class StatusReminderMiddleware(AgentMiddleware):
         )
 
     def before_model(
-        self, state: dict[str, Any], runtime: Any
+        self, state: AgentState[Any], runtime: Any
     ) -> dict[str, Any] | None:
         """Inject reminder into state if detector gates are all open.
 
@@ -186,7 +189,7 @@ class StatusReminderMiddleware(AgentMiddleware):
         return inject_framework_instruction(state, reminder)
 
     def after_model(
-        self, state: dict[str, Any], runtime: Any
+        self, state: AgentState[Any], runtime: Any
     ) -> dict[str, Any] | None:
         """Inspect tool_calls in the latest AIMessage and record the turn.
 

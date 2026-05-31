@@ -189,7 +189,7 @@ class LaneQueue:
         """
         lane = self.get_lane(lane_name)
         async with lane._lock:
-            remaining = deque()
+            remaining: deque[QueueItem] = deque()
             consumed = []
             for item in lane.queue:
                 if item.session_key == session_key:

@@ -9,6 +9,8 @@ from openpaw.model.message import Message
 if TYPE_CHECKING:
     from openpaw.model.channel import ChannelEvent, ChannelHistoryEntry
 
+__all__ = ["ChannelAdapter", "Message"]
+
 
 class ChannelAdapter(ABC):
     """Abstract base class for channel adapters.
@@ -20,6 +22,7 @@ class ChannelAdapter(ABC):
     """
 
     name: str = "base"
+    _channel_event_callback: Callable[["ChannelEvent"], Coroutine[Any, Any, None]] | None = None
 
     @abstractmethod
     async def start(self) -> None:
@@ -174,6 +177,23 @@ class ChannelAdapter(ABC):
         raise NotImplementedError(
             f"Channel '{type(self).__name__}' does not support file sending"
         )
+
+    def on_approval(
+        self, callback: Callable[[str, bool], Coroutine[Any, Any, None]]
+    ) -> None:
+        """Register a callback for approval resolutions.
+
+        Called by the framework when the user approves or denies a gated tool
+        call. Channel implementations that support interactive approval UI
+        (e.g., inline keyboards) should override this to wire their event
+        handler to the framework callback.
+
+        Default implementation is a no-op for channels without approval support.
+
+        Args:
+            callback: Async function receiving (approval_id: str, approved: bool).
+        """
+        pass
 
     async def send_approval_request(
         self,

@@ -92,8 +92,8 @@ The `delivery` field controls where cron results go:
 - **`channel`** (default) — Sends the agent's response directly to the configured channel
 - **`agent`** — Injects the cron output into the main agent's message queue as a `[SYSTEM]` event. The main agent receives a notification with the session log path so it can read the full output.
 
-!!! note "The `both` option was removed"
-    Previous versions supported `delivery: both`. Use `delivery: channel` for direct output, or `delivery: agent` to inject results into the main agent's queue as a `[SYSTEM]` event. When using `agent` delivery, the main agent can call `acknowledge_event` to silently acknowledge routine results without messaging the user.
+!!! note "Delivery modes"
+    Use `delivery: channel` for direct output, `delivery: agent` to inject results into the main agent's queue as a `[SYSTEM]` event, or `delivery: both` to do both simultaneously. When using `agent` delivery, the main agent can call `acknowledge_event` to silently acknowledge routine results without messaging the user.
 
 ```yaml
 # Route output to the main agent instead of the channel
@@ -101,6 +101,14 @@ output:
   channel: telegram
   chat_id: 123456789
   delivery: agent
+```
+
+```yaml
+# Send to channel AND inject into the main agent's queue
+output:
+  channel: telegram
+  chat_id: 123456789
+  delivery: both
 ```
 
 ### Static Cron Job Examples
@@ -455,13 +463,22 @@ The `delivery` field controls where heartbeat results go:
 - **`channel`** (default) — Sends the agent's response directly to the configured channel
 - **`agent`** — Injects the heartbeat output into the main agent's message queue as a `[SYSTEM]` event, with a reference to the full session log file
 
-!!! note "The `both` option was removed"
-    Previous versions supported `delivery: both`. Use `delivery: channel` for direct output, or `delivery: agent` to inject results into the main agent's queue as a `[SYSTEM]` event. When using `agent` delivery, the main agent can call `acknowledge_event` to silently acknowledge routine results without messaging the user.
+!!! note "Delivery modes"
+    Use `delivery: channel` for direct output, `delivery: agent` to inject results into the main agent's queue as a `[SYSTEM]` event, or `delivery: both` to do both simultaneously. When using `agent` delivery, the main agent can call `acknowledge_event` to silently acknowledge routine results without messaging the user.
 
 ```yaml
 # Deliver heartbeat output to the main agent's queue
 heartbeat:
   delivery: agent
+  output:
+    channel: telegram
+    chat_id: 123456789
+```
+
+```yaml
+# Send to channel AND inject into the main agent's queue
+heartbeat:
+  delivery: both
   output:
     channel: telegram
     chat_id: 123456789

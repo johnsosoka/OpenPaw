@@ -55,6 +55,10 @@ def create_channel(
             triggers=config.get("triggers", []),
             workspace_name=workspace_name,
         )
+    elif channel_type == "stdio":
+        from openpaw.channels.stdio import StdioChannel
+
+        adapter = StdioChannel(workspace_name=workspace_name)
     else:
         raise ValueError(f"Unsupported channel type: {channel_type}")
 

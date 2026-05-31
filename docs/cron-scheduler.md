@@ -70,7 +70,13 @@ Common Schedules:
 output:
   channel: telegram
   chat_id: 123456789  # Telegram user ID or group ID
+  delivery: channel   # channel (default), agent, or both
 ```
+
+**delivery** - Where to send results:
+- `channel` (default) — Sends directly to the configured channel
+- `agent` — Injects into the main agent's message queue as a `[SYSTEM]` event
+- `both` — Sends to the channel AND injects into the agent queue
 
 To get a Telegram chat ID:
 - User ID: Message [@userinfobot](https://t.me/userinfobot)
@@ -169,10 +175,16 @@ heartbeat:
   interval_minutes: 30           # How often to check in
   active_hours: "09:00-17:00"    # Only run during these hours (optional)
   suppress_ok: true              # Don't send message if agent responds "HEARTBEAT_OK"
+  delivery: channel              # channel (default), agent, or both
   output:
     channel: telegram
     chat_id: 123456789
 ```
+
+**delivery** - Where to send results:
+- `channel` (default) — Sends directly to the configured channel
+- `agent` — Injects into the main agent's message queue as a `[SYSTEM]` event
+- `both` — Sends to the channel AND injects into the agent queue
 
 ### HEARTBEAT_OK Protocol
 

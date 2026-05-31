@@ -1,7 +1,7 @@
 """Lifecycle management for WorkspaceRunner components."""
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -31,11 +31,11 @@ class LifecycleManager:
         config: Config,
         queue_manager: QueueManager,
         message_handler: Callable[[Message], Awaitable[None]],
-        queue_handler: Callable[[str, list[Message]], Awaitable[None]],
+        queue_handler: Callable[[str, list[Any]], Coroutine[Any, Any, None]],
         builtin_loader: BuiltinLoader,
         workspace_timezone: str,
         session_manager: SessionManager,
-        approval_handler: Callable[[str, bool], Awaitable[None]],
+        approval_handler: Callable[[str, bool], Coroutine[Any, Any, None]],
         logger: logging.Logger,
         result_callback: Callable[[str, str], Awaitable[None]] | None = None,
     ):
@@ -86,7 +86,7 @@ class LifecycleManager:
         Raises:
             ValueError: If channel configuration is invalid or names conflict.
         """
-        channel_configs: list[dict] = self._merged_config.get("channels", [])
+        channel_configs: list[dict[str, Any]] = self._merged_config.get("channels", [])
         if not channel_configs:
             raise ValueError(
                 f"Workspace '{self._workspace_name}' must define at least one channel in agent.yaml"
@@ -106,8 +106,9 @@ class LifecycleManager:
                 )
             seen_names.add(channel_name)
 
+            # Token required for bot-based channels; stdio does not need one
             token = channel_config.get("token")
-            if not token:
+            if channel_type in ("telegram", "discord") and not token:
                 raise ValueError(
                     f"Workspace '{self._workspace_name}': channel '{channel_name}' must define a token"
                 )
@@ -131,7 +132,7 @@ class LifecycleManager:
 
         return self._channels
 
-    def _log_channel_security(self, channel_name: str, config: dict) -> None:
+    def _log_channel_security(self, channel_name: str, config: dict[str, Any]) -> None:
         """Log security mode for a channel."""
         allow_all = config.get("allow_all", False)
         allowed_users = config.get("allowed_users", [])
@@ -207,8 +208,7 @@ class LifecycleManager:
 
         # Connect approval callback to channels
         for channel in self._channels.values():
-            if hasattr(channel, "on_approval"):
-                channel.on_approval(self._approval_handler)
+            channel.on_approval(self._approval_handler)
 
     async def stop_channels(self) -> None:
         """Stop all configured channels."""

@@ -3,6 +3,7 @@
 import logging
 import re
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -219,7 +220,7 @@ def _load_profile(profile_path: Path, source: str) -> SpawnProfile:
         ValueError: If required coercions fail (e.g. temperature not numeric).
     """
     raw = profile_path.read_text(encoding="utf-8")
-    data: dict = yaml.safe_load(raw) or {}
+    data: dict[str, Any] = yaml.safe_load(raw) or {}
 
     unknown_keys = set(data) - _KNOWN_KEYS
     if unknown_keys:
@@ -281,6 +282,13 @@ def _optional_float(value: object, source: Path) -> float | None:
     """Coerce *value* to float, logging a warning and returning None on failure."""
     if value is None:
         return None
+    if not isinstance(value, (str, int, float)):
+        logger.warning(
+            "Spawn profile %s: 'temperature' must be numeric — ignoring value %r",
+            source.name,
+            value,
+        )
+        return None
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -295,6 +303,13 @@ def _optional_float(value: object, source: Path) -> float | None:
 def _optional_int(value: object, source: Path) -> int | None:
     """Coerce *value* to int, logging a warning and returning None on failure."""
     if value is None:
+        return None
+    if not isinstance(value, (str, int, float)):
+        logger.warning(
+            "Spawn profile %s: integer field received non-integer value %r — ignoring",
+            source.name,
+            value,
+        )
         return None
     try:
         return int(value)

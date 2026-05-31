@@ -199,6 +199,7 @@ def _is_package_installed(package_name: str) -> bool:
         distribution(package_name)
         return True
     except Exception:
+        logger.debug("Failed to check package %s via importlib.metadata", package_name, exc_info=True)
         return False
 
 

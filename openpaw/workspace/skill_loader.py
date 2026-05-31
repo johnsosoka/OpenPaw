@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -215,7 +216,7 @@ def _load_skill(skill_dir: Path, skill_file: Path) -> SkillInfo:
     )
 
 
-def _parse_frontmatter(text: str) -> tuple[dict, str]:
+def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     """Extract YAML frontmatter and body content from a markdown string.
 
     Frontmatter is an optional YAML block at the very start of the file,

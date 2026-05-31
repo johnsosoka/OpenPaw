@@ -202,7 +202,7 @@ class TaskStore:
 
         if len(matches) == 1:
             logger.info(f"Resolved task ID prefix '{task_id}' to '{matches[0]}'")
-            return matches[0]
+            return str(matches[0])
 
         if len(matches) > 1:
             logger.warning(f"Ambiguous task ID prefix '{task_id}': matches {len(matches)} tasks")

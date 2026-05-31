@@ -440,7 +440,7 @@ class TestAgentFactoryProviderCatalog:
         create_chat_model`` inside the function body, so we intercept by
         replacing the attribute on the source module before the call.
         """
-        import openpaw.agent.runner as runner_mod
+        import openpaw.agent.model_factory as model_factory_mod
 
         catalog = _make_catalog(
             moonshot={"type": "openai", "api_key": "catalog-key", "base_url": "https://api.moonshot.ai/v1"}
@@ -453,12 +453,12 @@ class TestAgentFactoryProviderCatalog:
             captured_args.append(args)
             return MagicMock()
 
-        original = runner_mod.create_chat_model
-        runner_mod.create_chat_model = fake_create_chat_model
+        original = model_factory_mod.create_chat_model
+        model_factory_mod.create_chat_model = fake_create_chat_model
         try:
             valid, msg = factory.validate_model("moonshot:kimi-k2.5")
         finally:
-            runner_mod.create_chat_model = original
+            model_factory_mod.create_chat_model = original
 
         assert valid is True
         assert len(captured_args) == 1
