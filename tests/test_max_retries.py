@@ -2,7 +2,7 @@
 
 from unittest.mock import Mock, patch
 
-from openpaw.agent.model_factory import create_chat_model
+from openpaw.agent.runner import create_chat_model
 from openpaw.core.config.models import WorkspaceModelConfig
 
 # ---------------------------------------------------------------------------
