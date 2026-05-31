@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import re
 import time
 from typing import Any
 
@@ -9,19 +10,215 @@ from langchain.agents import create_agent
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.language_models import BaseChatModel
 
-from openpaw.agent.builder import AgentBuilder
+from openpaw.agent.metrics import InvocationMetrics, extract_metrics_from_callback
 from openpaw.agent.middleware.approval import ApprovalRequiredError
+from openpaw.agent.middleware.llm_hooks import THINKING_TAG_PATTERN, ThinkingTokenMiddleware
 from openpaw.agent.middleware.queue_aware import InterruptSignalError
-from openpaw.agent.model_factory import THINKING_MODELS
-from openpaw.agent.response_processor import ResponseProcessor
 from openpaw.agent.tools.filesystem import FilesystemTools
 from openpaw.core.prompts.system_events import (
     TIMEOUT_NOTIFICATION_GENERIC,
     TIMEOUT_NOTIFICATION_TEMPLATE,
 )
+from openpaw.core.timezone import workspace_now
 from openpaw.core.workspace import AgentWorkspace
 
 logger = logging.getLogger(__name__)
+
+# Surface retry diagnostics from provider SDKs.
+# OpenAI SDK logs "Retrying request to %s in %f seconds" at INFO.
+# Anthropic SDK logs similar messages at INFO.
+logging.getLogger("openai._base_client").setLevel(logging.INFO)
+logging.getLogger("anthropic._base_client").setLevel(logging.INFO)
+
+# Models known to produce thinking tokens
+THINKING_MODELS = [
+    "moonshot.kimi-k2-thinking",
+    "moonshotai.kimi-k2.5",
+    "kimi-k2-thinking",
+    "kimi-thinking",
+    "kimi-k2.5",
+]
+
+# Bedrock tool name validation pattern (AWS requirement)
+BEDROCK_TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+MAX_TOOL_NAME_LENGTH = 64
+
+
+def create_chat_model(
+    model_str: str,
+    api_key: str | None,
+    temperature: float,
+    region: str | None = None,
+    extra_kwargs: dict[str, Any] | None = None,
+) -> BaseChatModel:
+    """Create a chat model from a provider:model string.
+
+    Standalone function usable by both AgentRunner and model validation.
+
+    Args:
+        model_str: Model identifier in "provider:model" format.
+        api_key: API key for the model provider (not used for Bedrock).
+        temperature: Model temperature setting.
+        region: AWS region for Bedrock models (e.g., us-east-1).
+        extra_kwargs: Additional kwargs to pass to the model constructor
+            (e.g., base_url for OpenAI-compatible APIs, max_retries for retry config).
+
+    Returns:
+        Configured BaseChatModel instance. For Fireworks, returns a
+        RunnableRetry wrapper when max_retries > 0 (the Fireworks SDK does not
+        implement native retry). Callers that need model attribute access (e.g.
+        ``profile``) should hold a reference to the raw model separately — see
+        ``AgentRunner._build_agent()`` for the established pattern.
+
+    Raises:
+        ValueError: If provider is not supported.
+    """
+    # Parse provider from model_str (format: "provider:model_name")
+    if ":" in model_str:
+        provider, model_name = model_str.split(":", 1)
+    else:
+        provider = "openai"
+        model_name = model_str
+
+    # Build kwargs common to all providers
+    kwargs: dict[str, Any] = {
+        "model": model_name,
+        "temperature": temperature,
+    }
+
+    # Merge extra kwargs from config (base_url, model_kwargs, extra_body, etc.)
+    if extra_kwargs:
+        kwargs.update(extra_kwargs)
+
+    # Extract max_retries before merging into provider kwargs.
+    # Different providers require different handling (see per-provider logic below).
+    max_retries: int | None = kwargs.pop("max_retries", 3)
+    effective_retries = max_retries if (max_retries and max_retries > 0) else 0
+
+    # Flatten model_kwargs into direct constructor args so that params like
+    # extra_body reach the provider class directly instead of being silently dropped
+    nested_model_kwargs = kwargs.pop("model_kwargs", None)
+    if nested_model_kwargs and isinstance(nested_model_kwargs, dict):
+        kwargs.update(nested_model_kwargs)
+
+    if provider == "openai":
+        from langchain_openai import ChatOpenAI
+
+        if api_key:
+            kwargs["api_key"] = api_key
+        if effective_retries > 0:
+            kwargs["max_retries"] = effective_retries
+            logger.info(f"Creating ChatOpenAI: model={model_name}, max_retries={effective_retries}")
+        else:
+            logger.info(f"Creating ChatOpenAI: model={model_name}, kwargs={list(kwargs.keys())}")
+        return ChatOpenAI(**kwargs)
+
+    if provider == "anthropic":
+        from langchain_anthropic import ChatAnthropic
+
+        if api_key:
+            kwargs["api_key"] = api_key
+        if effective_retries > 0:
+            kwargs["max_retries"] = effective_retries
+            logger.info(f"Creating ChatAnthropic: model={model_name}, max_retries={effective_retries}")
+        else:
+            logger.info(f"Creating ChatAnthropic: model={model_name}")
+        return ChatAnthropic(**kwargs)
+
+    if provider in ("bedrock_converse", "bedrock"):
+        from langchain_aws import ChatBedrockConverse
+
+        if region:
+            kwargs["region_name"] = region
+        # Bedrock uses AWS credentials, not api_key.
+        # boto3 manages its own retry strategy — do not pass max_retries.
+        kwargs.pop("api_key", None)
+        logger.info(f"Creating ChatBedrockConverse: model={model_name}, kwargs_keys={list(kwargs.keys())}")
+        return ChatBedrockConverse(**kwargs)
+
+    if provider == "xai":
+        from langchain_xai import ChatXAI
+
+        if api_key:
+            kwargs["xai_api_key"] = api_key
+        if effective_retries > 0:
+            kwargs["max_retries"] = effective_retries
+            logger.info(f"Creating ChatXAI: model={model_name}, max_retries={effective_retries}")
+        else:
+            logger.info(f"Creating ChatXAI: model={model_name}")
+        return ChatXAI(**kwargs)
+
+    if provider == "fireworks":
+        import httpx
+        import tenacity
+        from fireworks.client.error import FireworksError, InvalidRequestError, RateLimitError
+        from langchain_fireworks import ChatFireworks
+
+        if api_key:
+            kwargs["fireworks_api_key"] = api_key
+        logger.info(f"Creating ChatFireworks: model={model_name}")
+        model = ChatFireworks(**kwargs)
+
+        # The Fireworks SDK's _max_retries is a no-op — patch _agenerate with
+        # tenacity for real retry behavior.  This preserves bind_tools() and all
+        # model attributes (unlike .with_retry() which wraps the entire Runnable).
+        #
+        # Fireworks changed their rate limit error format (Apr 2025): the code
+        # field shifted from "too_many_requests" (transient overload) to
+        # "invalid_request_error" (hard rate limit).  Hard rate limits need much
+        # longer backoff than transient 5xx errors, so we use a composite wait
+        # strategy that applies longer delays specifically for RateLimitError.
+        if effective_retries > 0:
+            # Use more attempts for Fireworks — the default of 3 is too few when
+            # multiple workspaces share one API key (rate limits may need 30-60s
+            # to clear, and 3 retries only yields ~8s total backoff).
+            fireworks_attempts = max(effective_retries, 6)
+            logger.info(
+                f"Patching ChatFireworks._agenerate with retry "
+                f"(max_attempts={fireworks_attempts + 1}, effective_retries={effective_retries})"
+            )
+            original_agenerate = model._agenerate
+
+            def _is_retryable_fireworks_error(exc: BaseException) -> bool:
+                if isinstance(exc, InvalidRequestError):
+                    msg = str(exc).lower()
+                    if "prompt is too long" in msg or "maximum context length" in msg:
+                        return False
+                return isinstance(
+                    exc,
+                    httpx.HTTPStatusError
+                    | httpx.ConnectError
+                    | httpx.ReadTimeout
+                    | ConnectionError
+                    | TimeoutError
+                    | FireworksError,
+                )
+
+            def _fireworks_wait(retry_state: tenacity.RetryCallState) -> float:
+                """Rate-limit-aware backoff: longer delays for RateLimitError."""
+                exc = retry_state.outcome.exception() if retry_state.outcome and retry_state.outcome.failed else None
+                if isinstance(exc, RateLimitError):
+                    return tenacity.wait_exponential_jitter(initial=5, max=120)(retry_state)
+                return tenacity.wait_exponential_jitter(initial=1, max=60)(retry_state)
+
+            @tenacity.retry(
+                retry=tenacity.retry_if_exception(_is_retryable_fireworks_error),
+                stop=tenacity.stop_after_attempt(fireworks_attempts + 1),
+                wait=_fireworks_wait,
+                before_sleep=tenacity.before_sleep_log(logger, logging.WARNING),
+                reraise=True,
+            )
+            async def _agenerate_with_retry(*args: Any, **kw: Any) -> Any:
+                return await original_agenerate(*args, **kw)
+
+            model._agenerate = _agenerate_with_retry  # type: ignore[method-assign]
+
+        return model
+
+    raise ValueError(
+        f"Unsupported model provider: '{provider}'. "
+        f"Supported: openai, anthropic, bedrock_converse, xai, fireworks"
+    )
 
 
 class AgentRunner:
@@ -31,7 +228,7 @@ class AgentRunner:
     - Workspace-based system prompts (AGENT.md, USER.md, SOUL.md, HEARTBEAT.md)
     - Sandboxed filesystem access for workspace operations
     - LangGraph checkpointing for multi-turn conversations
-    - Automatic stripping of model thinking tokens (<thinking>...</thinking>)
+    - Automatic stripping of model thinking tokens (<think>...</think>)
     - Tool name validation for Bedrock compatibility
     - Streaming execution via astream() for behavioral parity with ainvoke()
     - Middleware support (thinking token stripping, queue awareness, approval gates)
@@ -39,21 +236,38 @@ class AgentRunner:
 
     @staticmethod
     def _strip_thinking_tokens(text: str) -> str:
-        """Strip thinking tokens from string content (backward-compatible delegate).
+        """Strip thinking tokens from string content (fallback).
 
         Handles edge cases where ThinkingTokenMiddleware doesn't catch
-        <thinking> tags in string content.
+        <think>...</think> tags in string content.
         """
-        return ResponseProcessor.strip_thinking_tokens(text)
+        cleaned = THINKING_TAG_PATTERN.sub("", text)
+        return cleaned.strip()
 
     @staticmethod
     def _extract_text_from_content(content: Any) -> str:
-        """Extract text from message content (backward-compatible delegate).
+        """Extract text from message content, handling both string and structured formats.
 
         Bedrock models return content as a list of typed blocks:
         [{"type": "thinking", ...}, {"type": "text", "text": "answer"}]
+
+        Blocks may be dicts or objects with type/text attributes.
+
+        Returns:
+            Extracted text content, or empty string if no text blocks found.
         """
-        return ResponseProcessor.extract_text_from_content(content)
+        if not isinstance(content, list):
+            return str(content)
+
+        text_parts = []
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") == "text" and block.get("text"):
+                    text_parts.append(block["text"])
+            elif hasattr(block, "type") and hasattr(block, "text"):
+                if getattr(block, "type") == "text" and getattr(block, "text"):
+                    text_parts.append(block.text)
+        return "\n".join(text_parts)
 
     def __init__(
         self,
@@ -83,12 +297,13 @@ class AgentRunner:
             checkpointer: Optional LangGraph checkpointer for persistence.
             tools: Optional additional tools to provide to the agent.
             region: AWS region for Bedrock models (e.g., us-east-1).
-            strip_thinking: Whether to strip <thinking> tokens from responses.
+            strip_thinking: Whether to strip <think>...</think> tokens from responses.
             timeout_seconds: Wall-clock timeout for agent invocations (default 5 minutes).
             enabled_builtins: List of enabled builtin tool names for conditional prompt sections.
             extra_model_kwargs: Additional kwargs to pass to init_chat_model
                 (e.g., base_url for OpenAI-compatible APIs).
-            middleware: Optional list of middleware functions for tool execution.
+            middleware: Optional list of middleware functions for tool execution
+                (e.g., queue-aware middleware for steer/interrupt modes).
         """
         self.workspace = workspace
         self.model_id = model
@@ -109,10 +324,11 @@ class AgentRunner:
         self._max_output_tokens: int | None = self.extra_model_kwargs.get("max_tokens")
 
         # Log label for distinguishing main agent from sub-agents.
+        # Defaults to workspace name; sub-agent runner overrides with profile label.
         self._log_label: str = workspace.name
 
         # Per-invocation tracking (populated after each run)
-        self._last_metrics: Any | None = None
+        self._last_metrics: InvocationMetrics | None = None
         self._last_tools_used: list[str] = []
         self._current_tool_name: str | None = None
 
@@ -126,56 +342,54 @@ class AgentRunner:
             )
             self.strip_thinking = True
 
-        self._response_processor = ResponseProcessor(
-            strip_thinking=self.strip_thinking,
-            log_label=self._log_label,
-            model_id=self.model_id,
-        )
-
-        self._builder = AgentBuilder(
-            workspace=self.workspace,
-            model_id=self.model_id,
-            api_key=self.api_key,
-            temperature=self.temperature,
-            max_turns=self.max_turns,
-            checkpointer=self.checkpointer,
-            tools=self.additional_tools,
-            region=self.region,
-            strip_thinking=self.strip_thinking,
-            enabled_builtins=self.enabled_builtins,
-            extra_model_kwargs=self.extra_model_kwargs,
-            middleware=self._middleware,
-            channel_logging_enabled=self.channel_logging_enabled,
-            create_agent_func=create_agent,
-            filesystem_tools_cls=FilesystemTools,
-        )
         self._agent = self._build_agent()
 
     @property
     def max_output_tokens(self) -> int | None:
-        """Get the configured output token cap for this runner."""
+        """Get the configured output token cap for this runner.
+
+        Returns:
+            The max_tokens value passed via extra_model_kwargs, or None if uncapped.
+        """
         return self._max_output_tokens
 
     @property
-    def last_metrics(self) -> Any | None:
-        """Get token usage metrics from the most recent invocation."""
+    def last_metrics(self) -> InvocationMetrics | None:
+        """Get token usage metrics from the most recent invocation.
+
+        Returns:
+            InvocationMetrics from the last run() call, or None if no invocations yet.
+        """
         return self._last_metrics
 
     @property
     def last_tools_used(self) -> list[str]:
-        """Get list of tool names invoked during the most recent run."""
+        """Get list of tool names invoked during the most recent run.
+
+        Returns:
+            List of tool name strings (may contain duplicates if called multiple times).
+        """
         return self._last_tools_used
 
     @property
     def model_instance(self) -> BaseChatModel | None:
-        """Get the current model instance for profile access."""
+        """Get the current model instance for profile access.
+
+        Returns:
+            The currently configured BaseChatModel instance, or None if not yet built.
+        """
         return getattr(self, '_model_instance', None)
 
     def update_checkpointer(self, checkpointer: Any) -> None:
-        """Update the checkpointer and rebuild the agent graph."""
+        """Update the checkpointer and rebuild the agent graph.
+
+        Used for deferred initialization when checkpointer requires async setup.
+
+        Args:
+            checkpointer: New checkpointer instance (e.g., AsyncSqliteSaver).
+        """
         self.checkpointer = checkpointer
-        self._builder.checkpointer = checkpointer
-        self._agent, self._model_instance = self._builder.build()
+        self._agent = self._build_agent()
         logger.info(f"Updated checkpointer for workspace: {self.workspace.name}")
 
     def update_model(
@@ -187,6 +401,11 @@ class AgentRunner:
         """Update model configuration and rebuild the agent graph.
 
         Conversation state is preserved (checkpointer is model-independent).
+
+        Args:
+            model: New model identifier (provider:model format).
+            api_key: Optional new API key for the model provider.
+            temperature: Optional new temperature setting.
         """
         self.model_id = model
         if api_key is not None:
@@ -200,29 +419,33 @@ class AgentRunner:
             for thinking_model in THINKING_MODELS
         )
 
-        self._builder.model_id = self.model_id
-        self._builder.api_key = self.api_key
-        self._builder.temperature = self.temperature
-        self._builder.strip_thinking = self.strip_thinking
-
-        self._response_processor = ResponseProcessor(
-            strip_thinking=self.strip_thinking,
-            log_label=self._log_label,
-            model_id=self.model_id,
-        )
-
-        self._agent, self._model_instance = self._builder.build()
+        self._agent = self._build_agent()
         logger.info(f"Model updated to {model} for workspace: {self.workspace.name}")
 
     def rebuild_agent(self) -> None:
-        """Reload workspace files and rebuild the agent graph."""
+        """Reload workspace files and rebuild the agent graph.
+
+        Call this after conversation rotation (/new, /compact) so the agent
+        picks up any changes the agent made to its own workspace files
+        (AGENT.md, HEARTBEAT.md, etc.) during the previous conversation.
+        """
         self.workspace.reload_files()
-        self._builder.workspace = self.workspace
-        self._agent, self._model_instance = self._builder.build()
+        self._agent = self._build_agent()
         logger.info(f"Rebuilt agent with fresh workspace files: {self.workspace.name}")
 
     async def get_context_info(self, thread_id: str) -> dict[str, Any]:
-        """Get context window utilization for a conversation thread."""
+        """Get context window utilization for a conversation thread.
+
+        Args:
+            thread_id: The conversation thread ID to analyze.
+
+        Returns:
+            dict with:
+                - max_input_tokens: Model's maximum input context window
+                - approximate_tokens: Estimated token count in conversation
+                - utilization: Float 0-1 representing context usage
+                - message_count: Number of messages in the thread
+        """
         from langchain_core.messages.utils import count_tokens_approximately
 
         config = {"configurable": {"thread_id": thread_id}}
@@ -260,6 +483,14 @@ class AgentRunner:
         When approval middleware raises ApprovalRequiredError, LangGraph has already
         checkpointed an AIMessage with tool_calls but no corresponding ToolMessages.
         This creates an invalid state that OpenAI-compatible APIs reject.
+
+        This method reads the checkpoint, finds orphaned tool_calls, and injects
+        synthetic ToolMessages via aupdate_state() to restore valid message ordering.
+
+        Args:
+            thread_id: Conversation thread with orphaned state.
+            responses: Optional {tool_call_id: content} mapping for specific responses.
+                       Unmapped calls get a generic interruption message.
         """
         if not self.checkpointer:
             return
@@ -316,28 +547,146 @@ class AgentRunner:
         )
 
         # Inject synthetic ToolMessages as if they came from the "tools" node.
+        # as_node="tools" is critical: without it, LangGraph defaults to the last
+        # active node ("model"), leaving the graph in an ambiguous state that hangs
+        # on the next astream() invocation.
         await self._agent.aupdate_state(
             config, {"messages": synthetic_messages}, as_node="tools"
         )
 
+    def _validate_tool_names(self, tools: list[Any]) -> None:
+        """Validate tool names comply with Bedrock requirements.
+
+        AWS Bedrock requires tool names to:
+        - Match pattern [a-zA-Z0-9_-]+
+        - Be 64 characters or less
+
+        Args:
+            tools: List of tools to validate.
+
+        Raises:
+            ValueError: If any tool name is invalid.
+        """
+        for tool in tools:
+            tool_name = getattr(tool, "name", None)
+            if not tool_name:
+                logger.warning(f"Tool {tool} has no name attribute, skipping validation")
+                continue
+
+            # Check length
+            if len(tool_name) > MAX_TOOL_NAME_LENGTH:
+                raise ValueError(
+                    f"Tool name '{tool_name}' exceeds max length of {MAX_TOOL_NAME_LENGTH} characters"
+                )
+
+            # Check pattern
+            if not BEDROCK_TOOL_NAME_PATTERN.match(tool_name):
+                raise ValueError(
+                    f"Tool name '{tool_name}' contains invalid characters. "
+                    f"Must match pattern: [a-zA-Z0-9_-]+"
+                )
+
     def _create_model(self) -> BaseChatModel:
         """Create the appropriate chat model based on provider.
 
-        Thin wrapper around AgentBuilder.create_model() for backward compatibility.
+        Delegates to create_chat_model() module-level function.
+
+        Returns:
+            Configured BaseChatModel instance.
+
+        Raises:
+            ValueError: If provider is not supported.
         """
-        return self._builder.create_model()
+        return create_chat_model(
+            model_str=self.model_id,
+            api_key=self.api_key,
+            temperature=self.temperature,
+            region=self.region,
+            extra_kwargs=self.extra_model_kwargs,
+        )
 
     def _build_agent(self) -> Any:
         """Build the LangGraph agent with workspace configuration.
 
-        Backward-compatible wrapper that calls _create_model() first (to honor
-        test patches), then delegates the rest of construction to AgentBuilder.
+        Creates an agent with:
+        - Direct provider-specific model instantiation
+        - Sandboxed filesystem tools for workspace access
+        - Workspace-specific tools from tools/ directory
+        - System prompt from workspace markdown files
+        - Empty middleware list (populated in future sprints for steer/interrupt)
+        - Thinking token stripping handled via fallback logic in run()
         """
-        self._builder.additional_tools = self.additional_tools
+        # 1. Initialize model directly via provider class
         model = self._create_model()
         self._model_instance = model
-        self._agent, _ = self._builder.build(model=model)
-        return self._agent
+
+        # 2. Create FilesystemTools for workspace
+        workspace_root = self.workspace.path.resolve()
+        if not workspace_root.exists():
+            raise ValueError(f"Workspace does not exist: {workspace_root}")
+        if not workspace_root.is_dir():
+            raise ValueError(f"Workspace is not a directory: {workspace_root}")
+
+        logger.debug(f"Sandboxing agent to workspace: {workspace_root}")
+
+        # Get timezone from workspace config, defaulting to UTC
+        timezone = self.workspace.config.timezone if self.workspace.config else "UTC"
+
+        fs_tools_manager = FilesystemTools(
+            workspace_root=workspace_root,
+            timezone=timezone,
+            workspace_name=self.workspace.name,
+        )
+        filesystem_tools = fs_tools_manager.get_tools()
+
+        # 3. Combine all tools (filesystem + additional tools)
+        all_tools = filesystem_tools + self.additional_tools
+
+        # 4. Validate tool names (especially important for Bedrock)
+        if "bedrock" in self.model_id.lower():
+            logger.debug("Validating tool names for Bedrock compatibility")
+            self._validate_tool_names(all_tools)
+
+        # 5. Get system prompt from workspace (with dynamic current date)
+        try:
+            timezone = getattr(self.workspace.config, "timezone", "UTC") if self.workspace.config else "UTC"
+            current_dt = workspace_now(timezone).strftime("%A, %Y-%m-%d %H:%M %Z")
+        except (TypeError, AttributeError):
+            current_dt = None
+        system_prompt = self.workspace.build_system_prompt(
+            enabled_builtins=self.enabled_builtins,
+            current_datetime=current_dt,
+            channel_logging_enabled=self.channel_logging_enabled,
+        )
+
+        # 6. Wire middleware in dependency order:
+        #    - ThinkingTokenMiddleware (first): strips reasoning before other middleware sees it
+        #    - Custom middleware (after): queue-aware, approval gates, etc.
+        if self.strip_thinking:
+            middleware = [ThinkingTokenMiddleware(), *self._middleware]
+        else:
+            middleware = list(self._middleware)
+
+        # 7. Call create_agent (successor to create_react_agent)
+        # Note: create_agent handles tool binding internally - do NOT pre-bind
+        logger.info(
+            f"Creating agent with {len(all_tools)} tools "
+            f"({len(filesystem_tools)} filesystem, {len(self.additional_tools)} additional)"
+        )
+
+        # Log all tool names for debugging
+        tool_names = [getattr(t, 'name', str(t)) for t in all_tools]
+        logger.info(f"Tool names: {tool_names}")
+
+        agent = create_agent(
+            model=model,
+            tools=all_tools,
+            system_prompt=system_prompt,
+            checkpointer=self.checkpointer,
+            middleware=middleware,  # Thinking tokens + steer/interrupt + approval gates
+        )
+
+        return agent
 
     async def run(
         self,
@@ -353,7 +702,8 @@ class AgentRunner:
             thread_id: Thread identifier for multi-turn conversations.
 
         Returns:
-            Agent's response text.
+            Agent's response text. Thinking tokens are stripped by ThinkingTokenMiddleware
+            in the agent graph. Fallback stripping handles edge cases.
         """
         # Reset per-invocation tracking
         self._last_metrics = None
@@ -379,6 +729,7 @@ class AgentRunner:
 
         try:
             # Use astream with stream_mode="updates" for behavioral parity with ainvoke
+            # Collect all messages from the stream
             final_messages = []
             async with asyncio.timeout(self.timeout_seconds):
                 async for update in self._agent.astream(
@@ -386,25 +737,30 @@ class AgentRunner:
                     config=config,
                     stream_mode="updates",
                 ):
+                    # Updates come as: {"model": {"messages": [...]}} from create_agent v2
                     if "model" in update:
                         messages_in_update = update["model"].get("messages", [])
                         final_messages.extend(messages_in_update)
+                        # Capture tool names from AI messages with tool_calls
                         for msg in messages_in_update:
                             tool_calls = getattr(msg, "tool_calls", [])
                             if tool_calls:
                                 tool_names = [tc.get("name", "?") for tc in tool_calls]
                                 logger.info(f"[{self._log_label}] Tool calls: {tool_names}")
+                                # Track last tool called for timeout reporting
                                 self._current_tool_name = tool_calls[-1].get("name")
                             for tc in tool_calls:
                                 if name := tc.get("name"):
                                     self._last_tools_used.append(name)
+                    # Clear current tool tracking when we see tool results
                     if "tools" in update:
                         self._current_tool_name = None
         except InterruptSignalError:
+            # Re-raise for WorkspaceRunner to handle
             raise
         except TimeoutError:
+            # Extract partial metrics even on timeout
             duration_ms = (time.monotonic() - start_time) * 1000
-            from openpaw.agent.metrics import extract_metrics_from_callback
             self._last_metrics = extract_metrics_from_callback(
                 usage_callback, duration_ms, self.model_id
             )
@@ -415,14 +771,16 @@ class AgentRunner:
                 f"(workspace: {self._log_label})"
             )
 
+            # Use rich notification if we know what tool was executing
             if self._current_tool_name:
                 return TIMEOUT_NOTIFICATION_TEMPLATE.format(
                     timeout=int(self.timeout_seconds),
                     tool_name=self._current_tool_name,
                 )
-            return TIMEOUT_NOTIFICATION_GENERIC.format(
-                timeout=int(self.timeout_seconds),
-            )
+            else:
+                return TIMEOUT_NOTIFICATION_GENERIC.format(
+                    timeout=int(self.timeout_seconds),
+                )
         except ApprovalRequiredError:
             raise
         except Exception:
@@ -430,7 +788,6 @@ class AgentRunner:
 
         # Extract metrics after successful invocation
         duration_ms = (time.monotonic() - start_time) * 1000
-        from openpaw.agent.metrics import extract_metrics_from_callback
         self._last_metrics = extract_metrics_from_callback(
             usage_callback, duration_ms, self.model_id
         )
@@ -445,7 +802,23 @@ class AgentRunner:
                 )
 
         # Extract response from final messages
-        return self._response_processor.process(final_messages)
+        if final_messages:
+            last_message = final_messages[-1]
+            if hasattr(last_message, "content"):
+                raw_response = self._extract_text_from_content(last_message.content)
+            else:
+                raw_response = str(last_message)
+
+            # Fallback: strip <think> tags from string content if middleware missed them
+            if self.strip_thinking and "<think>" in raw_response.lower():
+                logger.warning(
+                    f"Fallback thinking stripping triggered "
+                    f"(workspace: {self._log_label}, model: {self.model_id})"
+                )
+                return self._strip_thinking_tokens(raw_response)
+            return raw_response
+
+        return ""
 
     def run_sync(
         self,
@@ -456,7 +829,8 @@ class AgentRunner:
         """Synchronous version of run for non-async contexts.
 
         Returns:
-            Agent's response text.
+            Agent's response text. Thinking tokens are stripped by ThinkingTokenMiddleware
+            in the agent graph. Fallback stripping handles edge cases.
         """
         # Set recursion_limit for multi-turn execution (2 supersteps per turn)
         config: dict[str, Any] = {"recursion_limit": self.max_turns * 2}
@@ -474,4 +848,19 @@ class AgentRunner:
         )
 
         messages = result.get("messages", [])
-        return self._response_processor.process(messages)
+        if messages:
+            last_message = messages[-1]
+            if hasattr(last_message, "content"):
+                raw_response = self._extract_text_from_content(last_message.content)
+            else:
+                raw_response = str(last_message)
+
+            if self.strip_thinking and "<think>" in raw_response.lower():
+                logger.warning(
+                    f"Fallback thinking stripping triggered "
+                    f"(workspace: {self._log_label}, model: {self.model_id})"
+                )
+                return self._strip_thinking_tokens(raw_response)
+            return raw_response
+
+        return ""
