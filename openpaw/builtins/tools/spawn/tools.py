@@ -17,6 +17,16 @@ from openpaw.model.subagent import SubAgentStatus
 logger = logging.getLogger(__name__)
 
 
+def _run_async_in_sync(coro: Any) -> Any:
+    """Run an async coroutine from a sync context, handling both loop and no-loop cases."""
+    try:
+        loop = asyncio.get_running_loop()
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        return future.result(timeout=5.0)
+    except RuntimeError:
+        return asyncio.run(coro)
+
+
 def create_spawn_agent_tool(builtin: Any) -> StructuredTool:
     """Create the spawn_agent tool."""
 
@@ -31,9 +41,11 @@ def create_spawn_agent_tool(builtin: Any) -> StructuredTool:
         profile: str | None = None,
     ) -> str:
         """Sync wrapper for spawn_agent (for LangChain compatibility)."""
-        result = builtin._build_spawn_request(
-            task, label, timeout_minutes, notify,
-            progress_interval_minutes, allowed_tools, denied_tools, profile,
+        result = _run_async_in_sync(
+            builtin._build_spawn_request(
+                task, label, timeout_minutes, notify,
+                progress_interval_minutes, allowed_tools, denied_tools, profile,
+            )
         )
         if isinstance(result, str):
             return result
@@ -66,7 +78,7 @@ def create_spawn_agent_tool(builtin: Any) -> StructuredTool:
         profile: str | None = None,
     ) -> str:
         """Spawn a new sub-agent to execute a task in the background."""
-        result = builtin._build_spawn_request(
+        result = await builtin._build_spawn_request(
             task, label, timeout_minutes, notify,
             progress_interval_minutes, allowed_tools, denied_tools, profile,
         )
@@ -153,14 +165,8 @@ def create_list_subagents_tool(builtin: Any) -> StructuredTool:
 
     from openpaw.builtins.tools.spawn.formatters import format_duration, format_time_ago
 
-    def list_subagents() -> str:
-        """List all sub-agents (active and recent)."""
-        if builtin._runner is None:
-            return "[Error: Sub-agent listing not available (runner not initialized)]"
-
-        active = builtin._runner.list_active()
-        recent = builtin._runner.list_recent(limit=10)
-
+    def _format_subagent_list(active: Any, recent: Any) -> str:
+        """Shared formatting logic for sub-agent listings."""
         if not active and not recent:
             return "No sub-agents found."
 
@@ -195,8 +201,27 @@ def create_list_subagents_tool(builtin: Any) -> StructuredTool:
 
         return "\n".join(lines) if lines else "No sub-agents found."
 
+    def list_subagents_sync() -> str:
+        """Sync wrapper for list_subagents."""
+        if builtin._runner is None:
+            return "[Error: Sub-agent listing not available (runner not initialized)]"
+
+        active = _run_async_in_sync(builtin._runner.list_active())
+        recent = _run_async_in_sync(builtin._runner.list_recent(limit=10))
+        return _format_subagent_list(active, recent)
+
+    async def list_subagents_async() -> str:
+        """List all sub-agents (active and recent)."""
+        if builtin._runner is None:
+            return "[Error: Sub-agent listing not available (runner not initialized)]"
+
+        active = await builtin._runner.list_active()
+        recent = await builtin._runner.list_recent(limit=10)
+        return _format_subagent_list(active, recent)
+
     return StructuredTool.from_function(
-        func=list_subagents,
+        func=list_subagents_sync,
+        coroutine=list_subagents_async,
         name="list_subagents",
         description=(
             "List all sub-agents (active and recently completed). "
@@ -213,28 +238,8 @@ def create_get_subagent_result_tool(builtin: Any) -> StructuredTool:
 
     from openpaw.builtins.tools.spawn.formatters import format_duration, format_time_ago
 
-    def get_subagent_result(id: str) -> str:
-        """Get the result of a sub-agent by ID."""
-        if builtin._runner is None:
-            return "[Error: Sub-agent results not available (runner not initialized)]"
-
-        request = builtin._runner.get_status(id)
-        if not request:
-            return f"Sub-agent not found: {id}"
-
-        if request.status == SubAgentStatus.RUNNING:
-            start_time = request.started_at or request.created_at
-            elapsed = datetime.now(UTC) - start_time
-            time_ago = format_time_ago(elapsed.total_seconds())
-            return f"Sub-agent '{request.label}' is still running (started {time_ago})"
-
-        if request.status == SubAgentStatus.PENDING:
-            return f"Sub-agent '{request.label}' is pending (not started yet)"
-
-        result = builtin._runner.get_result(id)
-        if not result:
-            return f"Sub-agent '{request.label}' has no result (status: {request.status.value})"
-
+    def _format_subagent_result(request: Any, result: Any, id: str) -> str:
+        """Shared formatting logic for sub-agent results."""
         lines = [
             f"Sub-agent: {request.label} ({id[:8]})",
             f"Status: {request.status.value}",
@@ -258,8 +263,57 @@ def create_get_subagent_result_tool(builtin: Any) -> StructuredTool:
 
         return "\n".join(lines)
 
+    def get_subagent_result_sync(id: str) -> str:
+        """Sync wrapper for get_subagent_result."""
+        if builtin._runner is None:
+            return "[Error: Sub-agent results not available (runner not initialized)]"
+
+        request = _run_async_in_sync(builtin._runner.get_status(id))
+        if not request:
+            return f"Sub-agent not found: {id}"
+
+        if request.status == SubAgentStatus.RUNNING:
+            start_time = request.started_at or request.created_at
+            elapsed = datetime.now(UTC) - start_time
+            time_ago = format_time_ago(elapsed.total_seconds())
+            return f"Sub-agent '{request.label}' is still running (started {time_ago})"
+
+        if request.status == SubAgentStatus.PENDING:
+            return f"Sub-agent '{request.label}' is pending (not started yet)"
+
+        result = _run_async_in_sync(builtin._runner.get_result(id))
+        if not result:
+            return f"Sub-agent '{request.label}' has no result (status: {request.status.value})"
+
+        return _format_subagent_result(request, result, id)
+
+    async def get_subagent_result_async(id: str) -> str:
+        """Get the result of a sub-agent by ID."""
+        if builtin._runner is None:
+            return "[Error: Sub-agent results not available (runner not initialized)]"
+
+        request = await builtin._runner.get_status(id)
+        if not request:
+            return f"Sub-agent not found: {id}"
+
+        if request.status == SubAgentStatus.RUNNING:
+            start_time = request.started_at or request.created_at
+            elapsed = datetime.now(UTC) - start_time
+            time_ago = format_time_ago(elapsed.total_seconds())
+            return f"Sub-agent '{request.label}' is still running (started {time_ago})"
+
+        if request.status == SubAgentStatus.PENDING:
+            return f"Sub-agent '{request.label}' is pending (not started yet)"
+
+        result = await builtin._runner.get_result(id)
+        if not result:
+            return f"Sub-agent '{request.label}' has no result (status: {request.status.value})"
+
+        return _format_subagent_result(request, result, id)
+
     return StructuredTool.from_function(
-        func=get_subagent_result,
+        func=get_subagent_result_sync,
+        coroutine=get_subagent_result_async,
         name="get_subagent_result",
         description=(
             "Get the result of a completed sub-agent by ID. "

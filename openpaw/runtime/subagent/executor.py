@@ -86,7 +86,7 @@ class SubAgentExecutor:
 
         # Check if we were cancelled during execution
         # (cancel() sets status to CANCELLED before task.cancel())
-        current_request = self._store.get(request.id)
+        current_request = await self._store.get(request.id)
         if current_request and current_request.status == SubAgentStatus.CANCELLED:
             logger.info(
                 f"Sub-agent {request.id} completed but was cancelled — "
@@ -132,7 +132,7 @@ class SubAgentExecutor:
             token_count=token_count,
             duration_ms=duration_ms,
         )
-        self._store.save_result(result)
+        await self._store.save_result(result)
 
         # Write session log
         log_path = await self._write_session_log(
@@ -144,10 +144,10 @@ class SubAgentExecutor:
         )
         if log_path:
             result.session_log_path = log_path
-            self._store.save_result(result)
+            await self._store.save_result(result)
 
         # Update status to COMPLETED
-        self._store.update_status(
+        await self._store.update_status(
             request.id, SubAgentStatus.COMPLETED, completed_at=datetime.now(UTC)
         )
 
@@ -190,7 +190,7 @@ class SubAgentExecutor:
             SubAgentResult in the specified terminal state.
         """
         duration_ms = (time.monotonic() - start_time) * 1000
-        self._store.update_status(
+        await self._store.update_status(
             request.id, status, completed_at=datetime.now(UTC)
         )
 
@@ -200,7 +200,7 @@ class SubAgentExecutor:
             error=error_msg,
             duration_ms=duration_ms,
         )
-        self._store.save_result(result)
+        await self._store.save_result(result)
 
         log_path = await self._write_session_log(
             request=request,
@@ -211,7 +211,7 @@ class SubAgentExecutor:
         )
         if log_path:
             result.session_log_path = log_path
-            self._store.save_result(result)
+            await self._store.save_result(result)
 
         logger.log(
             log_level,

@@ -100,7 +100,7 @@ class StatusCommand(CommandHandler):
         # Active subagents
         try:
             if context.subagent_store:
-                active_subagents = context.subagent_store.list_active()
+                active_subagents = await context.subagent_store.list_active()
                 if active_subagents:
                     labels = [req.label for req in active_subagents[:5]]
                     label_str = ", ".join(labels)
