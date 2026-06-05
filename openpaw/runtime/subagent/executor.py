@@ -223,7 +223,7 @@ class SubAgentExecutor:
         return result
 
     async def _handle_timeout(
-        self, request: SubAgentRequest, runner: "AgentRunner", start_time: float
+        self, request: SubAgentRequest, runner: AgentRunner, start_time: float
     ) -> SubAgentResult:
         """Handle agent timeout.
 
@@ -252,7 +252,7 @@ class SubAgentExecutor:
         )
 
     async def _handle_error(
-        self, request: SubAgentRequest, runner: "AgentRunner", start_time: float, error: Exception
+        self, request: SubAgentRequest, runner: AgentRunner, start_time: float, error: Exception
     ) -> SubAgentResult:
         """Handle generic agent failure.
 
