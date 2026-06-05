@@ -169,6 +169,8 @@ class QueueManager:
             await self._flush_session(session)
         except asyncio.CancelledError:
             pass
+        except Exception:
+            logger.exception(f"Debounce flush failed for session {session.session_key}")
 
     async def _flush_session(self, session: SessionQueue) -> None:
         """Flush collected messages to the lane queue."""

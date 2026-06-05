@@ -236,6 +236,7 @@ class WorkspaceRunner:
         self._subagent_runner: SubAgentRunner | None = None
         self._queue_processor_task: asyncio.Task[None] | None = None
         self._cleanup_task: asyncio.Task[None] | None = None
+        self._supervisor_task: asyncio.Task[None] | None = None
         self._running = False
 
     @property
@@ -567,9 +568,11 @@ class WorkspaceRunner:
         self._running = True
         self._task_service.start()
         self._queue_processor_task = asyncio.create_task(self._queue_processor())
+        self._queue_processor_task.add_done_callback(self._on_queue_processor_done)
         self._cleanup_task = asyncio.create_task(
             self._task_service.periodic_cleanup()
         )
+        self._supervisor_task = asyncio.create_task(self._task_supervisor())
 
         self.logger.info(f"Workspace runner '{self.workspace_name}' is running")
 
@@ -776,6 +779,67 @@ class WorkspaceRunner:
         if archived_count > 0:
             self.logger.info(f"Archived {archived_count} conversation(s) on shutdown")
 
+    def _on_queue_processor_done(self, task: asyncio.Task[None]) -> None:
+        """Callback invoked when the queue processor task completes.
+
+        Logs the exception immediately so crashes are visible even if the
+        supervisor has not yet woken up.
+        """
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            self.logger.critical(
+                f"Queue processor task crashed: {exc}", exc_info=exc
+            )
+
+    async def _task_supervisor(self) -> None:
+        """Monitor background tasks and notify users on crash.
+
+        Watches the queue processor task. If it dies unexpectedly, sends a
+        direct channel message to every active session and attempts to restart
+        the processor.
+        """
+        while self._running:
+            try:
+                await asyncio.sleep(10.0)
+            except asyncio.CancelledError:
+                break
+
+            if not self._queue_processor_task or self._queue_processor_task.done():
+                exc: BaseException | None = None
+                if self._queue_processor_task:
+                    exc = self._queue_processor_task.exception()
+                self.logger.critical(
+                    f"Queue processor is dead (exception: {exc}). Restarting...",
+                    exc_info=exc,
+                )
+
+                # Notify all active sessions via direct channel send
+                for session_key in list(self._session_manager.list_sessions().keys()):
+                    channel_name = session_key.split(":")[0]
+                    channel = self._channels.get(channel_name)
+                    if channel:
+                        try:
+                            await channel.send_message(
+                                session_key,
+                                "[SYSTEM] Message processing was interrupted due to an internal error. "
+                                "The administrator has been notified. Please retry your message.",
+                            )
+                        except Exception as e:
+                            self.logger.error(
+                                f"Failed to send crash notification to {session_key}: {e}"
+                            )
+
+                # Restart queue processor
+                self._queue_processor_task = asyncio.create_task(
+                    self._queue_processor()
+                )
+                self._queue_processor_task.add_done_callback(
+                    self._on_queue_processor_done
+                )
+                self.logger.info("Restarted queue processor")
+
     async def stop(self) -> None:
         """Stop workspace runner gracefully."""
         self.logger.info(f"Stopping workspace runner: {self.workspace_name}")
@@ -790,6 +854,16 @@ class WorkspaceRunner:
         )
         if lifecycle and lifecycle.notify_shutdown:
             await self._notify_lifecycle("Shutting down")
+
+        # Cancel supervisor
+        supervisor_task = getattr(self, "_supervisor_task", None)
+        if supervisor_task:
+            supervisor_task.cancel()
+            try:
+                await supervisor_task
+            except asyncio.CancelledError:
+                pass
+            self._supervisor_task = None
 
         # Cancel queue processor
         if self._queue_processor_task:

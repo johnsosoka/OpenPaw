@@ -290,6 +290,10 @@ class SubAgentRunner:
         """
         start_time = time.monotonic()
 
+        logger.info(
+            f"Sub-agent execution starting: {request.id} ('{request.label}') "
+            f"[session: {request.session_key}, timeout: {request.timeout_minutes}min]"
+        )
         try:
             # Acquire semaphore for concurrency control
             async with self._semaphore:

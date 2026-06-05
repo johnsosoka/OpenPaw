@@ -158,6 +158,10 @@ class MessageProcessor:
         followup_depth = 0
         max_followup_depth = 5
         is_system_batch = self._is_system_event_batch(messages)
+        self._logger.info(
+            f"MessageProcessor entering for session {session_key} "
+            f"({len(messages)} message(s), system_batch={is_system_batch})"
+        )
 
         # Check session TTL first — may rotate conversation before any further checks
         # TTL only applies to group sessions (not DMs)
