@@ -839,10 +839,11 @@ class TestSubAgentSessionLogging:
 
         await runner._execute_subagent(request)
 
-        # Session logger should be called with "(timed out)"
+        # Session logger should be called with enriched timeout message
         session_logger.write_session.assert_called_once()
         call_kwargs = session_logger.write_session.call_args[1]
-        assert call_kwargs["response"] == "(timed out)"
+        assert call_kwargs["response"].startswith("(timed out")
+        assert "last tool:" in call_kwargs["response"]
         assert call_kwargs["metrics"] is None
 
 
