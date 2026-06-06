@@ -81,6 +81,8 @@ class SubAgentExecutor:
                 response = await runner.run(message=request.task)
         except TimeoutError:
             return await self._handle_timeout(request, runner, start_time)
+        except asyncio.CancelledError:
+            raise  # Propagate cancellation to prevent misclassification as failure
         except Exception as e:
             return await self._handle_error(request, runner, start_time, e)
 
