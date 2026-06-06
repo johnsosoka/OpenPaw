@@ -36,5 +36,9 @@ class StatusUpdatesConfig(BaseModel):
     template: str = Field(
         default="[{event}] {message}", description="Optional format template for status messages"
     )
+    hermes_mode: bool = Field(
+        default=True,
+        description="Edit a single status message instead of sending multiple messages",
+    )
 
     model_config = {"extra": "allow"}

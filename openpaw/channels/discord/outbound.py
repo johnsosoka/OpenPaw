@@ -95,6 +95,58 @@ class DiscordOutboundSender:
 
         await channel.send(content=text, view=view)
 
+    async def edit_message(
+        self,
+        session_key: str,
+        message_id: str,
+        content: str,
+    ) -> bool:
+        """Edit an existing Discord message.
+
+        Args:
+            session_key: Target session identifier.
+            message_id: Discord message ID (snowflake) to edit.
+            content: New message content.
+
+        Returns:
+            True if the edit was successful.
+        """
+        channel_id = self._channel_id_from_session_key(session_key)
+        try:
+            channel = await self._resolve_channel(channel_id)
+            message = await channel.fetch_message(int(message_id))
+            await message.edit(content=content)
+            logger.debug("Edited Discord message %s in channel %s", message_id, channel_id)
+            return True
+        except Exception as e:
+            logger.debug("Failed to edit Discord message %s: %s", message_id, e)
+            return False
+
+    async def delete_message(
+        self,
+        session_key: str,
+        message_id: str,
+    ) -> bool:
+        """Delete an existing Discord message.
+
+        Args:
+            session_key: Target session identifier.
+            message_id: Discord message ID (snowflake) to delete.
+
+        Returns:
+            True if the deletion was successful.
+        """
+        channel_id = self._channel_id_from_session_key(session_key)
+        try:
+            channel = await self._resolve_channel(channel_id)
+            message = await channel.fetch_message(int(message_id))
+            await message.delete()
+            logger.debug("Deleted Discord message %s in channel %s", message_id, channel_id)
+            return True
+        except Exception as e:
+            logger.debug("Failed to delete Discord message %s: %s", message_id, e)
+            return False
+
     def _split_message(self, text: str) -> list[str]:
         """Split text into chunks that fit Discord's 2000-char message limit."""
         return split_message(text, MAX_MESSAGE_LENGTH)

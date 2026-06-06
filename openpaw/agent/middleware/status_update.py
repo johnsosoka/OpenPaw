@@ -7,6 +7,11 @@ Hooks into LangGraph's AgentMiddleware protocol to emit status messages:
 
 Throttling prevents spam during rapid tool-call sequences. Agent-driven
 report_progress tool calls bypass throttling.
+
+Hermes Pattern (default):
+- Sends one initial status message
+- Edits that same message on subsequent updates
+- Deletes the status message when the agent run completes
 """
 
 import logging
@@ -36,6 +41,11 @@ class StatusUpdateMiddleware(AgentMiddleware):
     - Budget-based: max_updates_per_run total auto-updates per agent invocation.
     - Deduplication: if the same set of tools is detected twice, only report once.
     - Agent-driven report_progress bypasses all throttling.
+
+    Hermes Pattern:
+    - When hermes_mode is True (default), a single status message is maintained
+      and edited in place. This prevents chat clutter.
+    - When False, each update sends a separate message (legacy behavior).
     """
 
     def __init__(self, config: StatusUpdatesConfig) -> None:
@@ -51,6 +61,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._last_update_time: float = 0.0
         self._updates_sent: int = 0
         self._last_reported_tools: frozenset[str] = frozenset()
+        self._status_message_id: str | None = None
 
     def set_context(self, channel: Any, session_key: str) -> None:
         """Set the active channel and session for the current agent run.
@@ -66,6 +77,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._last_update_time = 0.0
         self._updates_sent = 0
         self._last_reported_tools = frozenset()
+        self._status_message_id = None
 
     def reset(self) -> None:
         """Reset per-invocation state. Called by MessageProcessor after each run."""
@@ -74,6 +86,25 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._last_update_time = 0.0
         self._updates_sent = 0
         self._last_reported_tools = frozenset()
+        self._status_message_id = None
+
+    async def delete_status(self) -> None:
+        """Delete the tracked status message if one exists.
+
+        Called by MessageProcessor after the final response is delivered
+        to clean up the status message.
+        """
+        if not self._status_message_id or not self._channel or not self._session_key:
+            return
+        try:
+            deleted = await self._channel.delete_message(
+                self._session_key, self._status_message_id
+            )
+            if deleted:
+                logger.debug("Deleted status message %s", self._status_message_id)
+            self._status_message_id = None
+        except Exception as e:
+            logger.debug("Failed to delete status message: %s", e)
 
     async def abefore_agent(
         self, state: Any, runtime: Any
@@ -172,10 +203,11 @@ class StatusUpdateMiddleware(AgentMiddleware):
         return result
 
     async def _send_status(self, text: str) -> None:
-        """Send a status message to the channel with throttling.
+        """Send or edit a status message to the channel with throttling.
 
-        Uses the channel context set by MessageProcessor. Falls back to the
-        _channel_context module if the context was not set explicitly.
+        In Hermes mode (default), the first status message is sent normally and
+        subsequent updates edit that same message. In non-Hermes mode, each
+        update sends a separate message.
 
         Args:
             text: The status message text to send.
@@ -205,9 +237,25 @@ class StatusUpdateMiddleware(AgentMiddleware):
             return
 
         try:
-            await channel.send_message(session_key, text)
+            if self._config.hermes_mode and self._status_message_id:
+                # Hermes: edit existing message
+                edited = await channel.edit_message(
+                    session_key, self._status_message_id, text
+                )
+                if edited:
+                    self._updates_sent += 1
+                    self._last_update_time = now
+                    logger.debug("Status message edited: %s", text)
+                    return
+                # Edit failed — fall through to sending a new message
+                logger.debug("Edit failed, falling back to new message")
+
+            # Send new message
+            sent_message = await channel.send_message(session_key, text)
             self._updates_sent += 1
             self._last_update_time = now
+            if sent_message and hasattr(sent_message, "id"):
+                self._status_message_id = str(sent_message.id)
             logger.debug("Status update sent: %s", text)
         except Exception as e:
             logger.debug("Failed to send status update: %s", e)

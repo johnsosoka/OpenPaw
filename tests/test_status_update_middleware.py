@@ -11,14 +11,36 @@ from openpaw.agent.middleware.status_update import StatusUpdateMiddleware
 from openpaw.core.config.models import StatusUpdatesConfig
 
 
+class MockMessage:
+    """Mock message returned by send_message."""
+
+    def __init__(self, id: str, session_key: str, content: str):
+        self.id = id
+        self.session_key = session_key
+        self.content = content
+
+
 class MockChannel:
     """Mock channel adapter for testing."""
 
     def __init__(self):
         self.sent_messages: list[tuple[str, str]] = []
+        self.edited_messages: list[tuple[str, str, str]] = []
+        self.deleted_messages: list[tuple[str, str]] = []
+        self._message_counter: int = 0
 
-    async def send_message(self, session_key: str, content: str) -> None:
+    async def send_message(self, session_key: str, content: str) -> Any:
+        self._message_counter += 1
         self.sent_messages.append((session_key, content))
+        return MockMessage(str(self._message_counter), session_key, content)
+
+    async def edit_message(self, session_key: str, message_id: str, content: str) -> bool:
+        self.edited_messages.append((session_key, message_id, content))
+        return True
+
+    async def delete_message(self, session_key: str, message_id: str) -> bool:
+        self.deleted_messages.append((session_key, message_id))
+        return True
 
 
 def _make_config(
@@ -30,6 +52,7 @@ def _make_config(
     subagent_spawned: bool = True,
     min_interval_seconds: int = 0,
     max_updates_per_run: int = 10,
+    hermes_mode: bool = True,
 ) -> StatusUpdatesConfig:
     return StatusUpdatesConfig(
         enabled=enabled,
@@ -40,6 +63,7 @@ def _make_config(
         subagent_spawned=subagent_spawned,
         min_interval_seconds=min_interval_seconds,
         max_updates_per_run=max_updates_per_run,
+        hermes_mode=hermes_mode,
     )
 
 
@@ -200,7 +224,9 @@ async def test_aafter_model_reports_different_tool_set():
     state2 = {"messages": [_ai_with_tool_calls("write_file")]}
     await mw.aafter_model(state2, None)
 
-    assert len(channel.sent_messages) == 2
+    # In hermes mode: 1 sent, 1 edited
+    assert len(channel.sent_messages) == 1
+    assert len(channel.edited_messages) == 1
 
 
 @pytest.mark.asyncio
@@ -285,9 +311,11 @@ async def test_awrap_tool_call_reports_both_start_and_complete():
         return MagicMock()
 
     await mw.awrap_tool_call(req, handler)
-    assert len(channel.sent_messages) == 2
+    # In hermes mode: first sent, second edited
+    assert len(channel.sent_messages) == 1
+    assert len(channel.edited_messages) == 1
     assert channel.sent_messages[0] == ("telegram:123456", "Running tool: read_file...")
-    assert channel.sent_messages[1] == ("telegram:123456", "Completed: read_file")
+    assert channel.edited_messages[0] == ("telegram:123456", "1", "Completed: read_file")
 
 
 @pytest.mark.asyncio
@@ -320,6 +348,7 @@ async def test_throttling_time_based():
     await mw._send_status("First update")
     await mw._send_status("Second update")
 
+    # In hermes mode: 1 sent, 1 throttled
     assert len(channel.sent_messages) == 1
 
 
@@ -335,7 +364,9 @@ async def test_throttling_budget_based():
     await mw._send_status("Update 2")
     await mw._send_status("Update 3")
 
-    assert len(channel.sent_messages) == 2
+    # In hermes mode: 1 sent, 1 edited, 1 throttled
+    assert len(channel.sent_messages) == 1
+    assert len(channel.edited_messages) == 1
 
 
 @pytest.mark.asyncio
@@ -349,7 +380,9 @@ async def test_throttling_time_allows_after_interval():
     await mw._send_status("First update")
     await mw._send_status("Second update")
 
-    assert len(channel.sent_messages) == 2
+    # In hermes mode: 1 sent, 1 edited
+    assert len(channel.sent_messages) == 1
+    assert len(channel.edited_messages) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +396,7 @@ def test_reset_clears_counters():
     mw._updates_sent = 5
     mw._last_update_time = time.monotonic()
     mw._last_reported_tools = frozenset(["read_file"])
+    mw._status_message_id = "msg123"
 
     mw.reset()
 
@@ -371,6 +405,92 @@ def test_reset_clears_counters():
     assert mw._updates_sent == 0
     assert mw._last_update_time == 0.0
     assert mw._last_reported_tools == frozenset()
+    assert mw._status_message_id is None
+
+
+# ---------------------------------------------------------------------------
+# Hermes mode
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_hermes_mode_edits_single_message():
+    channel = MockChannel()
+    mw = _make_middleware(channel=channel)
+
+    # First update: send new message
+    await mw._send_status("Starting work...")
+    assert len(channel.sent_messages) == 1
+    assert len(channel.edited_messages) == 0
+
+    # Second update: edit existing message
+    await mw._send_status("Using tools: read_file...")
+    assert len(channel.sent_messages) == 1
+    assert len(channel.edited_messages) == 1
+    assert channel.edited_messages[0] == (
+        "telegram:123456",
+        "1",  # message_id from MockMessage
+        "Using tools: read_file...",
+    )
+
+
+@pytest.mark.asyncio
+async def test_hermes_mode_falls_back_to_new_message_on_edit_failure():
+    channel = MockChannel()
+    # Make edit fail
+    async def failing_edit(session_key: str, message_id: str, content: str) -> bool:
+        return False
+
+    channel.edit_message = failing_edit
+    mw = _make_middleware(channel=channel)
+
+    # First update: send new message
+    await mw._send_status("Starting work...")
+    assert len(channel.sent_messages) == 1
+
+    # Second update: edit fails, fallback to new message
+    await mw._send_status("Using tools: read_file...")
+    assert len(channel.sent_messages) == 2
+    assert len(channel.edited_messages) == 0
+
+
+@pytest.mark.asyncio
+async def test_hermes_mode_disabled_sends_separate_messages():
+    channel = MockChannel()
+    mw = _make_middleware(config=_make_config(hermes_mode=False), channel=channel)
+
+    await mw._send_status("Starting work...")
+    await mw._send_status("Using tools: read_file...")
+
+    assert len(channel.sent_messages) == 2
+    assert len(channel.edited_messages) == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_status_deletes_tracked_message():
+    channel = MockChannel()
+    mw = _make_middleware(channel=channel)
+
+    # Send a status message
+    await mw._send_status("Starting work...")
+    assert len(channel.sent_messages) == 1
+    message_id = mw._status_message_id
+    assert message_id is not None
+
+    # Delete it
+    await mw.delete_status()
+    assert len(channel.deleted_messages) == 1
+    assert channel.deleted_messages[0] == ("telegram:123456", message_id)
+    assert mw._status_message_id is None
+
+
+@pytest.mark.asyncio
+async def test_delete_status_noop_without_tracked_message():
+    channel = MockChannel()
+    mw = _make_middleware(channel=channel)
+
+    await mw.delete_status()
+    assert len(channel.deleted_messages) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +512,7 @@ class TestStatusUpdatesConfig:
         assert config.min_interval_seconds == 3
         assert config.max_updates_per_run == 10
         assert config.template == "[{event}] {message}"
+        assert config.hermes_mode is True
 
     def test_custom_values(self):
         config = StatusUpdatesConfig(
@@ -404,6 +525,7 @@ class TestStatusUpdatesConfig:
             min_interval_seconds=0,
             max_updates_per_run=5,
             template="{message}",
+            hermes_mode=False,
         )
         assert config.enabled is False
         assert config.agent_start is False
@@ -414,6 +536,7 @@ class TestStatusUpdatesConfig:
         assert config.min_interval_seconds == 0
         assert config.max_updates_per_run == 5
         assert config.template == "{message}"
+        assert config.hermes_mode is False
 
     def test_min_interval_bounds(self):
         with pytest.raises(Exception):

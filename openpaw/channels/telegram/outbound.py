@@ -159,3 +159,79 @@ class TelegramOutboundSender:
         except Exception as e:
             logger.error("Failed to send file '%s' to chat %s: %s", filename, chat_id, e)
             raise RuntimeError(f"Failed to send file: {e}") from e
+
+    async def edit_message(
+        self,
+        session_key: str,
+        message_id: str,
+        content: str,
+    ) -> bool:
+        """Edit an existing Telegram message.
+
+        Args:
+            session_key: Target session identifier.
+            message_id: Telegram message ID to edit.
+            content: New message content.
+
+        Returns:
+            True if the edit was successful.
+        """
+        parts = session_key.split(":")
+        chat_id = int(parts[1])
+
+        try:
+            from telegram.error import BadRequest
+
+            from openpaw.channels.formatting import markdown_to_telegram_html
+
+            html_content = markdown_to_telegram_html(content)
+            try:
+                await self._app.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=int(message_id),
+                    text=html_content,
+                    parse_mode="HTML",
+                )
+            except BadRequest as e:
+                if "can't parse" in str(e).lower():
+                    logger.warning("HTML parse failed on edit, using plain text: %s", e)
+                    await self._app.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=int(message_id),
+                        text=content,
+                    )
+                else:
+                    raise
+            logger.debug("Edited Telegram message %s in chat %s", message_id, chat_id)
+            return True
+        except Exception as e:
+            logger.debug("Failed to edit Telegram message %s: %s", message_id, e)
+            return False
+
+    async def delete_message(
+        self,
+        session_key: str,
+        message_id: str,
+    ) -> bool:
+        """Delete an existing Telegram message.
+
+        Args:
+            session_key: Target session identifier.
+            message_id: Telegram message ID to delete.
+
+        Returns:
+            True if the deletion was successful.
+        """
+        parts = session_key.split(":")
+        chat_id = int(parts[1])
+
+        try:
+            await self._app.bot.delete_message(
+                chat_id=chat_id,
+                message_id=int(message_id),
+            )
+            logger.debug("Deleted Telegram message %s in chat %s", message_id, chat_id)
+            return True
+        except Exception as e:
+            logger.debug("Failed to delete Telegram message %s: %s", message_id, e)
+            return False

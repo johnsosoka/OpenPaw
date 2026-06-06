@@ -408,6 +408,7 @@ class MessageProcessor:
                 if self._status_reminder_middleware:
                     self._status_reminder_middleware.reset()
                 if self._status_update_middleware:
+                    await self._status_update_middleware.delete_status()
                     self._status_update_middleware.reset()
 
             # Check steer (captured before reset)
