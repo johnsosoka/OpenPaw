@@ -776,7 +776,7 @@ class TestSubAgentSessionLogging:
         )
 
         # Store the request first
-        store.create(request)
+        await store.create(request)
 
         session_logger = MagicMock()
         session_logger.write_session = MagicMock(return_value="memory/sessions/subagent/subagent_test-subagent.jsonl")
@@ -824,7 +824,7 @@ class TestSubAgentSessionLogging:
         )
 
         # Store the request first
-        store.create(request)
+        await store.create(request)
 
         session_logger = MagicMock()
         session_logger.write_session = MagicMock(return_value="memory/sessions/subagent/timeout.jsonl")
@@ -839,10 +839,11 @@ class TestSubAgentSessionLogging:
 
         await runner._execute_subagent(request)
 
-        # Session logger should be called with "(timed out)"
+        # Session logger should be called with enriched timeout message
         session_logger.write_session.assert_called_once()
         call_kwargs = session_logger.write_session.call_args[1]
-        assert call_kwargs["response"] == "(timed out)"
+        assert call_kwargs["response"].startswith("(timed out")
+        assert "last tool:" in call_kwargs["response"]
         assert call_kwargs["metrics"] is None
 
 
@@ -955,7 +956,7 @@ class TestBackwardsCompatibility:
         )
 
         # Store the request first (required by SubAgentStore)
-        store.create(request)
+        await store.create(request)
 
         # Create runner WITHOUT session_logger
         runner = SubAgentRunner(
@@ -969,6 +970,6 @@ class TestBackwardsCompatibility:
         await runner._execute_subagent(request)
 
         # Should work without errors
-        result = store.get_result(request.id)
+        result = await store.get_result(request.id)
         assert result is not None
         assert result.output == "Subagent test"

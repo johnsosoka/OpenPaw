@@ -80,13 +80,15 @@ class SubAgentExecutor:
             async with asyncio.timeout(effective_timeout * 60):
                 response = await runner.run(message=request.task)
         except TimeoutError:
-            return await self._handle_timeout(request, start_time)
+            return await self._handle_timeout(request, runner, start_time)
+        except asyncio.CancelledError:
+            raise  # Propagate cancellation to prevent misclassification as failure
         except Exception as e:
-            return await self._handle_error(request, start_time, e)
+            return await self._handle_error(request, runner, start_time, e)
 
         # Check if we were cancelled during execution
         # (cancel() sets status to CANCELLED before task.cancel())
-        current_request = self._store.get(request.id)
+        current_request = await self._store.get(request.id)
         if current_request and current_request.status == SubAgentStatus.CANCELLED:
             logger.info(
                 f"Sub-agent {request.id} completed but was cancelled — "
@@ -132,7 +134,7 @@ class SubAgentExecutor:
             token_count=token_count,
             duration_ms=duration_ms,
         )
-        self._store.save_result(result)
+        await self._store.save_result(result)
 
         # Write session log
         log_path = await self._write_session_log(
@@ -144,10 +146,10 @@ class SubAgentExecutor:
         )
         if log_path:
             result.session_log_path = log_path
-            self._store.save_result(result)
+            await self._store.save_result(result)
 
         # Update status to COMPLETED
-        self._store.update_status(
+        await self._store.update_status(
             request.id, SubAgentStatus.COMPLETED, completed_at=datetime.now(UTC)
         )
 
@@ -175,6 +177,7 @@ class SubAgentExecutor:
         error_msg: str,
         response: str,
         log_level: int,
+        tools_used: list[str] | None = None,
     ) -> SubAgentResult:
         """Common failure path for timeout and error handling.
 
@@ -185,12 +188,13 @@ class SubAgentExecutor:
             error_msg: Human-readable error message.
             response: Session log response text.
             log_level: Logging level for the failure message.
+            tools_used: Optional list of tool names invoked before failure.
 
         Returns:
             SubAgentResult in the specified terminal state.
         """
         duration_ms = (time.monotonic() - start_time) * 1000
-        self._store.update_status(
+        await self._store.update_status(
             request.id, status, completed_at=datetime.now(UTC)
         )
 
@@ -200,18 +204,18 @@ class SubAgentExecutor:
             error=error_msg,
             duration_ms=duration_ms,
         )
-        self._store.save_result(result)
+        await self._store.save_result(result)
 
         log_path = await self._write_session_log(
             request=request,
             response=response,
-            tools_used=[],
+            tools_used=tools_used or [],
             metrics=None,
             duration_ms=duration_ms,
         )
         if log_path:
             result.session_log_path = log_path
-            self._store.save_result(result)
+            await self._store.save_result(result)
 
         logger.log(
             log_level,
@@ -221,48 +225,62 @@ class SubAgentExecutor:
         return result
 
     async def _handle_timeout(
-        self, request: SubAgentRequest, start_time: float
+        self, request: SubAgentRequest, runner: AgentRunner, start_time: float
     ) -> SubAgentResult:
         """Handle agent timeout.
 
         Args:
             request: The sub-agent request.
+            runner: The agent runner that timed out.
             start_time: Monotonic start time.
 
         Returns:
             SubAgentResult in TIMED_OUT state.
         """
-        error_msg = f"Sub-agent timed out after {request.timeout_minutes} minutes"
+        last_tool = getattr(runner, "_current_tool_name", None) or "unknown"
+        tools_used = list(getattr(runner, "_last_tools_used", []) or [])
+        error_msg = (
+            f"Sub-agent timed out after {request.timeout_minutes} minutes "
+            f"(last tool: {last_tool}, tools used: {tools_used})"
+        )
         return await self._finalize_failure(
             request,
             start_time,
             SubAgentStatus.TIMED_OUT,
             error_msg,
-            "(timed out)",
+            f"(timed out; last tool: {last_tool})",
             logging.WARNING,
+            tools_used=tools_used,
         )
 
     async def _handle_error(
-        self, request: SubAgentRequest, start_time: float, error: Exception
+        self, request: SubAgentRequest, runner: AgentRunner, start_time: float, error: Exception
     ) -> SubAgentResult:
         """Handle generic agent failure.
 
         Args:
             request: The sub-agent request.
+            runner: The agent runner that failed.
             start_time: Monotonic start time.
             error: The exception that was raised.
 
         Returns:
             SubAgentResult in FAILED state.
         """
-        error_msg = f"Sub-agent failed: {error!s}"
+        last_tool = getattr(runner, "_current_tool_name", None) or "unknown"
+        tools_used = list(getattr(runner, "_last_tools_used", []) or [])
+        error_msg = (
+            f"Sub-agent failed: {error!s} "
+            f"(last tool: {last_tool}, tools used: {tools_used})"
+        )
         return await self._finalize_failure(
             request,
             start_time,
             SubAgentStatus.FAILED,
             error_msg,
-            f"(failed: {error_msg})",
+            f"(failed: {error!s}; last tool: {last_tool})",
             logging.ERROR,
+            tools_used=tools_used,
         )
 
     async def _progress_timer(

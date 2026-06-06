@@ -146,9 +146,9 @@ class TestBuildOriginSuffix:
 @pytest.fixture
 def mock_store():
     store = Mock(spec=SubAgentStore)
-    store.update_status = Mock()
-    store.save_result = Mock()
-    store.get = Mock(return_value=None)
+    store.update_status = AsyncMock()
+    store.save_result = AsyncMock()
+    store.get = AsyncMock(return_value=None)
     return store
 
 

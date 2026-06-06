@@ -9,6 +9,8 @@ from copy import copy
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from openpaw.builtins.tools.spawn import SpawnAgentInput, SpawnToolBuiltin
 from openpaw.model.skill import SkillInfo
 from openpaw.model.spawn_profile import SpawnProfile
@@ -134,7 +136,8 @@ class TestCreateSubagentRequestProfile:
 
         assert request.profile is None
 
-    def test_profile_preserved_in_store_create_read_cycle(self, tmp_path: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_profile_preserved_in_store_create_read_cycle(self, tmp_path: Path) -> None:
         """Profile name survives a store create → read round-trip."""
         store = SubAgentStore(tmp_path)
         request = create_subagent_request(
@@ -145,13 +148,14 @@ class TestCreateSubagentRequestProfile:
             profile="doc-summarizer",
         )
 
-        store.create(request)
-        retrieved = store.get(request.id)
+        await store.create(request)
+        retrieved = await store.get(request.id)
 
         assert retrieved is not None
         assert retrieved.profile == "doc-summarizer"
 
-    def test_no_profile_store_round_trip(self, tmp_path: Path) -> None:
+    @pytest.mark.asyncio
+    async def test_no_profile_store_round_trip(self, tmp_path: Path) -> None:
         """A request without a profile is stored and retrieved with profile=None."""
         store = SubAgentStore(tmp_path)
         request = create_subagent_request(
@@ -161,8 +165,8 @@ class TestCreateSubagentRequestProfile:
             status=SubAgentStatus.PENDING,
         )
 
-        store.create(request)
-        retrieved = store.get(request.id)
+        await store.create(request)
+        retrieved = await store.get(request.id)
 
         assert retrieved is not None
         assert retrieved.profile is None

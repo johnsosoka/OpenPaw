@@ -727,6 +727,10 @@ class AgentRunner:
         # Track invocation duration
         start_time = time.monotonic()
 
+        logger.info(
+            f"Agent run starting (workspace: {self._log_label}, "
+            f"model: {self.model_id}, thread: {thread_id or 'new'})"
+        )
         try:
             # Use astream with stream_mode="updates" for behavioral parity with ainvoke
             # Collect all messages from the stream

@@ -149,7 +149,7 @@ class SubAgentRunner:
             )
 
         # Update status to RUNNING
-        self._store.update_status(
+        await self._store.update_status(
             request.id, SubAgentStatus.RUNNING, started_at=datetime.now(UTC)
         )
 
@@ -184,7 +184,7 @@ class SubAgentRunner:
             return False
 
         # Guard against cancel-after-complete race: don't overwrite a terminal status.
-        current = self._store.get(request_id)
+        current = await self._store.get(request_id)
         if current and current.status in (
             SubAgentStatus.COMPLETED,
             SubAgentStatus.FAILED,
@@ -200,22 +200,22 @@ class SubAgentRunner:
         task.cancel()
 
         # Update store status
-        self._store.update_status(
+        await self._store.update_status(
             request_id, SubAgentStatus.CANCELLED, completed_at=datetime.now(UTC)
         )
 
         logger.info(f"Cancelled sub-agent: {request_id}")
         return True
 
-    def list_active(self) -> list[SubAgentRequest]:
+    async def list_active(self) -> list[SubAgentRequest]:
         """List all active sub-agent requests (pending or running).
 
         Returns:
             List of SubAgentRequest instances.
         """
-        return self._store.list_active()
+        return await self._store.list_active()
 
-    def list_recent(self, limit: int = 10) -> list[SubAgentRequest]:
+    async def list_recent(self, limit: int = 10) -> list[SubAgentRequest]:
         """List recent sub-agent requests (all statuses, sorted by created_at desc).
 
         Args:
@@ -224,9 +224,9 @@ class SubAgentRunner:
         Returns:
             List of SubAgentRequest instances, most recent first.
         """
-        return self._store.list_recent(limit=limit)
+        return await self._store.list_recent(limit=limit)
 
-    def get_status(self, request_id: str) -> SubAgentRequest | None:
+    async def get_status(self, request_id: str) -> SubAgentRequest | None:
         """Get the status of a sub-agent request.
 
         Args:
@@ -235,9 +235,9 @@ class SubAgentRunner:
         Returns:
             SubAgentRequest if found, None otherwise.
         """
-        return self._store.get(request_id)
+        return await self._store.get(request_id)
 
-    def get_result(self, request_id: str) -> SubAgentResult | None:
+    async def get_result(self, request_id: str) -> SubAgentResult | None:
         """Get the result of a completed sub-agent.
 
         Args:
@@ -246,7 +246,7 @@ class SubAgentRunner:
         Returns:
             SubAgentResult if found, None otherwise.
         """
-        return self._store.get_result(request_id)
+        return await self._store.get_result(request_id)
 
     async def shutdown(self) -> None:
         """Shutdown the runner, cancelling all active sub-agents."""
@@ -261,7 +261,7 @@ class SubAgentRunner:
             if not task.done():
                 task.cancel()
                 # Update store status
-                self._store.update_status(
+                await self._store.update_status(
                     request_id, SubAgentStatus.CANCELLED, completed_at=datetime.now(UTC)
                 )
 
@@ -290,6 +290,10 @@ class SubAgentRunner:
         """
         start_time = time.monotonic()
 
+        logger.info(
+            f"Sub-agent execution starting: {request.id} ('{request.label}') "
+            f"[session: {request.session_key}, timeout: {request.timeout_minutes}min]"
+        )
         try:
             # Acquire semaphore for concurrency control
             async with self._semaphore:
@@ -308,10 +312,10 @@ class SubAgentRunner:
                         error=str(e),
                         duration_ms=duration_ms,
                     )
-                    self._store.update_status(
+                    await self._store.update_status(
                         request.id, SubAgentStatus.FAILED, completed_at=datetime.now(UTC)
                     )
-                    self._store.save_result(result)
+                    await self._store.save_result(result)
                     if request.notify:
                         await self._notifier.send_notification(request, result)
                     logger.warning(f"Sub-agent {request.id} failed: {e}")
@@ -345,7 +349,7 @@ class SubAgentRunner:
         except asyncio.CancelledError:
             # Handle cancellation
             duration_ms = (time.monotonic() - start_time) * 1000
-            self._store.update_status(
+            await self._store.update_status(
                 request.id, SubAgentStatus.CANCELLED, completed_at=datetime.now(UTC)
             )
 
@@ -355,7 +359,7 @@ class SubAgentRunner:
                 error="Sub-agent was cancelled",
                 duration_ms=duration_ms,
             )
-            self._store.save_result(result)
+            await self._store.save_result(result)
 
             # Write session log for cancelled path
             if self._session_logger:
@@ -369,7 +373,7 @@ class SubAgentRunner:
                         duration_ms=duration_ms,
                     )
                     result.session_log_path = log_path
-                    self._store.save_result(result)
+                    await self._store.save_result(result)
                 except Exception as log_err:
                     logger.warning(
                         f"Failed to write cancel session log for sub-agent {request.id}: {log_err}",
@@ -388,7 +392,7 @@ class SubAgentRunner:
         except Exception as e:
             # Handle failure
             duration_ms = (time.monotonic() - start_time) * 1000
-            self._store.update_status(
+            await self._store.update_status(
                 request.id, SubAgentStatus.FAILED, completed_at=datetime.now(UTC)
             )
 
@@ -399,7 +403,7 @@ class SubAgentRunner:
                 error=error_msg,
                 duration_ms=duration_ms,
             )
-            self._store.save_result(result)
+            await self._store.save_result(result)
 
             # Write session log for failure path
             if self._session_logger:
@@ -413,7 +417,7 @@ class SubAgentRunner:
                         duration_ms=duration_ms,
                     )
                     result.session_log_path = log_path
-                    self._store.save_result(result)
+                    await self._store.save_result(result)
                 except Exception as log_err:
                     logger.warning(
                         f"Failed to write failure session log for sub-agent {request.id}: {log_err}",

@@ -98,6 +98,10 @@ class SubAgentProfiler:
             ProfileNotFoundError: If the request references a profile that
                 cannot be resolved.
         """
+        logger.info(
+            f"Sub-agent profiler setup: {request.id} ('{request.label}') "
+            f"[profile: {request.profile or 'default'}]"
+        )
         profile: SpawnProfile | None = None
         if request.profile:
             profile = self.resolve(request.profile)

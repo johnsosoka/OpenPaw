@@ -111,7 +111,7 @@ class SpawnToolBuiltin(BaseBuiltinTool):
             create_list_team_profiles_tool(self),
         ]
 
-    def _build_spawn_request(
+    async def _build_spawn_request(
         self,
         task: str,
         label: str,
@@ -154,7 +154,7 @@ class SpawnToolBuiltin(BaseBuiltinTool):
         )
 
         try:
-            self._runner._store.create(request)
+            await self._runner._store.create(request)
         except Exception as e:
             logger.error(f"Failed to create sub-agent request: {e}")
             return f"[Error: Failed to create sub-agent request: {e}]"

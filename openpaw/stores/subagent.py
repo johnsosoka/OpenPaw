@@ -4,6 +4,9 @@ This module handles persistence of sub-agent requests and results, allowing
 parent agents to spawn background tasks and retrieve their outputs.
 """
 
+from __future__ import annotations
+
+import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -25,6 +28,9 @@ class SubAgentStore:
     Provides CRUD operations for sub-agent requests and results with thread-safe
     file access. State is stored in YAML format at {workspace}/data/subagents.yaml.
 
+    All public methods are async and run blocking file I/O in a thread pool
+    via asyncio.to_thread() to avoid blocking the event loop.
+
     Example:
         >>> store = SubAgentStore(Path("agent_workspaces/gilfoyle"))
         >>> request = SubAgentRequest(
@@ -34,10 +40,10 @@ class SubAgentStore:
         ...     status=SubAgentStatus.PENDING,
         ...     session_key="telegram:12345"
         ... )
-        >>> store.create(request)
-        >>> store.update_status(request.id, SubAgentStatus.RUNNING)
+        >>> await store.create(request)
+        >>> await store.update_status(request.id, SubAgentStatus.RUNNING)
         >>> result = SubAgentResult(request_id=request.id, output="Here are the findings...")
-        >>> store.save_result(result)
+        >>> await store.save_result(result)
     """
 
     MAX_RESULT_SIZE = 50_000  # 50K char truncation (consistent with read_file 100K valve)
@@ -58,8 +64,8 @@ class SubAgentStore:
         # Ensure the data/ directory exists
         self.storage_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # Clean up stale records on initialization
-        self.cleanup_stale()
+        # Clean up stale records on initialization (sync, since __init__ is sync)
+        self._cleanup_stale_sync()
 
         logger.info(f"SubAgentStore initialized: {self.storage_file}")
 
@@ -152,7 +158,7 @@ class SubAgentStore:
             logger.error(f"Failed to save sub-agent state to {self.storage_file}: {e}", exc_info=True)
             raise
 
-    def create(self, request: SubAgentRequest) -> None:
+    async def create(self, request: SubAgentRequest) -> None:
         """Create a new sub-agent request and persist immediately.
 
         Args:
@@ -161,19 +167,22 @@ class SubAgentStore:
         Raises:
             ValueError: If a request with the same ID already exists.
         """
-        with self._lock:
-            data = self._load_unlocked()
+        def _create_sync() -> None:
+            with self._lock:
+                data = self._load_unlocked()
 
-            # Check for duplicate ID
-            if any(r["id"] == request.id for r in data["requests"]):
-                raise ValueError(f"SubAgentRequest with ID {request.id} already exists")
+                # Check for duplicate ID
+                if any(r["id"] == request.id for r in data["requests"]):
+                    raise ValueError(f"SubAgentRequest with ID {request.id} already exists")
 
-            data["requests"].append(request.to_dict())
-            self._save_unlocked(data)
+                data["requests"].append(request.to_dict())
+                self._save_unlocked(data)
+
+        await asyncio.to_thread(_create_sync)
 
         logger.info(f"Created sub-agent request: {request.id} ({request.label}, {request.status.value})")
 
-    def update_status(self, request_id: str, status: SubAgentStatus, **kwargs: Any) -> bool:
+    async def update_status(self, request_id: str, status: SubAgentStatus, **kwargs: Any) -> bool:
         """Update a sub-agent request's status and optional fields.
 
         Args:
@@ -185,41 +194,47 @@ class SubAgentStore:
             True if request was found and updated, False otherwise.
 
         Example:
-            >>> store.update_status(
+            >>> await store.update_status(
             ...     "req-123",
             ...     SubAgentStatus.COMPLETED,
             ...     completed_at=datetime.now(UTC)
             ... )
         """
-        with self._lock:
-            data = self._load_unlocked()
+        def _update_status_sync() -> bool:
+            with self._lock:
+                data = self._load_unlocked()
 
-            for i, request_data in enumerate(data["requests"]):
-                if request_data["id"] == request_id:
-                    # Load existing request
-                    request = SubAgentRequest.from_dict(request_data)
+                for i, request_data in enumerate(data["requests"]):
+                    if request_data["id"] == request_id:
+                        # Load existing request
+                        request = SubAgentRequest.from_dict(request_data)
 
-                    # Update status
-                    request.status = status
+                        # Update status
+                        request.status = status
 
-                    # Update additional fields
-                    for key, value in kwargs.items():
-                        if hasattr(request, key):
-                            setattr(request, key, value)
-                        else:
-                            logger.warning(f"Ignoring unknown field: {key}")
+                        # Update additional fields
+                        for key, value in kwargs.items():
+                            if hasattr(request, key):
+                                setattr(request, key, value)
+                            else:
+                                logger.warning(f"Ignoring unknown field: {key}")
 
-                    # Replace in data
-                    data["requests"][i] = request.to_dict()
-                    self._save_unlocked(data)
+                        # Replace in data
+                        data["requests"][i] = request.to_dict()
+                        self._save_unlocked(data)
 
-                    logger.info(f"Updated sub-agent request: {request_id} -> {status.value}")
-                    return True
+                        logger.info(f"Updated sub-agent request: {request_id} -> {status.value}")
+                        return True
 
-        logger.warning(f"Sub-agent request not found for update: {request_id}")
-        return False
+                return False
 
-    def save_result(self, result: SubAgentResult) -> bool:
+        result = await asyncio.to_thread(_update_status_sync)
+
+        if not result:
+            logger.warning(f"Sub-agent request not found for update: {request_id}")
+        return result
+
+    async def save_result(self, result: SubAgentResult) -> bool:
         """Save sub-agent result (truncates output if too large).
 
         Args:
@@ -228,32 +243,38 @@ class SubAgentStore:
         Returns:
             True if result was saved (request exists), False otherwise.
         """
-        with self._lock:
-            data = self._load_unlocked()
+        def _save_result_sync() -> bool:
+            with self._lock:
+                data = self._load_unlocked()
 
-            # Verify request exists
-            if not any(r["id"] == result.request_id for r in data["requests"]):
-                logger.warning(f"Cannot save result: request {result.request_id} not found")
-                return False
+                # Verify request exists
+                if not any(r["id"] == result.request_id for r in data["requests"]):
+                    logger.warning(f"Cannot save result: request {result.request_id} not found")
+                    return False
 
-            # Truncate output if too large
-            if len(result.output) > self.MAX_RESULT_SIZE:
-                logger.warning(
-                    f"Truncating result output from {len(result.output)} to {self.MAX_RESULT_SIZE} chars"
-                )
-                result.output = result.output[:self.MAX_RESULT_SIZE] + "\n\n[Output truncated]"
+                # Truncate output if too large
+                if len(result.output) > self.MAX_RESULT_SIZE:
+                    logger.warning(
+                        f"Truncating result output from {len(result.output)} to {self.MAX_RESULT_SIZE} chars"
+                    )
+                    result.output = result.output[:self.MAX_RESULT_SIZE] + "\n\n[Output truncated]"
 
-            # Remove existing result for this request (if any)
-            data["results"] = [r for r in data["results"] if r["request_id"] != result.request_id]
+                # Remove existing result for this request (if any)
+                data["results"] = [r for r in data["results"] if r["request_id"] != result.request_id]
 
-            # Add new result
-            data["results"].append(result.to_dict())
-            self._save_unlocked(data)
+                # Add new result
+                data["results"].append(result.to_dict())
+                self._save_unlocked(data)
 
-        logger.info(f"Saved sub-agent result for request: {result.request_id}")
-        return True
+                return True
 
-    def get(self, request_id: str) -> SubAgentRequest | None:
+        saved = await asyncio.to_thread(_save_result_sync)
+
+        if saved:
+            logger.info(f"Saved sub-agent result for request: {result.request_id}")
+        return saved
+
+    async def get(self, request_id: str) -> SubAgentRequest | None:
         """Retrieve a single sub-agent request by ID.
 
         Args:
@@ -262,16 +283,19 @@ class SubAgentStore:
         Returns:
             SubAgentRequest instance if found, None otherwise.
         """
-        with self._lock:
-            data = self._load_unlocked()
+        def _get_sync() -> SubAgentRequest | None:
+            with self._lock:
+                data = self._load_unlocked()
 
-        for request_data in data["requests"]:
-            if request_data["id"] == request_id:
-                return SubAgentRequest.from_dict(request_data)
+            for request_data in data["requests"]:
+                if request_data["id"] == request_id:
+                    return SubAgentRequest.from_dict(request_data)
 
-        return None
+            return None
 
-    def get_result(self, request_id: str) -> SubAgentResult | None:
+        return await asyncio.to_thread(_get_sync)
+
+    async def get_result(self, request_id: str) -> SubAgentResult | None:
         """Retrieve a sub-agent result by request ID.
 
         Args:
@@ -280,40 +304,46 @@ class SubAgentStore:
         Returns:
             SubAgentResult instance if found, None otherwise.
         """
-        with self._lock:
-            data = self._load_unlocked()
+        def _get_result_sync() -> SubAgentResult | None:
+            with self._lock:
+                data = self._load_unlocked()
 
-        for result_data in data["results"]:
-            if result_data["request_id"] == request_id:
-                return SubAgentResult.from_dict(result_data)
+            for result_data in data["results"]:
+                if result_data["request_id"] == request_id:
+                    return SubAgentResult.from_dict(result_data)
 
-        return None
+            return None
 
-    def list_active(self) -> list[SubAgentRequest]:
+        return await asyncio.to_thread(_get_result_sync)
+
+    async def list_active(self) -> list[SubAgentRequest]:
         """List all active sub-agent requests (pending or running).
 
         Returns:
             List of SubAgentRequest instances with pending or running status.
         """
-        with self._lock:
-            data = self._load_unlocked()
+        def _list_active_sync() -> list[SubAgentRequest]:
+            with self._lock:
+                data = self._load_unlocked()
 
-        requests = []
+            requests = []
 
-        for request_data in data["requests"]:
-            try:
-                request = SubAgentRequest.from_dict(request_data)
+            for request_data in data["requests"]:
+                try:
+                    request = SubAgentRequest.from_dict(request_data)
 
-                # Only include pending or running
-                if request.status in (SubAgentStatus.PENDING, SubAgentStatus.RUNNING):
-                    requests.append(request)
-            except Exception as e:
-                logger.error(f"Failed to parse request {request_data.get('id', 'unknown')}: {e}")
-                continue
+                    # Only include pending or running
+                    if request.status in (SubAgentStatus.PENDING, SubAgentStatus.RUNNING):
+                        requests.append(request)
+                except Exception as e:
+                    logger.error(f"Failed to parse request {request_data.get('id', 'unknown')}: {e}")
+                    continue
 
-        return requests
+            return requests
 
-    def list_recent(self, limit: int = 10) -> list[SubAgentRequest]:
+        return await asyncio.to_thread(_list_active_sync)
+
+    async def list_recent(self, limit: int = 10) -> list[SubAgentRequest]:
         """List recent sub-agent requests (all statuses, sorted by created_at desc).
 
         Args:
@@ -322,30 +352,32 @@ class SubAgentStore:
         Returns:
             List of SubAgentRequest instances, most recent first.
         """
-        with self._lock:
-            data = self._load_unlocked()
+        def _list_recent_sync() -> list[SubAgentRequest]:
+            with self._lock:
+                data = self._load_unlocked()
 
-        requests = []
+            requests = []
 
-        for request_data in data["requests"]:
-            try:
-                request = SubAgentRequest.from_dict(request_data)
-                requests.append(request)
-            except Exception as e:
-                logger.error(f"Failed to parse request {request_data.get('id', 'unknown')}: {e}")
-                continue
+            for request_data in data["requests"]:
+                try:
+                    request = SubAgentRequest.from_dict(request_data)
+                    requests.append(request)
+                except Exception as e:
+                    logger.error(f"Failed to parse request {request_data.get('id', 'unknown')}: {e}")
+                    continue
 
-        # Sort by created_at descending
-        requests.sort(key=lambda r: r.created_at, reverse=True)
+            # Sort by created_at descending
+            requests.sort(key=lambda r: r.created_at, reverse=True)
 
-        return requests[:limit]
+            return requests[:limit]
 
-    def cleanup_stale(self) -> int:
+        return await asyncio.to_thread(_list_recent_sync)
+
+    def _cleanup_stale_sync(self) -> int:
         """Remove old completed records and mark stale running/pending as failed.
 
-        Prunes:
-        - Completed/failed/cancelled/timed_out requests older than max_age_hours
-        - Marks running/pending requests exceeding timeout_minutes as timed_out
+        Synchronous version for use inside __init__.  Public callers should use
+        cleanup_stale() instead.
 
         Returns:
             Number of records removed.
@@ -410,6 +442,18 @@ class SubAgentStore:
                 logger.info(f"Sub-agent cleanup: {', '.join(parts)}")
 
         return removed
+
+    async def cleanup_stale(self) -> int:
+        """Remove old completed records and mark stale running/pending as failed.
+
+        Prunes:
+        - Completed/failed/cancelled/timed_out requests older than max_age_hours
+        - Marks running/pending requests exceeding timeout_minutes as timed_out
+
+        Returns:
+            Number of records removed.
+        """
+        return await asyncio.to_thread(self._cleanup_stale_sync)
 
 
 def create_subagent_request(

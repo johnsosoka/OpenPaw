@@ -22,10 +22,10 @@ def mock_store():
     """Create a mock SubAgentStore."""
     from openpaw.stores.subagent import SubAgentStore
     store = Mock(spec=SubAgentStore)
-    store.update_status = Mock()
-    store.save_result = Mock()
-    store.get = Mock(return_value=None)
-    store.get_result = Mock(return_value=None)
+    store.update_status = AsyncMock()
+    store.save_result = AsyncMock()
+    store.get = AsyncMock(return_value=None)
+    store.get_result = AsyncMock(return_value=None)
     return store
 
 

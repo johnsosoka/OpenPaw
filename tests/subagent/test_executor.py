@@ -20,12 +20,12 @@ from openpaw.stores.subagent import SubAgentStore
 def mock_store():
     """Create a mock SubAgentStore."""
     store = Mock(spec=SubAgentStore)
-    store.update_status = Mock()
-    store.save_result = Mock()
-    store.get = Mock(return_value=None)
-    store.get_result = Mock(return_value=None)
-    store.list_active = Mock(return_value=[])
-    store.list_recent = Mock(return_value=[])
+    store.update_status = AsyncMock()
+    store.save_result = AsyncMock()
+    store.get = AsyncMock(return_value=None)
+    store.get_result = AsyncMock(return_value=None)
+    store.list_active = AsyncMock(return_value=[])
+    store.list_recent = AsyncMock(return_value=[])
     return store
 
 
@@ -484,7 +484,7 @@ async def test_session_log_path_set_on_result_after_success(
     local_runner.timeout_seconds = 1800
 
     saved_results: list[SubAgentResult] = []
-    mock_store.save_result = Mock(side_effect=lambda r: saved_results.append(r))
+    mock_store.save_result = AsyncMock(side_effect=lambda r: saved_results.append(r))
 
     runner = SubAgentRunner(
         agent_factory=lambda: local_runner,

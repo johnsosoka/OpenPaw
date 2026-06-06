@@ -34,10 +34,10 @@ def mock_runner(mock_store: SubAgentStore) -> SubAgentRunner:
     runner._store = mock_store
     runner.spawn = AsyncMock(return_value="test-id-123")
     runner.cancel = AsyncMock(return_value=True)
-    runner.list_active = MagicMock(return_value=[])
-    runner.list_recent = MagicMock(return_value=[])
-    runner.get_status = MagicMock(return_value=None)
-    runner.get_result = MagicMock(return_value=None)
+    runner.list_active = AsyncMock(return_value=[])
+    runner.list_recent = AsyncMock(return_value=[])
+    runner.get_status = AsyncMock(return_value=None)
+    runner.get_result = AsyncMock(return_value=None)
     return runner
 
 
@@ -130,7 +130,7 @@ async def test_spawn_agent_creates_request_and_calls_runner(
     mock_runner.spawn.assert_called_once()
 
     # Verify request was created in store
-    requests = mock_store.list_recent(limit=10)
+    requests = await mock_store.list_recent(limit=10)
     assert len(requests) == 1
     assert requests[0].task == "Test task"
     assert requests[0].label == "test-label"
@@ -177,7 +177,8 @@ async def test_spawn_agent_returns_error_when_no_session_context(
     assert "[Error: Cannot spawn sub-agent: no active session context]" in result
 
 
-def test_list_subagents_formats_active_and_recent_correctly(
+@pytest.mark.asyncio
+async def test_list_subagents_formats_active_and_recent_correctly(
     spawn_tool: SpawnToolBuiltin, mock_runner: SubAgentRunner
 ):
     """Test list_subagents formats active and recent correctly."""
@@ -211,7 +212,7 @@ def test_list_subagents_formats_active_and_recent_correctly(
     tools = spawn_tool.get_langchain_tool()
     list_tool = next(t for t in tools if t.name == "list_subagents")
 
-    result = list_tool.func()
+    result = await list_tool.coroutine()
 
     # Verify formatting
     assert "Active Sub-agents:" in result
@@ -225,7 +226,8 @@ def test_list_subagents_formats_active_and_recent_correctly(
     assert "completed" in result
 
 
-def test_list_subagents_handles_empty_case(
+@pytest.mark.asyncio
+async def test_list_subagents_handles_empty_case(
     spawn_tool: SpawnToolBuiltin, mock_runner: SubAgentRunner
 ):
     """Test list_subagents handles empty case."""
@@ -235,12 +237,13 @@ def test_list_subagents_handles_empty_case(
     tools = spawn_tool.get_langchain_tool()
     list_tool = next(t for t in tools if t.name == "list_subagents")
 
-    result = list_tool.func()
+    result = await list_tool.coroutine()
 
     assert result == "No sub-agents found."
 
 
-def test_get_subagent_result_returns_result_for_completed_agent(
+@pytest.mark.asyncio
+async def test_get_subagent_result_returns_result_for_completed_agent(
     spawn_tool: SpawnToolBuiltin, mock_runner: SubAgentRunner
 ):
     """Test get_subagent_result returns result for completed agent."""
@@ -270,7 +273,7 @@ def test_get_subagent_result_returns_result_for_completed_agent(
     tools = spawn_tool.get_langchain_tool()
     get_result_tool = next(t for t in tools if t.name == "get_subagent_result")
 
-    response = get_result_tool.func(id="test-123")
+    response = await get_result_tool.coroutine(id="test-123")
 
     assert "Sub-agent: test-label (test-123)" in response
     assert "Status: completed" in response
@@ -279,7 +282,8 @@ def test_get_subagent_result_returns_result_for_completed_agent(
     assert "This is the output from the sub-agent" in response
 
 
-def test_get_subagent_result_returns_status_for_running_agent(
+@pytest.mark.asyncio
+async def test_get_subagent_result_returns_status_for_running_agent(
     spawn_tool: SpawnToolBuiltin, mock_runner: SubAgentRunner
 ):
     """Test get_subagent_result returns status for running agent."""
@@ -300,12 +304,13 @@ def test_get_subagent_result_returns_status_for_running_agent(
     tools = spawn_tool.get_langchain_tool()
     get_result_tool = next(t for t in tools if t.name == "get_subagent_result")
 
-    response = get_result_tool.func(id="test-123")
+    response = await get_result_tool.coroutine(id="test-123")
 
     assert "Sub-agent 'test-label' is still running" in response
 
 
-def test_get_subagent_result_returns_not_found_message(
+@pytest.mark.asyncio
+async def test_get_subagent_result_returns_not_found_message(
     spawn_tool: SpawnToolBuiltin, mock_runner: SubAgentRunner
 ):
     """Test get_subagent_result returns not-found message."""
@@ -314,7 +319,7 @@ def test_get_subagent_result_returns_not_found_message(
     tools = spawn_tool.get_langchain_tool()
     get_result_tool = next(t for t in tools if t.name == "get_subagent_result")
 
-    response = get_result_tool.func(id="nonexistent")
+    response = await get_result_tool.coroutine(id="nonexistent")
 
     assert "Sub-agent not found: nonexistent" in response
 
@@ -360,7 +365,8 @@ def test_registration_in_registry():
     assert tool_class == SpawnToolBuiltin
 
 
-def test_get_subagent_result_truncates_long_output(
+@pytest.mark.asyncio
+async def test_get_subagent_result_truncates_long_output(
     spawn_tool: SpawnToolBuiltin, mock_runner: SubAgentRunner
 ):
     """Test get_subagent_result truncates output over 5000 chars."""
@@ -393,7 +399,7 @@ def test_get_subagent_result_truncates_long_output(
     tools = spawn_tool.get_langchain_tool()
     get_result_tool = next(t for t in tools if t.name == "get_subagent_result")
 
-    response = get_result_tool.func(id="test-123")
+    response = await get_result_tool.coroutine(id="test-123")
 
     # Verify truncation
     assert len(response) < 6000
