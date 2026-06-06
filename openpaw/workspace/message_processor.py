@@ -179,7 +179,9 @@ class MessageProcessor:
         if new_thread_id:
             thread_id = new_thread_id
 
+        run_count = 0
         while True:
+            run_count += 1
             # Capture steer state before finally block resets it
             steered = False
             steer_messages = None
@@ -207,7 +209,9 @@ class MessageProcessor:
 
                 # Set context for status update middleware
                 if self._status_update_middleware:
-                    self._status_update_middleware.set_context(channel, session_key)
+                    self._status_update_middleware.set_context(
+                        channel, session_key, run_count
+                    )
 
                 # Set followup chain depth
                 followup_tool = self._builtin_loader.get_tool_instance("followup")

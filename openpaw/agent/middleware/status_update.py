@@ -63,7 +63,9 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._last_reported_tools: frozenset[str] = frozenset()
         self._status_message_id: str | None = None
 
-    def set_context(self, channel: Any, session_key: str) -> None:
+    def set_context(
+        self, channel: Any, session_key: str, run_count: int = 1
+    ) -> None:
         """Set the active channel and session for the current agent run.
 
         Called by MessageProcessor before each agent run.
@@ -71,9 +73,12 @@ class StatusUpdateMiddleware(AgentMiddleware):
         Args:
             channel: The channel adapter instance for sending messages.
             session_key: The session identifier (e.g., 'telegram:123456').
+            run_count: Which agent run this is within the current process_messages
+                loop (1 for first run, 2+ for follow-ups, steer, etc.).
         """
         self._channel = channel
         self._session_key = session_key
+        self._run_count = run_count
         self._last_update_time = 0.0
         self._updates_sent = 0
         self._last_reported_tools = frozenset()
@@ -83,6 +88,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         """Reset per-invocation state. Called by MessageProcessor after each run."""
         self._channel = None
         self._session_key = None
+        self._run_count = 1
         self._last_update_time = 0.0
         self._updates_sent = 0
         self._last_reported_tools = frozenset()
@@ -109,7 +115,10 @@ class StatusUpdateMiddleware(AgentMiddleware):
     async def abefore_agent(
         self, state: Any, runtime: Any
     ) -> dict[str, Any] | None:
-        """Send 'Starting work...' when agent run begins (if enabled).
+        """Send status when agent run begins (if enabled).
+
+        First run: "Starting work..."
+        Subsequent runs: "Continuing work..."
 
         Args:
             state: LangGraph agent state.
@@ -121,7 +130,12 @@ class StatusUpdateMiddleware(AgentMiddleware):
         if not self._config.enabled or not self._config.agent_start:
             return None
 
-        await self._send_status("Starting work...")
+        label = (
+            "Starting work..."
+            if getattr(self, "_run_count", 1) == 1
+            else "Continuing work..."
+        )
+        await self._send_status(label)
         return None
 
     async def aafter_model(
