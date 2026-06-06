@@ -210,7 +210,7 @@ class MessageProcessor:
                 # Set context for status update middleware
                 if self._status_update_middleware:
                     self._status_update_middleware.set_context(
-                        channel, session_key, run_count
+                        channel, session_key, run_count, is_system_batch
                     )
 
                 # Set followup chain depth

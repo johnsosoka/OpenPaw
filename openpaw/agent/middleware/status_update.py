@@ -64,7 +64,11 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._status_message_id: str | None = None
 
     def set_context(
-        self, channel: Any, session_key: str, run_count: int = 1
+        self,
+        channel: Any,
+        session_key: str,
+        run_count: int = 1,
+        is_system_batch: bool = False,
     ) -> None:
         """Set the active channel and session for the current agent run.
 
@@ -75,10 +79,14 @@ class StatusUpdateMiddleware(AgentMiddleware):
             session_key: The session identifier (e.g., 'telegram:123456').
             run_count: Which agent run this is within the current process_messages
                 loop (1 for first run, 2+ for follow-ups, steer, etc.).
+            is_system_batch: Whether the current batch is a system event (cron,
+                heartbeat, sub-agent completion). Skips "Starting work..." to
+                avoid confusing the user mid-task.
         """
         self._channel = channel
         self._session_key = session_key
         self._run_count = run_count
+        self._is_system_batch = is_system_batch
         self._last_update_time = 0.0
         self._updates_sent = 0
         self._last_reported_tools = frozenset()
@@ -89,6 +97,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._channel = None
         self._session_key = None
         self._run_count = 1
+        self._is_system_batch = False
         self._last_update_time = 0.0
         self._updates_sent = 0
         self._last_reported_tools = frozenset()
@@ -119,6 +128,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
 
         First run: "Starting work..."
         Subsequent runs: "Continuing work..."
+        System events: skipped to avoid confusing the user mid-task.
 
         Args:
             state: LangGraph agent state.
@@ -128,6 +138,9 @@ class StatusUpdateMiddleware(AgentMiddleware):
             None (no state modifications).
         """
         if not self._config.enabled or not self._config.agent_start:
+            return None
+
+        if getattr(self, "_is_system_batch", False):
             return None
 
         label = (
