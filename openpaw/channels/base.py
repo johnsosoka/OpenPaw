@@ -229,3 +229,45 @@ class ChannelAdapter(ABC):
         message += "Reply /approve or /deny to this request."
 
         await self.send_message(session_key, message)
+
+    async def edit_message(
+        self,
+        session_key: str,
+        message_id: str,
+        content: str,
+    ) -> bool:
+        """Edit an existing message.
+
+        Override in channel implementations that support message editing
+        (e.g., Telegram, Discord). The default implementation returns False
+        to indicate the operation is not supported.
+
+        Args:
+            session_key: Target session identifier.
+            message_id: Platform-specific message ID to edit.
+            content: New message content.
+
+        Returns:
+            True if the edit was successful, False otherwise.
+        """
+        return False
+
+    async def delete_message(
+        self,
+        session_key: str,
+        message_id: str,
+    ) -> bool:
+        """Delete an existing message.
+
+        Override in channel implementations that support message deletion.
+        The default implementation returns False to indicate the operation
+        is not supported.
+
+        Args:
+            session_key: Target session identifier.
+            message_id: Platform-specific message ID to delete.
+
+        Returns:
+            True if the deletion was successful, False otherwise.
+        """
+        return False

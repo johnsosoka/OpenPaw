@@ -306,3 +306,36 @@ class TelegramChannel(ChannelAdapter, SecurityMixin):
             tool_args=tool_args,
             show_args=show_args,
         )
+
+    async def edit_message(
+        self,
+        session_key: str,
+        message_id: str,
+        content: str,
+    ) -> bool:
+        """Edit an existing Telegram message."""
+        if not self._outbound_sender:
+            if not self._app:
+                raise RuntimeError("Telegram channel not started")
+            self._outbound_sender = TelegramOutboundSender(
+                app=self._app,
+                channel_name=self.name,
+                bot_id=self._app.bot.id,
+            )
+        return await self._outbound_sender.edit_message(session_key, message_id, content)
+
+    async def delete_message(
+        self,
+        session_key: str,
+        message_id: str,
+    ) -> bool:
+        """Delete an existing Telegram message."""
+        if not self._outbound_sender:
+            if not self._app:
+                raise RuntimeError("Telegram channel not started")
+            self._outbound_sender = TelegramOutboundSender(
+                app=self._app,
+                channel_name=self.name,
+                bot_id=self._app.bot.id,
+            )
+        return await self._outbound_sender.delete_message(session_key, message_id)

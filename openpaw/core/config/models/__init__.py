@@ -53,6 +53,7 @@ from openpaw.core.config.models.security import (
     ToolApprovalConfig,
     ToolTimeoutsConfig,
 )
+from openpaw.core.config.models.status_updates import StatusUpdatesConfig
 from openpaw.core.config.models.workspace import (
     WorkspaceConfig,
     WorkspaceModelConfig,
@@ -91,6 +92,7 @@ __all__ = [
     "SendFileBuiltinConfig",
     "SpawnBuiltinConfig",
     "StatusReminderConfig",
+    "StatusUpdatesConfig",
     "ToolApprovalConfig",
     "ToolTimeoutsConfig",
     "VectorStoreConfig",

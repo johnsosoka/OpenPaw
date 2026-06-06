@@ -161,6 +161,13 @@ class BuiltinRegistry:
             logger.debug(f"Acknowledge tool not available: {e}")
 
         try:
+            from openpaw.builtins.tools.report_progress import ReportProgressTool
+
+            self.register_tool(ReportProgressTool)
+        except ImportError as e:
+            logger.debug(f"Report progress tool not available: {e}")
+
+        try:
             from openpaw.builtins.tools.gpt_researcher import GptResearcherTool
 
             self.register_tool(GptResearcherTool)

@@ -45,6 +45,7 @@ class MessageProcessor:
         session_ttl_minutes: int = 0,
         lifecycle_config: Any = None,
         status_reminder_middleware: Any = None,
+        status_update_middleware: Any = None,
     ):
         """Initialize message processor.
 
@@ -67,6 +68,9 @@ class MessageProcessor:
             lifecycle_config: LifecycleConfig instance for notification flags.
             status_reminder_middleware: Optional StatusReminderMiddleware instance.
                 When provided, its reset() is called alongside queue/approval resets.
+            status_update_middleware: Optional StatusUpdateMiddleware instance.
+                When provided, its set_context() is called before agent runs and
+                reset() is called in the finally block.
         """
         self._agent_runner = agent_runner
         self._session_manager = session_manager
@@ -84,6 +88,7 @@ class MessageProcessor:
         self._session_ttl_minutes = session_ttl_minutes
         self._lifecycle_config = lifecycle_config
         self._status_reminder_middleware = status_reminder_middleware
+        self._status_update_middleware = status_update_middleware
 
     def update_agent_runner(self, runner: "AgentRunner") -> None:
         """Update the agent runner instance.
@@ -174,7 +179,9 @@ class MessageProcessor:
         if new_thread_id:
             thread_id = new_thread_id
 
+        run_count = 0
         while True:
+            run_count += 1
             # Capture steer state before finally block resets it
             steered = False
             steer_messages = None
@@ -199,6 +206,12 @@ class MessageProcessor:
                 # Set session context for send_message tool
                 if channel:
                     self._connect_send_message_tool(channel, session_key)
+
+                # Set context for status update middleware
+                if self._status_update_middleware:
+                    self._status_update_middleware.set_context(
+                        channel, session_key, run_count, is_system_batch
+                    )
 
                 # Set followup chain depth
                 followup_tool = self._builtin_loader.get_tool_instance("followup")
@@ -398,6 +411,9 @@ class MessageProcessor:
                     self._approval_middleware.reset()
                 if self._status_reminder_middleware:
                     self._status_reminder_middleware.reset()
+                if self._status_update_middleware:
+                    await self._status_update_middleware.delete_status()
+                    self._status_update_middleware.reset()
 
             # Check steer (captured before reset)
             if steered and steer_messages:

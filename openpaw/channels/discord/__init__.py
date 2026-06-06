@@ -255,6 +255,39 @@ class DiscordChannel(ChannelAdapter, SecurityMixin):
             approval_callback=self._approval_callback,
         )
 
+    async def edit_message(
+        self,
+        session_key: str,
+        message_id: str,
+        content: str,
+    ) -> bool:
+        """Edit an existing Discord message."""
+        if not self._outbound_sender:
+            if not self._client:
+                raise RuntimeError("Discord channel not started")
+            self._outbound_sender = DiscordOutboundSender(
+                client=self._client,
+                channel_name=self.name,
+                bot_id=self._client.user.id,  # type: ignore[union-attr]
+            )
+        return await self._outbound_sender.edit_message(session_key, message_id, content)
+
+    async def delete_message(
+        self,
+        session_key: str,
+        message_id: str,
+    ) -> bool:
+        """Delete an existing Discord message."""
+        if not self._outbound_sender:
+            if not self._client:
+                raise RuntimeError("Discord channel not started")
+            self._outbound_sender = DiscordOutboundSender(
+                client=self._client,
+                channel_name=self.name,
+                bot_id=self._client.user.id,  # type: ignore[union-attr]
+            )
+        return await self._outbound_sender.delete_message(session_key, message_id)
+
     async def register_commands(self, commands: list[Any]) -> None:
         """Register OpenPaw commands as Discord slash commands."""
         if self._command_registrar is None:

@@ -11,6 +11,7 @@ from openpaw.core.config.models.cron import HeartbeatConfig
 from openpaw.core.config.models.lifecycle import LifecycleConfig, StatusReminderConfig
 from openpaw.core.config.models.memory import AutoCompactConfig, MemoryConfig
 from openpaw.core.config.models.security import ApprovalGatesConfig, ToolTimeoutsConfig
+from openpaw.core.config.models.status_updates import StatusUpdatesConfig
 
 
 class WorkspaceModelConfig(BaseModel):
@@ -170,6 +171,10 @@ class WorkspaceConfig(BaseModel):
     status_reminder: StatusReminderConfig = Field(
         default_factory=StatusReminderConfig,
         description="Status reminder middleware configuration",
+    )
+    status_updates: StatusUpdatesConfig = Field(
+        default_factory=StatusUpdatesConfig,
+        description="Status updates middleware configuration",
     )
 
     @field_validator("session_ttl_minutes")

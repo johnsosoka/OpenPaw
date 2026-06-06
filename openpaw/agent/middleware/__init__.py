@@ -20,6 +20,7 @@ from openpaw.agent.middleware.status_reminder import (
     StatusReminderMiddleware,
     inject_framework_instruction,
 )
+from openpaw.agent.middleware.status_update import StatusUpdateMiddleware
 from openpaw.agent.middleware.tool_timeout import ToolTimeoutMiddleware
 
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "QueueAwareToolMiddleware",
     "THINKING_TAG_PATTERN",
     "StatusReminderMiddleware",
+    "StatusUpdateMiddleware",
     "ThinkingTokenMiddleware",
     "ToolTimeoutMiddleware",
     "build_post_model_hook",

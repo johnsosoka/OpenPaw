@@ -519,6 +519,41 @@ status_reminder:
 
 Reminders are injected as `<framework_instruction>` tags into the agent's message stream — they do not create extra checkpoint entries or consume additional API calls.
 
+#### Status Updates
+
+```yaml
+status_updates:
+  enabled: true              # Default: true
+  agent_start: true          # Report when agent run begins
+  tool_calls_detected: true  # Report when agent decides to use tools
+  tool_start: false          # Report before each tool execution
+  tool_complete: false       # Report after each tool execution
+  subagent_spawned: true     # Report when sub-agent is dispatched
+  min_interval_seconds: 3    # Minimum seconds between auto-updates
+  max_updates_per_run: 10    # Maximum auto-updates per agent run
+  hermes_mode: true          # Edit single message in place (default: true)
+```
+
+**enabled** — Enable automatic status updates sent to the user during agent execution. Default: `true`.
+
+**agent_start** — Send `"Starting work..."` on the first run of a user message, and `"Continuing work..."` on subsequent runs (e.g., follow-up or self-continuation). Default: `true`. System events (cron, heartbeat, sub-agent completions) skip the agent start status to avoid mid-task confusion.
+
+**tool_calls_detected** — Send `"Using tools: X, Y..."` when the agent decides to call tools. Default: `true`.
+
+**tool_start** — Send `"Running tool: X..."` before each tool execution. Default: `false` (can be noisy).
+
+**tool_complete** — Send `"Completed: X"` after each tool execution. Default: `false` (can be noisy).
+
+**subagent_spawned** — Send `"Dispatched sub-agent: label"` when `spawn_agent` is called. Default: `true`.
+
+**min_interval_seconds** — Minimum seconds between auto-detected status updates. Prevents spam during rapid tool-call sequences. Default: `3`.
+
+**max_updates_per_run** — Maximum number of auto-detected status updates per agent invocation. Default: `10`.
+
+**hermes_mode** — When `true` (default), the first status update sends a new message, and subsequent updates edit the same message in place. This prevents chat clutter. The status message is deleted after the agent run completes. When `false`, each update sends a separate message.
+
+Status updates are sent directly to the user channel and do not create extra checkpoint entries or consume additional API calls. Agent-driven `report_progress` tool calls bypass all throttling.
+
 ---
 
 ### Merging Behavior

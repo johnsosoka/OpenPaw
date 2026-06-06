@@ -174,6 +174,7 @@ class WorkspaceRunner:
             self._message_processor,
             self._tool_timeout_middleware,
             self._status_reminder_middleware,
+            self._status_update_middleware,
         ) = self._initializer.init_agent(
             builtin_loader=self._builtin_loader,
             builtin_tools=self._builtin_tools,
