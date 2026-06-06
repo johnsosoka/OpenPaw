@@ -8,13 +8,13 @@ Builtins are optional capabilities conditionally loaded based on API key availab
 
 ## Overview
 
-OpenPaw ships with 16 built-in tools and 4 message processors. Builtins are discovered at runtime — if prerequisites (API keys, packages) are missing, the builtin is unavailable. The allow/deny system provides fine-grained control over which capabilities are active in each workspace.
+OpenPaw ships with 17 built-in tools and 4 message processors. Builtins are discovered at runtime — if prerequisites (API keys, packages) are missing, the builtin is unavailable. The allow/deny system provides fine-grained control over which capabilities are active in each workspace.
 
 **Architecture:**
 
 ```
 BuiltinRegistry
-├─ Tools (16)
+├─ Tools (17)
 │  ├─ browser          Web automation via Playwright
 │  ├─ email            Email send/receive via Gmail
 │  ├─ brave_search     Web search
@@ -24,6 +24,7 @@ BuiltinRegistry
 │  ├─ acknowledge      Silent system event acknowledgment
 │  ├─ task_tracker     Persistent task management
 │  ├─ send_message     Mid-execution messaging
+│  ├─ report_progress  Structured progress reporting
 │  ├─ send_file        Send workspace files to users
 │  ├─ followup         Self-continuation
 │  ├─ plan             Session-scoped planning
@@ -376,6 +377,38 @@ Agent: [Continues processing]
 Agent: [Calls send_message("Halfway done, found 3 anomalies...")]
 Agent: [Finishes and responds with full results]
 ```
+
+---
+
+### report_progress
+
+**Group:** `communication`
+**Type:** Tool
+**Prerequisites:** None (always available)
+
+Structured progress reporting for long operations. Unlike `send_message`, this tool provides a dedicated schema with status label, optional detail, and optional percentage. Use it when you want to give the user more structured progress information than a plain text message.
+
+**Configuration:**
+
+```yaml
+builtins:
+  report_progress:
+    enabled: true
+```
+
+**Usage Example:**
+
+```
+User: "Process this large dataset"
+Agent: [Calls report_progress("Analyzing data", detail="Processing batch 1 of 10", percent=10)]
+Agent: [Continues processing]
+Agent: [Calls report_progress("Analyzing data", detail="Processing batch 5 of 10", percent=50)]
+Agent: [Finishes and responds with full results]
+```
+
+**Implementation:**
+
+Uses shared `_channel_context` for session-safe state access to the active channel. Formats messages as: `Status — Detail (Percent%)`.
 
 ---
 
@@ -763,6 +796,47 @@ status_reminder:
 - Only active when the `send_message` builtin is loaded for the workspace
 - Resets between agent runs (each user message starts a fresh count)
 - Set `max_reminders: 0` to disable reminders while keeping detection active
+- Disabled entirely with `enabled: false`
+
+---
+
+### status_updates
+
+**Group:** `communication`
+**Type:** Middleware (not a tool — operates automatically)
+**Prerequisites:** None (always available)
+
+Automatic status updates sent to the user during agent execution. The middleware hooks into the agent run to detect and report:
+- When the agent starts working (`"Starting work..."`)
+- When the agent decides to call tools (`"Using tools: X, Y..."`)
+- When a sub-agent is dispatched (`"Dispatched sub-agent: label"`)
+- Optionally, per-tool start and completion messages
+
+Status updates are sent directly to the channel, bypassing the agent state to avoid extra LLM calls. They are throttled by time and budget to prevent spam.
+
+This is not a tool the agent calls — it operates transparently as middleware on every agent run.
+
+**Configuration:**
+
+```yaml
+status_updates:
+  enabled: true              # Default: true
+  agent_start: true          # Report "Starting work..." (default: true)
+  tool_calls_detected: true  # Report tool usage detection (default: true)
+  tool_start: false          # Report per-tool start (default: false)
+  tool_complete: false       # Report per-tool completion (default: false)
+  subagent_spawned: true     # Report sub-agent dispatch (default: true)
+  min_interval_seconds: 3    # Min seconds between auto-updates (default: 3)
+  max_updates_per_run: 10    # Max auto-updates per run (default: 10)
+```
+
+**Behavior:**
+
+- Time-based throttle: `min_interval_seconds` between auto-detected status messages
+- Budget-based throttle: `max_updates_per_run` total auto-updates per agent invocation
+- Deduplication: if the same tool set is detected twice, only report once
+- Agent-driven `report_progress` tool calls bypass all throttling
+- Resets between agent runs (each user message starts a fresh count)
 - Disabled entirely with `enabled: false`
 
 ---

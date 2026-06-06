@@ -7,6 +7,7 @@ from openpaw.agent.metrics import TokenUsageLogger
 from openpaw.agent.middleware import (
     ApprovalToolMiddleware,
     QueueAwareToolMiddleware,
+    StatusUpdateMiddleware,
     ToolTimeoutMiddleware,
 )
 from openpaw.agent.middleware.status_reminder import StatusReminderMiddleware
@@ -202,6 +203,7 @@ class WorkspaceInitializer:
         MessageProcessor,
         ToolTimeoutMiddleware,
         StatusReminderMiddleware | None,
+        StatusUpdateMiddleware | None,
     ]:
         """Set up middleware, agent factory, agent runner, and message processor."""
         # Create middleware
@@ -258,7 +260,7 @@ class WorkspaceInitializer:
                 f"Passing extra model kwargs: {list(extra_model_kwargs.keys())}"
             )
 
-        # Build middleware list (order matters: timeout → status_reminder → queue → approval)
+        # Build middleware list (order matters: status_update → timeout → status_reminder → queue → approval)
         tool_timeouts_config = self._get_tool_timeouts_config()
         tool_timeout_middleware = ToolTimeoutMiddleware(tool_timeouts_config)
         middlewares = [
@@ -267,6 +269,15 @@ class WorkspaceInitializer:
         ]
         if approval_manager:
             middlewares.append(approval_middleware.get_middleware())
+
+        # Create status update middleware
+        status_update_middleware: StatusUpdateMiddleware | None = None
+        if self._workspace.config:
+            status_update_config = self._workspace.config.status_updates
+            if status_update_config.enabled:
+                status_update_middleware = StatusUpdateMiddleware(status_update_config)
+                middlewares.insert(0, status_update_middleware)
+                self._logger.info("Status update middleware enabled")
 
         # Create status reminder middleware only when send_message builtin is active.
         status_reminder_middleware: StatusReminderMiddleware | None = None
@@ -344,6 +355,7 @@ class WorkspaceInitializer:
                 else None
             ),
             status_reminder_middleware=status_reminder_middleware,
+            status_update_middleware=status_update_middleware,
         )
 
         return (
@@ -355,6 +367,7 @@ class WorkspaceInitializer:
             message_processor,
             tool_timeout_middleware,
             status_reminder_middleware,
+            status_update_middleware,
         )
 
     @staticmethod

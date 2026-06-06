@@ -82,10 +82,11 @@ The LangGraph execution layer. `AgentRunner` wraps `create_react_agent()`, compo
 - Exposes `update_model()` for live model switching without restarting the workspace or losing conversation state
 - Provides `get_context_info()` for context window utilization checks (used by auto-compact)
 
-**`agent/middleware/`** contains two middleware classes that use LangGraph's `@wrap_tool_call` decorator pattern:
+**`agent/middleware/`** contains middleware classes that hook into the agent execution loop:
 
 - `QueueAwareToolMiddleware` — calls `queue_manager.peek_pending()` before each tool call; in steer mode injects pending messages as next input; in interrupt mode raises `InterruptSignalError`
 - `ApprovalToolMiddleware` — checks whether the target tool is gated; if so, raises `ApprovalRequiredError` and stores a `PendingApproval`
+- `StatusUpdateMiddleware` — emits automatic status messages to the user channel via `abefore_agent`, `aafter_model`, and `awrap_tool_call` hooks. Reports agent start, tool usage, and sub-agent dispatch with throttling to prevent spam.
 
 **`agent/tools/`** provides `FilesystemTools` — eight sandboxed operations (`ls`, `read_file`, `write_file`, `overwrite_file`, `edit_file`, `glob_files`, `grep_files`, `file_info`) restricted to the workspace root. `sandbox.py` exports `resolve_sandboxed_path()`, which rejects absolute paths, `~`, `..`, and `.openpaw/` access. This function is shared by `SendFileTool` and inbound processors for defense-in-depth validation.
 

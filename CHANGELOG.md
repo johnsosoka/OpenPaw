@@ -9,11 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Automatic status updates via `StatusUpdateMiddleware` — reports agent start, tool usage, and sub-agent dispatch to the user channel with configurable throttling.
+- New `report_progress` builtin tool for agent-driven structured progress reporting (status, detail, optional percentage).
+- `StatusUpdatesConfig` configuration model with workspace-level settings for status update behavior.
 - Background task supervisor in `WorkspaceRunner` that monitors queue processor health, restarts crashed tasks, and sends direct crash notifications to active sessions.
 - Entry/exit logging to critical async paths (`AgentRunner.run`, `SubAgentRunner._execute_subagent`, `SubAgentProfiler.setup`, `MessageProcessor.process_messages`, `LaneQueue.process`).
 - Enriched subagent timeout/error notifications with last tool context and tools used list.
 
 ### Changed
+
+- Updated `docs/builtins.md`, `docs/configuration.md`, and `docs/architecture.md` with status updates and `report_progress` documentation.
 
 ### Removed
 
