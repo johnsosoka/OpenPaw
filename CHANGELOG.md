@@ -9,11 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Background task supervisor in `WorkspaceRunner` that monitors queue processor health, restarts crashed tasks, and sends direct crash notifications to active sessions.
+- Entry/exit logging to critical async paths (`AgentRunner.run`, `SubAgentRunner._execute_subagent`, `SubAgentProfiler.setup`, `MessageProcessor.process_messages`, `LaneQueue.process`).
+- Enriched subagent timeout/error notifications with last tool context and tools used list.
+
 ### Changed
 
 ### Removed
 
 ### Fixed
+
+- `LaneQueue.process()` now catches handler exceptions and continues the loop, preventing a single handler crash from killing the entire message pipeline.
+- `SubAgentStore` converted to async-safe operations with `asyncio.to_thread()`, preventing synchronous YAML I/O from blocking the event loop.
+- Added outer timeout (10 minutes) to lane handler execution to prevent a single hung session from starving the entire lane.
+- `QueueManager._debounce_flush` now logs exceptions instead of silently swallowing them.
 
 ## [0.4.1] - 2026-05-30
 
