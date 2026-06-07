@@ -321,6 +321,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
                     self._updates_sent += 1
                     self._last_update_time = now
                     logger.debug("Status message edited: %s", text)
+                    await self._retrigger_typing(channel, session_key)
                     return
                 # Edit failed — fall through to sending a new message
                 logger.debug("Edit failed, falling back to new message")
@@ -332,5 +333,19 @@ class StatusUpdateMiddleware(AgentMiddleware):
             if sent_message and hasattr(sent_message, "id"):
                 self._status_message_id = str(sent_message.id)
             logger.debug("Status update sent: %s", text)
+            await self._retrigger_typing(channel, session_key)
         except Exception as e:
             logger.debug("Failed to send status update: %s", e)
+
+    async def _retrigger_typing(self, channel: Any, session_key: str) -> None:
+        """Re-trigger typing indicator after a status message is sent.
+
+        Platforms auto-clear typing when the bot sends a message. Re-triggering
+        keeps the indicator alive for long multi-step operations.
+        """
+        if not self._config.typing_indicator:
+            return
+        try:
+            await channel.send_typing(session_key)
+        except Exception:
+            logger.debug("Failed to retrigger typing indicator", exc_info=True)
