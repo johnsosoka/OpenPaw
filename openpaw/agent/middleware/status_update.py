@@ -301,6 +301,12 @@ class StatusUpdateMiddleware(AgentMiddleware):
         tool_args = request.tool_call.get("args", {})
         tool_emoji = _resolve_emoji([tool_name]) if self._config.use_emojis else None
         tool_detail = _extract_tool_detail(tool_name, tool_args)
+        logger.debug(
+            "[STATUS_UPDATE] tool_name=%s tool_args=%s tool_detail=%s",
+            tool_name,
+            tool_args,
+            tool_detail,
+        )
 
         # Report sub-agent dispatch
         if tool_name == "spawn_agent" and self._config.subagent_spawned:

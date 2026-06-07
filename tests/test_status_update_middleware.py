@@ -294,6 +294,47 @@ async def test_awrap_tool_call_reports_tool_start():
 
 
 @pytest.mark.asyncio
+async def test_awrap_tool_call_reports_tool_start_with_args():
+    channel = MockChannel()
+    mw = _make_middleware(config=_make_config(tool_start=True), channel=channel)
+    req = _make_tool_request("read_file", {"file_path": "notes.md"})
+
+    async def handler(request: Any) -> Any:
+        return MagicMock()
+
+    await mw.awrap_tool_call(req, handler)
+    assert len(channel.sent_messages) == 1
+    assert channel.sent_messages[0] == (
+        "telegram:123456",
+        "Running tool: read_file (notes.md)...",
+    )
+
+
+@pytest.mark.asyncio
+async def test_awrap_tool_call_reports_tool_start_with_spawn_agent_args():
+    channel = MockChannel()
+    mw = _make_middleware(config=_make_config(tool_start=True), channel=channel)
+    req = _make_tool_request("spawn_agent", {"label": "researcher", "task": "do research"})
+
+    async def handler(request: Any) -> Any:
+        return MagicMock()
+
+    await mw.awrap_tool_call(req, handler)
+    # In hermes mode: subagent_spawned sent first, then tool_start edits it
+    assert len(channel.sent_messages) == 1
+    assert len(channel.edited_messages) == 1
+    assert channel.sent_messages[0] == (
+        "telegram:123456",
+        "Dispatched sub-agent: researcher",
+    )
+    assert channel.edited_messages[0] == (
+        "telegram:123456",
+        "1",
+        "Running tool: spawn_agent (researcher)...",
+    )
+
+
+@pytest.mark.asyncio
 async def test_awrap_tool_call_reports_tool_complete():
     channel = MockChannel()
     mw = _make_middleware(config=_make_config(tool_complete=True), channel=channel)
