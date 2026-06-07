@@ -214,8 +214,8 @@ class TestReactions:
     """Test reaction lifecycle in process_messages."""
 
     @pytest.mark.asyncio
-    async def test_adds_eyes_on_start_and_check_on_success(self):
-        """👀 is added on start, then removed and ✅ added on success."""
+    async def test_adds_eyes_on_start_and_thumbs_up_on_success(self):
+        """👀 is added on start, then removed and 👍 added on success."""
         channel = MockChannel()
         agent_runner = MagicMock()
         agent_runner.run = AsyncMock(return_value="Hello")
@@ -231,12 +231,12 @@ class TestReactions:
 
         assert ("telegram:123", "42", "👀") in channel.reactions
         assert ("telegram:123", "42", "👀") in channel.removed_reactions
-        assert ("telegram:123", "42", "✅") in channel.reactions
-        assert ("telegram:123", "42", "❌") not in channel.reactions
+        assert ("telegram:123", "42", "👍") in channel.reactions
+        assert ("telegram:123", "42", "👎") not in channel.reactions
 
     @pytest.mark.asyncio
-    async def test_adds_cross_on_failure(self):
-        """❌ is added and 👀 removed when the agent run fails."""
+    async def test_adds_thumbs_down_on_failure(self):
+        """👎 is added and 👀 removed when the agent run fails."""
         channel = MockChannel()
         agent_runner = MagicMock()
         agent_runner.run = AsyncMock(side_effect=RuntimeError("boom"))
@@ -252,12 +252,12 @@ class TestReactions:
 
         assert ("telegram:123", "42", "👀") in channel.reactions
         assert ("telegram:123", "42", "👀") in channel.removed_reactions
-        assert ("telegram:123", "42", "❌") in channel.reactions
-        assert ("telegram:123", "42", "✅") not in channel.reactions
+        assert ("telegram:123", "42", "👎") in channel.reactions
+        assert ("telegram:123", "42", "👍") not in channel.reactions
 
     @pytest.mark.asyncio
     async def test_interrupt_followed_by_success(self):
-        """👀 stays through interrupt and is replaced by ✅ after re-run succeeds."""
+        """👀 stays through interrupt and is replaced by 👍 after re-run succeeds."""
         channel = MockChannel()
         agent_runner = MagicMock()
         agent_runner.run = AsyncMock(
@@ -285,7 +285,7 @@ class TestReactions:
         # After interrupt, the loop re-runs and succeeds, so final reaction is success
         assert ("telegram:123", "42", "👀") in channel.reactions
         assert ("telegram:123", "42", "👀") in channel.removed_reactions
-        assert ("telegram:123", "42", "✅") in channel.reactions
+        assert ("telegram:123", "42", "👍") in channel.reactions
 
     @pytest.mark.asyncio
     async def test_skipped_when_disabled(self):

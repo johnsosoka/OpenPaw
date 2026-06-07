@@ -559,9 +559,9 @@ class MessageProcessor:
         # Final reaction lifecycle
         if self._reactions_enabled() and original_message_id:
             if _run_outcome == "success":
-                await self._replace_reaction(channel, session_key, original_message_id, "👀", "✅")
+                await self._replace_reaction(channel, session_key, original_message_id, "👀", "👍")
             elif _run_outcome == "failure":
-                await self._replace_reaction(channel, session_key, original_message_id, "👀", "❌")
+                await self._replace_reaction(channel, session_key, original_message_id, "👀", "👎")
 
         # Reset followup state after loop exits
         followup_tool = self._builtin_loader.get_tool_instance("followup")
