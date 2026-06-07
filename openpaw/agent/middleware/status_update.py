@@ -64,6 +64,55 @@ def _resolve_emoji(tool_names: list[str]) -> str:
     return "🔧"
 
 
+# Tool detail extraction — maps tool names to the argument key(s) that
+# provide the most useful context for a status update.
+_TOOL_DETAIL_KEYS: dict[str, list[str]] = {
+    "read_file": ["file_path", "path"],
+    "write_file": ["file_path", "path"],
+    "edit_file": ["file_path", "path"],
+    "overwrite_file": ["file_path", "path"],
+    "ls": ["directory", "path"],
+    "glob_files": ["pattern"],
+    "grep_files": ["pattern"],
+    "shell": ["command"],
+    "browser_navigate": ["url"],
+    "browser_click": ["selector"],
+    "browser_type": ["selector"],
+    "brave_search": ["query"],
+    "research": ["query"],
+    "deep_research": ["query"],
+    "send_email": ["recipient", "to"],
+    "create_task": ["title"],
+    "schedule_at": ["task", "description"],
+    "spawn_agent": ["label"],
+}
+
+_MAX_DETAIL_LEN: int = 60
+
+
+def _extract_tool_detail(tool_name: str, args: dict[str, Any]) -> str | None:
+    """Extract a human-readable detail string from tool arguments.
+
+    Args:
+        tool_name: Name of the tool being called.
+        args: The arguments dict passed to the tool.
+
+    Returns:
+        A concise detail string (e.g., file path, URL, query), or None
+        if no relevant detail is found.
+    """
+    keys = _TOOL_DETAIL_KEYS.get(tool_name, [])
+    for key in keys:
+        value = args.get(key)
+        if value and isinstance(value, str):
+            value = value.strip()
+            if value:
+                if len(value) > _MAX_DETAIL_LEN:
+                    value = value[: _MAX_DETAIL_LEN - 3] + "..."
+                return value
+    return None
+
+
 class StatusUpdateMiddleware(AgentMiddleware):
     """Middleware that emits automatic status updates to the user channel.
 
@@ -249,27 +298,37 @@ class StatusUpdateMiddleware(AgentMiddleware):
             return await handler(request)
 
         tool_name = request.tool_call.get("name", "unknown")
-
+        tool_args = request.tool_call.get("args", {})
         tool_emoji = _resolve_emoji([tool_name]) if self._config.use_emojis else None
+        tool_detail = _extract_tool_detail(tool_name, tool_args)
 
         # Report sub-agent dispatch
         if tool_name == "spawn_agent" and self._config.subagent_spawned:
-            args = request.tool_call.get("args", {})
-            label = args.get("label", "sub-agent")
+            label = tool_args.get("label", "sub-agent")
             emoji = tool_emoji if tool_emoji != "🔧" else "🤖"
-            await self._send_status(f"Dispatched sub-agent: {label}", emoji=emoji)
+            status = f"Dispatched sub-agent: {label}"
+            if tool_detail and tool_detail != label:
+                status += f" ({tool_detail})"
+            await self._send_status(status, emoji=emoji)
 
         # Tool start notification
         if self._config.tool_start:
             start_emoji = tool_emoji if tool_emoji != "🔧" else "⚙️"
-            await self._send_status(f"Running tool: {tool_name}...", emoji=start_emoji)
+            status = f"Running tool: {tool_name}"
+            if tool_detail:
+                status += f" ({tool_detail})"
+            status += "..."
+            await self._send_status(status, emoji=start_emoji)
 
         result = await handler(request)
 
         # Tool complete notification
         if self._config.tool_complete:
             complete_emoji = tool_emoji if tool_emoji != "🔧" else "✅"
-            await self._send_status(f"Completed: {tool_name}", emoji=complete_emoji)
+            status = f"Completed: {tool_name}"
+            if tool_detail:
+                status += f" ({tool_detail})"
+            await self._send_status(status, emoji=complete_emoji)
 
         return result
 
