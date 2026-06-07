@@ -402,13 +402,22 @@ builtins:
 User: "Process this large dataset"
 Agent: [Calls report_progress("Analyzing data", detail="Processing batch 1 of 10", percent=10)]
 Agent: [Continues processing]
-Agent: [Calls report_progress("Analyzing data", detail="Processing batch 5 of 10", percent=50)]
+Agent: [Calls report_progress("Analyzing data", detail="Processing batch 5 of 10", percent=50, emoji="📊")]
 Agent: [Finishes and responds with full results]
+```
+
+**Optional Emoji Parameter:**
+
+Pass an `emoji` to prefix the status message with a custom emoji. If omitted, the framework uses a default emoji based on the status label.
+
+```
+Agent: [Calls report_progress("Deploying", detail="Pushing to staging", percent=30, emoji="🚀")]
+User sees: "🚀 Deploying — Pushing to staging (30%)"
 ```
 
 **Implementation:**
 
-Uses shared `_channel_context` for session-safe state access to the active channel. Formats messages as: `Status — Detail (Percent%)`.
+Uses shared `_channel_context` for session-safe state access to the active channel. Formats messages as: `Status — Detail (Percent%)` with an optional emoji prefix.
 
 ---
 

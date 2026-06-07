@@ -271,3 +271,52 @@ class ChannelAdapter(ABC):
             True if the deletion was successful, False otherwise.
         """
         return False
+
+    async def send_typing(self, session_key: str) -> None:
+        """Trigger a typing indicator in the session.
+
+        Override in implementations that support typing indicators
+        (e.g., Telegram, Discord). The default implementation is a no-op.
+
+        Args:
+            session_key: Target session identifier.
+        """
+        pass
+
+    async def add_reaction(
+        self, session_key: str, message_id: str, emoji: str
+    ) -> bool:
+        """Add an emoji reaction to a message.
+
+        Override in implementations that support reactions (e.g., Telegram,
+        Discord). The default implementation returns False to indicate the
+        operation is not supported.
+
+        Args:
+            session_key: Target session identifier.
+            message_id: Platform-specific message ID to react to.
+            emoji: The emoji string to add (e.g., "👀").
+
+        Returns:
+            True if the reaction was added successfully, False otherwise.
+        """
+        return False
+
+    async def remove_reaction(
+        self, session_key: str, message_id: str, emoji: str
+    ) -> bool:
+        """Remove a bot's emoji reaction from a message.
+
+        Override in implementations that support reaction removal.
+        The default implementation returns False to indicate the operation
+        is not supported.
+
+        Args:
+            session_key: Target session identifier.
+            message_id: Platform-specific message ID to remove the reaction from.
+            emoji: The emoji string to remove (e.g., "👀").
+
+        Returns:
+            True if the reaction was removed successfully, False otherwise.
+        """
+        return False

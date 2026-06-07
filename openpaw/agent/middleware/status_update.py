@@ -26,6 +26,43 @@ from openpaw.core.config.models.status_updates import StatusUpdatesConfig
 
 logger = logging.getLogger(__name__)
 
+_EMOJI_MAP: dict[str, str] = {
+    "spawn_agent": "🤖",
+    "memory_search": "🔍",
+    "send_message": "📤",
+    "send_file": "📎",
+    "report_progress": "📊",
+    "shell": "💻",
+    "browser": "🌐",
+    "read_file": "📖",
+    "list_dir": "📖",
+    "grep": "📖",
+    "write_file": "📝",
+    "edit_file": "📝",
+    "plan": "📋",
+    "task": "📅",
+    "cron": "📅",
+    "acknowledge": "👍",
+    "followup": "⏳",
+    "email": "📧",
+    "gmail": "📧",
+    "channel_history": "📜",
+    "md2pdf": "📄",
+    "brave_search": "🔎",
+    "elevenlabs_tts": "🔊",
+    "gpt_researcher": "🔬",
+    "describe_image": "🖼️",
+    "calendar": "📆",
+}
+
+
+def _resolve_emoji(tool_names: list[str]) -> str:
+    """Return the emoji for the first matching tool, or 🔧 if none match."""
+    for name in tool_names:
+        if name in _EMOJI_MAP:
+            return _EMOJI_MAP[name]
+    return "🔧"
+
 
 class StatusUpdateMiddleware(AgentMiddleware):
     """Middleware that emits automatic status updates to the user channel.
@@ -148,7 +185,8 @@ class StatusUpdateMiddleware(AgentMiddleware):
             if getattr(self, "_run_count", 1) == 1
             else "Continuing work..."
         )
-        await self._send_status(label)
+        emoji = "🚀" if self._config.use_emojis else None
+        await self._send_status(label, emoji=emoji)
         return None
 
     async def aafter_model(
@@ -191,7 +229,8 @@ class StatusUpdateMiddleware(AgentMiddleware):
 
         self._last_reported_tools = current_tools
         names_str = ", ".join(tool_names)
-        await self._send_status(f"Using tools: {names_str}...")
+        emoji = _resolve_emoji(tool_names) if self._config.use_emojis else None
+        await self._send_status(f"Using tools: {names_str}...", emoji=emoji)
         return None
 
     async def awrap_tool_call(
@@ -211,25 +250,30 @@ class StatusUpdateMiddleware(AgentMiddleware):
 
         tool_name = request.tool_call.get("name", "unknown")
 
+        tool_emoji = _resolve_emoji([tool_name]) if self._config.use_emojis else None
+
         # Report sub-agent dispatch
         if tool_name == "spawn_agent" and self._config.subagent_spawned:
             args = request.tool_call.get("args", {})
             label = args.get("label", "sub-agent")
-            await self._send_status(f"Dispatched sub-agent: {label}")
+            emoji = tool_emoji if tool_emoji != "🔧" else "🤖"
+            await self._send_status(f"Dispatched sub-agent: {label}", emoji=emoji)
 
         # Tool start notification
         if self._config.tool_start:
-            await self._send_status(f"Running tool: {tool_name}...")
+            start_emoji = tool_emoji if tool_emoji != "🔧" else "⚙️"
+            await self._send_status(f"Running tool: {tool_name}...", emoji=start_emoji)
 
         result = await handler(request)
 
         # Tool complete notification
         if self._config.tool_complete:
-            await self._send_status(f"Completed: {tool_name}")
+            complete_emoji = tool_emoji if tool_emoji != "🔧" else "✅"
+            await self._send_status(f"Completed: {tool_name}", emoji=complete_emoji)
 
         return result
 
-    async def _send_status(self, text: str) -> None:
+    async def _send_status(self, text: str, emoji: str | None = None) -> None:
         """Send or edit a status message to the channel with throttling.
 
         In Hermes mode (default), the first status message is sent normally and
@@ -238,6 +282,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
 
         Args:
             text: The status message text to send.
+            emoji: Optional emoji to prefix the text when use_emojis is enabled.
         """
         channel = self._channel
         session_key = self._session_key
@@ -262,6 +307,9 @@ class StatusUpdateMiddleware(AgentMiddleware):
                 "Status update throttled (min_interval): %s", text
             )
             return
+
+        if self._config.use_emojis and emoji:
+            text = f"{emoji} {text}"
 
         try:
             if self._config.hermes_mode and self._status_message_id:

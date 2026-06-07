@@ -53,6 +53,9 @@ def _make_config(
     min_interval_seconds: int = 0,
     max_updates_per_run: int = 10,
     hermes_mode: bool = True,
+    use_emojis: bool = False,
+    typing_indicator: bool = True,
+    reactions: bool = True,
 ) -> StatusUpdatesConfig:
     return StatusUpdatesConfig(
         enabled=enabled,
@@ -64,6 +67,9 @@ def _make_config(
         min_interval_seconds=min_interval_seconds,
         max_updates_per_run=max_updates_per_run,
         hermes_mode=hermes_mode,
+        use_emojis=use_emojis,
+        typing_indicator=typing_indicator,
+        reactions=reactions,
     )
 
 
@@ -513,6 +519,9 @@ class TestStatusUpdatesConfig:
         assert config.max_updates_per_run == 10
         assert config.template == "[{event}] {message}"
         assert config.hermes_mode is True
+        assert config.typing_indicator is True
+        assert config.reactions is True
+        assert config.use_emojis is True
 
     def test_custom_values(self):
         config = StatusUpdatesConfig(
@@ -526,6 +535,9 @@ class TestStatusUpdatesConfig:
             max_updates_per_run=5,
             template="{message}",
             hermes_mode=False,
+            typing_indicator=False,
+            reactions=False,
+            use_emojis=False,
         )
         assert config.enabled is False
         assert config.agent_start is False
@@ -537,6 +549,9 @@ class TestStatusUpdatesConfig:
         assert config.max_updates_per_run == 5
         assert config.template == "{message}"
         assert config.hermes_mode is False
+        assert config.typing_indicator is False
+        assert config.reactions is False
+        assert config.use_emojis is False
 
     def test_min_interval_bounds(self):
         with pytest.raises(Exception):
@@ -549,3 +564,83 @@ class TestStatusUpdatesConfig:
     def test_percent_bounds(self):
         with pytest.raises(Exception):
             StatusUpdatesConfig(min_interval_seconds=-1)
+
+
+# ---------------------------------------------------------------------------
+# Emoji behavior
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_abefore_agent_uses_emoji_when_enabled():
+    channel = MockChannel()
+    mw = _make_middleware(config=_make_config(use_emojis=True), channel=channel)
+
+    result = await mw.abefore_agent({}, None)
+
+    assert result is None
+    assert len(channel.sent_messages) == 1
+    assert channel.sent_messages[0] == ("telegram:123456", "🚀 Starting work...")
+
+
+@pytest.mark.asyncio
+async def test_aafter_model_uses_emoji_for_tools():
+    channel = MockChannel()
+    mw = _make_middleware(config=_make_config(use_emojis=True), channel=channel)
+    state = {"messages": [_ai_with_tool_calls("read_file", "write_file")]}
+
+    result = await mw.aafter_model(state, None)
+
+    assert result is None
+    assert len(channel.sent_messages) == 1
+    assert channel.sent_messages[0] == (
+        "telegram:123456",
+        "📖 Using tools: read_file, write_file...",
+    )
+
+
+@pytest.mark.asyncio
+async def test_awrap_tool_call_uses_emoji_for_spawn_agent():
+    channel = MockChannel()
+    mw = _make_middleware(config=_make_config(use_emojis=True), channel=channel)
+    req = _make_tool_request("spawn_agent", {"label": "researcher"})
+
+    async def handler(request: Any) -> Any:
+        return MagicMock()
+
+    result = await mw.awrap_tool_call(req, handler)
+    assert result is not None
+    assert len(channel.sent_messages) == 1
+    assert channel.sent_messages[0] == ("telegram:123456", "🤖 Dispatched sub-agent: researcher")
+
+
+@pytest.mark.asyncio
+async def test_emoji_disabled_when_use_emojis_false():
+    channel = MockChannel()
+    mw = _make_middleware(config=_make_config(use_emojis=False), channel=channel)
+    state = {"messages": [_ai_with_tool_calls("read_file")]}
+
+    await mw.abefore_agent({}, None)
+    await mw.aafter_model(state, None)
+
+    # In hermes mode: first sent, second edited
+    assert len(channel.sent_messages) == 1
+    assert len(channel.edited_messages) == 1
+    assert channel.sent_messages[0] == ("telegram:123456", "Starting work...")
+    assert channel.edited_messages[0] == ("telegram:123456", "1", "Using tools: read_file...")
+
+
+@pytest.mark.asyncio
+async def test_emoji_map_returns_default_for_unknown_tool():
+    channel = MockChannel()
+    mw = _make_middleware(config=_make_config(use_emojis=True), channel=channel)
+    state = {"messages": [_ai_with_tool_calls("unknown_tool")]}
+
+    result = await mw.aafter_model(state, None)
+
+    assert result is None
+    assert len(channel.sent_messages) == 1
+    assert channel.sent_messages[0] == (
+        "telegram:123456",
+        "🔧 Using tools: unknown_tool...",
+    )

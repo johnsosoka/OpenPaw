@@ -147,6 +147,45 @@ class DiscordOutboundSender:
             logger.debug("Failed to delete Discord message %s: %s", message_id, e)
             return False
 
+    async def send_typing(self, session_key: str) -> None:
+        """Trigger Discord typing indicator."""
+        if not self._client:
+            return
+        try:
+            channel_id = self._channel_id_from_session_key(session_key)
+            channel = await self._resolve_channel(channel_id)
+            await channel.trigger_typing()  # type: ignore[union-attr]
+        except Exception:
+            logger.debug("Failed to trigger typing", exc_info=True)
+
+    async def add_reaction(self, session_key: str, message_id: str, emoji: str) -> bool:
+        """Add an emoji reaction to a Discord message."""
+        if not self._client:
+            return False
+        try:
+            channel_id = self._channel_id_from_session_key(session_key)
+            channel = await self._resolve_channel(channel_id)
+            message = await channel.fetch_message(int(message_id))
+            await message.add_reaction(emoji)
+            return True
+        except Exception:
+            logger.debug("Failed to add reaction", exc_info=True)
+            return False
+
+    async def remove_reaction(self, session_key: str, message_id: str, emoji: str) -> bool:
+        """Remove a bot reaction from a Discord message."""
+        if not self._client:
+            return False
+        try:
+            channel_id = self._channel_id_from_session_key(session_key)
+            channel = await self._resolve_channel(channel_id)
+            message = await channel.fetch_message(int(message_id))
+            await message.remove_reaction(emoji, self._client.user)
+            return True
+        except Exception:
+            logger.debug("Failed to remove reaction", exc_info=True)
+            return False
+
     def _split_message(self, text: str) -> list[str]:
         """Split text into chunks that fit Discord's 2000-char message limit."""
         return split_message(text, MAX_MESSAGE_LENGTH)

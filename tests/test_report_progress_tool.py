@@ -66,7 +66,7 @@ async def test_async_execution_basic(tool, mock_channel):
 
     assert "Progress reported" in result
     assert len(mock_channel.sent_messages) == 1
-    assert mock_channel.sent_messages[0] == ("telegram:123456", "Analyzing data")
+    assert mock_channel.sent_messages[0] == ("telegram:123456", "📊 Analyzing data")
     clear_channel_context()
 
 
@@ -81,7 +81,7 @@ async def test_async_execution_with_detail(tool, mock_channel):
     assert len(mock_channel.sent_messages) == 1
     assert mock_channel.sent_messages[0] == (
         "telegram:123456",
-        "Analyzing data — Processing batch 3 of 10",
+        "📊 Analyzing data — Processing batch 3 of 10",
     )
     clear_channel_context()
 
@@ -97,7 +97,7 @@ async def test_async_execution_with_percent(tool, mock_channel):
     assert len(mock_channel.sent_messages) == 1
     assert mock_channel.sent_messages[0] == (
         "telegram:123456",
-        "Analyzing data (50%)",
+        "📊 Analyzing data (50%)",
     )
     clear_channel_context()
 
@@ -117,7 +117,23 @@ async def test_async_execution_with_all_fields(tool, mock_channel):
     assert len(mock_channel.sent_messages) == 1
     assert mock_channel.sent_messages[0] == (
         "telegram:123456",
-        "Analyzing data — Processing batch 3 of 10 (50%)",
+        "📊 Analyzing data — Processing batch 3 of 10 (50%)",
+    )
+    clear_channel_context()
+
+
+@pytest.mark.asyncio
+async def test_async_execution_with_custom_emoji(tool, mock_channel):
+    tool.set_session_context(mock_channel, "telegram:123456")
+    langchain_tool = tool.get_langchain_tool()
+
+    result = await langchain_tool.coroutine("Analyzing data", emoji="🔥")
+
+    assert "Progress reported" in result
+    assert len(mock_channel.sent_messages) == 1
+    assert mock_channel.sent_messages[0] == (
+        "telegram:123456",
+        "🔥 Analyzing data",
     )
     clear_channel_context()
 
@@ -146,7 +162,7 @@ def test_sync_execution_with_context(tool, mock_channel):
 
     assert "Progress reported" in result
     assert len(mock_channel.sent_messages) == 1
-    assert mock_channel.sent_messages[0] == ("telegram:123456", "Analyzing data")
+    assert mock_channel.sent_messages[0] == ("telegram:123456", "📊 Analyzing data")
     clear_channel_context()
 
 

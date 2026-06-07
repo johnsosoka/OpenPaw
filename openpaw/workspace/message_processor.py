@@ -17,7 +17,7 @@ from openpaw.core.prompts.system_events import (
     TOOL_DENIED_TEMPLATE,
 )
 from openpaw.core.utils import is_context_overflow_error, resolve_user_name, sanitize_error_for_user
-from openpaw.model.message import Message
+from openpaw.model.message import Message, MessageDirection
 from openpaw.runtime.approval import ApprovalGateManager
 from openpaw.runtime.queue.lane import QueueMode
 from openpaw.runtime.queue.manager import QueueManager
@@ -145,6 +145,63 @@ class MessageProcessor:
                 lines.append(str(msg))
         return "\n".join(lines)
 
+    def _get_original_message_id(self, messages: list[Message]) -> str | None:
+        """Find the first non-system inbound message ID for reaction targeting.
+
+        Reactions are applied to the user's original message. System events
+        (cron, heartbeat) do not have a user message to react to.
+
+        Args:
+            messages: The message batch to inspect.
+
+        Returns:
+            The original inbound message ID, or None if no suitable message exists.
+        """
+        for msg in messages:
+            if msg.direction == MessageDirection.INBOUND and msg.user_id != "system":
+                return msg.id
+        return None
+
+    async def _add_reaction(
+        self, channel: ChannelAdapter | None, session_key: str, message_id: str | None, emoji: str
+    ) -> None:
+        """Best-effort add a reaction to a message."""
+        if not channel or not message_id:
+            return
+        try:
+            await channel.add_reaction(session_key, message_id, emoji)
+        except Exception:
+            self._logger.debug("Failed to add reaction %s", emoji, exc_info=True)
+
+    async def _remove_reaction(
+        self, channel: ChannelAdapter | None, session_key: str, message_id: str | None, emoji: str
+    ) -> None:
+        """Best-effort remove a reaction from a message."""
+        if not channel or not message_id:
+            return
+        try:
+            await channel.remove_reaction(session_key, message_id, emoji)
+        except Exception:
+            self._logger.debug("Failed to remove reaction %s", emoji, exc_info=True)
+
+    def _reactions_enabled(self) -> bool:
+        """Check whether reactions are enabled in the status update config."""
+        if not self._status_update_middleware:
+            return False
+        config = getattr(self._status_update_middleware, "_config", None)
+        if not config:
+            return False
+        return getattr(config, "reactions", False)
+
+    def _typing_enabled(self) -> bool:
+        """Check whether typing indicator is enabled in the status update config."""
+        if not self._status_update_middleware:
+            return False
+        config = getattr(self._status_update_middleware, "_config", None)
+        if not config:
+            return False
+        return getattr(config, "typing_indicator", False)
+
     async def process_messages(
         self,
         session_key: str,
@@ -179,7 +236,21 @@ class MessageProcessor:
         if new_thread_id:
             thread_id = new_thread_id
 
+        original_message_id = self._get_original_message_id(messages)
+
+        # Send typing indicator
+        if self._typing_enabled() and channel:
+            try:
+                await channel.send_typing(session_key)
+            except Exception:
+                self._logger.debug("Typing indicator failed", exc_info=True)
+
+        # Add start reaction
+        if self._reactions_enabled() and original_message_id:
+            await self._add_reaction(channel, session_key, original_message_id, "👀")
+
         run_count = 0
+        _run_outcome = "success"
         while True:
             run_count += 1
             # Capture steer state before finally block resets it
@@ -361,6 +432,7 @@ class MessageProcessor:
                         continue  # Re-enter with denial message
 
                 # No channel available, deny by default
+                _run_outcome = "failure"
                 break
 
             except InterruptSignalError as e:
@@ -402,6 +474,7 @@ class MessageProcessor:
 
                 if channel:
                     await channel.send_message(session_key, sanitize_error_for_user(e))
+                _run_outcome = "failure"
                 break  # Don't continue followup chain on error
 
             finally:
@@ -450,6 +523,15 @@ class MessageProcessor:
                     self._schedule_delayed_followup(followup, session_key)
 
             break  # No followup or delayed followup scheduled, exit loop
+
+        # Final reaction lifecycle
+        if self._reactions_enabled() and original_message_id:
+            if _run_outcome == "success":
+                await self._remove_reaction(channel, session_key, original_message_id, "👀")
+                await self._add_reaction(channel, session_key, original_message_id, "✅")
+            elif _run_outcome == "failure":
+                await self._remove_reaction(channel, session_key, original_message_id, "👀")
+                await self._add_reaction(channel, session_key, original_message_id, "❌")
 
         # Reset followup state after loop exits
         followup_tool = self._builtin_loader.get_tool_instance("followup")

@@ -40,5 +40,19 @@ class StatusUpdatesConfig(BaseModel):
         default=True,
         description="Edit a single status message instead of sending multiple messages",
     )
+    typing_indicator: bool = Field(
+        default=True,
+        description=(
+            "Send typing indicator while agent is processing. "
+            "The indicator is sent once at the start of a turn and auto-expires "
+            "after ~5 seconds (Telegram) or ~10 seconds (Discord)."
+        ),
+    )
+    reactions: bool = Field(
+        default=True, description="Add emoji reactions to the user's original message"
+    )
+    use_emojis: bool = Field(
+        default=True, description="Prefix status messages with relevant emojis"
+    )
 
     model_config = {"extra": "allow"}

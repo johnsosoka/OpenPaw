@@ -532,7 +532,9 @@ status_updates:
   min_interval_seconds: 3    # Minimum seconds between auto-updates
   max_updates_per_run: 10    # Maximum auto-updates per agent run
   hermes_mode: true          # Edit single message in place (default: true)
-```
+  typing_indicator: true      # Send typing indicator while agent is processing
+  reactions: true            # Add emoji reactions to the user's original message
+  use_emojis: true           # Prefix status messages with relevant emojis
 
 **enabled** — Enable automatic status updates sent to the user during agent execution. Default: `true`.
 
@@ -551,6 +553,12 @@ status_updates:
 **max_updates_per_run** — Maximum number of auto-detected status updates per agent invocation. Default: `10`.
 
 **hermes_mode** — When `true` (default), the first status update sends a new message, and subsequent updates edit the same message in place. This prevents chat clutter. The status message is deleted after the agent run completes. When `false`, each update sends a separate message.
+
+**typing_indicator** — When `true` (default), the framework sends a typing indicator (e.g., "typing..." on Telegram or "Agent is typing..." on Discord) while the agent is actively processing. Cleared when the agent completes or sends a real message.
+
+**reactions** — When `true` (default), the framework adds an emoji reaction to the user's original message to indicate the agent has seen it and is working. The reaction is removed when the agent finishes. Only supported on channels that support emoji reactions (Telegram, Discord).
+
+**use_emojis** — When `true` (default), status messages are prefixed with relevant emoji for visual clarity (e.g., `⚙️` for tool calls, `🚀` for starting work, `🤖` for sub-agent dispatch). Set to `false` for plain text status messages.
 
 Status updates are sent directly to the user channel and do not create extra checkpoint entries or consume additional API calls. Agent-driven `report_progress` tool calls bypass all throttling.
 
