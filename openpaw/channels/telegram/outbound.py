@@ -251,6 +251,8 @@ class TelegramOutboundSender:
         if not self._app:
             return False
         try:
+            from telegram import ReactionTypeEmoji
+
             chat_id = int(session_key.split(":")[1])
             logger.info(
                 "Setting reaction %s on message %s (chat_id=%s)",
@@ -259,7 +261,7 @@ class TelegramOutboundSender:
             await self._app.bot.set_message_reaction(
                 chat_id=chat_id,
                 message_id=int(message_id),
-                reaction=[emoji],
+                reaction=[ReactionTypeEmoji(emoji=emoji)],
             )
             logger.info("Reaction %s set successfully on message %s", emoji, message_id)
             return True

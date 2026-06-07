@@ -13,6 +13,8 @@ class TestAddReaction:
     @pytest.mark.asyncio
     async def test_add_reaction_calls_set_message_reaction(self):
         """add_reaction calls set_message_reaction with the correct payload."""
+        from telegram import ReactionTypeEmoji
+
         app = MagicMock()
         app.bot.set_message_reaction = AsyncMock()
         sender = TelegramOutboundSender(app=app, channel_name="telegram", bot_id=1)
@@ -23,7 +25,7 @@ class TestAddReaction:
         app.bot.set_message_reaction.assert_awaited_once_with(
             chat_id=123456,
             message_id=42,
-            reaction=["👀"],
+            reaction=[ReactionTypeEmoji(emoji="👀")],
         )
 
     @pytest.mark.asyncio
