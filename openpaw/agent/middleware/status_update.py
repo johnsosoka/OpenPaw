@@ -277,7 +277,20 @@ class StatusUpdateMiddleware(AgentMiddleware):
             return None
 
         self._last_reported_tools = current_tools
-        names_str = ", ".join(tool_names)
+
+        # Build a detail-rich list: "tool_name (detail)" when detail is available
+        tool_parts: list[str] = []
+        for tc in tool_calls:
+            name = tc.get("name", "")
+            if not name:
+                continue
+            detail = _extract_tool_detail(name, tc.get("args", {}))
+            if detail:
+                tool_parts.append(f"{name} ({detail})")
+            else:
+                tool_parts.append(name)
+
+        names_str = ", ".join(tool_parts)
         emoji = _resolve_emoji(tool_names) if self._config.use_emojis else None
         await self._send_status(f"Using tools: {names_str}...", emoji=emoji)
         return None

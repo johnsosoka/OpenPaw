@@ -172,6 +172,33 @@ async def test_aafter_model_detects_tool_calls():
 
 
 @pytest.mark.asyncio
+async def test_aafter_model_includes_tool_details():
+    channel = MockChannel()
+    mw = _make_middleware(channel=channel)
+    state = {
+        "messages": [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "read_file", "id": "call_1", "args": {"file_path": "notes.md"}},
+                    {"name": "write_file", "id": "call_2", "args": {"file_path": "report.md"}},
+                    {"name": "spawn_agent", "id": "call_3", "args": {"label": "researcher"}},
+                ],
+            )
+        ]
+    }
+
+    result = await mw.aafter_model(state, None)
+
+    assert result is None
+    assert len(channel.sent_messages) == 1
+    assert channel.sent_messages[0] == (
+        "telegram:123456",
+        "Using tools: read_file (notes.md), write_file (report.md), spawn_agent (researcher)...",
+    )
+
+
+@pytest.mark.asyncio
 async def test_aafter_model_silent_when_no_tool_calls():
     channel = MockChannel()
     mw = _make_middleware(channel=channel)
@@ -556,7 +583,7 @@ class TestStatusUpdatesConfig:
         assert config.tool_start is True
         assert config.tool_complete is False
         assert config.subagent_spawned is True
-        assert config.min_interval_seconds == 3
+        assert config.min_interval_seconds == 1
         assert config.max_updates_per_run == 10
         assert config.template == "[{event}] {message}"
         assert config.hermes_mode is True

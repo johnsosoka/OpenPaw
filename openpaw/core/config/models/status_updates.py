@@ -28,7 +28,7 @@ class StatusUpdatesConfig(BaseModel):
         default=True, description="Send 'Dispatched sub-agent: X' when spawn_agent is called"
     )
     min_interval_seconds: int = Field(
-        default=3, ge=0, description="Minimum seconds between auto-detected status updates"
+        default=1, ge=0, description="Minimum seconds between auto-detected status updates"
     )
     max_updates_per_run: int = Field(
         default=10, ge=0, description="Maximum auto-detected updates per agent run"
