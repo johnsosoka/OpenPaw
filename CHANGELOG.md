@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `docs/builtins.md`, `docs/configuration.md`, and `docs/architecture.md` with status updates and `report_progress` documentation.
 - Updated `ChannelAdapter` base class with `edit_message` and `delete_message` default no-ops.
 - Implemented `edit_message`/`delete_message` in Telegram and Discord channel adapters.
+- `aafter_model` status messages now include per-tool argument details (e.g., `read_file (notes.md)` instead of just `read_file`).
+- `min_interval_seconds` default lowered from `3` to `1` to allow `tool_start` messages to get through during multi-step operations.
+- `tool_start` now defaults to `true` so granular status details are visible without manual configuration.
 
 ### Removed
 
@@ -36,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SubAgentStore` converted to async-safe operations with `asyncio.to_thread()`, preventing synchronous YAML I/O from blocking the event loop.
 - Added outer timeout (10 minutes) to lane handler execution to prevent a single hung session from starving the entire lane.
 - `QueueManager._debounce_flush` now logs exceptions instead of silently swallowing them.
+- Telegram `set_message_reaction` now uses `ReactionTypeEmoji` objects instead of raw emoji strings, fixing `Reaction_invalid` and `Can't parse reactiontype` API errors.
+- Reaction emojis changed to Telegram-valid set: `👍` (success) and `👎` (failure) instead of `✅` and `❌`.
+- Fixed `UnboundLocalError` in `runner.py` when processing tool call updates without `messages_in_update` defined.
 
 ## [0.4.1] - 2026-05-30
 
