@@ -170,8 +170,9 @@ class MessageProcessor:
             return
         try:
             await channel.add_reaction(session_key, message_id, emoji)
+            self._logger.info("Added reaction %s to message %s", emoji, message_id)
         except Exception:
-            self._logger.debug("Failed to add reaction %s", emoji, exc_info=True)
+            self._logger.info("Failed to add reaction %s to message %s", emoji, message_id, exc_info=True)
 
     async def _remove_reaction(
         self, channel: ChannelAdapter | None, session_key: str, message_id: str | None, emoji: str
@@ -181,8 +182,9 @@ class MessageProcessor:
             return
         try:
             await channel.remove_reaction(session_key, message_id, emoji)
+            self._logger.info("Removed reaction %s from message %s", emoji, message_id)
         except Exception:
-            self._logger.debug("Failed to remove reaction %s", emoji, exc_info=True)
+            self._logger.info("Failed to remove reaction %s from message %s", emoji, message_id, exc_info=True)
 
     def _reactions_enabled(self) -> bool:
         """Check whether reactions are enabled in the status update config."""
@@ -237,6 +239,11 @@ class MessageProcessor:
             thread_id = new_thread_id
 
         original_message_id = self._get_original_message_id(messages)
+        self._logger.info(
+            "Reaction diagnostics: enabled=%s, original_message_id=%s",
+            self._reactions_enabled(),
+            original_message_id,
+        )
 
         # Send typing indicator
         if self._typing_enabled() and channel:
