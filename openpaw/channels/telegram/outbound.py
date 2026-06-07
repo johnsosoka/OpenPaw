@@ -252,14 +252,19 @@ class TelegramOutboundSender:
             return False
         try:
             chat_id = int(session_key.split(":")[1])
+            logger.info(
+                "Setting reaction %s on message %s (chat_id=%s)",
+                emoji, message_id, chat_id,
+            )
             await self._app.bot.set_message_reaction(
                 chat_id=chat_id,
                 message_id=int(message_id),
                 reaction=[emoji],
             )
+            logger.info("Reaction %s set successfully on message %s", emoji, message_id)
             return True
-        except Exception:
-            logger.debug("Failed to add reaction", exc_info=True)
+        except Exception as e:
+            logger.info("Failed to add reaction %s on message %s: %s", emoji, message_id, e)
             return False
 
     async def remove_reaction(self, session_key: str, message_id: str, emoji: str) -> bool:
@@ -273,14 +278,19 @@ class TelegramOutboundSender:
             return False
         try:
             chat_id = int(session_key.split(":")[1])
+            logger.info(
+                "Removing reaction %s from message %s (chat_id=%s)",
+                emoji, message_id, chat_id,
+            )
             await self._app.bot.set_message_reaction(
                 chat_id=chat_id,
                 message_id=int(message_id),
                 reaction=[],  # Empty clears all
             )
+            logger.info("Reaction %s removed successfully from message %s", emoji, message_id)
             return True
-        except Exception:
-            logger.debug("Failed to remove reaction", exc_info=True)
+        except Exception as e:
+            logger.info("Failed to remove reaction %s from message %s: %s", emoji, message_id, e)
             return False
 
     async def replace_reaction(
@@ -292,4 +302,13 @@ class TelegramOutboundSender:
         when a new one is set. This avoids the double API call that
         can trigger rate limits.
         """
-        return await self.add_reaction(session_key, message_id, new_emoji)
+        logger.info(
+            "Replacing reaction %s with %s on message %s (session=%s)",
+            old_emoji, new_emoji, message_id, session_key,
+        )
+        result = await self.add_reaction(session_key, message_id, new_emoji)
+        logger.info(
+            "Replace reaction result: %s (old=%s, new=%s, msg=%s)",
+            result, old_emoji, new_emoji, message_id,
+        )
+        return result
