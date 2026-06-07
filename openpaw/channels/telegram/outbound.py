@@ -282,3 +282,14 @@ class TelegramOutboundSender:
         except Exception:
             logger.debug("Failed to remove reaction", exc_info=True)
             return False
+
+    async def replace_reaction(
+        self, session_key: str, message_id: str, old_emoji: str, new_emoji: str
+    ) -> bool:
+        """Replace a bot's emoji reaction with a new one.
+
+        Telegram's set_message_reaction replaces the existing reaction
+        when a new one is set. This avoids the double API call that
+        can trigger rate limits.
+        """
+        return await self.add_reaction(session_key, message_id, new_emoji)

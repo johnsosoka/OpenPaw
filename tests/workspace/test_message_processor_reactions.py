@@ -153,6 +153,11 @@ class MockChannel:
         self.removed_reactions.append((session_key, message_id, emoji))
         return True
 
+    async def replace_reaction(self, session_key: str, message_id: str, old_emoji: str, new_emoji: str) -> bool:
+        self.removed_reactions.append((session_key, message_id, old_emoji))
+        self.reactions.append((session_key, message_id, new_emoji))
+        return True
+
 
 # ---------------------------------------------------------------------------
 # Typing indicator

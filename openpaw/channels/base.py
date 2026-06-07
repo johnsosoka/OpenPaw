@@ -320,3 +320,24 @@ class ChannelAdapter(ABC):
             True if the reaction was removed successfully, False otherwise.
         """
         return False
+
+    async def replace_reaction(
+        self, session_key: str, message_id: str, old_emoji: str, new_emoji: str
+    ) -> bool:
+        """Replace a bot's emoji reaction with a new one.
+
+        Default implementation removes the old reaction and adds the new one.
+        Platforms that support atomic replacement (e.g., Telegram's
+        setMessageReaction) should override this to avoid double API calls.
+
+        Args:
+            session_key: Target session identifier.
+            message_id: Platform-specific message ID to replace the reaction on.
+            old_emoji: The emoji string to remove (e.g., "👀").
+            new_emoji: The emoji string to add (e.g., "✅").
+
+        Returns:
+            True if the replacement was successful, False otherwise.
+        """
+        await self.remove_reaction(session_key, message_id, old_emoji)
+        return await self.add_reaction(session_key, message_id, new_emoji)

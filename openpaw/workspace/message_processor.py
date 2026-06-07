@@ -192,6 +192,25 @@ class MessageProcessor:
         except Exception:
             self._logger.info("Failed to remove reaction %s from message %s", emoji, message_id, exc_info=True)
 
+    async def _replace_reaction(
+        self, channel: ChannelAdapter | None, session_key: str, message_id: str | None, old_emoji: str, new_emoji: str
+    ) -> None:
+        """Best-effort replace a reaction on a message.
+
+        Uses the channel's replace_reaction if available (avoids double API
+        calls on Telegram). Falls back to remove + add for other platforms.
+        """
+        if not channel or not message_id:
+            return
+        try:
+            ok = await channel.replace_reaction(session_key, message_id, old_emoji, new_emoji)
+            if ok:
+                self._logger.info("Replaced reaction %s with %s on message %s", old_emoji, new_emoji, message_id)
+            else:
+                self._logger.info("Failed to replace reaction %s with %s on message %s (channel returned False)", old_emoji, new_emoji, message_id)
+        except Exception:
+            self._logger.info("Failed to replace reaction %s with %s on message %s", old_emoji, new_emoji, message_id, exc_info=True)
+
     def _reactions_enabled(self) -> bool:
         """Check whether reactions are enabled in the status update config."""
         if not self._status_update_middleware:
@@ -540,11 +559,9 @@ class MessageProcessor:
         # Final reaction lifecycle
         if self._reactions_enabled() and original_message_id:
             if _run_outcome == "success":
-                await self._remove_reaction(channel, session_key, original_message_id, "👀")
-                await self._add_reaction(channel, session_key, original_message_id, "✅")
+                await self._replace_reaction(channel, session_key, original_message_id, "👀", "✅")
             elif _run_outcome == "failure":
-                await self._remove_reaction(channel, session_key, original_message_id, "👀")
-                await self._add_reaction(channel, session_key, original_message_id, "❌")
+                await self._replace_reaction(channel, session_key, original_message_id, "👀", "❌")
 
         # Reset followup state after loop exits
         followup_tool = self._builtin_loader.get_tool_instance("followup")
