@@ -216,6 +216,7 @@ def _build_agent_yaml(name: str, channel: str | None, model: str | None) -> str:
         "  use_emojis: true",
         "  agent_start: true",
         "  tool_calls_detected: true",
+        "  tool_start: true",
         "  subagent_spawned: true",
         "  hermes_mode: true",
     ]

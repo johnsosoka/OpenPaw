@@ -19,7 +19,7 @@ class StatusUpdatesConfig(BaseModel):
         default=True, description="Send 'Using tools: X, Y...' when agent decides to call tools"
     )
     tool_start: bool = Field(
-        default=False, description="Send 'Running tool: X...' before each tool execution"
+        default=True, description="Send 'Running tool: X...' before each tool execution"
     )
     tool_complete: bool = Field(
         default=False, description="Send 'Completed: X' after each tool execution"

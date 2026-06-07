@@ -512,7 +512,7 @@ class TestStatusUpdatesConfig:
         assert config.enabled is True
         assert config.agent_start is True
         assert config.tool_calls_detected is True
-        assert config.tool_start is False
+        assert config.tool_start is True
         assert config.tool_complete is False
         assert config.subagent_spawned is True
         assert config.min_interval_seconds == 3
