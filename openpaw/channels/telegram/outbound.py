@@ -255,7 +255,7 @@ class TelegramOutboundSender:
             await self._app.bot.set_message_reaction(
                 chat_id=chat_id,
                 message_id=int(message_id),
-                reaction=[{"type": "emoji", "emoji": emoji}],
+                reaction=[emoji],
             )
             return True
         except Exception:

@@ -169,8 +169,11 @@ class MessageProcessor:
         if not channel or not message_id:
             return
         try:
-            await channel.add_reaction(session_key, message_id, emoji)
-            self._logger.info("Added reaction %s to message %s", emoji, message_id)
+            ok = await channel.add_reaction(session_key, message_id, emoji)
+            if ok:
+                self._logger.info("Added reaction %s to message %s", emoji, message_id)
+            else:
+                self._logger.info("Failed to add reaction %s to message %s (channel returned False)", emoji, message_id)
         except Exception:
             self._logger.info("Failed to add reaction %s to message %s", emoji, message_id, exc_info=True)
 
@@ -181,8 +184,11 @@ class MessageProcessor:
         if not channel or not message_id:
             return
         try:
-            await channel.remove_reaction(session_key, message_id, emoji)
-            self._logger.info("Removed reaction %s from message %s", emoji, message_id)
+            ok = await channel.remove_reaction(session_key, message_id, emoji)
+            if ok:
+                self._logger.info("Removed reaction %s from message %s", emoji, message_id)
+            else:
+                self._logger.info("Failed to remove reaction %s from message %s (channel returned False)", emoji, message_id)
         except Exception:
             self._logger.info("Failed to remove reaction %s from message %s", emoji, message_id, exc_info=True)
 

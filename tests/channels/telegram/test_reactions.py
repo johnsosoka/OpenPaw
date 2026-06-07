@@ -23,7 +23,7 @@ class TestAddReaction:
         app.bot.set_message_reaction.assert_awaited_once_with(
             chat_id=123456,
             message_id=42,
-            reaction=[{"type": "emoji", "emoji": "👀"}],
+            reaction=["👀"],
         )
 
     @pytest.mark.asyncio
