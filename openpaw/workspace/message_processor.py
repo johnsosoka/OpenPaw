@@ -163,7 +163,11 @@ class MessageProcessor:
         return None
 
     async def _add_reaction(
-        self, channel: ChannelAdapter | None, session_key: str, message_id: str | None, emoji: str
+        self,
+        channel: ChannelAdapter | None,
+        session_key: str,
+        message_id: str | None,
+        emoji: str,
     ) -> None:
         """Best-effort add a reaction to a message."""
         if not channel or not message_id:
@@ -171,14 +175,26 @@ class MessageProcessor:
         try:
             ok = await channel.add_reaction(session_key, message_id, emoji)
             if ok:
-                self._logger.info("Added reaction %s to message %s", emoji, message_id)
+                self._logger.info(
+                    "Added reaction %s to message %s", emoji, message_id
+                )
             else:
-                self._logger.info("Failed to add reaction %s to message %s (channel returned False)", emoji, message_id)
+                self._logger.info(
+                    "Failed to add reaction %s to message %s (channel returned False)",
+                    emoji, message_id,
+                )
         except Exception:
-            self._logger.info("Failed to add reaction %s to message %s", emoji, message_id, exc_info=True)
+            self._logger.info(
+                "Failed to add reaction %s to message %s", emoji, message_id,
+                exc_info=True,
+            )
 
     async def _remove_reaction(
-        self, channel: ChannelAdapter | None, session_key: str, message_id: str | None, emoji: str
+        self,
+        channel: ChannelAdapter | None,
+        session_key: str,
+        message_id: str | None,
+        emoji: str,
     ) -> None:
         """Best-effort remove a reaction from a message."""
         if not channel or not message_id:
@@ -186,14 +202,27 @@ class MessageProcessor:
         try:
             ok = await channel.remove_reaction(session_key, message_id, emoji)
             if ok:
-                self._logger.info("Removed reaction %s from message %s", emoji, message_id)
+                self._logger.info(
+                    "Removed reaction %s from message %s", emoji, message_id,
+                )
             else:
-                self._logger.info("Failed to remove reaction %s from message %s (channel returned False)", emoji, message_id)
+                self._logger.info(
+                    "Failed to remove reaction %s from message %s (channel returned False)",
+                    emoji, message_id,
+                )
         except Exception:
-            self._logger.info("Failed to remove reaction %s from message %s", emoji, message_id, exc_info=True)
+            self._logger.info(
+                "Failed to remove reaction %s from message %s", emoji, message_id,
+                exc_info=True,
+            )
 
     async def _replace_reaction(
-        self, channel: ChannelAdapter | None, session_key: str, message_id: str | None, old_emoji: str, new_emoji: str
+        self,
+        channel: ChannelAdapter | None,
+        session_key: str,
+        message_id: str | None,
+        old_emoji: str,
+        new_emoji: str,
     ) -> None:
         """Best-effort replace a reaction on a message.
 
@@ -203,13 +232,25 @@ class MessageProcessor:
         if not channel or not message_id:
             return
         try:
-            ok = await channel.replace_reaction(session_key, message_id, old_emoji, new_emoji)
+            ok = await channel.replace_reaction(
+                session_key, message_id, old_emoji, new_emoji,
+            )
             if ok:
-                self._logger.info("Replaced reaction %s with %s on message %s", old_emoji, new_emoji, message_id)
+                self._logger.info(
+                    "Replaced reaction %s with %s on message %s",
+                    old_emoji, new_emoji, message_id,
+                )
             else:
-                self._logger.info("Failed to replace reaction %s with %s on message %s (channel returned False)", old_emoji, new_emoji, message_id)
+                self._logger.info(
+                    "Failed to replace reaction %s with %s on message %s (channel returned False)",
+                    old_emoji, new_emoji, message_id,
+                )
         except Exception:
-            self._logger.info("Failed to replace reaction %s with %s on message %s", old_emoji, new_emoji, message_id, exc_info=True)
+            self._logger.info(
+                "Failed to replace reaction %s with %s on message %s",
+                old_emoji, new_emoji, message_id,
+                exc_info=True,
+            )
 
     def _reactions_enabled(self) -> bool:
         """Check whether reactions are enabled in the status update config."""
