@@ -50,6 +50,9 @@ def _make_config(
     tool_start: bool = False,
     tool_complete: bool = False,
     subagent_spawned: bool = True,
+    steer_redirected: bool = True,
+    run_interrupted: bool = True,
+    collect_queued: bool = True,
     min_interval_seconds: int = 0,
     max_updates_per_run: int = 10,
     hermes_mode: bool = True,
@@ -64,6 +67,9 @@ def _make_config(
         tool_start=tool_start,
         tool_complete=tool_complete,
         subagent_spawned=subagent_spawned,
+        steer_redirected=steer_redirected,
+        run_interrupted=run_interrupted,
+        collect_queued=collect_queued,
         min_interval_seconds=min_interval_seconds,
         max_updates_per_run=max_updates_per_run,
         hermes_mode=hermes_mode,
@@ -583,10 +589,16 @@ class TestStatusUpdatesConfig:
         assert config.tool_start is True
         assert config.tool_complete is False
         assert config.subagent_spawned is True
+        assert config.steer_redirected is True
+        assert config.run_interrupted is True
+        assert config.collect_queued is True
         assert config.min_interval_seconds == 1
         assert config.max_updates_per_run == 10
         assert config.template == "[{event}] {message}"
         assert config.hermes_mode is True
+        assert config.typing_indicator is True
+        assert config.reactions is True
+        assert config.use_emojis is True
         assert config.typing_indicator is True
         assert config.reactions is True
         assert config.use_emojis is True
@@ -599,6 +611,9 @@ class TestStatusUpdatesConfig:
             tool_start=True,
             tool_complete=True,
             subagent_spawned=False,
+            steer_redirected=False,
+            run_interrupted=False,
+            collect_queued=False,
             min_interval_seconds=0,
             max_updates_per_run=5,
             template="{message}",
@@ -613,6 +628,9 @@ class TestStatusUpdatesConfig:
         assert config.tool_start is True
         assert config.tool_complete is True
         assert config.subagent_spawned is False
+        assert config.steer_redirected is False
+        assert config.run_interrupted is False
+        assert config.collect_queued is False
         assert config.min_interval_seconds == 0
         assert config.max_updates_per_run == 5
         assert config.template == "{message}"
@@ -632,6 +650,227 @@ class TestStatusUpdatesConfig:
     def test_percent_bounds(self):
         with pytest.raises(Exception):
             StatusUpdatesConfig(min_interval_seconds=-1)
+
+    def test_new_flags_default_true(self):
+        config = StatusUpdatesConfig()
+        assert config.steer_redirected is True
+        assert config.run_interrupted is True
+        assert config.collect_queued is True
+
+    def test_new_flags_custom_values(self):
+        config = StatusUpdatesConfig(
+            steer_redirected=False,
+            run_interrupted=False,
+            collect_queued=False,
+        )
+        assert config.steer_redirected is False
+        assert config.run_interrupted is False
+        assert config.collect_queued is False
+
+
+# ---------------------------------------------------------------------------
+# Steer / Interrupt / Collect notifications
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_awrap_tool_call_detects_steer_skip():
+    from langchain_core.messages import ToolMessage
+    from openpaw.core.prompts.system_events import STEER_SKIP_MESSAGE
+
+    channel = MockChannel()
+    mw = _make_middleware(channel=channel)
+    req = _make_tool_request("read_file")
+
+    async def handler(request: Any) -> Any:
+        return ToolMessage(content=STEER_SKIP_MESSAGE, tool_call_id="call_123")
+
+    result = await mw.awrap_tool_call(req, handler)
+    assert result.content == STEER_SKIP_MESSAGE
+    # No prior status message exists, so it sends a new message
+    assert len(channel.sent_messages) == 1
+    assert channel.sent_messages[0] == (
+        "telegram:123456",
+        "🔄 Redirecting to your new message...",
+    )
+
+
+@pytest.mark.asyncio
+async def test_awrap_tool_call_detects_steer_skip_with_existing_status():
+    from langchain_core.messages import ToolMessage
+    from openpaw.core.prompts.system_events import STEER_SKIP_MESSAGE
+
+    channel = MockChannel()
+    mw = _make_middleware(channel=channel)
+    # Establish a prior status message
+    await mw._send_status("Starting work...")
+    assert len(channel.sent_messages) == 1
+
+    req = _make_tool_request("read_file")
+
+    async def handler(request: Any) -> Any:
+        return ToolMessage(content=STEER_SKIP_MESSAGE, tool_call_id="call_123")
+
+    result = await mw.awrap_tool_call(req, handler)
+    assert result.content == STEER_SKIP_MESSAGE
+    # In hermes mode: steer notification edits the existing message
+    assert len(channel.sent_messages) == 1
+    assert len(channel.edited_messages) == 1
+    assert channel.edited_messages[0] == (
+        "telegram:123456",
+        "1",
+        "🔄 Redirecting to your new message...",
+    )
+
+
+@pytest.mark.asyncio
+async def test_awrap_tool_call_detects_interrupt():
+    from openpaw.agent.middleware.queue_aware import InterruptSignalError
+
+    channel = MockChannel()
+    mw = _make_middleware(channel=channel)
+    req = _make_tool_request("read_file")
+
+    async def handler(request: Any) -> Any:
+        raise InterruptSignalError([("telegram", "test")])
+
+    with pytest.raises(InterruptSignalError):
+        await mw.awrap_tool_call(req, handler)
+
+    # No prior status message exists, so it sends a new message
+    assert len(channel.sent_messages) == 1
+    assert channel.sent_messages[0] == (
+        "telegram:123456",
+        "🛑 Stopping current run — processing your new message",
+    )
+
+
+@pytest.mark.asyncio
+async def test_awrap_tool_call_detects_interrupt_with_existing_status():
+    from openpaw.agent.middleware.queue_aware import InterruptSignalError
+
+    channel = MockChannel()
+    mw = _make_middleware(channel=channel)
+    # Establish a prior status message
+    await mw._send_status("Starting work...")
+    assert len(channel.sent_messages) == 1
+
+    req = _make_tool_request("read_file")
+
+    async def handler(request: Any) -> Any:
+        raise InterruptSignalError([("telegram", "test")])
+
+    with pytest.raises(InterruptSignalError):
+        await mw.awrap_tool_call(req, handler)
+
+    # In hermes mode: interrupt notification edits the existing message
+    assert len(channel.sent_messages) == 1
+    assert len(channel.edited_messages) == 1
+    assert channel.edited_messages[0] == (
+        "telegram:123456",
+        "1",
+        "🛑 Stopping current run — processing your new message",
+    )
+
+
+@pytest.mark.asyncio
+async def test_steer_notification_disabled_by_config():
+    from langchain_core.messages import ToolMessage
+    from openpaw.core.prompts.system_events import STEER_SKIP_MESSAGE
+
+    channel = MockChannel()
+    mw = _make_middleware(
+        config=_make_config(steer_redirected=False),
+        channel=channel,
+    )
+    req = _make_tool_request("read_file")
+
+    async def handler(request: Any) -> Any:
+        return ToolMessage(content=STEER_SKIP_MESSAGE, tool_call_id="call_123")
+
+    result = await mw.awrap_tool_call(req, handler)
+    assert result.content == STEER_SKIP_MESSAGE
+    assert len(channel.sent_messages) == 0
+    assert len(channel.edited_messages) == 0
+
+
+@pytest.mark.asyncio
+async def test_interrupt_notification_disabled_by_config():
+    from openpaw.agent.middleware.queue_aware import InterruptSignalError
+
+    channel = MockChannel()
+    mw = _make_middleware(
+        config=_make_config(run_interrupted=False),
+        channel=channel,
+    )
+    req = _make_tool_request("read_file")
+
+    async def handler(request: Any) -> Any:
+        raise InterruptSignalError([("telegram", "test")])
+
+    with pytest.raises(InterruptSignalError):
+        await mw.awrap_tool_call(req, handler)
+
+    assert len(channel.sent_messages) == 0
+    assert len(channel.edited_messages) == 0
+
+
+@pytest.mark.asyncio
+async def test_steer_notification_bypasses_throttle():
+    from langchain_core.messages import ToolMessage
+    from openpaw.core.prompts.system_events import STEER_SKIP_MESSAGE
+
+    channel = MockChannel()
+    mw = _make_middleware(
+        config=_make_config(min_interval_seconds=999),
+        channel=channel,
+    )
+    req = _make_tool_request("read_file")
+
+    async def handler(request: Any) -> Any:
+        return ToolMessage(content=STEER_SKIP_MESSAGE, tool_call_id="call_123")
+
+    result = await mw.awrap_tool_call(req, handler)
+    assert result.content == STEER_SKIP_MESSAGE
+    # Should still be sent despite extreme throttle
+    assert len(channel.sent_messages) == 1
+    assert channel.sent_messages[0] == (
+        "telegram:123456",
+        "🔄 Redirecting to your new message...",
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_forced_status_bypasses_throttle():
+    channel = MockChannel()
+    mw = _make_middleware(
+        config=_make_config(min_interval_seconds=999),
+        channel=channel,
+    )
+
+    await mw.send_forced_status("📨 New messages received — bundling...")
+    assert len(channel.sent_messages) == 1
+    assert channel.sent_messages[0] == ("telegram:123456", "📨 New messages received — bundling...")
+
+
+@pytest.mark.asyncio
+async def test_send_forced_status_edits_when_message_exists():
+    channel = MockChannel()
+    mw = _make_middleware(channel=channel)
+
+    # Establish a status message
+    await mw._send_status("Starting work...")
+    assert len(channel.sent_messages) == 1
+
+    # Force-send should edit the existing message
+    await mw.send_forced_status("📨 New messages received — bundling...")
+    assert len(channel.sent_messages) == 1
+    assert len(channel.edited_messages) == 1
+    assert channel.edited_messages[0] == (
+        "telegram:123456",
+        "1",
+        "📨 New messages received — bundling...",
+    )
 
 
 # ---------------------------------------------------------------------------

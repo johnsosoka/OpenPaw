@@ -12,8 +12,9 @@ from openpaw.agent.middleware import (
 from openpaw.builtins.loader import BuiltinLoader
 from openpaw.channels.base import ChannelAdapter
 from openpaw.core.prompts.system_events import (
+    COLLECT_USER_NOTIFICATION,
     FOLLOWUP_TEMPLATE,
-    INTERRUPT_NOTIFICATION,
+    INTERRUPT_USER_NOTIFICATION,
     TOOL_DENIED_TEMPLATE,
 )
 from openpaw.core.utils import is_context_overflow_error, resolve_user_name, sanitize_error_for_user
@@ -399,6 +400,19 @@ class MessageProcessor:
                                 steered = True
                                 steer_messages = pending
 
+                # Collect mode: notify user if messages were batched while running
+                if (
+                    not steered
+                    and session_mode == QueueMode.COLLECT
+                    and self._status_update_middleware
+                    and self._status_update_middleware._config.collect_queued
+                ):
+                    has_pending = await self._queue_manager.peek_pending(session_key)
+                    if has_pending:
+                        await self._status_update_middleware.send_forced_status(
+                            COLLECT_USER_NOTIFICATION
+                        )
+
                 # Log token usage and processing summary
                 run_duration_ms = (time.monotonic() - run_start) * 1000
                 metrics = self._agent_runner.last_metrics
@@ -518,9 +532,16 @@ class MessageProcessor:
                         session_key=session_key,
                     )
 
-                # Notify user that run was interrupted
-                if channel:
-                    await channel.send_message(session_key, INTERRUPT_NOTIFICATION)
+                # Notify user that run was interrupted.
+                # Skip direct send if the status update middleware already handled it.
+                should_notify = True
+                if self._status_update_middleware:
+                    config = self._status_update_middleware._config
+                    if config.enabled and config.run_interrupted:
+                        should_notify = False
+
+                if channel and should_notify:
+                    await channel.send_message(session_key, INTERRUPT_USER_NOTIFICATION)
 
                 # Use the pending messages as the new input
                 pending_msgs = e.pending_messages

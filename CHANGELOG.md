@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Emoji reactions** — `status_updates.reactions` (default: `true`) adds an emoji reaction to the user's original message to indicate the agent is working. Reactions are removed when the agent finishes.
 - **Emoji-enriched status updates** — `status_updates.use_emojis` (default: `true`) prefixes auto-generated status messages with relevant emoji (e.g., `⚙️` for tool calls, `🚀` for starting work, `🤖` for sub-agent dispatch).
 - **Optional `emoji` parameter for `report_progress`** — Agents can pass a custom emoji to `report_progress` to prefix the status message with a visual indicator.
+- **Steer-mode-aware status notifications** — `StatusUpdateMiddleware` now detects `STEER`, `INTERRUPT`, and `COLLECT` mode events and sends user-facing emoji-prefixed notifications via the existing Hermes message. Messages: `🔄 Redirecting to your new message...`, `🛑 Stopping current run — processing your new message`, `📨 New messages received — bundling...`. Configurable via `steer_redirected`, `run_interrupted`, and `collect_queued` (default: `true`).
 - Background task supervisor in `WorkspaceRunner` that monitors queue processor health, restarts crashed tasks, and sends direct crash notifications to active sessions.
 - Entry/exit logging to critical async paths (`AgentRunner.run`, `SubAgentRunner._execute_subagent`, `SubAgentProfiler.setup`, `MessageProcessor.process_messages`, `LaneQueue.process`).
 - Enriched subagent timeout/error notifications with last tool context and tools used list.
@@ -30,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `aafter_model` status messages now include per-tool argument details (e.g., `read_file (notes.md)` instead of just `read_file`).
 - `min_interval_seconds` default lowered from `3` to `1` to allow `tool_start` messages to get through during multi-step operations.
 - `tool_start` now defaults to `true` so granular status details are visible without manual configuration.
+- Interrupt mode fallback notification now uses emoji-prefixed `🛑 Stopping current run — processing your new message` instead of bracketed `[Run interrupted — processing new message]`, making it unmistakably user-facing.
 
 ### Removed
 

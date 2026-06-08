@@ -27,6 +27,18 @@ class StatusUpdatesConfig(BaseModel):
     subagent_spawned: bool = Field(
         default=True, description="Send 'Dispatched sub-agent: X' when spawn_agent is called"
     )
+    steer_redirected: bool = Field(
+        default=True,
+        description="Send '🔄 Redirecting...' when steer mode skips tools",
+    )
+    run_interrupted: bool = Field(
+        default=True,
+        description="Send '🛑 Stopping...' when interrupt mode aborts a run",
+    )
+    collect_queued: bool = Field(
+        default=True,
+        description="Send '📨 New messages received...' when collect mode batches messages mid-run",
+    )
     min_interval_seconds: int = Field(
         default=1, ge=0, description="Minimum seconds between auto-detected status updates"
     )
