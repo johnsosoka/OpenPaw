@@ -66,6 +66,17 @@ SUBAGENT_PROGRESS_TEMPLATE = PromptTemplate(
 # Interrupt mode notification (static, no variables)
 INTERRUPT_NOTIFICATION = "[Run interrupted — processing new message]"
 
+# --- User-facing status notifications (emoji-prefixed, sent to channel, not agent state) ---
+
+# User-facing steer notification (status update middleware, not injected into agent state)
+STEER_USER_NOTIFICATION = "🔄 Redirecting to your new message..."
+
+# User-facing interrupt notification (status update middleware or direct fallback)
+INTERRUPT_USER_NOTIFICATION = "🛑 Stopping current run — processing your new message"
+
+# User-facing collect notification (when messages are batched while a run is active)
+COLLECT_USER_NOTIFICATION = "📨 New messages received — bundling..."
+
 # Timeout warning for graceful shutdown (Track 3B)
 TIMEOUT_WARNING_TEMPLATE = PromptTemplate(
     template=(

@@ -19,10 +19,16 @@ import time
 from typing import Any
 
 from langchain.agents.middleware.types import AgentMiddleware
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 
+from openpaw.agent.middleware.queue_aware import InterruptSignalError
 from openpaw.builtins.tools._channel_context import get_channel_context
 from openpaw.core.config.models.status_updates import StatusUpdatesConfig
+from openpaw.core.prompts.system_events import (
+    INTERRUPT_USER_NOTIFICATION,
+    STEER_SKIP_MESSAGE,
+    STEER_USER_NOTIFICATION,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -300,6 +306,9 @@ class StatusUpdateMiddleware(AgentMiddleware):
     ) -> Any:
         """Intercept tool execution to report sub-agent dispatch and per-tool status.
 
+        Also detects steer and interrupt signals to send user-facing status
+        notifications via the existing Hermes message.
+
         Args:
             request: ToolCallRequest with tool_call (name, args, id).
             handler: Async callable to execute the tool.
@@ -339,7 +348,14 @@ class StatusUpdateMiddleware(AgentMiddleware):
             status += "..."
             await self._send_status(status, emoji=start_emoji)
 
-        result = await handler(request)
+        try:
+            result = await handler(request)
+        except InterruptSignalError:
+            if self._config.run_interrupted:
+                await self._send_status(
+                    INTERRUPT_USER_NOTIFICATION, force=True
+                )
+            raise
 
         # Tool complete notification
         if self._config.tool_complete:
@@ -349,9 +365,31 @@ class StatusUpdateMiddleware(AgentMiddleware):
                 status += f" ({tool_detail})"
             await self._send_status(status, emoji=complete_emoji)
 
+        # Detect steer skip and notify user
+        if (
+            self._config.steer_redirected
+            and isinstance(result, ToolMessage)
+            and result.content == STEER_SKIP_MESSAGE
+        ):
+            await self._send_status(STEER_USER_NOTIFICATION, force=True)
+
         return result
 
-    async def _send_status(self, text: str, emoji: str | None = None) -> None:
+    async def send_forced_status(self, text: str) -> None:
+        """Send a status update that bypasses throttling.
+
+        Public entry point for external callers (e.g., MessageProcessor) that
+        need to send a status notification for one-time events like steer or
+        collect. This delegates to _send_status with force=True.
+
+        Args:
+            text: The status message text to send.
+        """
+        await self._send_status(text, force=True)
+
+    async def _send_status(
+        self, text: str, emoji: str | None = None, force: bool = False
+    ) -> None:
         """Send or edit a status message to the channel with throttling.
 
         In Hermes mode (default), the first status message is sent normally and
@@ -361,6 +399,8 @@ class StatusUpdateMiddleware(AgentMiddleware):
         Args:
             text: The status message text to send.
             emoji: Optional emoji to prefix the text when use_emojis is enabled.
+            force: When True, bypass time and budget throttling. Used for
+                one-time events like steer or interrupt notifications.
         """
         channel = self._channel
         session_key = self._session_key
@@ -372,7 +412,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
                 return
 
         # Budget throttle
-        if self._updates_sent >= self._config.max_updates_per_run:
+        if not force and self._updates_sent >= self._config.max_updates_per_run:
             logger.debug(
                 "Status update throttled (budget exhausted): %s", text
             )
@@ -380,7 +420,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
 
         # Time throttle
         now = time.monotonic()
-        if now - self._last_update_time < self._config.min_interval_seconds:
+        if not force and now - self._last_update_time < self._config.min_interval_seconds:
             logger.debug(
                 "Status update throttled (min_interval): %s", text
             )
