@@ -33,6 +33,9 @@ class ReportProgressInput(BaseModel):
     percent: int | None = Field(
         default=None, ge=0, le=100, description="Optional progress percentage 0-100"
     )
+    emoji: str | None = Field(
+        default=None, description="Optional emoji prefix, e.g. '📖'"
+    )
 
 
 class ReportProgressTool(BaseBuiltinTool):
@@ -84,22 +87,29 @@ class ReportProgressTool(BaseBuiltinTool):
     def get_langchain_tool(self) -> Any:
         """Return the report_progress tool as a LangChain StructuredTool."""
 
-        def _format_progress(status: str, detail: str | None, percent: int | None) -> str:
+        def _format_progress(status: str, detail: str | None, percent: int | None, emoji: str | None = None) -> str:
             """Format progress message with optional detail and percentage."""
-            parts = [status]
+            resolved_emoji = emoji if emoji is not None else "📊"
+            parts = [f"{resolved_emoji} ", status]
             if detail:
                 parts.append(f" — {detail}")
             if percent is not None:
                 parts.append(f" ({percent}%)")
             return "".join(parts)
 
-        def report_progress_sync(status: str, detail: str | None = None, percent: int | None = None) -> str:
+        def report_progress_sync(
+            status: str,
+            detail: str | None = None,
+            percent: int | None = None,
+            emoji: str | None = None,
+        ) -> str:
             """Sync wrapper for report_progress (for LangChain compatibility).
 
             Args:
                 status: Short status label.
                 detail: Optional longer detail message.
                 percent: Optional progress percentage 0-100.
+                emoji: Optional emoji prefix.
 
             Returns:
                 Confirmation message or error.
@@ -110,7 +120,7 @@ class ReportProgressTool(BaseBuiltinTool):
                 return "[Error: report_progress not available in this context (no active session)]"
 
             try:
-                message = _format_progress(status, detail, percent)
+                message = _format_progress(status, detail, percent, emoji)
                 import asyncio
                 try:
                     loop = asyncio.get_running_loop()
@@ -128,13 +138,19 @@ class ReportProgressTool(BaseBuiltinTool):
                 logger.error("Failed to report progress: %s", e)
                 return f"[Error: Failed to report progress: {e}]"
 
-        async def report_progress_async(status: str, detail: str | None = None, percent: int | None = None) -> str:
+        async def report_progress_async(
+            status: str,
+            detail: str | None = None,
+            percent: int | None = None,
+            emoji: str | None = None,
+        ) -> str:
             """Report progress to the user while working.
 
             Args:
                 status: Short status label.
                 detail: Optional longer detail message.
                 percent: Optional progress percentage 0-100.
+                emoji: Optional emoji prefix.
 
             Returns:
                 Confirmation message or error.
@@ -145,7 +161,7 @@ class ReportProgressTool(BaseBuiltinTool):
                 return "[Error: report_progress not available in this context (no active session)]"
 
             try:
-                message = _format_progress(status, detail, percent)
+                message = _format_progress(status, detail, percent, emoji)
                 await channel.send_message(session_key, message)
                 logger.info("Reported progress to %s: %s", session_key, status)
                 return f"Progress reported: {status}"

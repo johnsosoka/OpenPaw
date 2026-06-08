@@ -19,7 +19,7 @@ class StatusUpdatesConfig(BaseModel):
         default=True, description="Send 'Using tools: X, Y...' when agent decides to call tools"
     )
     tool_start: bool = Field(
-        default=False, description="Send 'Running tool: X...' before each tool execution"
+        default=True, description="Send 'Running tool: X...' before each tool execution"
     )
     tool_complete: bool = Field(
         default=False, description="Send 'Completed: X' after each tool execution"
@@ -28,7 +28,7 @@ class StatusUpdatesConfig(BaseModel):
         default=True, description="Send 'Dispatched sub-agent: X' when spawn_agent is called"
     )
     min_interval_seconds: int = Field(
-        default=3, ge=0, description="Minimum seconds between auto-detected status updates"
+        default=1, ge=0, description="Minimum seconds between auto-detected status updates"
     )
     max_updates_per_run: int = Field(
         default=10, ge=0, description="Maximum auto-detected updates per agent run"
@@ -39,6 +39,20 @@ class StatusUpdatesConfig(BaseModel):
     hermes_mode: bool = Field(
         default=True,
         description="Edit a single status message instead of sending multiple messages",
+    )
+    typing_indicator: bool = Field(
+        default=True,
+        description=(
+            "Send typing indicator while agent is processing. "
+            "The indicator is sent once at the start of a turn and auto-expires "
+            "after ~5 seconds (Telegram) or ~10 seconds (Discord)."
+        ),
+    )
+    reactions: bool = Field(
+        default=True, description="Add emoji reactions to the user's original message"
+    )
+    use_emojis: bool = Field(
+        default=True, description="Prefix status messages with relevant emojis"
     )
 
     model_config = {"extra": "allow"}

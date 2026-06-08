@@ -235,3 +235,82 @@ class TelegramOutboundSender:
         except Exception as e:
             logger.debug("Failed to delete Telegram message %s: %s", message_id, e)
             return False
+
+    async def send_typing(self, session_key: str) -> None:
+        """Trigger Telegram typing indicator."""
+        if not self._app:
+            return
+        try:
+            chat_id = int(session_key.split(":")[1])
+            await self._app.bot.send_chat_action(chat_id=chat_id, action="typing")
+        except Exception:
+            logger.debug("Failed to send typing action", exc_info=True)
+
+    async def add_reaction(self, session_key: str, message_id: str, emoji: str) -> bool:
+        """Add an emoji reaction to a Telegram message."""
+        if not self._app:
+            return False
+        try:
+            from telegram import ReactionTypeEmoji
+
+            chat_id = int(session_key.split(":")[1])
+            logger.info(
+                "Setting reaction %s on message %s (chat_id=%s)",
+                emoji, message_id, chat_id,
+            )
+            await self._app.bot.set_message_reaction(
+                chat_id=chat_id,
+                message_id=int(message_id),
+                reaction=[ReactionTypeEmoji(emoji=emoji)],
+            )
+            logger.info("Reaction %s set successfully on message %s", emoji, message_id)
+            return True
+        except Exception as e:
+            logger.info("Failed to add reaction %s on message %s: %s", emoji, message_id, e)
+            return False
+
+    async def remove_reaction(self, session_key: str, message_id: str, emoji: str) -> bool:
+        """Remove the bot's reactions from a Telegram message.
+
+        Note: Telegram's set_message_reaction with an empty reaction list
+        clears all reactions set by the bot. The emoji parameter is accepted
+        for API compatibility but not used.
+        """
+        if not self._app:
+            return False
+        try:
+            chat_id = int(session_key.split(":")[1])
+            logger.info(
+                "Removing reaction %s from message %s (chat_id=%s)",
+                emoji, message_id, chat_id,
+            )
+            await self._app.bot.set_message_reaction(
+                chat_id=chat_id,
+                message_id=int(message_id),
+                reaction=[],  # Empty clears all
+            )
+            logger.info("Reaction %s removed successfully from message %s", emoji, message_id)
+            return True
+        except Exception as e:
+            logger.info("Failed to remove reaction %s from message %s: %s", emoji, message_id, e)
+            return False
+
+    async def replace_reaction(
+        self, session_key: str, message_id: str, old_emoji: str, new_emoji: str
+    ) -> bool:
+        """Replace a bot's emoji reaction with a new one.
+
+        Telegram's set_message_reaction replaces the existing reaction
+        when a new one is set. This avoids the double API call that
+        can trigger rate limits.
+        """
+        logger.info(
+            "Replacing reaction %s with %s on message %s (session=%s)",
+            old_emoji, new_emoji, message_id, session_key,
+        )
+        result = await self.add_reaction(session_key, message_id, new_emoji)
+        logger.info(
+            "Replace reaction result: %s (old=%s, new=%s, msg=%s)",
+            result, old_emoji, new_emoji, message_id,
+        )
+        return result

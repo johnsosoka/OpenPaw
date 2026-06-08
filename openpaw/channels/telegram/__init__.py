@@ -339,3 +339,55 @@ class TelegramChannel(ChannelAdapter, SecurityMixin):
                 bot_id=self._app.bot.id,
             )
         return await self._outbound_sender.delete_message(session_key, message_id)
+
+    async def send_typing(self, session_key: str) -> None:
+        """Trigger typing indicator in a Telegram chat."""
+        if not self._outbound_sender:
+            if not self._app:
+                raise RuntimeError("Telegram channel not started")
+            self._outbound_sender = TelegramOutboundSender(
+                app=self._app,
+                channel_name=self.name,
+                bot_id=self._app.bot.id,
+            )
+        await self._outbound_sender.send_typing(session_key)
+
+    async def add_reaction(self, session_key: str, message_id: str, emoji: str) -> bool:
+        """Add an emoji reaction to a Telegram message."""
+        if not self._outbound_sender:
+            if not self._app:
+                raise RuntimeError("Telegram channel not started")
+            self._outbound_sender = TelegramOutboundSender(
+                app=self._app,
+                channel_name=self.name,
+                bot_id=self._app.bot.id,
+            )
+        return await self._outbound_sender.add_reaction(session_key, message_id, emoji)
+
+    async def remove_reaction(self, session_key: str, message_id: str, emoji: str) -> bool:
+        """Remove reactions from a Telegram message."""
+        if not self._outbound_sender:
+            if not self._app:
+                raise RuntimeError("Telegram channel not started")
+            self._outbound_sender = TelegramOutboundSender(
+                app=self._app,
+                channel_name=self.name,
+                bot_id=self._app.bot.id,
+            )
+        return await self._outbound_sender.remove_reaction(session_key, message_id, emoji)
+
+    async def replace_reaction(
+        self, session_key: str, message_id: str, old_emoji: str, new_emoji: str
+    ) -> bool:
+        """Replace a bot's emoji reaction with a new one."""
+        if not self._outbound_sender:
+            if not self._app:
+                raise RuntimeError("Telegram channel not started")
+            self._outbound_sender = TelegramOutboundSender(
+                app=self._app,
+                channel_name=self.name,
+                bot_id=self._app.bot.id,
+            )
+        return await self._outbound_sender.replace_reaction(
+            session_key, message_id, old_emoji, new_emoji
+        )

@@ -288,6 +288,42 @@ class DiscordChannel(ChannelAdapter, SecurityMixin):
             )
         return await self._outbound_sender.delete_message(session_key, message_id)
 
+    async def send_typing(self, session_key: str) -> None:
+        """Trigger Discord typing indicator."""
+        if not self._outbound_sender:
+            if not self._client:
+                raise RuntimeError("Discord channel not started")
+            self._outbound_sender = DiscordOutboundSender(
+                client=self._client,
+                channel_name=self.name,
+                bot_id=self._client.user.id,  # type: ignore[union-attr]
+            )
+        await self._outbound_sender.send_typing(session_key)
+
+    async def add_reaction(self, session_key: str, message_id: str, emoji: str) -> bool:
+        """Add an emoji reaction to a Discord message."""
+        if not self._outbound_sender:
+            if not self._client:
+                raise RuntimeError("Discord channel not started")
+            self._outbound_sender = DiscordOutboundSender(
+                client=self._client,
+                channel_name=self.name,
+                bot_id=self._client.user.id,  # type: ignore[union-attr]
+            )
+        return await self._outbound_sender.add_reaction(session_key, message_id, emoji)
+
+    async def remove_reaction(self, session_key: str, message_id: str, emoji: str) -> bool:
+        """Remove a bot reaction from a Discord message."""
+        if not self._outbound_sender:
+            if not self._client:
+                raise RuntimeError("Discord channel not started")
+            self._outbound_sender = DiscordOutboundSender(
+                client=self._client,
+                channel_name=self.name,
+                bot_id=self._client.user.id,  # type: ignore[union-attr]
+            )
+        return await self._outbound_sender.remove_reaction(session_key, message_id, emoji)
+
     async def register_commands(self, commands: list[Any]) -> None:
         """Register OpenPaw commands as Discord slash commands."""
         if self._command_registrar is None:

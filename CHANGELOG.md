@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Run-aware status labels** — First user-message run shows `"Starting work..."`, subsequent runs show `"Continuing work..."`. System events (cron, heartbeat, sub-agent completions) skip the status update to avoid mid-task confusion.
 - **`report_progress` builtin tool** — Agent-driven structured progress reporting with `status`, `detail`, and optional `percentage` (0-100).
 - **`StatusUpdatesConfig`** configuration model with workspace-level toggles (`agent_start`, `tool_calls_detected`, `tool_start`, `tool_complete`, `subagent_spawned`, `hermes_mode`) and throttling (`min_interval_seconds`, `max_updates_per_run`).
+- **Typing indicators** — `status_updates.typing_indicator` (default: `true`) sends a channel typing indicator while the agent is processing.
+- **Emoji reactions** — `status_updates.reactions` (default: `true`) adds an emoji reaction to the user's original message to indicate the agent is working. Reactions are removed when the agent finishes.
+- **Emoji-enriched status updates** — `status_updates.use_emojis` (default: `true`) prefixes auto-generated status messages with relevant emoji (e.g., `⚙️` for tool calls, `🚀` for starting work, `🤖` for sub-agent dispatch).
+- **Optional `emoji` parameter for `report_progress`** — Agents can pass a custom emoji to `report_progress` to prefix the status message with a visual indicator.
 - Background task supervisor in `WorkspaceRunner` that monitors queue processor health, restarts crashed tasks, and sends direct crash notifications to active sessions.
 - Entry/exit logging to critical async paths (`AgentRunner.run`, `SubAgentRunner._execute_subagent`, `SubAgentProfiler.setup`, `MessageProcessor.process_messages`, `LaneQueue.process`).
 - Enriched subagent timeout/error notifications with last tool context and tools used list.
@@ -23,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `docs/builtins.md`, `docs/configuration.md`, and `docs/architecture.md` with status updates and `report_progress` documentation.
 - Updated `ChannelAdapter` base class with `edit_message` and `delete_message` default no-ops.
 - Implemented `edit_message`/`delete_message` in Telegram and Discord channel adapters.
+- `aafter_model` status messages now include per-tool argument details (e.g., `read_file (notes.md)` instead of just `read_file`).
+- `min_interval_seconds` default lowered from `3` to `1` to allow `tool_start` messages to get through during multi-step operations.
+- `tool_start` now defaults to `true` so granular status details are visible without manual configuration.
 
 ### Removed
 
@@ -32,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SubAgentStore` converted to async-safe operations with `asyncio.to_thread()`, preventing synchronous YAML I/O from blocking the event loop.
 - Added outer timeout (10 minutes) to lane handler execution to prevent a single hung session from starving the entire lane.
 - `QueueManager._debounce_flush` now logs exceptions instead of silently swallowing them.
+- Telegram `set_message_reaction` now uses `ReactionTypeEmoji` objects instead of raw emoji strings, fixing `Reaction_invalid` and `Can't parse reactiontype` API errors.
+- Reaction emojis changed to Telegram-valid set: `👍` (success) and `👎` (failure) instead of `✅` and `❌`.
+- Fixed `UnboundLocalError` in `runner.py` when processing tool call updates without `messages_in_update` defined.
 
 ## [0.4.1] - 2026-05-30
 

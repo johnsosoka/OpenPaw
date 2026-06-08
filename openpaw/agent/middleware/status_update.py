@@ -26,6 +26,92 @@ from openpaw.core.config.models.status_updates import StatusUpdatesConfig
 
 logger = logging.getLogger(__name__)
 
+_EMOJI_MAP: dict[str, str] = {
+    "spawn_agent": "🤖",
+    "memory_search": "🔍",
+    "send_message": "📤",
+    "send_file": "📎",
+    "report_progress": "📊",
+    "shell": "💻",
+    "browser": "🌐",
+    "read_file": "📖",
+    "list_dir": "📖",
+    "grep": "📖",
+    "write_file": "📝",
+    "edit_file": "📝",
+    "plan": "📋",
+    "task": "📅",
+    "cron": "📅",
+    "acknowledge": "👍",
+    "followup": "⏳",
+    "email": "📧",
+    "gmail": "📧",
+    "channel_history": "📜",
+    "md2pdf": "📄",
+    "brave_search": "🔎",
+    "elevenlabs_tts": "🔊",
+    "gpt_researcher": "🔬",
+    "describe_image": "🖼️",
+    "calendar": "📆",
+}
+
+
+def _resolve_emoji(tool_names: list[str]) -> str:
+    """Return the emoji for the first matching tool, or 🔧 if none match."""
+    for name in tool_names:
+        if name in _EMOJI_MAP:
+            return _EMOJI_MAP[name]
+    return "🔧"
+
+
+# Tool detail extraction — maps tool names to the argument key(s) that
+# provide the most useful context for a status update.
+_TOOL_DETAIL_KEYS: dict[str, list[str]] = {
+    "read_file": ["file_path", "path"],
+    "write_file": ["file_path", "path"],
+    "edit_file": ["file_path", "path"],
+    "overwrite_file": ["file_path", "path"],
+    "ls": ["directory", "path"],
+    "glob_files": ["pattern"],
+    "grep_files": ["pattern"],
+    "shell": ["command"],
+    "browser_navigate": ["url"],
+    "browser_click": ["selector"],
+    "browser_type": ["selector"],
+    "brave_search": ["query"],
+    "research": ["query"],
+    "deep_research": ["query"],
+    "send_email": ["recipient", "to"],
+    "create_task": ["title"],
+    "schedule_at": ["task", "description"],
+    "spawn_agent": ["label"],
+}
+
+_MAX_DETAIL_LEN: int = 60
+
+
+def _extract_tool_detail(tool_name: str, args: dict[str, Any]) -> str | None:
+    """Extract a human-readable detail string from tool arguments.
+
+    Args:
+        tool_name: Name of the tool being called.
+        args: The arguments dict passed to the tool.
+
+    Returns:
+        A concise detail string (e.g., file path, URL, query), or None
+        if no relevant detail is found.
+    """
+    keys = _TOOL_DETAIL_KEYS.get(tool_name, [])
+    for key in keys:
+        value = args.get(key)
+        if value and isinstance(value, str):
+            value = value.strip()
+            if value:
+                if len(value) > _MAX_DETAIL_LEN:
+                    value = value[: _MAX_DETAIL_LEN - 3] + "..."
+                return value
+    return None
+
 
 class StatusUpdateMiddleware(AgentMiddleware):
     """Middleware that emits automatic status updates to the user channel.
@@ -148,7 +234,8 @@ class StatusUpdateMiddleware(AgentMiddleware):
             if getattr(self, "_run_count", 1) == 1
             else "Continuing work..."
         )
-        await self._send_status(label)
+        emoji = "🚀" if self._config.use_emojis else None
+        await self._send_status(label, emoji=emoji)
         return None
 
     async def aafter_model(
@@ -190,8 +277,22 @@ class StatusUpdateMiddleware(AgentMiddleware):
             return None
 
         self._last_reported_tools = current_tools
-        names_str = ", ".join(tool_names)
-        await self._send_status(f"Using tools: {names_str}...")
+
+        # Build a detail-rich list: "tool_name (detail)" when detail is available
+        tool_parts: list[str] = []
+        for tc in tool_calls:
+            name = tc.get("name", "")
+            if not name:
+                continue
+            detail = _extract_tool_detail(name, tc.get("args", {}))
+            if detail:
+                tool_parts.append(f"{name} ({detail})")
+            else:
+                tool_parts.append(name)
+
+        names_str = ", ".join(tool_parts)
+        emoji = _resolve_emoji(tool_names) if self._config.use_emojis else None
+        await self._send_status(f"Using tools: {names_str}...", emoji=emoji)
         return None
 
     async def awrap_tool_call(
@@ -210,26 +311,47 @@ class StatusUpdateMiddleware(AgentMiddleware):
             return await handler(request)
 
         tool_name = request.tool_call.get("name", "unknown")
+        tool_args = request.tool_call.get("args", {})
+        tool_emoji = _resolve_emoji([tool_name]) if self._config.use_emojis else None
+        tool_detail = _extract_tool_detail(tool_name, tool_args)
+        logger.debug(
+            "[STATUS_UPDATE] tool_name=%s tool_args=%s tool_detail=%s",
+            tool_name,
+            tool_args,
+            tool_detail,
+        )
 
         # Report sub-agent dispatch
         if tool_name == "spawn_agent" and self._config.subagent_spawned:
-            args = request.tool_call.get("args", {})
-            label = args.get("label", "sub-agent")
-            await self._send_status(f"Dispatched sub-agent: {label}")
+            label = tool_args.get("label", "sub-agent")
+            emoji = tool_emoji if tool_emoji != "🔧" else "🤖"
+            status = f"Dispatched sub-agent: {label}"
+            if tool_detail and tool_detail != label:
+                status += f" ({tool_detail})"
+            await self._send_status(status, emoji=emoji)
 
         # Tool start notification
         if self._config.tool_start:
-            await self._send_status(f"Running tool: {tool_name}...")
+            start_emoji = tool_emoji if tool_emoji != "🔧" else "⚙️"
+            status = f"Running tool: {tool_name}"
+            if tool_detail:
+                status += f" ({tool_detail})"
+            status += "..."
+            await self._send_status(status, emoji=start_emoji)
 
         result = await handler(request)
 
         # Tool complete notification
         if self._config.tool_complete:
-            await self._send_status(f"Completed: {tool_name}")
+            complete_emoji = tool_emoji if tool_emoji != "🔧" else "✅"
+            status = f"Completed: {tool_name}"
+            if tool_detail:
+                status += f" ({tool_detail})"
+            await self._send_status(status, emoji=complete_emoji)
 
         return result
 
-    async def _send_status(self, text: str) -> None:
+    async def _send_status(self, text: str, emoji: str | None = None) -> None:
         """Send or edit a status message to the channel with throttling.
 
         In Hermes mode (default), the first status message is sent normally and
@@ -238,6 +360,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
 
         Args:
             text: The status message text to send.
+            emoji: Optional emoji to prefix the text when use_emojis is enabled.
         """
         channel = self._channel
         session_key = self._session_key
@@ -263,6 +386,9 @@ class StatusUpdateMiddleware(AgentMiddleware):
             )
             return
 
+        if self._config.use_emojis and emoji:
+            text = f"{emoji} {text}"
+
         try:
             if self._config.hermes_mode and self._status_message_id:
                 # Hermes: edit existing message
@@ -273,6 +399,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
                     self._updates_sent += 1
                     self._last_update_time = now
                     logger.debug("Status message edited: %s", text)
+                    await self._retrigger_typing(channel, session_key)
                     return
                 # Edit failed — fall through to sending a new message
                 logger.debug("Edit failed, falling back to new message")
@@ -284,5 +411,19 @@ class StatusUpdateMiddleware(AgentMiddleware):
             if sent_message and hasattr(sent_message, "id"):
                 self._status_message_id = str(sent_message.id)
             logger.debug("Status update sent: %s", text)
+            await self._retrigger_typing(channel, session_key)
         except Exception as e:
             logger.debug("Failed to send status update: %s", e)
+
+    async def _retrigger_typing(self, channel: Any, session_key: str) -> None:
+        """Re-trigger typing indicator after a status message is sent.
+
+        Platforms auto-clear typing when the bot sends a message. Re-triggering
+        keeps the indicator alive for long multi-step operations.
+        """
+        if not self._config.typing_indicator:
+            return
+        try:
+            await channel.send_typing(session_key)
+        except Exception:
+            logger.debug("Failed to retrigger typing indicator", exc_info=True)
