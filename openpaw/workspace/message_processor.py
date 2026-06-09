@@ -5,12 +5,12 @@ import time
 from typing import Any
 
 from openpaw.agent import AgentRunner
-from openpaw.builtins.tools.cron.scheduler_bridge import _add_to_live_scheduler
 from openpaw.agent.middleware import (
     ApprovalRequiredError,
     InterruptSignalError,
 )
 from openpaw.builtins.loader import BuiltinLoader
+from openpaw.builtins.tools.cron.scheduler_bridge import _add_to_live_scheduler
 from openpaw.channels.base import ChannelAdapter
 from openpaw.core.prompts.system_events import (
     COLLECT_USER_NOTIFICATION,
