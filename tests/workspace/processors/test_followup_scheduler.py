@@ -1,7 +1,7 @@
 """Tests for FollowupScheduler."""
 
 import logging
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -71,14 +71,12 @@ class TestCheck:
         followup.prompt = "do later"
         tool = MagicMock()
         tool.get_pending_followup.return_value = followup
-        scheduler._builtin_loader.get_tool_instance.return_value = tool
 
         cron_tool = MagicMock()
         cron_tool.scheduler = MagicMock()
         cron_tool.default_chat_id = "123"
         cron_tool.default_channel = "telegram"
         cron_tool.store = MagicMock()
-        cron_tool._add_to_live_scheduler = MagicMock()
 
         def side_effect(name):
             if name == "followup":
@@ -88,7 +86,13 @@ class TestCheck:
             return None
 
         scheduler._builtin_loader.get_tool_instance.side_effect = side_effect
-        result = scheduler.check("s1", 0)
+
+        with patch(
+            "openpaw.workspace.processors.followup_scheduler._add_to_live_scheduler"
+        ) as mock_bridge:
+            result = scheduler.check("s1", 0)
+
         assert result.action == "break"
         assert result.scheduled is True
         cron_tool.store.add_task.assert_called_once()
+        mock_bridge.assert_called_once_with(cron_tool.scheduler, cron_tool.store.add_task.call_args[0][0])

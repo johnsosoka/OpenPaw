@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed `AttributeError: 'CronToolBuiltin' object has no attribute '_add_to_live_scheduler'` in `FollowupScheduler` and `MessageProcessor` — both callers now use the standalone `_add_to_live_scheduler(scheduler, task)` bridge function from `scheduler_bridge.py` instead of calling a non-existent instance method. This was crashing the queue processor on delayed followup scheduling.
 - `LaneQueue.process()` now catches handler exceptions and continues the loop, preventing a single handler crash from killing the entire message pipeline.
 - `SubAgentStore` converted to async-safe operations with `asyncio.to_thread()`, preventing synchronous YAML I/O from blocking the event loop.
 - Added outer timeout (10 minutes) to lane handler execution to prevent a single hung session from starving the entire lane.

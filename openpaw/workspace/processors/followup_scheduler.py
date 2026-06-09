@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from openpaw.builtins.tools.cron.scheduler_bridge import _add_to_live_scheduler
 from openpaw.core.prompts.system_events import FOLLOWUP_TEMPLATE
 
 
@@ -129,5 +130,5 @@ class FollowupScheduler:
             chat_id=cron_tool.default_chat_id,
         )
         cron_tool.store.add_task(task)
-        cron_tool._add_to_live_scheduler(task)
+        _add_to_live_scheduler(cron_tool.scheduler, task)
         self._logger.info(f"Delayed followup scheduled as cron task {task.id}")
