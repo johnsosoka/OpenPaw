@@ -69,7 +69,7 @@ class WorkspaceRunner:
         self._workspace_loader = WorkspaceLoader(config.workspaces_path)
         workspace_env = workspace_root / str(DOT_ENV)
         if workspace_env.exists():
-            load_dotenv(workspace_env, override=True)
+            load_dotenv(workspace_env, override=False)
             self.logger.info(f"Loaded environment from: {workspace_env}")
         self._workspace = self._workspace_loader.load(workspace_name)
         self._merged_config = WorkspaceInitializer.merge_workspace_config(

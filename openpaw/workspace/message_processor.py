@@ -10,6 +10,7 @@ from openpaw.agent.middleware import (
     InterruptSignalError,
 )
 from openpaw.builtins.loader import BuiltinLoader
+from openpaw.builtins.tools.cron.scheduler_bridge import _add_to_live_scheduler
 from openpaw.channels.base import ChannelAdapter
 from openpaw.core.prompts.system_events import (
     COLLECT_USER_NOTIFICATION,
@@ -945,7 +946,7 @@ class MessageProcessor:
             chat_id=cron_tool.default_chat_id,
         )
         cron_tool.store.add_task(task)
-        cron_tool._add_to_live_scheduler(task)
+        _add_to_live_scheduler(cron_tool.scheduler, task)
         self._logger.info(f"Delayed followup scheduled as cron task {task.id}")
 
     def _connect_send_message_tool(self, channel: Any, session_key: str) -> None:
