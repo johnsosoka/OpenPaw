@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `StatusUpdateMiddleware` now sends the steer redirect notification exactly once per steer event instead of re-editing the status message for every skipped tool. Adds a `_steer_notified` guard that is reset in `set_context()` and `reset()` so subsequent runs can notify again. (#146)
 - Fixed `AttributeError: 'CronToolBuiltin' object has no attribute '_add_to_live_scheduler'` in `FollowupScheduler` and `MessageProcessor` — both callers now use the standalone `_add_to_live_scheduler(scheduler, task)` bridge function from `scheduler_bridge.py` instead of calling a non-existent instance method. This was crashing the queue processor on delayed followup scheduling.
 - `LaneQueue.process()` now catches handler exceptions and continues the loop, preventing a single handler crash from killing the entire message pipeline.
 - `SubAgentStore` converted to async-safe operations with `asyncio.to_thread()`, preventing synchronous YAML I/O from blocking the event loop.
