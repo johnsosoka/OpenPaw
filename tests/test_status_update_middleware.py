@@ -1039,7 +1039,7 @@ async def test_create_subagent_status_sends_message_and_stores_id():
     content = channel.sent_messages[0][1]
     assert "researcher" in content
     assert "req-1" in mw._subagent_status_ids
-    msg_id, label = mw._subagent_status_ids["req-1"]
+    msg_id, label, _ch, _sk = mw._subagent_status_ids["req-1"]
     assert msg_id == "1"
     assert label == "researcher"
 
@@ -1104,7 +1104,7 @@ async def test_update_subagent_status_noop_for_unknown_id():
 async def test_update_subagent_status_noop_when_disabled():
     channel = MockChannel()
     mw = _make_middleware(config=_make_config(enabled=False), channel=channel)
-    mw._subagent_status_ids["req-1"] = ("msg-99", "researcher")
+    mw._subagent_status_ids["req-1"] = ("msg-99", "researcher", channel, "telegram:123456")
 
     await mw.update_subagent_status("req-1", "Running tool: read_file...")
 
@@ -1185,7 +1185,7 @@ async def test_finalize_subagent_status_noop_when_subagent_status_false():
     cfg = _make_config()
     cfg2 = cfg.model_copy(update={"subagent_status": False})
     mw = _make_middleware(config=cfg2, channel=channel)
-    mw._subagent_status_ids["req-1"] = ("msg-1", "researcher")
+    mw._subagent_status_ids["req-1"] = ("msg-1", "researcher", channel, "telegram:123456")
 
     await mw.finalize_subagent_status("req-1", "completed")
 
@@ -1203,8 +1203,8 @@ async def test_concurrent_subagents_have_separate_message_ids():
     await mw.create_subagent_status("req-2", "writer")
 
     assert len(channel.sent_messages) == 2
-    msg_id_1, _ = mw._subagent_status_ids["req-1"]
-    msg_id_2, _ = mw._subagent_status_ids["req-2"]
+    msg_id_1 = mw._subagent_status_ids["req-1"][0]
+    msg_id_2 = mw._subagent_status_ids["req-2"][0]
     assert msg_id_1 != msg_id_2
 
 
@@ -1229,11 +1229,13 @@ def test_reset_does_not_clear_subagent_status_ids():
     """Sub-agent status IDs survive reset() — sub-agents may outlive the main run."""
     channel = MockChannel()
     mw = _make_middleware(channel=channel)
-    mw._subagent_status_ids["req-1"] = ("msg-42", "researcher")
+    mw._subagent_status_ids["req-1"] = ("msg-42", "researcher", channel, "telegram:123456")
 
     mw.reset()
 
-    assert mw._subagent_status_ids == {"req-1": ("msg-42", "researcher")}
+    assert "req-1" in mw._subagent_status_ids
+    assert mw._subagent_status_ids["req-1"][0] == "msg-42"
+    assert mw._subagent_status_ids["req-1"][1] == "researcher"
 
 
 def test_subagent_status_config_defaults():
@@ -1255,7 +1257,11 @@ def test_subagent_status_cleanup_invalid_value():
 
 @pytest.mark.asyncio
 async def test_finalize_removes_entry_even_without_channel_context():
-    """Entry is popped from _subagent_status_ids even when channel is None after reset()."""
+    """Entry is popped and status updated even when self._channel is None after reset().
+
+    The fix stores (channel, session_key) in the tuple at create time, so finalize
+    uses the stored refs rather than the cleared self._channel / self._session_key.
+    """
     channel = MockChannel()
     mw = _make_middleware(channel=channel)
 
@@ -1270,6 +1276,55 @@ async def test_finalize_removes_entry_even_without_channel_context():
 
     await mw.finalize_subagent_status("sub-1", "completed")
 
+    # Entry is cleaned up.
     assert "sub-1" not in mw._subagent_status_ids
-    assert len(channel.edited_messages) == 0
-    assert len(channel.deleted_messages) == 0
+    # Stored channel refs allow the edit to proceed despite reset() clearing self._channel.
+    assert len(channel.edited_messages) == 1
+    assert "✅" in channel.edited_messages[0][2]
+
+
+@pytest.mark.asyncio
+async def test_finalize_works_after_reset_clears_channel():
+    """finalize_subagent_status uses stored (channel, session_key) after reset()."""
+    channel = MockChannel()
+    mw = _make_middleware(channel=channel)
+
+    await mw.create_subagent_status("sub-1", "researcher")
+    stored_msg_id = mw._subagent_status_ids["sub-1"][0]
+    stored_session_key = mw._subagent_status_ids["sub-1"][3]
+
+    mw.reset()
+    assert mw._channel is None
+    assert mw._session_key is None
+
+    await mw.finalize_subagent_status("sub-1", "completed")
+
+    assert "sub-1" not in mw._subagent_status_ids
+    assert len(channel.edited_messages) == 1
+    edit_session_key, edit_msg_id, edit_content = channel.edited_messages[0]
+    assert edit_session_key == stored_session_key
+    assert edit_msg_id == stored_msg_id
+    assert "✅" in edit_content
+
+
+@pytest.mark.asyncio
+async def test_update_works_after_reset_clears_channel():
+    """update_subagent_status uses stored (channel, session_key) after reset()."""
+    channel = MockChannel()
+    mw = _make_middleware(channel=channel)
+
+    await mw.create_subagent_status("sub-1", "researcher")
+    stored_msg_id = mw._subagent_status_ids["sub-1"][0]
+    stored_session_key = mw._subagent_status_ids["sub-1"][3]
+
+    mw.reset()
+    assert mw._channel is None
+    assert mw._session_key is None
+
+    await mw.update_subagent_status("sub-1", "Running tool: shell", "💻")
+
+    assert len(channel.edited_messages) == 1
+    edit_session_key, edit_msg_id, edit_content = channel.edited_messages[0]
+    assert edit_session_key == stored_session_key
+    assert edit_msg_id == stored_msg_id
+    assert "Running tool: shell" in edit_content

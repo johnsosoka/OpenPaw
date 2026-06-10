@@ -566,9 +566,6 @@ class WorkspaceRunner:
                 return
             if not mw._config.enabled or not mw._config.subagent_status:
                 return
-            # No channel context during cron/heartbeat sub-agent runs
-            if not mw._channel or not mw._session_key:
-                return
             if event == "start":
                 await mw.create_subagent_status(subagent_id, text)
             elif event == "tool":

@@ -155,9 +155,9 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._last_reported_tools: frozenset[str] = frozenset()
         self._status_message_id: str | None = None
         self._steer_notified: bool = False
-        # Per-sub-agent status tracking: subagent_id -> (message_id, label).
+        # Per-sub-agent status tracking: subagent_id -> (msg_id, label, channel, session_key).
         # Not cleared on reset() — sub-agents may outlive the main agent run.
-        self._subagent_status_ids: dict[str, tuple[str, str]] = {}
+        self._subagent_status_ids: dict[str, tuple[str, str, Any, str]] = {}
 
     def set_context(
         self,
@@ -236,7 +236,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         try:
             sent = await channel.send_message(session_key, text)
             if sent and hasattr(sent, "id"):
-                self._subagent_status_ids[subagent_id] = (str(sent.id), label)
+                self._subagent_status_ids[subagent_id] = (str(sent.id), label, channel, session_key)
                 logger.debug("Created sub-agent status for %s: msg=%s", subagent_id, sent.id)
         except Exception as e:
             logger.debug("Failed to create sub-agent status: %s", e)
@@ -256,11 +256,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         entry = self._subagent_status_ids.get(subagent_id)
         if not entry:
             return
-        msg_id, label = entry
-        channel = self._channel
-        session_key = self._session_key
-        if not channel or not session_key:
-            return
+        msg_id, label, channel, session_key = entry
         status_line = f"{emoji} {status}" if emoji and self._config.use_emojis else status
         text = f"🤖 Sub-agent: {label}\n{status_line}"
         try:
@@ -283,12 +279,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         entry = self._subagent_status_ids.pop(subagent_id, None)
         if not entry:
             return
-        msg_id, label = entry
-        channel = self._channel
-        session_key = self._session_key
-        if not channel or not session_key:
-            # Entry already popped — no channel to update, but dict is clean.
-            return
+        msg_id, label, channel, session_key = entry
 
         _outcome_emoji = {"completed": "✅", "failed": "❌", "cancelled": "🚫"}
         outcome_emoji = _outcome_emoji.get(outcome, "⚠️")
