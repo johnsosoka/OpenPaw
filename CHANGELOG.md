@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-sub-agent status messages** — Each spawned sub-agent now gets its own Hermes-style status message that is created on dispatch, edited as the sub-agent runs each tool, and finalized to `✅ Completed`, `❌ Failed`, or `🚫 Cancelled` on completion. Gives the user real-time visibility into long-running team members. New `SubAgentToolMiddleware` is injected into each sub-agent's runner; events bridge back to the parent `StatusUpdateMiddleware` via a `status_callback` on `SubAgentRunner`. (#144)
+- **`StatusUpdatesConfig.subagent_status`** (default `true`) and **`subagent_status_cleanup`** (`"edit"` / `"delete"`, default `"edit"`) configuration fields to control per-sub-agent status behavior.
 - **Automatic status updates** — `StatusUpdateMiddleware` reports agent start, tool usage, and sub-agent dispatch to the user channel with configurable throttling.
 - **Edit-in-place status pattern** — Status updates edit a single message in place instead of sending multiple messages. Supports `edit_message`/`delete_message` on Telegram and Discord. Configurable via `status_updates.edit_in_place` (default: `true`).
 - **Run-aware status labels** — First user-message run shows `"Starting work..."`, subsequent runs show `"Continuing work..."`. System events (cron, heartbeat, sub-agent completions) skip the status update to avoid mid-task confusion.
