@@ -8,7 +8,7 @@ Hooks into LangGraph's AgentMiddleware protocol to emit status messages:
 Throttling prevents spam during rapid tool-call sequences. Agent-driven
 report_progress tool calls bypass throttling.
 
-Hermes Pattern (default):
+Edit-in-place pattern (default):
 - Sends one initial status message
 - Edits that same message on subsequent updates
 - Deletes the status message when the agent run completes
@@ -134,8 +134,8 @@ class StatusUpdateMiddleware(AgentMiddleware):
     - Deduplication: if the same set of tools is detected twice, only report once.
     - Agent-driven report_progress bypasses all throttling.
 
-    Hermes Pattern:
-    - When hermes_mode is True (default), a single status message is maintained
+    Edit-in-place pattern:
+    - When edit_in_place is True (default), a single status message is maintained
       and edited in place. This prevents chat clutter.
     - When False, each update sends a separate message (legacy behavior).
     """
@@ -307,7 +307,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         """Intercept tool execution to report sub-agent dispatch and per-tool status.
 
         Also detects steer and interrupt signals to send user-facing status
-        notifications via the existing Hermes message.
+        notifications via the existing status message.
 
         Args:
             request: ToolCallRequest with tool_call (name, args, id).
@@ -392,8 +392,8 @@ class StatusUpdateMiddleware(AgentMiddleware):
     ) -> None:
         """Send or edit a status message to the channel with throttling.
 
-        In Hermes mode (default), the first status message is sent normally and
-        subsequent updates edit that same message. In non-Hermes mode, each
+        In edit-in-place mode (default), the first status message is sent normally
+        and subsequent updates edit that same message. In legacy mode, each
         update sends a separate message.
 
         Args:
@@ -430,8 +430,8 @@ class StatusUpdateMiddleware(AgentMiddleware):
             text = f"{emoji} {text}"
 
         try:
-            if self._config.hermes_mode and self._status_message_id:
-                # Hermes: edit existing message
+            if self._config.edit_in_place and self._status_message_id:
+                # Edit-in-place: edit existing message
                 edited = await channel.edit_message(
                     session_key, self._status_message_id, text
                 )

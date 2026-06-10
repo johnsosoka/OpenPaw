@@ -531,7 +531,7 @@ status_updates:
   subagent_spawned: true     # Report when sub-agent is dispatched
   min_interval_seconds: 3    # Minimum seconds between auto-updates
   max_updates_per_run: 10    # Maximum auto-updates per agent run
-  hermes_mode: true          # Edit single message in place (default: true)
+  edit_in_place: true        # Edit single message in place (default: true)
   typing_indicator: true      # Send typing indicator while agent is processing
   reactions: true            # Add emoji reactions to the user's original message
   use_emojis: true           # Prefix status messages with relevant emojis
@@ -552,7 +552,7 @@ status_updates:
 
 **max_updates_per_run** — Maximum number of auto-detected status updates per agent invocation. Default: `10`.
 
-**hermes_mode** — When `true` (default), the first status update sends a new message, and subsequent updates edit the same message in place. This prevents chat clutter. The status message is deleted after the agent run completes. When `false`, each update sends a separate message.
+**edit_in_place** — When `true` (default), the first status update sends a new message, and subsequent updates edit the same message in place. This prevents chat clutter. The status message is deleted after the agent run completes. When `false`, each update sends a separate message.
 
 **typing_indicator** — When `true` (default), the framework sends a typing indicator (e.g., "typing..." on Telegram or "Agent is typing..." on Discord) while the agent is actively processing. Cleared when the agent completes or sends a real message.
 

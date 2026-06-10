@@ -218,7 +218,7 @@ def _build_agent_yaml(name: str, channel: str | None, model: str | None) -> str:
         "  tool_calls_detected: true",
         "  tool_start: true",
         "  subagent_spawned: true",
-        "  hermes_mode: true",
+        "  edit_in_place: true",
     ]
 
     return "\n".join(lines) + "\n"
