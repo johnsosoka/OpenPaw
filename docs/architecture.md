@@ -86,7 +86,7 @@ The LangGraph execution layer. `AgentRunner` wraps `create_react_agent()`, compo
 
 - `QueueAwareToolMiddleware` — calls `queue_manager.peek_pending()` before each tool call; in steer mode injects pending messages as next input; in interrupt mode raises `InterruptSignalError`
 - `ApprovalToolMiddleware` — checks whether the target tool is gated; if so, raises `ApprovalRequiredError` and stores a `PendingApproval`
-- `StatusUpdateMiddleware` — emits automatic status messages to the user channel via `abefore_agent`, `aafter_model`, and `awrap_tool_call` hooks. Reports agent start, tool usage, and sub-agent dispatch with throttling to prevent spam. Uses the Hermes pattern by default: a single status message is edited in place rather than sending multiple messages. Supports `edit_message`/`delete_message` on the channel adapter for in-place updates. Skips status updates for system events (cron, heartbeat, sub-agent completions) to avoid mid-task confusion.
+- `StatusUpdateMiddleware` — emits automatic status messages to the user channel via `abefore_agent`, `aafter_model`, and `awrap_tool_call` hooks. Reports agent start, tool usage, and sub-agent dispatch with throttling to prevent spam. Uses the edit-in-place status pattern by default: a single status message is edited in place rather than sending multiple messages. Supports `edit_message`/`delete_message` on the channel adapter for in-place updates. Skips status updates for system events (cron, heartbeat, sub-agent completions) to avoid mid-task confusion.
 
 **`agent/tools/`** provides `FilesystemTools` — eight sandboxed operations (`ls`, `read_file`, `write_file`, `overwrite_file`, `edit_file`, `glob_files`, `grep_files`, `file_info`) restricted to the workspace root. `sandbox.py` exports `resolve_sandboxed_path()`, which rejects absolute paths, `~`, `..`, and `.openpaw/` access. This function is shared by `SendFileTool` and inbound processors for defense-in-depth validation.
 
@@ -139,9 +139,9 @@ File-backed persistence using threading locks and atomic writes (write to a tmp 
 
 External communication adapters. `ChannelAdapter` is the abstract base all adapters implement. The `create_channel()` factory in `factory.py` decouples `WorkspaceRunner` from concrete channel types — adding a new platform requires a new adapter file and a factory registration, nothing else.
 
-The Telegram adapter handles sender allowlisting, voice/audio (delegated to `WhisperProcessor`), documents (delegated to `DoclingProcessor`), photo uploads, and inline keyboard callbacks for approval gates. Supports message editing and deletion for the Hermes status update pattern.
+The Telegram adapter handles sender allowlisting, voice/audio (delegated to `WhisperProcessor`), documents (delegated to `DoclingProcessor`), photo uploads, and inline keyboard callbacks for approval gates. Supports message editing and deletion for the edit-in-place status pattern.
 
-The Discord adapter handles guild/DM routing, slash command registration, and rich approval UI with Approve/Deny buttons. Supports message editing and deletion for the Hermes status update pattern.
+The Discord adapter handles guild/DM routing, slash command registration, and rich approval UI with Approve/Deny buttons. Supports message editing and deletion for the edit-in-place status pattern.
 
 The `commands/` subdirectory contains `CommandRouter` and handler classes for all framework commands.
 

@@ -10,15 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Automatic status updates** — `StatusUpdateMiddleware` reports agent start, tool usage, and sub-agent dispatch to the user channel with configurable throttling.
-- **Hermes pattern** — Status updates edit a single message in place instead of sending multiple messages. Supports `edit_message`/`delete_message` on Telegram and Discord. Configurable via `status_updates.hermes_mode` (default: `true`).
+- **Edit-in-place status pattern** — Status updates edit a single message in place instead of sending multiple messages. Supports `edit_message`/`delete_message` on Telegram and Discord. Configurable via `status_updates.edit_in_place` (default: `true`).
 - **Run-aware status labels** — First user-message run shows `"Starting work..."`, subsequent runs show `"Continuing work..."`. System events (cron, heartbeat, sub-agent completions) skip the status update to avoid mid-task confusion.
 - **`report_progress` builtin tool** — Agent-driven structured progress reporting with `status`, `detail`, and optional `percentage` (0-100).
-- **`StatusUpdatesConfig`** configuration model with workspace-level toggles (`agent_start`, `tool_calls_detected`, `tool_start`, `tool_complete`, `subagent_spawned`, `hermes_mode`) and throttling (`min_interval_seconds`, `max_updates_per_run`).
+- **`StatusUpdatesConfig`** configuration model with workspace-level toggles (`agent_start`, `tool_calls_detected`, `tool_start`, `tool_complete`, `subagent_spawned`, `edit_in_place`) and throttling (`min_interval_seconds`, `max_updates_per_run`).
 - **Typing indicators** — `status_updates.typing_indicator` (default: `true`) sends a channel typing indicator while the agent is processing.
 - **Emoji reactions** — `status_updates.reactions` (default: `true`) adds an emoji reaction to the user's original message to indicate the agent is working. Reactions are removed when the agent finishes.
 - **Emoji-enriched status updates** — `status_updates.use_emojis` (default: `true`) prefixes auto-generated status messages with relevant emoji (e.g., `⚙️` for tool calls, `🚀` for starting work, `🤖` for sub-agent dispatch).
 - **Optional `emoji` parameter for `report_progress`** — Agents can pass a custom emoji to `report_progress` to prefix the status message with a visual indicator.
-- **Steer-mode-aware status notifications** — `StatusUpdateMiddleware` now detects `STEER`, `INTERRUPT`, and `COLLECT` mode events and sends user-facing emoji-prefixed notifications via the existing Hermes message. Messages: `🔄 Redirecting to your new message...`, `🛑 Stopping current run — processing your new message`, `📨 New messages received — bundling...`. Configurable via `steer_redirected`, `run_interrupted`, and `collect_queued` (default: `true`).
+- **Steer-mode-aware status notifications** — `StatusUpdateMiddleware` now detects `STEER`, `INTERRUPT`, and `COLLECT` mode events and sends user-facing emoji-prefixed notifications via the existing status message. Messages: `🔄 Redirecting to your new message...`, `🛑 Stopping current run — processing your new message`, `📨 New messages received — bundling...`. Configurable via `steer_redirected`, `run_interrupted`, and `collect_queued` (default: `true`).
 - Background task supervisor in `WorkspaceRunner` that monitors queue processor health, restarts crashed tasks, and sends direct crash notifications to active sessions.
 - Entry/exit logging to critical async paths (`AgentRunner.run`, `SubAgentRunner._execute_subagent`, `SubAgentProfiler.setup`, `MessageProcessor.process_messages`, `LaneQueue.process`).
 - Enriched subagent timeout/error notifications with last tool context and tools used list.

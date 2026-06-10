@@ -55,7 +55,7 @@ def _make_config(
     collect_queued: bool = True,
     min_interval_seconds: int = 0,
     max_updates_per_run: int = 10,
-    hermes_mode: bool = True,
+    edit_in_place: bool = True,
     use_emojis: bool = False,
     typing_indicator: bool = True,
     reactions: bool = True,
@@ -72,7 +72,7 @@ def _make_config(
         collect_queued=collect_queued,
         min_interval_seconds=min_interval_seconds,
         max_updates_per_run=max_updates_per_run,
-        hermes_mode=hermes_mode,
+        edit_in_place=edit_in_place,
         use_emojis=use_emojis,
         typing_indicator=typing_indicator,
         reactions=reactions,
@@ -263,7 +263,7 @@ async def test_aafter_model_reports_different_tool_set():
     state2 = {"messages": [_ai_with_tool_calls("write_file")]}
     await mw.aafter_model(state2, None)
 
-    # In hermes mode: 1 sent, 1 edited
+    # In edit-in-place mode: 1 sent, 1 edited
     assert len(channel.sent_messages) == 1
     assert len(channel.edited_messages) == 1
 
@@ -353,7 +353,7 @@ async def test_awrap_tool_call_reports_tool_start_with_spawn_agent_args():
         return MagicMock()
 
     await mw.awrap_tool_call(req, handler)
-    # In hermes mode: subagent_spawned sent first, then tool_start edits it
+    # In edit-in-place mode: subagent_spawned sent first, then tool_start edits it
     assert len(channel.sent_messages) == 1
     assert len(channel.edited_messages) == 1
     assert channel.sent_messages[0] == (
@@ -391,7 +391,7 @@ async def test_awrap_tool_call_reports_both_start_and_complete():
         return MagicMock()
 
     await mw.awrap_tool_call(req, handler)
-    # In hermes mode: first sent, second edited
+    # In edit-in-place mode: first sent, second edited
     assert len(channel.sent_messages) == 1
     assert len(channel.edited_messages) == 1
     assert channel.sent_messages[0] == ("telegram:123456", "Running tool: read_file...")
@@ -428,7 +428,7 @@ async def test_throttling_time_based():
     await mw._send_status("First update")
     await mw._send_status("Second update")
 
-    # In hermes mode: 1 sent, 1 throttled
+    # In edit-in-place mode: 1 sent, 1 throttled
     assert len(channel.sent_messages) == 1
 
 
@@ -444,7 +444,7 @@ async def test_throttling_budget_based():
     await mw._send_status("Update 2")
     await mw._send_status("Update 3")
 
-    # In hermes mode: 1 sent, 1 edited, 1 throttled
+    # In edit-in-place mode: 1 sent, 1 edited, 1 throttled
     assert len(channel.sent_messages) == 1
     assert len(channel.edited_messages) == 1
 
@@ -460,7 +460,7 @@ async def test_throttling_time_allows_after_interval():
     await mw._send_status("First update")
     await mw._send_status("Second update")
 
-    # In hermes mode: 1 sent, 1 edited
+    # In edit-in-place mode: 1 sent, 1 edited
     assert len(channel.sent_messages) == 1
     assert len(channel.edited_messages) == 1
 
@@ -489,12 +489,12 @@ def test_reset_clears_counters():
 
 
 # ---------------------------------------------------------------------------
-# Hermes mode
+# Edit-in-place mode
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_hermes_mode_edits_single_message():
+async def test_edit_in_place_mode_edits_single_message():
     channel = MockChannel()
     mw = _make_middleware(channel=channel)
 
@@ -515,7 +515,7 @@ async def test_hermes_mode_edits_single_message():
 
 
 @pytest.mark.asyncio
-async def test_hermes_mode_falls_back_to_new_message_on_edit_failure():
+async def test_edit_in_place_mode_falls_back_to_new_message_on_edit_failure():
     channel = MockChannel()
     # Make edit fail
     async def failing_edit(session_key: str, message_id: str, content: str) -> bool:
@@ -535,9 +535,9 @@ async def test_hermes_mode_falls_back_to_new_message_on_edit_failure():
 
 
 @pytest.mark.asyncio
-async def test_hermes_mode_disabled_sends_separate_messages():
+async def test_edit_in_place_mode_disabled_sends_separate_messages():
     channel = MockChannel()
-    mw = _make_middleware(config=_make_config(hermes_mode=False), channel=channel)
+    mw = _make_middleware(config=_make_config(edit_in_place=False), channel=channel)
 
     await mw._send_status("Starting work...")
     await mw._send_status("Using tools: read_file...")
@@ -595,7 +595,7 @@ class TestStatusUpdatesConfig:
         assert config.min_interval_seconds == 1
         assert config.max_updates_per_run == 10
         assert config.template == "[{event}] {message}"
-        assert config.hermes_mode is True
+        assert config.edit_in_place is True
         assert config.typing_indicator is True
         assert config.reactions is True
         assert config.use_emojis is True
@@ -617,7 +617,7 @@ class TestStatusUpdatesConfig:
             min_interval_seconds=0,
             max_updates_per_run=5,
             template="{message}",
-            hermes_mode=False,
+            edit_in_place=False,
             typing_indicator=False,
             reactions=False,
             use_emojis=False,
@@ -634,7 +634,7 @@ class TestStatusUpdatesConfig:
         assert config.min_interval_seconds == 0
         assert config.max_updates_per_run == 5
         assert config.template == "{message}"
-        assert config.hermes_mode is False
+        assert config.edit_in_place is False
         assert config.typing_indicator is False
         assert config.reactions is False
         assert config.use_emojis is False
@@ -713,7 +713,7 @@ async def test_awrap_tool_call_detects_steer_skip_with_existing_status():
 
     result = await mw.awrap_tool_call(req, handler)
     assert result.content == STEER_SKIP_MESSAGE
-    # In hermes mode: steer notification edits the existing message
+    # In edit-in-place mode: steer notification edits the existing message
     assert len(channel.sent_messages) == 1
     assert len(channel.edited_messages) == 1
     assert channel.edited_messages[0] == (
@@ -763,7 +763,7 @@ async def test_awrap_tool_call_detects_interrupt_with_existing_status():
     with pytest.raises(InterruptSignalError):
         await mw.awrap_tool_call(req, handler)
 
-    # In hermes mode: interrupt notification edits the existing message
+    # In edit-in-place mode: interrupt notification edits the existing message
     assert len(channel.sent_messages) == 1
     assert len(channel.edited_messages) == 1
     assert channel.edited_messages[0] == (
@@ -930,7 +930,7 @@ async def test_emoji_disabled_when_use_emojis_false():
     await mw.abefore_agent({}, None)
     await mw.aafter_model(state, None)
 
-    # In hermes mode: first sent, second edited
+    # In edit-in-place mode: first sent, second edited
     assert len(channel.sent_messages) == 1
     assert len(channel.edited_messages) == 1
     assert channel.sent_messages[0] == ("telegram:123456", "Starting work...")

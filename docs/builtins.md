@@ -837,12 +837,12 @@ status_updates:
   subagent_spawned: true     # Report sub-agent dispatch (default: true)
   min_interval_seconds: 3    # Min seconds between auto-updates (default: 3)
   max_updates_per_run: 10    # Max auto-updates per run (default: 10)
-  hermes_mode: true          # Edit single message in place (default: true)
+  edit_in_place: true        # Edit single message in place (default: true)
 ```
 
 **Behavior:**
 
-- **Hermes pattern** (default): A single status message is maintained and edited in place. First update sends a new message; subsequent updates edit the same message. The message is deleted after the agent run completes.
+- **Edit-in-place pattern** (default): A single status message is maintained and edited in place. First update sends a new message; subsequent updates edit the same message. The message is deleted after the agent run completes.
 - **Run-aware labels**: First run shows `"Starting work..."`, subsequent runs show `"Continuing work..."`.
 - **System events skip**: Cron, heartbeat, and sub-agent completion events do not trigger status updates to avoid mid-task confusion.
 - Time-based throttle: `min_interval_seconds` between auto-detected status messages
