@@ -154,6 +154,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._updates_sent: int = 0
         self._last_reported_tools: frozenset[str] = frozenset()
         self._status_message_id: str | None = None
+        self._steer_notified: bool = False
 
     def set_context(
         self,
@@ -183,6 +184,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._updates_sent = 0
         self._last_reported_tools = frozenset()
         self._status_message_id = None
+        self._steer_notified = False
 
     def reset(self) -> None:
         """Reset per-invocation state. Called by MessageProcessor after each run."""
@@ -194,6 +196,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._updates_sent = 0
         self._last_reported_tools = frozenset()
         self._status_message_id = None
+        self._steer_notified = False
 
     async def delete_status(self) -> None:
         """Delete the tracked status message if one exists.
@@ -365,13 +368,15 @@ class StatusUpdateMiddleware(AgentMiddleware):
                 status += f" ({tool_detail})"
             await self._send_status(status, emoji=complete_emoji)
 
-        # Detect steer skip and notify user
+        # Detect steer skip and notify user (fire exactly once per steer event)
         if (
             self._config.steer_redirected
             and isinstance(result, ToolMessage)
             and result.content == STEER_SKIP_MESSAGE
+            and not self._steer_notified
         ):
             await self._send_status(STEER_USER_NOTIFICATION, force=True)
+            self._steer_notified = True
 
         return result
 

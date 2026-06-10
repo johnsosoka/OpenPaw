@@ -841,6 +841,76 @@ async def test_steer_notification_bypasses_throttle():
 
 
 @pytest.mark.asyncio
+async def test_awrap_tool_call_steer_notification_fires_exactly_once():
+    """Steer notification is sent only once even when multiple tools are skipped."""
+    from langchain_core.messages import ToolMessage
+
+    from openpaw.core.prompts.system_events import STEER_SKIP_MESSAGE, STEER_USER_NOTIFICATION
+
+    channel = MockChannel()
+    mw = _make_middleware(
+        config=_make_config(steer_redirected=True, enabled=True),
+        channel=channel,
+    )
+
+    async def handler(request: Any) -> Any:
+        return ToolMessage(content=STEER_SKIP_MESSAGE, tool_call_id="call_1")
+
+    # Invoke awrap_tool_call three times simulating three skipped tools in one turn
+    await mw.awrap_tool_call(_make_tool_request("tool_a"), handler)
+    await mw.awrap_tool_call(_make_tool_request("tool_b"), handler)
+    await mw.awrap_tool_call(_make_tool_request("tool_c"), handler)
+
+    # Count all channel interactions that contain the steer notification text
+    steer_count = sum(
+        1 for (_, content) in channel.sent_messages if STEER_USER_NOTIFICATION in content
+    ) + sum(
+        1 for (_, _, content) in channel.edited_messages if STEER_USER_NOTIFICATION in content
+    )
+    assert steer_count == 1, f"Expected 1 steer notification, got {steer_count}"
+    assert mw._steer_notified is True
+
+
+@pytest.mark.asyncio
+async def test_steer_notified_resets_after_reset():
+    """_steer_notified is False after reset(), allowing subsequent runs to notify again."""
+    from langchain_core.messages import ToolMessage
+
+    from openpaw.core.prompts.system_events import STEER_SKIP_MESSAGE, STEER_USER_NOTIFICATION
+
+    channel = MockChannel()
+    mw = _make_middleware(
+        config=_make_config(steer_redirected=True, enabled=True),
+        channel=channel,
+    )
+
+    async def handler(request: Any) -> Any:
+        return ToolMessage(content=STEER_SKIP_MESSAGE, tool_call_id="call_1")
+
+    # First run: notification fires
+    await mw.awrap_tool_call(_make_tool_request("tool_a"), handler)
+    assert mw._steer_notified is True
+
+    # Reset simulates end of agent run
+    mw.reset()
+    assert mw._steer_notified is False
+
+    # Set context for second run
+    mw.set_context(channel, "telegram:123456")
+    assert mw._steer_notified is False
+
+    # Second run: notification fires again
+    await mw.awrap_tool_call(_make_tool_request("tool_a"), handler)
+
+    steer_count = sum(
+        1 for (_, content) in channel.sent_messages if STEER_USER_NOTIFICATION in content
+    ) + sum(
+        1 for (_, _, content) in channel.edited_messages if STEER_USER_NOTIFICATION in content
+    )
+    assert steer_count == 2, f"Expected 2 steer notifications across two runs, got {steer_count}"
+
+
+@pytest.mark.asyncio
 async def test_send_forced_status_bypasses_throttle():
     channel = MockChannel()
     mw = _make_middleware(
