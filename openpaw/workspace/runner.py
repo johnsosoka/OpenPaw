@@ -551,6 +551,31 @@ class WorkspaceRunner:
         subagent_session_logger = SessionLogger(
             self._workspace.path, session_type="subagent"
         )
+
+        # Closure bridges sub-agent lifecycle events to StatusUpdateMiddleware.
+        # Reads self._status_update_middleware lazily so it works even if
+        # middleware is built after this closure is created.
+        async def _subagent_status_callback(
+            subagent_id: str,
+            event: str,
+            text: str,
+            emoji: str | None,
+        ) -> None:
+            mw = self._status_update_middleware
+            if mw is None:
+                return
+            if not mw._config.enabled or not mw._config.subagent_status:
+                return
+            # No channel context during cron/heartbeat sub-agent runs
+            if not mw._channel or not mw._session_key:
+                return
+            if event == "start":
+                await mw.create_subagent_status(subagent_id, text)
+            elif event == "tool":
+                await mw.update_subagent_status(subagent_id, text, emoji)
+            elif event in ("completed", "failed", "cancelled"):
+                await mw.finalize_subagent_status(subagent_id, event)
+
         self._subagent_runner = SubAgentRunner(
             agent_factory=self._agent_factory.get_agent_factory_closure(),
             store=self._subagent_store,
@@ -562,6 +587,7 @@ class WorkspaceRunner:
             session_logger=subagent_session_logger,
             profile_resolver=profile_resolver,
             agent_factory_instance=self._agent_factory,
+            status_callback=_subagent_status_callback,
         )
         self._tool_connector.connect_spawn_tool(self._subagent_runner)
         self._tool_connector.connect_channel_history_tool(self._checkpointer)

@@ -155,6 +155,9 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._last_reported_tools: frozenset[str] = frozenset()
         self._status_message_id: str | None = None
         self._steer_notified: bool = False
+        # Per-sub-agent status tracking: subagent_id -> (message_id, label).
+        # Not cleared on reset() — sub-agents may outlive the main agent run.
+        self._subagent_status_ids: dict[str, tuple[str, str]] = {}
 
     def set_context(
         self,
@@ -215,6 +218,95 @@ class StatusUpdateMiddleware(AgentMiddleware):
             self._status_message_id = None
         except Exception as e:
             logger.debug("Failed to delete status message: %s", e)
+
+    async def create_subagent_status(self, subagent_id: str, label: str) -> None:
+        """Send a new status message for a sub-agent and store its message ID.
+
+        Args:
+            subagent_id: Unique identifier for the sub-agent request.
+            label: Display name shown in the status header.
+        """
+        if not self._config.enabled or not self._config.subagent_status:
+            return
+        channel = self._channel
+        session_key = self._session_key
+        if not channel or not session_key:
+            return
+        text = f"🤖 Sub-agent: {label}\n🟡 Starting work..."
+        try:
+            sent = await channel.send_message(session_key, text)
+            if sent and hasattr(sent, "id"):
+                self._subagent_status_ids[subagent_id] = (str(sent.id), label)
+                logger.debug("Created sub-agent status for %s: msg=%s", subagent_id, sent.id)
+        except Exception as e:
+            logger.debug("Failed to create sub-agent status: %s", e)
+
+    async def update_subagent_status(
+        self, subagent_id: str, status: str, emoji: str | None = None
+    ) -> None:
+        """Edit a sub-agent's status message in place.
+
+        Args:
+            subagent_id: Unique identifier for the sub-agent request.
+            status: Status text to display below the header line.
+            emoji: Optional emoji prefix for the status line.
+        """
+        if not self._config.enabled or not self._config.subagent_status:
+            return
+        entry = self._subagent_status_ids.get(subagent_id)
+        if not entry:
+            return
+        msg_id, label = entry
+        channel = self._channel
+        session_key = self._session_key
+        if not channel or not session_key:
+            return
+        status_line = f"{emoji} {status}" if emoji and self._config.use_emojis else status
+        text = f"🤖 Sub-agent: {label}\n{status_line}"
+        try:
+            await channel.edit_message(session_key, msg_id, text)
+            logger.debug("Updated sub-agent status for %s: %s", subagent_id, status)
+        except Exception as e:
+            logger.debug("Failed to update sub-agent status: %s", e)
+
+    async def finalize_subagent_status(
+        self, subagent_id: str, outcome: str
+    ) -> None:
+        """Edit or delete a sub-agent's status message at lifecycle end.
+
+        Args:
+            subagent_id: Unique identifier for the sub-agent request.
+            outcome: One of "completed", "failed", or "cancelled".
+        """
+        if not self._config.enabled or not self._config.subagent_status:
+            return
+        entry = self._subagent_status_ids.pop(subagent_id, None)
+        if not entry:
+            return
+        msg_id, label = entry
+        channel = self._channel
+        session_key = self._session_key
+        if not channel or not session_key:
+            # Entry already popped — no channel to update, but dict is clean.
+            return
+
+        _outcome_emoji = {"completed": "✅", "failed": "❌", "cancelled": "🚫"}
+        outcome_emoji = _outcome_emoji.get(outcome, "⚠️")
+        outcome_label = outcome.capitalize()
+
+        if self._config.subagent_status_cleanup == "delete":
+            try:
+                await channel.delete_message(session_key, msg_id)
+                logger.debug("Deleted sub-agent status for %s", subagent_id)
+            except Exception as e:
+                logger.debug("Failed to delete sub-agent status: %s", e)
+        else:
+            text = f"🤖 Sub-agent: {label}\n{outcome_emoji} {outcome_label}"
+            try:
+                await channel.edit_message(session_key, msg_id, text)
+                logger.debug("Finalized sub-agent status for %s: %s", subagent_id, outcome)
+            except Exception as e:
+                logger.debug("Failed to finalize sub-agent status: %s", e)
 
     async def abefore_agent(
         self, state: Any, runtime: Any

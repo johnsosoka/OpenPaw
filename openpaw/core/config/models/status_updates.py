@@ -66,5 +66,14 @@ class StatusUpdatesConfig(BaseModel):
     use_emojis: bool = Field(
         default=True, description="Prefix status messages with relevant emojis"
     )
+    subagent_status: bool = Field(
+        default=True,
+        description="Send a separate status message per spawned sub-agent",
+    )
+    subagent_status_cleanup: str = Field(
+        default="edit",
+        pattern="^(edit|delete)$",
+        description="How to finalize sub-agent status messages: 'edit' to final state or 'delete'",
+    )
 
     model_config = {"extra": "allow"}
