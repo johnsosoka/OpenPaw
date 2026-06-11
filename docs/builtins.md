@@ -836,7 +836,6 @@ status_updates:
   tool_complete: false       # Report per-tool completion (default: false)
   subagent_spawned: true     # Report sub-agent dispatch (default: true)
   min_interval_seconds: 3    # Min seconds between auto-updates (default: 3)
-  max_updates_per_run: 10    # Max auto-updates per run (default: 10)
   edit_in_place: true        # Edit single message in place (default: true)
 ```
 
@@ -846,7 +845,6 @@ status_updates:
 - **Run-aware labels**: First run shows `"Starting work..."`, subsequent runs show `"Continuing work..."`.
 - **System events skip**: Cron, heartbeat, and sub-agent completion events do not trigger status updates to avoid mid-task confusion.
 - Time-based throttle: `min_interval_seconds` between auto-detected status messages
-- Budget-based throttle: `max_updates_per_run` total auto-updates per agent invocation
 - Deduplication: if the same tool set is detected twice, only report once
 - Agent-driven `report_progress` tool calls bypass all throttling
 - Resets between agent runs (each user message starts a fresh count)
