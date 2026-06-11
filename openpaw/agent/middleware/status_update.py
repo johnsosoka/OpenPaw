@@ -109,13 +109,13 @@ def _extract_tool_detail(tool_name: str, args: dict[str, Any]) -> str | None:
     """
     keys = _TOOL_DETAIL_KEYS.get(tool_name, [])
     for key in keys:
-        value = args.get(key)
-        if value and isinstance(value, str):
-            value = value.strip()
-            if value:
-                if len(value) > _MAX_DETAIL_LEN:
-                    value = value[: _MAX_DETAIL_LEN - 3] + "..."
-                return value
+        raw = args.get(key)
+        if raw and isinstance(raw, str):
+            cleaned: str = raw.strip()
+            if cleaned:
+                if len(cleaned) > _MAX_DETAIL_LEN:
+                    cleaned = cleaned[: _MAX_DETAIL_LEN - 3] + "..."
+                return cleaned
     return None
 
 
