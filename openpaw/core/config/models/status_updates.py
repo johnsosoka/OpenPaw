@@ -42,9 +42,6 @@ class StatusUpdatesConfig(BaseModel):
     min_interval_seconds: int = Field(
         default=1, ge=0, description="Minimum seconds between auto-detected status updates"
     )
-    max_updates_per_run: int = Field(
-        default=10, ge=0, description="Maximum auto-detected updates per agent run"
-    )
     template: str = Field(
         default="[{event}] {message}", description="Optional format template for status messages"
     )

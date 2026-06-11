@@ -49,6 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`status_updates.max_updates_per_run`** configuration field has been removed. The per-agent-run budget cap (default `10`) silently dropped status updates after the budget was exhausted, which produced a "frozen status" UX during tool-heavy runs (e.g., browser sessions with 30+ tool calls). `min_interval_seconds` remains the active throttle; the agent loop's own recursion ceiling caps total iterations.
+
 ### Fixed
 
 - Resolved all outstanding mypy errors across the codebase (40 errors → 0). The bulk were in `openpaw/builtins/tools/browser/session.py` from a prior browser refactor where Playwright lifecycle fields were initialized to `None` without `Optional` annotations.

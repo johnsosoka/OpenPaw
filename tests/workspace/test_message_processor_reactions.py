@@ -123,7 +123,6 @@ def _make_status_update_middleware(
     config.tool_calls_detected = True
     config.subagent_spawned = True
     config.min_interval_seconds = 0
-    config.max_updates_per_run = 10
     config.edit_in_place = True
     middleware = MagicMock()
     middleware._config = config

@@ -130,7 +130,6 @@ class StatusUpdateMiddleware(AgentMiddleware):
 
     Throttling:
     - Time-based: min_interval_seconds between auto-detected updates.
-    - Budget-based: max_updates_per_run total auto-updates per agent invocation.
     - Deduplication: if the same set of tools is detected twice, only report once.
     - Agent-driven report_progress bypasses all throttling.
 
@@ -151,7 +150,6 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._channel: Any | None = None
         self._session_key: str | None = None
         self._last_update_time: float = 0.0
-        self._updates_sent: int = 0
         self._last_reported_tools: frozenset[str] = frozenset()
         self._status_message_id: str | None = None
         self._steer_notified: bool = False
@@ -184,7 +182,6 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._run_count = run_count
         self._is_system_batch = is_system_batch
         self._last_update_time = 0.0
-        self._updates_sent = 0
         self._last_reported_tools = frozenset()
         self._status_message_id = None
         self._steer_notified = False
@@ -196,7 +193,6 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._run_count = 1
         self._is_system_batch = False
         self._last_update_time = 0.0
-        self._updates_sent = 0
         self._last_reported_tools = frozenset()
         self._status_message_id = None
         self._steer_notified = False
@@ -499,13 +495,6 @@ class StatusUpdateMiddleware(AgentMiddleware):
             if not channel or not session_key:
                 return
 
-        # Budget throttle
-        if not force and self._updates_sent >= self._config.max_updates_per_run:
-            logger.debug(
-                "Status update throttled (budget exhausted): %s", text
-            )
-            return
-
         # Time throttle
         now = time.monotonic()
         if not force and now - self._last_update_time < self._config.min_interval_seconds:
@@ -524,7 +513,6 @@ class StatusUpdateMiddleware(AgentMiddleware):
                     session_key, self._status_message_id, text
                 )
                 if edited:
-                    self._updates_sent += 1
                     self._last_update_time = now
                     logger.debug("Status message edited: %s", text)
                     await self._retrigger_typing(channel, session_key)
@@ -534,7 +522,6 @@ class StatusUpdateMiddleware(AgentMiddleware):
 
             # Send new message
             sent_message = await channel.send_message(session_key, text)
-            self._updates_sent += 1
             self._last_update_time = now
             if sent_message and hasattr(sent_message, "id"):
                 self._status_message_id = str(sent_message.id)

@@ -530,7 +530,6 @@ status_updates:
   tool_complete: false       # Report after each tool execution
   subagent_spawned: true     # Report when sub-agent is dispatched
   min_interval_seconds: 3    # Minimum seconds between auto-updates
-  max_updates_per_run: 10    # Maximum auto-updates per agent run
   edit_in_place: true        # Edit single message in place (default: true)
   typing_indicator: true      # Send typing indicator while agent is processing
   reactions: true            # Add emoji reactions to the user's original message
@@ -549,8 +548,6 @@ status_updates:
 **subagent_spawned** — Send `"Dispatched sub-agent: label"` when `spawn_agent` is called. Default: `true`.
 
 **min_interval_seconds** — Minimum seconds between auto-detected status updates. Prevents spam during rapid tool-call sequences. Default: `3`.
-
-**max_updates_per_run** — Maximum number of auto-detected status updates per agent invocation. Default: `10`.
 
 **edit_in_place** — When `true` (default), the first status update sends a new message, and subsequent updates edit the same message in place. This prevents chat clutter. The status message is deleted after the agent run completes. When `false`, each update sends a separate message.
 

@@ -54,7 +54,6 @@ def _make_config(
     run_interrupted: bool = True,
     collect_queued: bool = True,
     min_interval_seconds: int = 0,
-    max_updates_per_run: int = 10,
     edit_in_place: bool = True,
     use_emojis: bool = False,
     typing_indicator: bool = True,
@@ -71,7 +70,6 @@ def _make_config(
         run_interrupted=run_interrupted,
         collect_queued=collect_queued,
         min_interval_seconds=min_interval_seconds,
-        max_updates_per_run=max_updates_per_run,
         edit_in_place=edit_in_place,
         use_emojis=use_emojis,
         typing_indicator=typing_indicator,
@@ -433,23 +431,6 @@ async def test_throttling_time_based():
 
 
 @pytest.mark.asyncio
-async def test_throttling_budget_based():
-    channel = MockChannel()
-    mw = _make_middleware(
-        config=_make_config(max_updates_per_run=2),
-        channel=channel,
-    )
-
-    await mw._send_status("Update 1")
-    await mw._send_status("Update 2")
-    await mw._send_status("Update 3")
-
-    # In edit-in-place mode: 1 sent, 1 edited, 1 throttled
-    assert len(channel.sent_messages) == 1
-    assert len(channel.edited_messages) == 1
-
-
-@pytest.mark.asyncio
 async def test_throttling_time_allows_after_interval():
     channel = MockChannel()
     mw = _make_middleware(
@@ -473,7 +454,6 @@ async def test_throttling_time_allows_after_interval():
 def test_reset_clears_counters():
     channel = MockChannel()
     mw = _make_middleware(channel=channel)
-    mw._updates_sent = 5
     mw._last_update_time = time.monotonic()
     mw._last_reported_tools = frozenset(["read_file"])
     mw._status_message_id = "msg123"
@@ -482,7 +462,6 @@ def test_reset_clears_counters():
 
     assert mw._channel is None
     assert mw._session_key is None
-    assert mw._updates_sent == 0
     assert mw._last_update_time == 0.0
     assert mw._last_reported_tools == frozenset()
     assert mw._status_message_id is None
@@ -593,7 +572,6 @@ class TestStatusUpdatesConfig:
         assert config.run_interrupted is True
         assert config.collect_queued is True
         assert config.min_interval_seconds == 1
-        assert config.max_updates_per_run == 10
         assert config.template == "[{event}] {message}"
         assert config.edit_in_place is True
         assert config.typing_indicator is True
@@ -615,7 +593,6 @@ class TestStatusUpdatesConfig:
             run_interrupted=False,
             collect_queued=False,
             min_interval_seconds=0,
-            max_updates_per_run=5,
             template="{message}",
             edit_in_place=False,
             typing_indicator=False,
@@ -632,7 +609,6 @@ class TestStatusUpdatesConfig:
         assert config.run_interrupted is False
         assert config.collect_queued is False
         assert config.min_interval_seconds == 0
-        assert config.max_updates_per_run == 5
         assert config.template == "{message}"
         assert config.edit_in_place is False
         assert config.typing_indicator is False
@@ -642,10 +618,6 @@ class TestStatusUpdatesConfig:
     def test_min_interval_bounds(self):
         with pytest.raises(Exception):
             StatusUpdatesConfig(min_interval_seconds=-1)
-
-    def test_max_updates_bounds(self):
-        with pytest.raises(Exception):
-            StatusUpdatesConfig(max_updates_per_run=-1)
 
     def test_percent_bounds(self):
         with pytest.raises(Exception):
