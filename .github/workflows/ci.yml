@@ -61,7 +61,6 @@ jobs:
 
       - name: Mypy type check
         if: needs.changes.outputs.code == 'true'
-        continue-on-error: true
         run: poetry run mypy openpaw/
 
       - name: No code changes

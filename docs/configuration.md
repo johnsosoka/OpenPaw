@@ -519,6 +519,46 @@ status_reminder:
 
 Reminders are injected as `<framework_instruction>` tags into the agent's message stream — they do not create extra checkpoint entries or consume additional API calls.
 
+#### Status Updates
+
+```yaml
+status_updates:
+  enabled: true              # Default: true
+  agent_start: true          # Report when agent run begins
+  tool_calls_detected: true  # Report when agent decides to use tools
+  tool_start: false          # Report before each tool execution
+  tool_complete: false       # Report after each tool execution
+  subagent_spawned: true     # Report when sub-agent is dispatched
+  min_interval_seconds: 3    # Minimum seconds between auto-updates
+  edit_in_place: true        # Edit single message in place (default: true)
+  typing_indicator: true      # Send typing indicator while agent is processing
+  reactions: true            # Add emoji reactions to the user's original message
+  use_emojis: true           # Prefix status messages with relevant emojis
+
+**enabled** — Enable automatic status updates sent to the user during agent execution. Default: `true`.
+
+**agent_start** — Send `"Starting work..."` on the first run of a user message, and `"Continuing work..."` on subsequent runs (e.g., follow-up or self-continuation). Default: `true`. System events (cron, heartbeat, sub-agent completions) skip the agent start status to avoid mid-task confusion.
+
+**tool_calls_detected** — Send `"Using tools: X, Y..."` when the agent decides to call tools. Default: `true`.
+
+**tool_start** — Send `"Running tool: X..."` before each tool execution. Default: `false` (can be noisy).
+
+**tool_complete** — Send `"Completed: X"` after each tool execution. Default: `false` (can be noisy).
+
+**subagent_spawned** — Send `"Dispatched sub-agent: label"` when `spawn_agent` is called. Default: `true`.
+
+**min_interval_seconds** — Minimum seconds between auto-detected status updates. Prevents spam during rapid tool-call sequences. Default: `3`.
+
+**edit_in_place** — When `true` (default), the first status update sends a new message, and subsequent updates edit the same message in place. This prevents chat clutter. The status message is deleted after the agent run completes. When `false`, each update sends a separate message.
+
+**typing_indicator** — When `true` (default), the framework sends a typing indicator (e.g., "typing..." on Telegram or "Agent is typing..." on Discord) while the agent is actively processing. Cleared when the agent completes or sends a real message.
+
+**reactions** — When `true` (default), the framework adds an emoji reaction to the user's original message to indicate the agent has seen it and is working. The reaction is removed when the agent finishes. Only supported on channels that support emoji reactions (Telegram, Discord).
+
+**use_emojis** — When `true` (default), status messages are prefixed with relevant emoji for visual clarity (e.g., `⚙️` for tool calls, `🚀` for starting work, `🤖` for sub-agent dispatch). Set to `false` for plain text status messages.
+
+Status updates are sent directly to the user channel and do not create extra checkpoint entries or consume additional API calls. Agent-driven `report_progress` tool calls bypass all throttling.
+
 ---
 
 ### Merging Behavior

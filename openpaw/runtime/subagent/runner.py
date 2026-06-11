@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from openpaw.agent import AgentRunner
 from openpaw.agent.metrics import TokenUsageLogger
+from openpaw.agent.middleware.subagent_status import StatusCallbackT, SubAgentToolMiddleware
 from openpaw.agent.session_logger import SessionLogger
 from openpaw.channels.base import ChannelAdapter
 from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStatus
@@ -79,6 +80,7 @@ class SubAgentRunner:
         session_logger: SessionLogger | None = None,
         profile_resolver: SpawnProfileResolver | None = None,
         agent_factory_instance: AgentFactory | None = None,
+        status_callback: StatusCallbackT | None = None,
     ):
         """Initialize the sub-agent runner.
 
@@ -97,6 +99,9 @@ class SubAgentRunner:
                 model overrides, tool filtering, and system prompt injection.
             agent_factory_instance: Optional AgentFactory used to create profiled agents
                 via create_profiled_agent(). Required when profiles specify model overrides.
+            status_callback: Optional callback for per-sub-agent status updates.
+                Signature: (subagent_id, event, text, emoji) -> None.
+                Events: "start", "tool", "completed", "failed", "cancelled".
         """
         self._agent_factory = agent_factory
         self._store = store
@@ -108,6 +113,7 @@ class SubAgentRunner:
         self._session_logger = session_logger
         self._profile_resolver = profile_resolver
         self._agent_factory_instance = agent_factory_instance
+        self._status_callback = status_callback
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self._active_tasks: dict[str, asyncio.Task[Any]] = {}
 
@@ -129,6 +135,28 @@ class SubAgentRunner:
             result_callback=result_callback,
         )
 
+    async def _fire_status(
+        self,
+        subagent_id: str,
+        event: str,
+        text: str,
+        emoji: str | None = None,
+    ) -> None:
+        """Fire the status_callback, suppressing all errors.
+
+        Args:
+            subagent_id: Unique identifier for the sub-agent request.
+            event: Lifecycle event name ("start", "tool", "completed", "failed", "cancelled").
+            text: Human-readable status text.
+            emoji: Optional emoji prefix.
+        """
+        if not self._status_callback:
+            return
+        try:
+            await self._status_callback(subagent_id, event, text, emoji)
+        except Exception as e:
+            logger.debug("status_callback error for %s (%s): %s", subagent_id, event, e)
+
     async def spawn(self, request: SubAgentRequest) -> str:
         """Spawn a new sub-agent to handle a request.
 
@@ -149,7 +177,7 @@ class SubAgentRunner:
             )
 
         # Update status to RUNNING
-        self._store.update_status(
+        await self._store.update_status(
             request.id, SubAgentStatus.RUNNING, started_at=datetime.now(UTC)
         )
 
@@ -184,7 +212,7 @@ class SubAgentRunner:
             return False
 
         # Guard against cancel-after-complete race: don't overwrite a terminal status.
-        current = self._store.get(request_id)
+        current = await self._store.get(request_id)
         if current and current.status in (
             SubAgentStatus.COMPLETED,
             SubAgentStatus.FAILED,
@@ -200,22 +228,22 @@ class SubAgentRunner:
         task.cancel()
 
         # Update store status
-        self._store.update_status(
+        await self._store.update_status(
             request_id, SubAgentStatus.CANCELLED, completed_at=datetime.now(UTC)
         )
 
         logger.info(f"Cancelled sub-agent: {request_id}")
         return True
 
-    def list_active(self) -> list[SubAgentRequest]:
+    async def list_active(self) -> list[SubAgentRequest]:
         """List all active sub-agent requests (pending or running).
 
         Returns:
             List of SubAgentRequest instances.
         """
-        return self._store.list_active()
+        return await self._store.list_active()
 
-    def list_recent(self, limit: int = 10) -> list[SubAgentRequest]:
+    async def list_recent(self, limit: int = 10) -> list[SubAgentRequest]:
         """List recent sub-agent requests (all statuses, sorted by created_at desc).
 
         Args:
@@ -224,9 +252,9 @@ class SubAgentRunner:
         Returns:
             List of SubAgentRequest instances, most recent first.
         """
-        return self._store.list_recent(limit=limit)
+        return await self._store.list_recent(limit=limit)
 
-    def get_status(self, request_id: str) -> SubAgentRequest | None:
+    async def get_status(self, request_id: str) -> SubAgentRequest | None:
         """Get the status of a sub-agent request.
 
         Args:
@@ -235,9 +263,9 @@ class SubAgentRunner:
         Returns:
             SubAgentRequest if found, None otherwise.
         """
-        return self._store.get(request_id)
+        return await self._store.get(request_id)
 
-    def get_result(self, request_id: str) -> SubAgentResult | None:
+    async def get_result(self, request_id: str) -> SubAgentResult | None:
         """Get the result of a completed sub-agent.
 
         Args:
@@ -246,7 +274,7 @@ class SubAgentRunner:
         Returns:
             SubAgentResult if found, None otherwise.
         """
-        return self._store.get_result(request_id)
+        return await self._store.get_result(request_id)
 
     async def shutdown(self) -> None:
         """Shutdown the runner, cancelling all active sub-agents."""
@@ -261,7 +289,7 @@ class SubAgentRunner:
             if not task.done():
                 task.cancel()
                 # Update store status
-                self._store.update_status(
+                await self._store.update_status(
                     request_id, SubAgentStatus.CANCELLED, completed_at=datetime.now(UTC)
                 )
 
@@ -290,6 +318,10 @@ class SubAgentRunner:
         """
         start_time = time.monotonic()
 
+        logger.info(
+            f"Sub-agent execution starting: {request.id} ('{request.label}') "
+            f"[session: {request.session_key}, timeout: {request.timeout_minutes}min]"
+        )
         try:
             # Acquire semaphore for concurrency control
             async with self._semaphore:
@@ -308,14 +340,27 @@ class SubAgentRunner:
                         error=str(e),
                         duration_ms=duration_ms,
                     )
-                    self._store.update_status(
+                    await self._store.update_status(
                         request.id, SubAgentStatus.FAILED, completed_at=datetime.now(UTC)
                     )
-                    self._store.save_result(result)
+                    await self._store.save_result(result)
+                    # Fire status callback before notify so the user sees the outcome
+                    await self._fire_status(request.id, "failed", "Profile not found", "❌")
                     if request.notify:
                         await self._notifier.send_notification(request, result)
                     logger.warning(f"Sub-agent {request.id} failed: {e}")
                     return
+
+                # Inject per-sub-agent tool middleware when a callback is configured.
+                # Must be injected before profiler calls _build_agent() — but profiler
+                # has already called it. Append to _middleware and rebuild the agent.
+                if self._status_callback:
+                    tool_mw = SubAgentToolMiddleware(request.id, self._status_callback)
+                    runner._middleware.append(tool_mw)
+                    runner._agent = runner._build_agent()
+
+                # Fire "start" event after the runner is ready
+                await self._fire_status(request.id, "start", request.label)
 
                 # Start periodic progress timer if configured.
                 # The task is cancelled in the finally block regardless of outcome.
@@ -337,6 +382,16 @@ class SubAgentRunner:
                         with contextlib.suppress(asyncio.CancelledError):
                             await progress_task
 
+                # Determine terminal event from result status
+                if result is not None:
+                    stored = await self._store.get(request.id)
+                    if stored and stored.status == SubAgentStatus.TIMED_OUT:
+                        await self._fire_status(request.id, "failed", "Timed out", "❌")
+                    elif result.error:
+                        await self._fire_status(request.id, "failed", "Failed", "❌")
+                    else:
+                        await self._fire_status(request.id, "completed", "Completed", "✅")
+
                 # Send notification if requested (skip if result is None, which
                 # indicates cancelled-after-completion)
                 if result is not None and request.notify:
@@ -345,7 +400,7 @@ class SubAgentRunner:
         except asyncio.CancelledError:
             # Handle cancellation
             duration_ms = (time.monotonic() - start_time) * 1000
-            self._store.update_status(
+            await self._store.update_status(
                 request.id, SubAgentStatus.CANCELLED, completed_at=datetime.now(UTC)
             )
 
@@ -355,7 +410,7 @@ class SubAgentRunner:
                 error="Sub-agent was cancelled",
                 duration_ms=duration_ms,
             )
-            self._store.save_result(result)
+            await self._store.save_result(result)
 
             # Write session log for cancelled path
             if self._session_logger:
@@ -369,7 +424,7 @@ class SubAgentRunner:
                         duration_ms=duration_ms,
                     )
                     result.session_log_path = log_path
-                    self._store.save_result(result)
+                    await self._store.save_result(result)
                 except Exception as log_err:
                     logger.warning(
                         f"Failed to write cancel session log for sub-agent {request.id}: {log_err}",
@@ -377,6 +432,10 @@ class SubAgentRunner:
                     )
 
             logger.info(f"Sub-agent {request.id} was cancelled")
+
+            # Fire cancelled status before re-raise — mirrors the existing notifier pattern
+            with contextlib.suppress(Exception):
+                await self._fire_status(request.id, "cancelled", "Cancelled", "🚫")
 
             # Notify parent — must happen before re-raise; suppress secondary CancelledError
             if request.notify:
@@ -388,7 +447,7 @@ class SubAgentRunner:
         except Exception as e:
             # Handle failure
             duration_ms = (time.monotonic() - start_time) * 1000
-            self._store.update_status(
+            await self._store.update_status(
                 request.id, SubAgentStatus.FAILED, completed_at=datetime.now(UTC)
             )
 
@@ -399,7 +458,7 @@ class SubAgentRunner:
                 error=error_msg,
                 duration_ms=duration_ms,
             )
-            self._store.save_result(result)
+            await self._store.save_result(result)
 
             # Write session log for failure path
             if self._session_logger:
@@ -413,7 +472,7 @@ class SubAgentRunner:
                         duration_ms=duration_ms,
                     )
                     result.session_log_path = log_path
-                    self._store.save_result(result)
+                    await self._store.save_result(result)
                 except Exception as log_err:
                     logger.warning(
                         f"Failed to write failure session log for sub-agent {request.id}: {log_err}",
@@ -421,6 +480,9 @@ class SubAgentRunner:
                     )
 
             logger.error(f"Sub-agent {request.id} failed: {e}", exc_info=True)
+
+            # Fire failed status before notification
+            await self._fire_status(request.id, "failed", "Failed", "❌")
 
             # Notify parent of failure
             if request.notify:

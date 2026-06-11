@@ -152,7 +152,7 @@ SECTION_PROGRESS_UPDATES = (
     "- When changing approach or encountering an unexpected result\n"
     "- When spawning sub-agents or scheduling background work\n"
     "- When waiting on something (sub-agent completion, scheduled task)\n\n"
-    "**Progress updates are not your final answer.** The pattern is:\n"
+    "**Progress updates are not your final answer.** The pattern is: "
     "send_message('Found X, now doing Y...') -> continue working -> final response.\n\n"
     "Use progress updates between steps, not as a substitute for completing the work.\n\n"
     "**IMPORTANT: Never duplicate content.** If you already sent your answer via "
@@ -160,6 +160,17 @@ SECTION_PROGRESS_UPDATES = (
     "response is always delivered to the user too—sending the same thing twice creates "
     "duplicate messages. If you've already communicated everything via send_message, "
     "keep your final response brief (e.g., a short summary or next-steps question)."
+)
+
+# Report progress tool - conditional on report_progress builtin
+SECTION_REPORT_PROGRESS = (
+    "\n\n## Structured Progress Reporting\n\n"
+    "Use report_progress() to keep the user informed during long operations. "
+    "Call it when starting a new phase of work or when you want to reassure the user.\n\n"
+    "Provide a short status label (e.g., 'Analyzing data'), optional detail, and "
+    "optional percentage (0-100). The framework will format and deliver the update "
+    "immediately. This is especially useful for multi-step tasks where you want "
+    "to give the user more structured progress information than a plain send_message."
 )
 
 # File sharing - conditional on send_file builtin
@@ -420,6 +431,10 @@ def build_capability_summary(enabled_builtins: list[str] | None) -> str:
         capabilities.append("- **Planning**: Session-scoped task planning for multi-step work")
     if _is_enabled("send_message"):
         capabilities.append("- **Progress Updates**: Send messages to users during long operations")
+    if _is_enabled("report_progress"):
+        capabilities.append(
+            "- **Structured Progress Reporting**: Send structured progress updates with status, detail, and percentage"
+        )
     if _is_enabled("send_file"):
         capabilities.append("- **File Sharing**: Send workspace files to users")
     if _is_enabled("memory_search"):

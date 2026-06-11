@@ -727,6 +727,10 @@ class AgentRunner:
         # Track invocation duration
         start_time = time.monotonic()
 
+        logger.info(
+            f"Agent run starting (workspace: {self._log_label}, "
+            f"model: {self.model_id}, thread: {thread_id or 'new'})"
+        )
         try:
             # Use astream with stream_mode="updates" for behavioral parity with ainvoke
             # Collect all messages from the stream
@@ -747,6 +751,12 @@ class AgentRunner:
                             if tool_calls:
                                 tool_names = [tc.get("name", "?") for tc in tool_calls]
                                 logger.info(f"[{self._log_label}] Tool calls: {tool_names}")
+                                for tc in tool_calls:
+                                    tc_name = tc.get("name", "?")
+                                    tc_args = tc.get("args", {})
+                                    logger.info(
+                                        f"[{self._log_label}] Tool call args: {tc_name} -> {tc_args}"
+                                    )
                                 # Track last tool called for timeout reporting
                                 self._current_tool_name = tool_calls[-1].get("name")
                             for tc in tool_calls:

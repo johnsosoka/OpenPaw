@@ -69,7 +69,7 @@ class WorkspaceRunner:
         self._workspace_loader = WorkspaceLoader(config.workspaces_path)
         workspace_env = workspace_root / str(DOT_ENV)
         if workspace_env.exists():
-            load_dotenv(workspace_env, override=True)
+            load_dotenv(workspace_env, override=False)
             self.logger.info(f"Loaded environment from: {workspace_env}")
         self._workspace = self._workspace_loader.load(workspace_name)
         self._merged_config = WorkspaceInitializer.merge_workspace_config(
@@ -174,6 +174,7 @@ class WorkspaceRunner:
             self._message_processor,
             self._tool_timeout_middleware,
             self._status_reminder_middleware,
+            self._status_update_middleware,
         ) = self._initializer.init_agent(
             builtin_loader=self._builtin_loader,
             builtin_tools=self._builtin_tools,
@@ -236,6 +237,7 @@ class WorkspaceRunner:
         self._subagent_runner: SubAgentRunner | None = None
         self._queue_processor_task: asyncio.Task[None] | None = None
         self._cleanup_task: asyncio.Task[None] | None = None
+        self._supervisor_task: asyncio.Task[None] | None = None
         self._running = False
 
     @property
@@ -549,6 +551,28 @@ class WorkspaceRunner:
         subagent_session_logger = SessionLogger(
             self._workspace.path, session_type="subagent"
         )
+
+        # Closure bridges sub-agent lifecycle events to StatusUpdateMiddleware.
+        # Reads self._status_update_middleware lazily so it works even if
+        # middleware is built after this closure is created.
+        async def _subagent_status_callback(
+            subagent_id: str,
+            event: str,
+            text: str,
+            emoji: str | None,
+        ) -> None:
+            mw = self._status_update_middleware
+            if mw is None:
+                return
+            if not mw._config.enabled or not mw._config.subagent_status:
+                return
+            if event == "start":
+                await mw.create_subagent_status(subagent_id, text)
+            elif event == "tool":
+                await mw.update_subagent_status(subagent_id, text, emoji)
+            elif event in ("completed", "failed", "cancelled"):
+                await mw.finalize_subagent_status(subagent_id, event)
+
         self._subagent_runner = SubAgentRunner(
             agent_factory=self._agent_factory.get_agent_factory_closure(),
             store=self._subagent_store,
@@ -560,6 +584,7 @@ class WorkspaceRunner:
             session_logger=subagent_session_logger,
             profile_resolver=profile_resolver,
             agent_factory_instance=self._agent_factory,
+            status_callback=_subagent_status_callback,
         )
         self._tool_connector.connect_spawn_tool(self._subagent_runner)
         self._tool_connector.connect_channel_history_tool(self._checkpointer)
@@ -567,9 +592,11 @@ class WorkspaceRunner:
         self._running = True
         self._task_service.start()
         self._queue_processor_task = asyncio.create_task(self._queue_processor())
+        self._queue_processor_task.add_done_callback(self._on_queue_processor_done)
         self._cleanup_task = asyncio.create_task(
             self._task_service.periodic_cleanup()
         )
+        self._supervisor_task = asyncio.create_task(self._task_supervisor())
 
         self.logger.info(f"Workspace runner '{self.workspace_name}' is running")
 
@@ -776,6 +803,67 @@ class WorkspaceRunner:
         if archived_count > 0:
             self.logger.info(f"Archived {archived_count} conversation(s) on shutdown")
 
+    def _on_queue_processor_done(self, task: asyncio.Task[None]) -> None:
+        """Callback invoked when the queue processor task completes.
+
+        Logs the exception immediately so crashes are visible even if the
+        supervisor has not yet woken up.
+        """
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            self.logger.critical(
+                f"Queue processor task crashed: {exc}", exc_info=exc
+            )
+
+    async def _task_supervisor(self) -> None:
+        """Monitor background tasks and notify users on crash.
+
+        Watches the queue processor task. If it dies unexpectedly, sends a
+        direct channel message to every active session and attempts to restart
+        the processor.
+        """
+        while self._running:
+            try:
+                await asyncio.sleep(10.0)
+            except asyncio.CancelledError:
+                break
+
+            if not self._queue_processor_task or self._queue_processor_task.done():
+                exc: BaseException | None = None
+                if self._queue_processor_task:
+                    exc = self._queue_processor_task.exception()
+                self.logger.critical(
+                    f"Queue processor is dead (exception: {exc}). Restarting...",
+                    exc_info=exc,
+                )
+
+                # Notify all active sessions via direct channel send
+                for session_key in list(self._session_manager.list_sessions().keys()):
+                    channel_name = session_key.split(":")[0]
+                    channel = self._channels.get(channel_name)
+                    if channel:
+                        try:
+                            await channel.send_message(
+                                session_key,
+                                "[SYSTEM] Message processing was interrupted due to an internal error. "
+                                "The administrator has been notified. Please retry your message.",
+                            )
+                        except Exception as e:
+                            self.logger.error(
+                                f"Failed to send crash notification to {session_key}: {e}"
+                            )
+
+                # Restart queue processor
+                self._queue_processor_task = asyncio.create_task(
+                    self._queue_processor()
+                )
+                self._queue_processor_task.add_done_callback(
+                    self._on_queue_processor_done
+                )
+                self.logger.info("Restarted queue processor")
+
     async def stop(self) -> None:
         """Stop workspace runner gracefully."""
         self.logger.info(f"Stopping workspace runner: {self.workspace_name}")
@@ -790,6 +878,16 @@ class WorkspaceRunner:
         )
         if lifecycle and lifecycle.notify_shutdown:
             await self._notify_lifecycle("Shutting down")
+
+        # Cancel supervisor
+        supervisor_task = getattr(self, "_supervisor_task", None)
+        if supervisor_task:
+            supervisor_task.cancel()
+            try:
+                await supervisor_task
+            except asyncio.CancelledError:
+                pass
+            self._supervisor_task = None
 
         # Cancel queue processor
         if self._queue_processor_task:

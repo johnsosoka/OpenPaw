@@ -95,6 +95,97 @@ class DiscordOutboundSender:
 
         await channel.send(content=text, view=view)
 
+    async def edit_message(
+        self,
+        session_key: str,
+        message_id: str,
+        content: str,
+    ) -> bool:
+        """Edit an existing Discord message.
+
+        Args:
+            session_key: Target session identifier.
+            message_id: Discord message ID (snowflake) to edit.
+            content: New message content.
+
+        Returns:
+            True if the edit was successful.
+        """
+        channel_id = self._channel_id_from_session_key(session_key)
+        try:
+            channel = await self._resolve_channel(channel_id)
+            message = await channel.fetch_message(int(message_id))
+            await message.edit(content=content)
+            logger.debug("Edited Discord message %s in channel %s", message_id, channel_id)
+            return True
+        except Exception as e:
+            logger.debug("Failed to edit Discord message %s: %s", message_id, e)
+            return False
+
+    async def delete_message(
+        self,
+        session_key: str,
+        message_id: str,
+    ) -> bool:
+        """Delete an existing Discord message.
+
+        Args:
+            session_key: Target session identifier.
+            message_id: Discord message ID (snowflake) to delete.
+
+        Returns:
+            True if the deletion was successful.
+        """
+        channel_id = self._channel_id_from_session_key(session_key)
+        try:
+            channel = await self._resolve_channel(channel_id)
+            message = await channel.fetch_message(int(message_id))
+            await message.delete()
+            logger.debug("Deleted Discord message %s in channel %s", message_id, channel_id)
+            return True
+        except Exception as e:
+            logger.debug("Failed to delete Discord message %s: %s", message_id, e)
+            return False
+
+    async def send_typing(self, session_key: str) -> None:
+        """Trigger Discord typing indicator."""
+        if not self._client:
+            return
+        try:
+            channel_id = self._channel_id_from_session_key(session_key)
+            channel = await self._resolve_channel(channel_id)
+            await channel.trigger_typing()  # type: ignore[union-attr]
+        except Exception:
+            logger.debug("Failed to trigger typing", exc_info=True)
+
+    async def add_reaction(self, session_key: str, message_id: str, emoji: str) -> bool:
+        """Add an emoji reaction to a Discord message."""
+        if not self._client:
+            return False
+        try:
+            channel_id = self._channel_id_from_session_key(session_key)
+            channel = await self._resolve_channel(channel_id)
+            message = await channel.fetch_message(int(message_id))
+            await message.add_reaction(emoji)
+            return True
+        except Exception:
+            logger.debug("Failed to add reaction", exc_info=True)
+            return False
+
+    async def remove_reaction(self, session_key: str, message_id: str, emoji: str) -> bool:
+        """Remove a bot reaction from a Discord message."""
+        if not self._client:
+            return False
+        try:
+            channel_id = self._channel_id_from_session_key(session_key)
+            channel = await self._resolve_channel(channel_id)
+            message = await channel.fetch_message(int(message_id))
+            await message.remove_reaction(emoji, self._client.user)
+            return True
+        except Exception:
+            logger.debug("Failed to remove reaction", exc_info=True)
+            return False
+
     def _split_message(self, text: str) -> list[str]:
         """Split text into chunks that fit Discord's 2000-char message limit."""
         return split_message(text, MAX_MESSAGE_LENGTH)

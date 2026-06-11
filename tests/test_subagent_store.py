@@ -1,6 +1,6 @@
 """Tests for SubAgentStore."""
 
-import threading
+import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -10,7 +10,8 @@ from openpaw.model.subagent import SubAgentRequest, SubAgentResult, SubAgentStat
 from openpaw.stores.subagent import SubAgentStore, create_subagent_request
 
 
-def test_create_subagent_request(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_create_subagent_request(tmp_path: Path):
     """Test creating a sub-agent request and verifying persistence."""
     store = SubAgentStore(tmp_path)
 
@@ -22,10 +23,10 @@ def test_create_subagent_request(tmp_path: Path):
         session_key="telegram:12345"
     )
 
-    store.create(request)
+    await store.create(request)
 
     # Verify retrieval
-    retrieved = store.get("req-123")
+    retrieved = await store.get("req-123")
     assert retrieved is not None
     assert retrieved.id == "req-123"
     assert retrieved.task == "Research topic X"
@@ -34,7 +35,8 @@ def test_create_subagent_request(tmp_path: Path):
     assert retrieved.session_key == "telegram:12345"
 
 
-def test_create_duplicate_id_raises_error(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_create_duplicate_id_raises_error(tmp_path: Path):
     """Test creating a request with duplicate ID raises ValueError."""
     store = SubAgentStore(tmp_path)
 
@@ -46,7 +48,7 @@ def test_create_duplicate_id_raises_error(tmp_path: Path):
         session_key="telegram:12345"
     )
 
-    store.create(request)
+    await store.create(request)
 
     # Try to create another with same ID
     duplicate = SubAgentRequest(
@@ -58,10 +60,11 @@ def test_create_duplicate_id_raises_error(tmp_path: Path):
     )
 
     with pytest.raises(ValueError, match="already exists"):
-        store.create(duplicate)
+        await store.create(duplicate)
 
 
-def test_update_status(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_update_status(tmp_path: Path):
     """Test updating request status."""
     store = SubAgentStore(tmp_path)
 
@@ -73,29 +76,31 @@ def test_update_status(tmp_path: Path):
         session_key="telegram:12345"
     )
 
-    store.create(request)
+    await store.create(request)
 
     # Update to running
     now = datetime.now(UTC)
-    success = store.update_status("req-123", SubAgentStatus.RUNNING, started_at=now)
+    success = await store.update_status("req-123", SubAgentStatus.RUNNING, started_at=now)
     assert success is True
 
     # Verify update
-    updated = store.get("req-123")
+    updated = await store.get("req-123")
     assert updated is not None
     assert updated.status == SubAgentStatus.RUNNING
     assert updated.started_at == now
 
 
-def test_update_status_nonexistent_request(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_update_status_nonexistent_request(tmp_path: Path):
     """Test updating nonexistent request returns False."""
     store = SubAgentStore(tmp_path)
 
-    success = store.update_status("nonexistent", SubAgentStatus.RUNNING)
+    success = await store.update_status("nonexistent", SubAgentStatus.RUNNING)
     assert success is False
 
 
-def test_save_result(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_save_result(tmp_path: Path):
     """Test saving sub-agent result."""
     store = SubAgentStore(tmp_path)
 
@@ -107,7 +112,7 @@ def test_save_result(tmp_path: Path):
         status=SubAgentStatus.RUNNING,
         session_key="telegram:12345"
     )
-    store.create(request)
+    await store.create(request)
 
     # Save result
     result = SubAgentResult(
@@ -117,11 +122,11 @@ def test_save_result(tmp_path: Path):
         duration_ms=5400.0
     )
 
-    success = store.save_result(result)
+    success = await store.save_result(result)
     assert success is True
 
     # Verify retrieval
-    retrieved = store.get_result("req-123")
+    retrieved = await store.get_result("req-123")
     assert retrieved is not None
     assert retrieved.request_id == "req-123"
     assert retrieved.output == "Here are the findings..."
@@ -130,7 +135,8 @@ def test_save_result(tmp_path: Path):
     assert retrieved.error is None
 
 
-def test_save_result_nonexistent_request(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_save_result_nonexistent_request(tmp_path: Path):
     """Test saving result for nonexistent request returns False."""
     store = SubAgentStore(tmp_path)
 
@@ -140,11 +146,12 @@ def test_save_result_nonexistent_request(tmp_path: Path):
         token_count=100
     )
 
-    success = store.save_result(result)
+    success = await store.save_result(result)
     assert success is False
 
 
-def test_save_result_truncation(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_save_result_truncation(tmp_path: Path):
     """Test result output is truncated when exceeding MAX_RESULT_SIZE."""
     store = SubAgentStore(tmp_path)
 
@@ -156,7 +163,7 @@ def test_save_result_truncation(tmp_path: Path):
         status=SubAgentStatus.RUNNING,
         session_key="telegram:12345"
     )
-    store.create(request)
+    await store.create(request)
 
     # Create result with large output (60K chars > 50K limit)
     large_output = "x" * 60_000
@@ -166,32 +173,35 @@ def test_save_result_truncation(tmp_path: Path):
         token_count=1000
     )
 
-    store.save_result(result)
+    await store.save_result(result)
 
     # Verify truncation
-    retrieved = store.get_result("req-123")
+    retrieved = await store.get_result("req-123")
     assert retrieved is not None
     assert len(retrieved.output) <= store.MAX_RESULT_SIZE + 100  # Allow for truncation message
     assert "[Output truncated]" in retrieved.output
 
 
-def test_get_nonexistent_request(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_get_nonexistent_request(tmp_path: Path):
     """Test getting nonexistent request returns None."""
     store = SubAgentStore(tmp_path)
 
-    request = store.get("nonexistent")
+    request = await store.get("nonexistent")
     assert request is None
 
 
-def test_get_result_nonexistent(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_get_result_nonexistent(tmp_path: Path):
     """Test getting nonexistent result returns None."""
     store = SubAgentStore(tmp_path)
 
-    result = store.get_result("nonexistent")
+    result = await store.get_result("nonexistent")
     assert result is None
 
 
-def test_list_active_returns_only_pending_running(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_list_active_returns_only_pending_running(tmp_path: Path):
     """Test list_active returns only pending and running requests."""
     store = SubAgentStore(tmp_path)
 
@@ -228,17 +238,18 @@ def test_list_active_returns_only_pending_running(tmp_path: Path):
     ]
 
     for req in requests:
-        store.create(req)
+        await store.create(req)
 
     # List active
-    active = store.list_active()
+    active = await store.list_active()
 
     assert len(active) == 2
     assert {r.id for r in active} == {"req-1", "req-2"}
     assert all(r.status in (SubAgentStatus.PENDING, SubAgentStatus.RUNNING) for r in active)
 
 
-def test_list_recent_sorted_by_created_at(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_list_recent_sorted_by_created_at(tmp_path: Path):
     """Test list_recent returns requests sorted by created_at desc."""
     store = SubAgentStore(tmp_path)
 
@@ -272,10 +283,10 @@ def test_list_recent_sorted_by_created_at(tmp_path: Path):
     ]
 
     for req in requests:
-        store.create(req)
+        await store.create(req)
 
     # List recent
-    recent = store.list_recent(limit=10)
+    recent = await store.list_recent(limit=10)
 
     assert len(recent) == 3
     # Should be sorted newest first
@@ -284,7 +295,8 @@ def test_list_recent_sorted_by_created_at(tmp_path: Path):
     assert recent[2].id == "req-1"
 
 
-def test_list_recent_respects_limit(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_list_recent_respects_limit(tmp_path: Path):
     """Test list_recent respects limit parameter."""
     store = SubAgentStore(tmp_path)
 
@@ -297,15 +309,16 @@ def test_list_recent_respects_limit(tmp_path: Path):
             status=SubAgentStatus.COMPLETED,
             session_key="telegram:12345"
         )
-        store.create(request)
+        await store.create(request)
 
     # List with limit
-    recent = store.list_recent(limit=3)
+    recent = await store.list_recent(limit=3)
 
     assert len(recent) == 3
 
 
-def test_cleanup_stale_removes_old_records(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_cleanup_stale_removes_old_records(tmp_path: Path):
     """Test cleanup_stale removes completed records older than max_age_hours."""
     store = SubAgentStore(tmp_path, max_age_hours=1)
 
@@ -321,7 +334,7 @@ def test_cleanup_stale_removes_old_records(tmp_path: Path):
         created_at=now - timedelta(hours=2),
         completed_at=now - timedelta(hours=2)
     )
-    store.create(old_request)
+    await store.create(old_request)
 
     # Create recent completed request (30 minutes ago)
     recent_request = SubAgentRequest(
@@ -333,18 +346,19 @@ def test_cleanup_stale_removes_old_records(tmp_path: Path):
         created_at=now - timedelta(minutes=30),
         completed_at=now - timedelta(minutes=30)
     )
-    store.create(recent_request)
+    await store.create(recent_request)
 
     # Cleanup
-    removed = store.cleanup_stale()
+    removed = await store.cleanup_stale()
 
     # Old request should be removed, recent should remain
     assert removed == 1
-    assert store.get("req-old") is None
-    assert store.get("req-recent") is not None
+    assert await store.get("req-old") is None
+    assert await store.get("req-recent") is not None
 
 
-def test_cleanup_stale_marks_stale_running_as_failed(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_cleanup_stale_marks_stale_running_as_failed(tmp_path: Path):
     """Test cleanup_stale marks stale running/pending requests as timed_out."""
     # Create store without auto-cleanup to manually control when it runs
     store = SubAgentStore(tmp_path, max_age_hours=24)
@@ -361,7 +375,7 @@ def test_cleanup_stale_marks_stale_running_as_failed(tmp_path: Path):
         created_at=now - timedelta(minutes=45),
         timeout_minutes=30
     )
-    store.create(stale_request)
+    await store.create(stale_request)
 
     # Create running request within timeout
     active_request = SubAgentRequest(
@@ -373,24 +387,25 @@ def test_cleanup_stale_marks_stale_running_as_failed(tmp_path: Path):
         created_at=now - timedelta(minutes=10),
         timeout_minutes=30
     )
-    store.create(active_request)
+    await store.create(active_request)
 
     # Manually call cleanup (note: cleanup is also called in __init__ but after these creates)
-    removed = store.cleanup_stale()
+    removed = await store.cleanup_stale()
 
     # Stale request should be marked as timed_out
-    stale = store.get("req-stale")
+    stale = await store.get("req-stale")
     assert stale is not None
     assert stale.status == SubAgentStatus.TIMED_OUT
     assert stale.completed_at is not None
 
     # Active request should remain running
-    active = store.get("req-active")
+    active = await store.get("req-active")
     assert active is not None
     assert active.status == SubAgentStatus.RUNNING
 
 
-def test_cleanup_stale_removes_orphaned_results(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_cleanup_stale_removes_orphaned_results(tmp_path: Path):
     """Test cleanup_stale removes results for deleted requests."""
     store = SubAgentStore(tmp_path, max_age_hours=1)
 
@@ -406,27 +421,28 @@ def test_cleanup_stale_removes_orphaned_results(tmp_path: Path):
         created_at=now - timedelta(hours=2),
         completed_at=now - timedelta(hours=2)
     )
-    store.create(old_request)
+    await store.create(old_request)
 
     result = SubAgentResult(
         request_id="req-old",
         output="Old output",
         token_count=100
     )
-    store.save_result(result)
+    await store.save_result(result)
 
     # Cleanup (should remove old request and its result)
-    store.cleanup_stale()
+    await store.cleanup_stale()
 
-    assert store.get("req-old") is None
-    assert store.get_result("req-old") is None
+    assert await store.get("req-old") is None
+    assert await store.get_result("req-old") is None
 
 
-def test_thread_safety_concurrent_writes(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_thread_safety_concurrent_writes(tmp_path: Path):
     """Test store handles concurrent writes without corruption."""
     store = SubAgentStore(tmp_path)
 
-    def create_requests(start_id: int, count: int):
+    async def create_requests(start_id: int, count: int):
         for i in range(count):
             request = SubAgentRequest(
                 id=f"req-{start_id}-{i}",
@@ -435,25 +451,19 @@ def test_thread_safety_concurrent_writes(tmp_path: Path):
                 status=SubAgentStatus.PENDING,
                 session_key="telegram:12345"
             )
-            store.create(request)
+            await store.create(request)
 
-    # Create threads
-    threads = []
-    for i in range(3):
-        thread = threading.Thread(target=create_requests, args=(i, 5))
-        threads.append(thread)
-        thread.start()
-
-    # Wait for completion
-    for thread in threads:
-        thread.join()
+    # Create concurrent tasks
+    tasks = [asyncio.create_task(create_requests(i, 5)) for i in range(3)]
+    await asyncio.gather(*tasks)
 
     # Verify all requests were created
-    recent = store.list_recent(limit=100)
+    recent = await store.list_recent(limit=100)
     assert len(recent) == 15
 
 
-def test_request_to_dict_from_dict_roundtrip(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_request_to_dict_from_dict_roundtrip(tmp_path: Path):
     """Test SubAgentRequest serialization roundtrip."""
     now = datetime.now(UTC)
 
@@ -486,7 +496,8 @@ def test_request_to_dict_from_dict_roundtrip(tmp_path: Path):
     assert restored.notify == original.notify
 
 
-def test_result_to_dict_from_dict_roundtrip(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_result_to_dict_from_dict_roundtrip(tmp_path: Path):
     """Test SubAgentResult serialization roundtrip."""
     original = SubAgentResult(
         request_id="req-123",
@@ -507,16 +518,18 @@ def test_result_to_dict_from_dict_roundtrip(tmp_path: Path):
     assert restored.error == original.error
 
 
-def test_storage_file_does_not_exist_yet(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_storage_file_does_not_exist_yet(tmp_path: Path):
     """Test store handles nonexistent storage file gracefully."""
     store = SubAgentStore(tmp_path)
 
     # Should not crash
-    requests = store.list_recent()
+    requests = await store.list_recent()
     assert len(requests) == 0
 
 
-def test_openpaw_directory_created(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_openpaw_directory_created(tmp_path: Path):
     """Test SubAgentStore creates data directory."""
     store = SubAgentStore(tmp_path)
 
@@ -525,7 +538,8 @@ def test_openpaw_directory_created(tmp_path: Path):
     assert data_dir.is_dir()
 
 
-def test_persistence_survives_reload(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_persistence_survives_reload(tmp_path: Path):
     """Test YAML persistence survives store reload."""
     # Create store and request
     store1 = SubAgentStore(tmp_path)
@@ -537,19 +551,20 @@ def test_persistence_survives_reload(tmp_path: Path):
         status=SubAgentStatus.PENDING,
         session_key="telegram:12345"
     )
-    store1.create(request)
+    await store1.create(request)
 
     # Create new store instance (simulates restart)
     store2 = SubAgentStore(tmp_path)
 
     # Should load same request
-    retrieved = store2.get("req-123")
+    retrieved = await store2.get("req-123")
     assert retrieved is not None
     assert retrieved.id == "req-123"
     assert retrieved.task == "Task"
 
 
-def test_result_with_error(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_result_with_error(tmp_path: Path):
     """Test saving result with error message."""
     store = SubAgentStore(tmp_path)
 
@@ -561,7 +576,7 @@ def test_result_with_error(tmp_path: Path):
         status=SubAgentStatus.RUNNING,
         session_key="telegram:12345"
     )
-    store.create(request)
+    await store.create(request)
 
     # Save result with error
     result = SubAgentResult(
@@ -572,15 +587,16 @@ def test_result_with_error(tmp_path: Path):
         error="Timeout error"
     )
 
-    store.save_result(result)
+    await store.save_result(result)
 
     # Verify error persisted
-    retrieved = store.get_result("req-123")
+    retrieved = await store.get_result("req-123")
     assert retrieved is not None
     assert retrieved.error == "Timeout error"
 
 
-def test_create_subagent_request_factory(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_create_subagent_request_factory(tmp_path: Path):
     """Test create_subagent_request factory function."""
     request = create_subagent_request(
         task="Research topic X",
@@ -600,7 +616,8 @@ def test_create_subagent_request_factory(tmp_path: Path):
     assert request.notify is True
 
 
-def test_update_status_with_additional_kwargs(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_update_status_with_additional_kwargs(tmp_path: Path):
     """Test update_status accepts additional kwargs."""
     store = SubAgentStore(tmp_path)
 
@@ -611,11 +628,11 @@ def test_update_status_with_additional_kwargs(tmp_path: Path):
         status=SubAgentStatus.PENDING,
         session_key="telegram:12345"
     )
-    store.create(request)
+    await store.create(request)
 
     # Update with additional fields
     now = datetime.now(UTC)
-    store.update_status(
+    await store.update_status(
         "req-123",
         SubAgentStatus.COMPLETED,
         completed_at=now,
@@ -623,14 +640,15 @@ def test_update_status_with_additional_kwargs(tmp_path: Path):
     )
 
     # Verify updates
-    updated = store.get("req-123")
+    updated = await store.get("req-123")
     assert updated is not None
     assert updated.status == SubAgentStatus.COMPLETED
     assert updated.completed_at == now
     assert updated.notify is False
 
 
-def test_cleanup_stale_called_on_init(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_cleanup_stale_called_on_init(tmp_path: Path):
     """Test cleanup_stale is called during initialization."""
     now = datetime.now(UTC)
 
@@ -646,16 +664,17 @@ def test_cleanup_stale_called_on_init(tmp_path: Path):
         created_at=now - timedelta(hours=3),
         completed_at=now - timedelta(hours=3)
     )
-    store1.create(old_request)
+    await store1.create(old_request)
 
     # Create new store instance (should cleanup on init)
     store2 = SubAgentStore(tmp_path, max_age_hours=1)
 
     # Old request should be gone
-    assert store2.get("req-old") is None
+    assert await store2.get("req-old") is None
 
 
-def test_save_result_replaces_existing(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_save_result_replaces_existing(tmp_path: Path):
     """Test saving result replaces existing result for same request."""
     store = SubAgentStore(tmp_path)
 
@@ -667,7 +686,7 @@ def test_save_result_replaces_existing(tmp_path: Path):
         status=SubAgentStatus.RUNNING,
         session_key="telegram:12345"
     )
-    store.create(request)
+    await store.create(request)
 
     # Save first result
     result1 = SubAgentResult(
@@ -675,7 +694,7 @@ def test_save_result_replaces_existing(tmp_path: Path):
         output="First output",
         token_count=100
     )
-    store.save_result(result1)
+    await store.save_result(result1)
 
     # Save second result (should replace)
     result2 = SubAgentResult(
@@ -683,10 +702,10 @@ def test_save_result_replaces_existing(tmp_path: Path):
         output="Second output",
         token_count=200
     )
-    store.save_result(result2)
+    await store.save_result(result2)
 
     # Verify only second result exists
-    retrieved = store.get_result("req-123")
+    retrieved = await store.get_result("req-123")
     assert retrieved is not None
     assert retrieved.output == "Second output"
     assert retrieved.token_count == 200

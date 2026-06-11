@@ -1,10 +1,15 @@
 """Browser session management for Playwright lifecycle."""
 
+from __future__ import annotations
+
 import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from playwright.async_api import Browser, BrowserContext, Page, Playwright
 
 from openpaw.builtins.tools.browser.security import DomainPolicy
 from openpaw.builtins.tools.browser.snapshot import SnapshotTransformer
@@ -77,10 +82,10 @@ class BrowserSession:
         self.snapshot_transformer = SnapshotTransformer(max_depth=max_depth)
 
         # Playwright state (lazy init)
-        self._playwright = None
-        self._browser = None
-        self._context = None
-        self._page = None
+        self._playwright: Playwright | None = None
+        self._browser: Browser | None = None
+        self._context: BrowserContext | None = None
+        self._page: Page | None = None
         self._active_page_index = 0  # Track active tab
 
         # Element ref map from last snapshot (invalidated on navigation)
@@ -95,6 +100,18 @@ class BrowserSession:
     def is_active(self) -> bool:
         """Check if browser is currently active."""
         return self._browser is not None and self._page is not None
+
+    def _require_page(self) -> Page:
+        """Return the active page, raising RuntimeError if not launched."""
+        if self._page is None:
+            raise RuntimeError("Browser not launched — call launch() first")
+        return self._page
+
+    def _require_context(self) -> BrowserContext:
+        """Return the active browser context, raising RuntimeError if not launched."""
+        if self._context is None:
+            raise RuntimeError("Browser not launched — call launch() first")
+        return self._context
 
     async def launch(self) -> None:
         """Launch Playwright browser and create context/page.
@@ -119,26 +136,22 @@ class BrowserSession:
                 headless=self.headless
             )
 
-            # Create context with downloads enabled
-            context_kwargs = {
-                "viewport": {
-                    "width": self.viewport_width,
-                    "height": self.viewport_height,
-                },
-                "accept_downloads": True,
-            }
-
-            # Load cookies if persist is enabled
+            # Load cookies if persistence is enabled
+            loaded_storage_state = None
             if self.persist_cookies and self.cookie_file.exists():
                 try:
                     logger.info("Loading cookies from storage")
                     with open(self.cookie_file) as f:
-                        storage_state = json.load(f)
-                        context_kwargs["storage_state"] = storage_state
+                        loaded_storage_state = json.load(f)
                 except Exception as e:
                     logger.warning(f"Failed to load cookies: {e}")
 
-            self._context = await self._browser.new_context(**context_kwargs)
+            # Create context with downloads enabled; pass storage_state only when loaded
+            self._context = await self._browser.new_context(
+                viewport={"width": self.viewport_width, "height": self.viewport_height},
+                accept_downloads=True,
+                storage_state=loaded_storage_state,
+            )
 
             # Create initial page
             self._page = await self._context.new_page()
@@ -214,10 +227,11 @@ class BrowserSession:
 
         try:
             logger.info(f"Navigating to: {url}")
-            response = await self._page.goto(url, wait_until="domcontentloaded")
+            page = self._require_page()
+            response = await page.goto(url, wait_until="domcontentloaded")
 
             # Check if redirect went to disallowed domain
-            final_url = self._page.url
+            final_url = page.url
             if final_url != url and not self.domain_policy.is_allowed(final_url):
                 logger.warning(f"Redirect blocked: {url} -> {final_url}")
                 return (
@@ -228,7 +242,7 @@ class BrowserSession:
             self._ref_map = {}
 
             # Get page title
-            title = await self._page.title()
+            title = await page.title()
             status = response.status if response else "unknown"
 
             logger.info(f"Navigated successfully: {title} (status: {status})")
@@ -251,16 +265,17 @@ class BrowserSession:
             return "Browser not active. Use browser_navigate first."
 
         try:
-            await self._page.go_back(wait_until="domcontentloaded")
+            page = self._require_page()
+            await page.go_back(wait_until="domcontentloaded")
             self._ref_map = {}  # Invalidate refs
-            title = await self._page.title()
+            title = await page.title()
             logger.info(f"Navigated back: {title}")
             return f"Navigated back to: {title}\n\nUse browser_snapshot to see page content."
         except Exception as e:
             logger.error(f"Back navigation failed: {e}")
             return f"Back navigation failed: {str(e)}"
 
-    async def _get_accessibility_tree(self) -> dict | None:
+    async def _get_accessibility_tree(self) -> dict[str, Any] | None:
         """Get accessibility tree via CDP (Chrome DevTools Protocol).
 
         Playwright 1.58+ removed page.accessibility.snapshot(), so we use
@@ -271,7 +286,8 @@ class BrowserSession:
         """
         try:
             # Create CDP session
-            client = await self._page.context.new_cdp_session(self._page)
+            page = self._require_page()
+            client = await page.context.new_cdp_session(page)
 
             try:
                 # Get full accessibility tree from CDP
@@ -286,12 +302,13 @@ class BrowserSession:
                 node_map = {node["nodeId"]: node for node in nodes}
 
                 # Helper to extract role string from CDP role object
-                def get_role(node: dict) -> str:
+                # Returns None for roles that should be filtered out (StaticText, etc.)
+                def get_role(node: dict[str, Any]) -> str | None:
                     role_obj = node.get("role", {})
                     value = role_obj.get("value", "")
 
                     # Normalize role names (CDP uses internal names like "RootWebArea")
-                    role_map = {
+                    role_map: dict[str, str | None] = {
                         "RootWebArea": "WebArea",
                         "WebArea": "WebArea",
                         "GenericContainer": "group",
@@ -305,13 +322,13 @@ class BrowserSession:
                     return value.lower() if value else ""
 
                 # Helper to extract name from CDP name object
-                def get_name(node: dict) -> str:
+                def get_name(node: dict[str, Any]) -> str:
                     name_obj = node.get("name", {})
                     return name_obj.get("value", "") if isinstance(name_obj, dict) else ""
 
                 # Helper to extract properties dict
-                def get_properties(node: dict) -> dict:
-                    props = {}
+                def get_properties(node: dict[str, Any]) -> dict[str, Any]:
+                    props: dict[str, Any] = {}
                     for prop in node.get("properties", []):
                         prop_name = prop.get("name", "")
                         prop_value = prop.get("value", {})
@@ -326,7 +343,7 @@ class BrowserSession:
                     return props
 
                 # Recursive function to build tree
-                def build_tree(node_id: str) -> dict | None:
+                def build_tree(node_id: str) -> dict[str, Any] | None:
                     if node_id not in node_map:
                         return None
 
@@ -335,7 +352,7 @@ class BrowserSession:
                     # Skip ignored nodes (but include their children)
                     if cdp_node.get("ignored", False):
                         # Flatten through ignored nodes
-                        children = []
+                        children: list[dict[str, Any]] = []
                         for child_id in cdp_node.get("childIds", []):
                             child = build_tree(child_id)
                             if child:
@@ -353,7 +370,7 @@ class BrowserSession:
                         return None
 
                     # Build node dict
-                    tree_node = {}
+                    tree_node: dict[str, Any] = {}
 
                     if role:
                         tree_node["role"] = role
@@ -374,21 +391,21 @@ class BrowserSession:
                         tree_node["value"] = props["value"]
 
                     # Recursively build children
-                    children = []
+                    node_children: list[dict[str, Any]] = []
                     for child_id in cdp_node.get("childIds", []):
                         child = build_tree(child_id)
                         if child:
                             # Handle flattened children from ignored nodes
                             if isinstance(child, list):
-                                children.extend(child)
+                                node_children.extend(child)
                             elif isinstance(child, dict) and "children" in child and "role" not in child:
                                 # Unwrap container with only children
-                                children.extend(child["children"])
+                                node_children.extend(child["children"])
                             else:
-                                children.append(child)
+                                node_children.append(child)
 
-                    if children:
-                        tree_node["children"] = children
+                    if node_children:
+                        tree_node["children"] = node_children
 
                     return tree_node
 
@@ -431,8 +448,9 @@ class BrowserSession:
             self._ref_map = ref_map
 
             # Add header with metadata
-            title = await self._page.title()
-            url = self._page.url
+            page = self._require_page()
+            title = await page.title()
+            url = page.url
             header = f"Page: {title}\nURL: {url}\nInteractive elements: {len(ref_map)}\n\n"
 
             logger.info(f"Snapshot captured: {len(ref_map)} interactive elements")
@@ -472,13 +490,14 @@ class BrowserSession:
             logger.info(f"Clicking element {ref}: {name} ({role}) keep_refs={keep_refs}")
 
             # Try to locate element by role and name
+            page = self._require_page()
             try:
-                locator = self._page.get_by_role(role, name=name)
+                locator = page.get_by_role(role, name=name)
                 await locator.click(timeout=self.timeout_seconds * 1000)
             except Exception:
                 # Fallback: try by text if it's a link or button
                 if role in ("link", "button") and name:
-                    locator = self._page.get_by_text(name, exact=False)
+                    locator = page.get_by_text(name, exact=False)
                     await locator.first.click(timeout=self.timeout_seconds * 1000)
                 else:
                     raise
@@ -486,7 +505,7 @@ class BrowserSession:
             if keep_refs:
                 # Wait for DOM to settle, then refresh snapshot
                 try:
-                    await self._page.wait_for_load_state("domcontentloaded", timeout=5000)
+                    await page.wait_for_load_state("domcontentloaded", timeout=5000)
                 except Exception:
                     pass  # Best-effort wait; DOM may already be stable
 
@@ -536,7 +555,7 @@ class BrowserSession:
             logger.info(f"Typing into element {ref}: {name} ({role})")
 
             # Locate input element
-            locator = self._page.get_by_role(role, name=name)
+            locator = self._require_page().get_by_role(role, name=name)
 
             # Clear and type
             await locator.clear(timeout=self.timeout_seconds * 1000)
@@ -585,7 +604,7 @@ class BrowserSession:
             logger.info(f"Selecting option in element {ref}: {name} ({role})")
 
             # Locate select element
-            locator = self._page.get_by_role(role, name=name)
+            locator = self._require_page().get_by_role(role, name=name)
 
             # Try to select by value, then by label
             try:
@@ -620,11 +639,12 @@ class BrowserSession:
 
         try:
             logger.info(f"Executing JS (length={len(script)})")
+            page = self._require_page()
 
             if arg is not None:
-                result = await self._page.evaluate(script, arg)
+                result = await page.evaluate(script, arg)
             else:
-                result = await self._page.evaluate(script)
+                result = await page.evaluate(script)
 
             if result is None:
                 return "Script executed (returned null/undefined)"
@@ -663,7 +683,7 @@ class BrowserSession:
                 distance = -distance
 
             # Execute scroll
-            await self._page.evaluate(f"window.scrollBy(0, {distance})")
+            await self._require_page().evaluate(f"window.scrollBy(0, {distance})")
 
             logger.info(f"Scrolled {direction} by {abs(distance)}px")
             return f"Scrolled {direction} ({amount})"
@@ -691,7 +711,7 @@ class BrowserSession:
             file_path = self.screenshots_dir / filename
 
             # Take screenshot
-            await self._page.screenshot(path=str(file_path), full_page=full_page)
+            await self._require_page().screenshot(path=str(file_path), full_page=full_page)
 
             # Return relative path from workspace root
             rel_path = file_path.relative_to(self.workspace_path)
@@ -713,7 +733,7 @@ class BrowserSession:
             return "Browser not active. Use browser_navigate first."
 
         try:
-            pages = self._context.pages
+            pages = self._require_context().pages
             lines = ["Open tabs:"]
 
             for i, page in enumerate(pages):
@@ -742,23 +762,24 @@ class BrowserSession:
             return "Browser not active. Use browser_navigate first."
 
         try:
-            pages = self._context.pages
+            pages = self._require_context().pages
 
             if index < 0 or index >= len(pages):
                 return f"Invalid tab index: {index}. Use browser_tabs to see available tabs."
 
             # Switch to page
             self._page = pages[index]
-            self._page.set_default_timeout(self.timeout_seconds * 1000)
+            new_page = self._require_page()
+            new_page.set_default_timeout(self.timeout_seconds * 1000)
 
             # Re-register navigation handler
-            self._page.on("framenavigated", self._handle_frame_navigated)
+            new_page.on("framenavigated", self._handle_frame_navigated)
 
             # Invalidate refs (different page)
             self._ref_map = {}
 
-            title = await self._page.title()
-            url = self._page.url
+            title = await new_page.title()
+            url = new_page.url
 
             logger.info(f"Switched to tab {index}: {title}")
             return f"Switched to tab {index}: {title}\nURL: {url}\n\nUse browser_snapshot to see page content."
@@ -794,14 +815,17 @@ class BrowserSession:
         """
         pass
 
-    def _handle_frame_navigated(self, frame) -> None:
+    def _handle_frame_navigated(self, frame: Any) -> None:
         """Handle frame navigation events for redirect detection.
 
         Args:
             frame: Playwright frame object.
         """
-        # Check if this is the main frame
-        if frame == self._page.main_frame:
+        # Check if this is the main frame — guard against None during teardown
+        page = self._page
+        if page is None:
+            return
+        if frame == page.main_frame:
             url = frame.url
 
             # Validate domain (log warning, don't block — already navigated)

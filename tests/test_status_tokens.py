@@ -3,7 +3,7 @@
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -419,7 +419,7 @@ async def test_status_shows_active_subagents(workspace_path: Path):
         timeout_minutes=30,
     )
     subagent_store = Mock()
-    subagent_store.list_active = Mock(return_value=[request1, request2])
+    subagent_store.list_active = AsyncMock(return_value=[request1, request2])
 
     context = CommandContext(
         channel=Mock(),

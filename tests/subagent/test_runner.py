@@ -17,12 +17,12 @@ from openpaw.stores.subagent import SubAgentStore
 def mock_store():
     """Create a mock SubAgentStore."""
     store = Mock(spec=SubAgentStore)
-    store.update_status = Mock()
-    store.save_result = Mock()
-    store.get = Mock(return_value=None)
-    store.get_result = Mock(return_value=None)
-    store.list_active = Mock(return_value=[])
-    store.list_recent = Mock(return_value=[])
+    store.update_status = AsyncMock()
+    store.save_result = AsyncMock()
+    store.get = AsyncMock(return_value=None)
+    store.get_result = AsyncMock(return_value=None)
+    store.list_active = AsyncMock(return_value=[])
+    store.list_recent = AsyncMock(return_value=[])
     return store
 
 
@@ -492,45 +492,49 @@ async def test_shutdown_cancels_all_active_tasks(mock_store, mock_channel, mock_
     assert len(cancelled_calls) >= 2  # Both should be cancelled
 
 
-def test_list_active_delegates_to_store(sub_agent_runner, mock_store):
+@pytest.mark.asyncio
+async def test_list_active_delegates_to_store(sub_agent_runner, mock_store):
     """Test that list_active() delegates to store."""
     expected = [Mock(spec=SubAgentRequest)]
     mock_store.list_active.return_value = expected
 
-    result = sub_agent_runner.list_active()
+    result = await sub_agent_runner.list_active()
 
     assert result == expected
     mock_store.list_active.assert_called_once()
 
 
-def test_list_recent_delegates_to_store(sub_agent_runner, mock_store):
+@pytest.mark.asyncio
+async def test_list_recent_delegates_to_store(sub_agent_runner, mock_store):
     """Test that list_recent() delegates to store."""
     expected = [Mock(spec=SubAgentRequest)]
     mock_store.list_recent.return_value = expected
 
-    result = sub_agent_runner.list_recent(limit=5)
+    result = await sub_agent_runner.list_recent(limit=5)
 
     assert result == expected
     mock_store.list_recent.assert_called_once_with(limit=5)
 
 
-def test_get_status_delegates_to_store(sub_agent_runner, mock_store):
+@pytest.mark.asyncio
+async def test_get_status_delegates_to_store(sub_agent_runner, mock_store):
     """Test that get_status() delegates to store."""
     expected = Mock(spec=SubAgentRequest)
     mock_store.get.return_value = expected
 
-    result = sub_agent_runner.get_status("test-id")
+    result = await sub_agent_runner.get_status("test-id")
 
     assert result == expected
     mock_store.get.assert_called_once_with("test-id")
 
 
-def test_get_result_delegates_to_store(sub_agent_runner, mock_store):
+@pytest.mark.asyncio
+async def test_get_result_delegates_to_store(sub_agent_runner, mock_store):
     """Test that get_result() delegates to store.get_result()."""
     expected = Mock(spec=SubAgentResult)
     mock_store.get_result.return_value = expected
 
-    result = sub_agent_runner.get_result("test-id")
+    result = await sub_agent_runner.get_result("test-id")
 
     assert result == expected
     mock_store.get_result.assert_called_once_with("test-id")

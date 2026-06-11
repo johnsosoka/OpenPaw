@@ -10,14 +10,16 @@ from openpaw.agent.middleware import (
     InterruptSignalError,
 )
 from openpaw.builtins.loader import BuiltinLoader
+from openpaw.builtins.tools.cron.scheduler_bridge import _add_to_live_scheduler
 from openpaw.channels.base import ChannelAdapter
 from openpaw.core.prompts.system_events import (
+    COLLECT_USER_NOTIFICATION,
     FOLLOWUP_TEMPLATE,
-    INTERRUPT_NOTIFICATION,
+    INTERRUPT_USER_NOTIFICATION,
     TOOL_DENIED_TEMPLATE,
 )
 from openpaw.core.utils import is_context_overflow_error, resolve_user_name, sanitize_error_for_user
-from openpaw.model.message import Message
+from openpaw.model.message import Message, MessageDirection
 from openpaw.runtime.approval import ApprovalGateManager
 from openpaw.runtime.queue.lane import QueueMode
 from openpaw.runtime.queue.manager import QueueManager
@@ -45,6 +47,7 @@ class MessageProcessor:
         session_ttl_minutes: int = 0,
         lifecycle_config: Any = None,
         status_reminder_middleware: Any = None,
+        status_update_middleware: Any = None,
     ):
         """Initialize message processor.
 
@@ -67,6 +70,9 @@ class MessageProcessor:
             lifecycle_config: LifecycleConfig instance for notification flags.
             status_reminder_middleware: Optional StatusReminderMiddleware instance.
                 When provided, its reset() is called alongside queue/approval resets.
+            status_update_middleware: Optional StatusUpdateMiddleware instance.
+                When provided, its set_context() is called before agent runs and
+                reset() is called in the finally block.
         """
         self._agent_runner = agent_runner
         self._session_manager = session_manager
@@ -84,6 +90,7 @@ class MessageProcessor:
         self._session_ttl_minutes = session_ttl_minutes
         self._lifecycle_config = lifecycle_config
         self._status_reminder_middleware = status_reminder_middleware
+        self._status_update_middleware = status_update_middleware
 
     def update_agent_runner(self, runner: "AgentRunner") -> None:
         """Update the agent runner instance.
@@ -140,6 +147,131 @@ class MessageProcessor:
                 lines.append(str(msg))
         return "\n".join(lines)
 
+    def _get_original_message_id(self, messages: list[Message]) -> str | None:
+        """Find the first non-system inbound message ID for reaction targeting.
+
+        Reactions are applied to the user's original message. System events
+        (cron, heartbeat) do not have a user message to react to.
+
+        Args:
+            messages: The message batch to inspect.
+
+        Returns:
+            The original inbound message ID, or None if no suitable message exists.
+        """
+        for msg in messages:
+            if msg.direction == MessageDirection.INBOUND and msg.user_id != "system":
+                return msg.id
+        return None
+
+    async def _add_reaction(
+        self,
+        channel: ChannelAdapter | None,
+        session_key: str,
+        message_id: str | None,
+        emoji: str,
+    ) -> None:
+        """Best-effort add a reaction to a message."""
+        if not channel or not message_id:
+            return
+        try:
+            ok = await channel.add_reaction(session_key, message_id, emoji)
+            if ok:
+                self._logger.info(
+                    "Added reaction %s to message %s", emoji, message_id
+                )
+            else:
+                self._logger.info(
+                    "Failed to add reaction %s to message %s (channel returned False)",
+                    emoji, message_id,
+                )
+        except Exception:
+            self._logger.info(
+                "Failed to add reaction %s to message %s", emoji, message_id,
+                exc_info=True,
+            )
+
+    async def _remove_reaction(
+        self,
+        channel: ChannelAdapter | None,
+        session_key: str,
+        message_id: str | None,
+        emoji: str,
+    ) -> None:
+        """Best-effort remove a reaction from a message."""
+        if not channel or not message_id:
+            return
+        try:
+            ok = await channel.remove_reaction(session_key, message_id, emoji)
+            if ok:
+                self._logger.info(
+                    "Removed reaction %s from message %s", emoji, message_id,
+                )
+            else:
+                self._logger.info(
+                    "Failed to remove reaction %s from message %s (channel returned False)",
+                    emoji, message_id,
+                )
+        except Exception:
+            self._logger.info(
+                "Failed to remove reaction %s from message %s", emoji, message_id,
+                exc_info=True,
+            )
+
+    async def _replace_reaction(
+        self,
+        channel: ChannelAdapter | None,
+        session_key: str,
+        message_id: str | None,
+        old_emoji: str,
+        new_emoji: str,
+    ) -> None:
+        """Best-effort replace a reaction on a message.
+
+        Uses the channel's replace_reaction if available (avoids double API
+        calls on Telegram). Falls back to remove + add for other platforms.
+        """
+        if not channel or not message_id:
+            return
+        try:
+            ok = await channel.replace_reaction(
+                session_key, message_id, old_emoji, new_emoji,
+            )
+            if ok:
+                self._logger.info(
+                    "Replaced reaction %s with %s on message %s",
+                    old_emoji, new_emoji, message_id,
+                )
+            else:
+                self._logger.info(
+                    "Failed to replace reaction %s with %s on message %s (channel returned False)",
+                    old_emoji, new_emoji, message_id,
+                )
+        except Exception:
+            self._logger.info(
+                "Failed to replace reaction %s with %s on message %s",
+                old_emoji, new_emoji, message_id,
+                exc_info=True,
+            )
+
+    def _reactions_enabled(self) -> bool:
+        """Check whether reactions are enabled in the status update config."""
+        if not self._status_update_middleware:
+            return False
+        config = getattr(self._status_update_middleware, "_config", None)
+        if not config:
+            return False
+        return getattr(config, "reactions", False)
+
+    def _typing_enabled(self) -> bool:
+        """Check whether typing indicator is enabled in the status update config."""
+        if not self._status_update_middleware:
+            return False
+        config = getattr(self._status_update_middleware, "_config", None)
+        if not config:
+            return False
+        return getattr(config, "typing_indicator", False)
+
     async def process_messages(
         self,
         session_key: str,
@@ -158,6 +290,10 @@ class MessageProcessor:
         followup_depth = 0
         max_followup_depth = 5
         is_system_batch = self._is_system_event_batch(messages)
+        self._logger.info(
+            f"MessageProcessor entering for session {session_key} "
+            f"({len(messages)} message(s), system_batch={is_system_batch})"
+        )
 
         # Check session TTL first — may rotate conversation before any further checks
         # TTL only applies to group sessions (not DMs)
@@ -170,7 +306,28 @@ class MessageProcessor:
         if new_thread_id:
             thread_id = new_thread_id
 
+        original_message_id = self._get_original_message_id(messages)
+        self._logger.info(
+            "Reaction diagnostics: enabled=%s, original_message_id=%s",
+            self._reactions_enabled(),
+            original_message_id,
+        )
+
+        # Send typing indicator
+        if self._typing_enabled() and channel:
+            try:
+                await channel.send_typing(session_key)
+            except Exception:
+                self._logger.debug("Typing indicator failed", exc_info=True)
+
+        # Add start reaction
+        if self._reactions_enabled() and original_message_id:
+            await self._add_reaction(channel, session_key, original_message_id, "👀")
+
+        run_count = 0
+        _run_outcome = "success"
         while True:
+            run_count += 1
             # Capture steer state before finally block resets it
             steered = False
             steer_messages = None
@@ -195,6 +352,12 @@ class MessageProcessor:
                 # Set session context for send_message tool
                 if channel:
                     self._connect_send_message_tool(channel, session_key)
+
+                # Set context for status update middleware
+                if self._status_update_middleware:
+                    self._status_update_middleware.set_context(
+                        channel, session_key, run_count, is_system_batch
+                    )
 
                 # Set followup chain depth
                 followup_tool = self._builtin_loader.get_tool_instance("followup")
@@ -237,6 +400,19 @@ class MessageProcessor:
                                 )
                                 steered = True
                                 steer_messages = pending
+
+                # Collect mode: notify user if messages were batched while running
+                if (
+                    not steered
+                    and session_mode == QueueMode.COLLECT
+                    and self._status_update_middleware
+                    and self._status_update_middleware._config.collect_queued
+                ):
+                    has_pending = await self._queue_manager.peek_pending(session_key)
+                    if has_pending:
+                        await self._status_update_middleware.send_forced_status(
+                            COLLECT_USER_NOTIFICATION
+                        )
 
                 # Log token usage and processing summary
                 run_duration_ms = (time.monotonic() - run_start) * 1000
@@ -344,6 +520,7 @@ class MessageProcessor:
                         continue  # Re-enter with denial message
 
                 # No channel available, deny by default
+                _run_outcome = "failure"
                 break
 
             except InterruptSignalError as e:
@@ -356,9 +533,16 @@ class MessageProcessor:
                         session_key=session_key,
                     )
 
-                # Notify user that run was interrupted
-                if channel:
-                    await channel.send_message(session_key, INTERRUPT_NOTIFICATION)
+                # Notify user that run was interrupted.
+                # Skip direct send if the status update middleware already handled it.
+                should_notify = True
+                if self._status_update_middleware:
+                    config = self._status_update_middleware._config
+                    if config.enabled and config.run_interrupted:
+                        should_notify = False
+
+                if channel and should_notify:
+                    await channel.send_message(session_key, INTERRUPT_USER_NOTIFICATION)
 
                 # Use the pending messages as the new input
                 pending_msgs = e.pending_messages
@@ -385,6 +569,7 @@ class MessageProcessor:
 
                 if channel:
                     await channel.send_message(session_key, sanitize_error_for_user(e))
+                _run_outcome = "failure"
                 break  # Don't continue followup chain on error
 
             finally:
@@ -394,6 +579,9 @@ class MessageProcessor:
                     self._approval_middleware.reset()
                 if self._status_reminder_middleware:
                     self._status_reminder_middleware.reset()
+                if self._status_update_middleware:
+                    await self._status_update_middleware.delete_status()
+                    self._status_update_middleware.reset()
 
             # Check steer (captured before reset)
             if steered and steer_messages:
@@ -430,6 +618,13 @@ class MessageProcessor:
                     self._schedule_delayed_followup(followup, session_key)
 
             break  # No followup or delayed followup scheduled, exit loop
+
+        # Final reaction lifecycle
+        if self._reactions_enabled() and original_message_id:
+            if _run_outcome == "success":
+                await self._replace_reaction(channel, session_key, original_message_id, "👀", "👍")
+            elif _run_outcome == "failure":
+                await self._replace_reaction(channel, session_key, original_message_id, "👀", "👎")
 
         # Reset followup state after loop exits
         followup_tool = self._builtin_loader.get_tool_instance("followup")
@@ -751,7 +946,7 @@ class MessageProcessor:
             chat_id=cron_tool.default_chat_id,
         )
         cron_tool.store.add_task(task)
-        cron_tool._add_to_live_scheduler(task)
+        _add_to_live_scheduler(cron_tool.scheduler, task)
         self._logger.info(f"Delayed followup scheduled as cron task {task.id}")
 
     def _connect_send_message_tool(self, channel: Any, session_key: str) -> None:

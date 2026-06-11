@@ -159,3 +159,158 @@ class TelegramOutboundSender:
         except Exception as e:
             logger.error("Failed to send file '%s' to chat %s: %s", filename, chat_id, e)
             raise RuntimeError(f"Failed to send file: {e}") from e
+
+    async def edit_message(
+        self,
+        session_key: str,
+        message_id: str,
+        content: str,
+    ) -> bool:
+        """Edit an existing Telegram message.
+
+        Args:
+            session_key: Target session identifier.
+            message_id: Telegram message ID to edit.
+            content: New message content.
+
+        Returns:
+            True if the edit was successful.
+        """
+        parts = session_key.split(":")
+        chat_id = int(parts[1])
+
+        try:
+            from telegram.error import BadRequest
+
+            from openpaw.channels.formatting import markdown_to_telegram_html
+
+            html_content = markdown_to_telegram_html(content)
+            try:
+                await self._app.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=int(message_id),
+                    text=html_content,
+                    parse_mode="HTML",
+                )
+            except BadRequest as e:
+                if "can't parse" in str(e).lower():
+                    logger.warning("HTML parse failed on edit, using plain text: %s", e)
+                    await self._app.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=int(message_id),
+                        text=content,
+                    )
+                else:
+                    raise
+            logger.debug("Edited Telegram message %s in chat %s", message_id, chat_id)
+            return True
+        except Exception as e:
+            logger.debug("Failed to edit Telegram message %s: %s", message_id, e)
+            return False
+
+    async def delete_message(
+        self,
+        session_key: str,
+        message_id: str,
+    ) -> bool:
+        """Delete an existing Telegram message.
+
+        Args:
+            session_key: Target session identifier.
+            message_id: Telegram message ID to delete.
+
+        Returns:
+            True if the deletion was successful.
+        """
+        parts = session_key.split(":")
+        chat_id = int(parts[1])
+
+        try:
+            await self._app.bot.delete_message(
+                chat_id=chat_id,
+                message_id=int(message_id),
+            )
+            logger.debug("Deleted Telegram message %s in chat %s", message_id, chat_id)
+            return True
+        except Exception as e:
+            logger.debug("Failed to delete Telegram message %s: %s", message_id, e)
+            return False
+
+    async def send_typing(self, session_key: str) -> None:
+        """Trigger Telegram typing indicator."""
+        if not self._app:
+            return
+        try:
+            chat_id = int(session_key.split(":")[1])
+            await self._app.bot.send_chat_action(chat_id=chat_id, action="typing")
+        except Exception:
+            logger.debug("Failed to send typing action", exc_info=True)
+
+    async def add_reaction(self, session_key: str, message_id: str, emoji: str) -> bool:
+        """Add an emoji reaction to a Telegram message."""
+        if not self._app:
+            return False
+        try:
+            from telegram import ReactionTypeEmoji
+
+            chat_id = int(session_key.split(":")[1])
+            logger.info(
+                "Setting reaction %s on message %s (chat_id=%s)",
+                emoji, message_id, chat_id,
+            )
+            await self._app.bot.set_message_reaction(
+                chat_id=chat_id,
+                message_id=int(message_id),
+                reaction=[ReactionTypeEmoji(emoji=emoji)],
+            )
+            logger.info("Reaction %s set successfully on message %s", emoji, message_id)
+            return True
+        except Exception as e:
+            logger.info("Failed to add reaction %s on message %s: %s", emoji, message_id, e)
+            return False
+
+    async def remove_reaction(self, session_key: str, message_id: str, emoji: str) -> bool:
+        """Remove the bot's reactions from a Telegram message.
+
+        Note: Telegram's set_message_reaction with an empty reaction list
+        clears all reactions set by the bot. The emoji parameter is accepted
+        for API compatibility but not used.
+        """
+        if not self._app:
+            return False
+        try:
+            chat_id = int(session_key.split(":")[1])
+            logger.info(
+                "Removing reaction %s from message %s (chat_id=%s)",
+                emoji, message_id, chat_id,
+            )
+            await self._app.bot.set_message_reaction(
+                chat_id=chat_id,
+                message_id=int(message_id),
+                reaction=[],  # Empty clears all
+            )
+            logger.info("Reaction %s removed successfully from message %s", emoji, message_id)
+            return True
+        except Exception as e:
+            logger.info("Failed to remove reaction %s from message %s: %s", emoji, message_id, e)
+            return False
+
+    async def replace_reaction(
+        self, session_key: str, message_id: str, old_emoji: str, new_emoji: str
+    ) -> bool:
+        """Replace a bot's emoji reaction with a new one.
+
+        Telegram's set_message_reaction replaces the existing reaction
+        when a new one is set. This avoids the double API call that
+        can trigger rate limits.
+        """
+        logger.info(
+            "Replacing reaction %s with %s on message %s (session=%s)",
+            old_emoji, new_emoji, message_id, session_key,
+        )
+        result = await self.add_reaction(session_key, message_id, new_emoji)
+        logger.info(
+            "Replace reaction result: %s (old=%s, new=%s, msg=%s)",
+            result, old_emoji, new_emoji, message_id,
+        )
+        return result
