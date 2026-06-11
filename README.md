@@ -4,7 +4,6 @@
   <p>
     <a href="https://github.com/johnsosoka/OpenPaw/actions/workflows/ci.yml"><img src="https://github.com/johnsosoka/OpenPaw/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
     <a href="https://github.com/johnsosoka/OpenPaw/actions/workflows/docs.yml"><img src="https://github.com/johnsosoka/OpenPaw/actions/workflows/docs.yml/badge.svg?branch=main" alt="Docs"></a>
-    <img src="https://github.com/johnsosoka/OpenPaw/actions/workflows/ai-code-review.yml/badge.svg" alt="AI Code Review">
     <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
     <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-green" alt="License">
   </p>
@@ -16,39 +15,88 @@
 
 OpenPaw gives each agent its own workspace -- personality files, custom tools, scheduled tasks -- then gets out of the way. It handles the orchestration so you can focus on what your agents actually do.
 
-Agents can ingest documents, browse the web, search the internet, and manage their own files -- making them well-suited for research, information processing, and long-running autonomous workflows. Give them a schedule and they'll check in on their own.
+Agents can ingest documents, browse the web, search the internet, delegate to specialist sub-agents, and manage their own files -- making them well-suited for research, information processing, and long-running autonomous workflows. Give them a schedule and they'll check in on their own.
 
 > **[Read the full documentation](https://johnsosoka.github.io/OpenPaw/)**
 
 ## Highlights
 
-**First Class Document processing** -- Docling OCR/ICR turns scanned PDFs, DOCX, and PPTX into markdown automatically. Whisper transcribes voice messages on arrival.
+### Composable sub-agent teams
 
-**Drop-in custom tools** -- Write a `@tool` function, put it in `agent/tools/`, restart. Your agent picks it up with zero wiring.
+Every primary agent is a team lead. Drop a YAML into `agent/team/` and your agent gains a teammate it can dispatch with `spawn_agent(profile="researcher")`:
 
-**Multi-agent spawning** -- Agents spin up background workers for parallel tasks with full lifecycle tracking and result collection.
+```yaml
+name: researcher
+description: "Web research specialist — searches, cross-references, and cites sources."
+system_prompt: |
+  You are a focused research specialist. Search, cross-reference, and
+  summarize findings with source citations.
+model: anthropic:claude-sonnet-4-20250514
+allowed_tools: [brave_search, read_file, write_file]
+timeout_minutes: 10
+max_turns: 20
+```
 
-**Dynamic tool assignment** -- Spawned sub-agents can be given a tailored tool loadout via allow/deny lists, so each worker gets only the capabilities it needs.
+Each teammate gets its own model, tool loadout, skill set, and lifecycle budget. Run several in parallel -- the parent dispatches, they work, results route back when they finish.
 
-**Cron scheduling and heartbeats** -- Recurring jobs, one-shot timers, proactive check-ins. Agents can even self-schedule follow-ups at runtime.
+### Live in-place status updates
 
-**Browser automation** -- Playwright-driven web interaction via accessibility tree. Agents reference page elements by number, not CSS selectors.
+Both your primary agent **and every sub-agent** maintain a single status message that edits in place as work progresses. No chat flood, no scroll-back -- just a live, current view of who's doing what right now. Get actionable insight into your agent teams at a glance. Agents can also call `report_progress` to announce structured milestones with their own emoji.
 
-**Email integration** -- Send and receive email via Gmail with safe-by-default recipient policies. Read inbox, search, reply with threading, and manage attachments.
+```
+🚀 Starting work...
+🔎 Running tool: brave_search (langgraph release notes)...
+🤖 Dispatched sub-agent: researcher
 
-**Deep research** -- Integrate with a self-hosted GPT-Researcher instance for multi-source research reports with citations. Agents submit queries via WebSocket and receive comprehensive markdown reports.
+🤖 Sub-agent: researcher
+🔎 Running tool: brave_search (recent papers)...
+📝 Running tool: write_file (notes.md)...
+✅ Completed
+```
 
-**Approval gates** -- Human-in-the-loop authorization for dangerous operations, with configurable timeouts and channel-native UI.
+<!-- TODO: replace this block with a demo GIF -->
 
-**Multi-channel support** -- Connect agents to Telegram, Discord, or both simultaneously. Trigger-based activation lets agents respond to @mentions, keyword triggers, or both in group chats. On-demand context fetch gives agents awareness of recent channel history when triggered.
+### Mid-run responsiveness
 
-**Session management** -- Conversations auto-reset after inactivity (default 3 hours). Auto-compact rotates context when the window fills. Persistent channel logs give agents searchable message history.
+Send a follow-up while the agent is mid-task and it sees it. Steer the run ("🔄 Redirecting..."), interrupt completely ("🛑 Stopping..."), or let messages batch quietly ("📨 New messages received..."). One-line emoji notifications keep you in the loop without breaking the agent's flow.
 
-**Workspace isolation** -- Each agent gets its own SOUL.md personality, tools directory, conversation history, channels, and sandboxed filesystem.
+Typing indicators run while the agent is processing; emoji reactions on your original message track success (👍) or failure (👎).
 
-**Multi-provider LLM support** -- Anthropic, OpenAI, AWS Bedrock, xAI, and any OpenAI-compatible endpoint. Switch models at runtime with `/model`.
+### Channels
 
-**Memory and observability** -- Vector search for semantic recall, conversation archiving to markdown and JSON, and session logs for every cron, heartbeat, and sub-agent run. Full visibility into what your agents are doing and thinking.
+**Telegram + Discord, simultaneously** -- One workspace, multiple channels. Trigger-based activation (mentions, keywords, or both) lets agents respond appropriately in group chats. On-demand channel history gives them awareness of recent conversation when triggered.
+
+### Workspace identity
+
+Each agent gets its own SOUL (personality), AGENT (capabilities), USER (context), and HEARTBEAT (agent-writable scratchpad) files, plus a sandboxed filesystem. `config/` and `data/` are write-protected from the agent itself; everything else lives under `workspace/`.
+
+**Skills** -- Reusable knowledge blocks (`SKILL.md`) drop into the workspace and can be selectively granted to specific team members.
+
+### Tools that do real work
+
+- **Document processing** -- Docling OCR/ICR turns scanned PDFs, DOCX, and PPTX into markdown automatically. Whisper transcribes voice messages on arrival.
+- **Browser automation** -- Playwright-driven web interaction via the accessibility tree. Agents reference elements by number, not CSS selectors.
+- **Email integration** -- Send and receive via Gmail with safe-by-default recipient policies. Search, reply with threading, manage attachments.
+- **Deep research** -- Connect to a self-hosted GPT-Researcher instance for multi-source reports with citations.
+- **Web search** -- Brave Search and other providers for direct search-and-summarize.
+- **Drop-in custom tools** -- Write a `@tool` function, save it to `agent/tools/`, restart. Auto-discovered, no wiring needed.
+
+### Scheduling & autonomy
+
+- **Cron and heartbeats** -- Recurring jobs from YAML, plus proactive check-ins agents can configure themselves.
+- **Dynamic scheduling** -- `schedule_at`, `schedule_every`, `request_followup`. Your agent can plan its own future.
+- **Auto-compact** -- When the context window fills, the framework summarizes old turns and continues without missing a beat.
+- **Runtime model switching** -- `/model anthropic:claude-opus-4-20250514` mid-conversation. No restart.
+
+### Safe by default
+
+- **Approval gates** -- Human-in-the-loop authorization for sensitive operations with configurable timeouts and channel-native UI.
+- **Recipient policies** -- Email defaults to deny-all sends; only addresses on your allowlist go through.
+- **Sandboxed filesystem** -- Custom tools write to `workspace/` by default; `config/` and `data/` are read-only to agents.
+
+### Multi-provider LLMs
+
+Anthropic, OpenAI, AWS Bedrock, xAI, Fireworks, and any OpenAI-compatible endpoint. Define providers once in global config and reference by name from any workspace.
 
 ## Quick Start
 
@@ -114,6 +162,7 @@ agent_workspaces/my_agent/
 │   ├── SOUL.md         # Core personality and values
 │   ├── HEARTBEAT.md    # Session state scratchpad (agent-writable)
 │   ├── tools/          # Custom LangChain @tool functions
+│   ├── team/           # Sub-agent profiles (YAML)
 │   └── skills/         # Skill directories
 ├── config/             # Configuration (write-protected)
 │   ├── agent.yaml      # Per-workspace settings (model, channel, queue)
@@ -170,12 +219,6 @@ Development follows a GitFlow branching model:
 - **Feature branches** -- Branch from `develop` as `feature/`, `bugfix/`, `docs/`, or `chore/`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
-
-## AI Code Review
-
-All pull requests are automatically reviewed by GPT-4o via [ai-code-review](https://github.com/AleksandrFurmenkovOfficial/ai-code-review). The AI checks for code quality, security issues, performance concerns, and maintainability.
-
-Reviews run on every PR open and update. Results are posted as inline comments on the pull request.
 
 ## Prerequisites
 
