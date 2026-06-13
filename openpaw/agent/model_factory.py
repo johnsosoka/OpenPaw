@@ -7,7 +7,7 @@ LangChain BaseChatModel instance.
 
 import logging
 import re
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.language_models import BaseChatModel
 
@@ -168,7 +168,10 @@ def create_chat_model(
             f"Creating ChatMoonshot: model={model_name}, thinking={thinking}, "
             f"temperature={kwargs.get('temperature')}"
         )
-        return ChatMoonshot(**kwargs)
+        # cast: langchain_moonshot is an optional dep and resolves to Any when
+        # not installed (mypy strict + ignore_missing_imports). The cast is safe
+        # because ChatMoonshot inherits from BaseChatOpenAI which is a BaseChatModel.
+        return cast(BaseChatModel, ChatMoonshot(**kwargs))
 
     if provider == "ollama":
         try:
@@ -192,7 +195,8 @@ def create_chat_model(
             f"Creating ChatOllama: model={model_name}, "
             f"base_url={kwargs.get('base_url', 'default')}, kwargs={list(kwargs.keys())}"
         )
-        return ChatOllama(**kwargs)
+        # cast: optional dep — see ChatMoonshot return above for rationale.
+        return cast(BaseChatModel, ChatOllama(**kwargs))
 
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
