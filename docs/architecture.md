@@ -217,7 +217,7 @@ Global defaults merge with workspace overrides, environment variables expand, an
 
 The merge is a deep dictionary merge: nested keys in `agent.yaml` override only the fields they specify; everything else inherits from `config.yaml`. A workspace that sets only `model.temperature` inherits the global model provider, API key, and all channel settings.
 
-`${VAR}` substitution runs after merging. Any unresolved reference fails fast at startup with an error naming the missing variable and its source file. Provider catalog entries under `providers:` in `config.yaml` let multiple workspaces share connection details. The shorthand `model: moonshot:kimi-k2.5` triggers resolution: `moonshot` maps to `type: openai`, `api_key`, and `base_url` in the catalog, producing a call to `init_chat_model("openai:kimi-k2.5", ...)` with those values. The user-visible display string stays `moonshot:kimi-k2.5` in `/status` output.
+`${VAR}` substitution runs after merging. Any unresolved reference fails fast at startup with an error naming the missing variable and its source file. Provider catalog entries under `providers:` in `config.yaml` let multiple workspaces share connection details. The shorthand `model: moonshot:kimi-k2.5` triggers resolution against the catalog and then dispatches to the native `ChatMoonshot` provider in `openpaw.agent.model_factory.create_chat_model()`. Catalog entries with a `type:` override (e.g. `type: bedrock_converse`) are remapped before dispatch — the original name stays the user-visible display string in `/status` output.
 
 See [Configuration](configuration.md) for the full field reference and provider catalog examples.
 

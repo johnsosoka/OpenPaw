@@ -21,13 +21,12 @@ logger = logging.getLogger(__name__)
 logging.getLogger("openai._base_client").setLevel(logging.INFO)
 logging.getLogger("anthropic._base_client").setLevel(logging.INFO)
 
-# Models known to produce thinking tokens
+# Bedrock-routed Kimi model IDs that emit raw <think> tags in content and need
+# regex stripping by ThinkingTokenMiddleware. The native `moonshot:` provider
+# uses ChatMoonshot which separates reasoning content via additional_kwargs,
+# so it does NOT belong on this list.
 THINKING_MODELS = [
     "moonshot.kimi-k2-thinking",
-    "moonshotai.kimi-k2.5",
-    "kimi-k2-thinking",
-    "kimi-thinking",
-    "kimi-k2.5",
 ]
 
 # Bedrock tool name validation pattern (AWS requirement)
@@ -95,6 +94,33 @@ def create_chat_model(
     if provider == "openai":
         from langchain_openai import ChatOpenAI
 
+        # Hard cutover guard: the legacy "talk to Moonshot through ChatOpenAI"
+        # shape used base_url=https://api.moonshot.ai/v1 plus extra_body.thinking.
+        # 0.4.3 replaces this with a native `moonshot:` provider; refuse both
+        # legacy signals with a migration message rather than silently working.
+        base_url = kwargs.get("base_url") or kwargs.get("openai_api_base")
+        if base_url and "moonshot.ai" in str(base_url):
+            raise ValueError(
+                "Direct Moonshot access via the 'openai' provider with "
+                "base_url 'https://api.moonshot.ai/v1' was removed in 0.4.3. "
+                "Use the native 'moonshot' provider instead:\n"
+                "    model:\n"
+                "      provider: moonshot\n"
+                "      model: kimi-k2.5\n"
+                "      thinking: false   # or true\n"
+                "      api_key: ${MOONSHOT_API_KEY}"
+            )
+        if "extra_body" in kwargs and isinstance(kwargs["extra_body"], dict) and "thinking" in kwargs["extra_body"]:
+            raise ValueError(
+                "'extra_body.thinking' on the 'openai' provider was removed in 0.4.3. "
+                "Use the native 'moonshot' provider with the top-level 'thinking' field instead:\n"
+                "    model:\n"
+                "      provider: moonshot\n"
+                "      model: kimi-k2.5\n"
+                "      thinking: false   # or true\n"
+                "      api_key: ${MOONSHOT_API_KEY}"
+            )
+
         if api_key:
             kwargs["api_key"] = api_key
         if effective_retries > 0:
@@ -103,6 +129,70 @@ def create_chat_model(
         else:
             logger.info(f"Creating ChatOpenAI: model={model_name}, kwargs={list(kwargs.keys())}")
         return ChatOpenAI(**kwargs)
+
+    if provider == "moonshot":
+        try:
+            from langchain_moonshot import ChatMoonshot
+        except ImportError as exc:
+            raise ImportError(
+                "The 'moonshot' provider requires the optional langchain-moonshot package. "
+                "Install it with: pip install 'openpaw-ai[moonshot]' "
+                "(or: pip install langchain-moonshot)."
+            ) from exc
+
+        # ChatMoonshot expects bool — coerce None (the WorkspaceModelConfig default)
+        # to False so we don't trip its pydantic validation.
+        thinking = bool(kwargs.get("thinking") or False)
+        kwargs["thinking"] = thinking
+
+        # Auto-correct temperature when the caller passed the framework default
+        # (0.7) — Moonshot enforces 0.6 for thinking=False and 1.0 for thinking=True
+        # and would otherwise raise a 400 at request time. We can't reliably tell
+        # an unset value from a deliberate "0.7"; if it WAS deliberate, the WARNING
+        # makes the override visible in the logs so the user can pin temperature
+        # to the value they actually want.
+        if kwargs.get("temperature") == 0.7:
+            corrected = 1.0 if thinking else 0.6
+            logger.warning(
+                f"Moonshot: temperature 0.7 is invalid for kimi-k2.5; "
+                f"auto-correcting to {corrected} for thinking={thinking}. "
+                f"Set temperature explicitly in your model config to silence this warning."
+            )
+            kwargs["temperature"] = corrected
+
+        if api_key:
+            kwargs["api_key"] = api_key
+        if effective_retries > 0:
+            kwargs["max_retries"] = effective_retries
+        logger.info(
+            f"Creating ChatMoonshot: model={model_name}, thinking={thinking}, "
+            f"temperature={kwargs.get('temperature')}"
+        )
+        return ChatMoonshot(**kwargs)
+
+    if provider == "ollama":
+        try:
+            from langchain_ollama import ChatOllama
+        except ImportError as exc:
+            raise ImportError(
+                "The 'ollama' provider requires the optional langchain-ollama package. "
+                "Install it with: pip install 'openpaw-ai[ollama]' "
+                "(or: pip install langchain-ollama)."
+            ) from exc
+
+        # Ollama is local — no API key, and retries don't help for a connection
+        # to localhost. Drop both unless the user explicitly opted in.
+        kwargs.pop("api_key", None)
+        if effective_retries > 0:
+            logger.debug(
+                "Ignoring max_retries for ollama provider (local server, fast-fail preferred)"
+            )
+
+        logger.info(
+            f"Creating ChatOllama: model={model_name}, "
+            f"base_url={kwargs.get('base_url', 'default')}, kwargs={list(kwargs.keys())}"
+        )
+        return ChatOllama(**kwargs)
 
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
@@ -207,7 +297,7 @@ def create_chat_model(
 
     raise ValueError(
         f"Unsupported model provider: '{provider}'. "
-        f"Supported: openai, anthropic, bedrock_converse, xai, fireworks"
+        f"Supported: openai, anthropic, bedrock_converse, xai, fireworks, moonshot, ollama"
     )
 
 
