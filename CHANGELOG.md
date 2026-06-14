@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`thinking: bool | None`** field on `WorkspaceModelConfig` — opt-in reasoning mode for providers that support it natively.
 - **`base_url`** promoted from extras to a typed field on `WorkspaceModelConfig` for clearer schema and validation.
 - New `tests/test_native_providers.py` covers ChatMoonshot wiring (thinking flag, temperature auto-correct, ImportError) and ChatOllama wiring (no api_key, ollama-specific kwargs, no retries, ImportError) plus provider catalog integration for both.
+- `openpaw init` workspace scaffolder learned `moonshot` and `ollama` providers. `openpaw init my_agent --model moonshot:kimi-k2.5` scaffolds a config with `thinking: false` + `temperature: 0.6`; `--model ollama:llama3.1` scaffolds keyless with `base_url: http://localhost:11434` and `num_ctx: 16384`. New tests in `tests/cli_init/test_scaffolder.py` round-trip the generated YAML through `WorkspaceConfig` to ensure it boots cleanly.
 
 ### Changed
 
