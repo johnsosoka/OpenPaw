@@ -1,5 +1,7 @@
 """Tests for WorkspaceModelConfig provider:model auto-split."""
 
+import pytest
+
 from openpaw.core.config.models import WorkspaceModelConfig
 
 
@@ -48,18 +50,45 @@ class TestWorkspaceModelConfigNormalization:
         assert config.provider == "xai"
         assert config.model == "grok-3-mini"
 
-    def test_extra_kwargs_preserved(self):
-        """Extra kwargs (like base_url) are preserved through normalization."""
+    def test_base_url_preserved_for_non_legacy_providers(self):
+        """base_url survives normalization on providers that legitimately use it (e.g. Ollama)."""
         config = WorkspaceModelConfig(
-            model="openai:kimi-k2.5",
-            base_url="https://api.moonshot.ai/v1",
+            model="ollama:gemma4:31b-it-q4_K_M",
+            base_url="http://localhost:11434",
         )
-        assert config.provider == "openai"
-        assert config.model == "kimi-k2.5"
-        assert config.base_url == "https://api.moonshot.ai/v1"
+        assert config.provider == "ollama"
+        assert config.model == "gemma4:31b-it-q4_K_M"
+        assert config.base_url == "http://localhost:11434"
 
     def test_empty_string_provider_not_split(self):
         """Empty string provider should not trigger auto-split."""
         config = WorkspaceModelConfig(provider="", model="provider:model-id")
         assert config.provider == ""
         assert config.model == "provider:model-id"
+
+    def test_legacy_moonshot_via_openai_rejected(self):
+        """Pre-0.4.3 'openai + base_url=api.moonshot.ai' shape is hard-rejected."""
+        with pytest.raises(ValueError, match="moonshot"):
+            WorkspaceModelConfig(
+                model="openai:kimi-k2.5",
+                base_url="https://api.moonshot.ai/v1",
+            )
+
+    def test_legacy_extra_body_thinking_rejected(self):
+        """Pre-0.4.3 'extra_body.thinking' shape is hard-rejected."""
+        with pytest.raises(ValueError, match="extra_body.thinking"):
+            WorkspaceModelConfig(
+                provider="openai",
+                model="kimi-k2.5",
+                extra_body={"thinking": {"type": "disabled"}},
+            )
+
+    def test_native_moonshot_thinking_flag(self):
+        """Native moonshot provider accepts the top-level thinking flag."""
+        config = WorkspaceModelConfig(
+            model="moonshot:kimi-k2.5",
+            thinking=True,
+        )
+        assert config.provider == "moonshot"
+        assert config.model == "kimi-k2.5"
+        assert config.thinking is True

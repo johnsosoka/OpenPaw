@@ -116,3 +116,35 @@ class TestCreateWorkspace:
     def test_returns_workspace_path(self, tmp_path: Path) -> None:
         result = _create_workspace(tmp_path, "rex", None, None)
         assert result == tmp_path / "rex"
+
+    def test_scaffolds_moonshot_workspace_with_thinking_flag(self, tmp_path: Path) -> None:
+        """`--model moonshot:kimi-k2.5` produces a valid native moonshot config."""
+        from openpaw.core.config.models import WorkspaceConfig
+
+        _create_workspace(tmp_path, "kimi_agent", None, "moonshot:kimi-k2.5")
+        text = (tmp_path / "kimi_agent" / "config" / "agent.yaml").read_text()
+        assert "provider: moonshot" in text
+        assert "model: kimi-k2.5" in text
+        assert "thinking: false" in text
+        assert "api_key: ${MOONSHOT_API_KEY}" in text
+        # Round-trip through Pydantic — catches the pre-0.4.3 legacy-rejection
+        # path so we know this scaffolded yaml will actually boot.
+        cfg = WorkspaceConfig(**yaml.safe_load(text))
+        assert cfg.model.provider == "moonshot"
+        assert cfg.model.thinking is False
+
+    def test_scaffolds_ollama_workspace_keyless(self, tmp_path: Path) -> None:
+        """`--model ollama:llama3.1` produces a keyless config with base_url + num_ctx."""
+        from openpaw.core.config.models import WorkspaceConfig
+
+        _create_workspace(tmp_path, "local_agent", None, "ollama:llama3.1")
+        text = (tmp_path / "local_agent" / "config" / "agent.yaml").read_text()
+        assert "provider: ollama" in text
+        assert "model: llama3.1" in text
+        assert "base_url: http://localhost:11434" in text
+        assert "num_ctx: 16384" in text
+        # Ollama is keyless — make sure scaffolder doesn't emit a bogus api_key line.
+        assert "api_key:" not in text
+        cfg = WorkspaceConfig(**yaml.safe_load(text))
+        assert cfg.model.provider == "ollama"
+        assert cfg.model.base_url == "http://localhost:11434"

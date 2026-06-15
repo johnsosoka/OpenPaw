@@ -15,6 +15,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [0.4.3] - 2026-06-13
+
+> **BREAKING:** Workspaces using the pre-0.4.3 Moonshot configuration shape
+> (`provider: openai` with `base_url: https://api.moonshot.ai/v1`, or any
+> `extra_body.thinking` block) will now fail to load. Switch to the native
+> `moonshot` provider — see migration note below.
+
+### Added
+
+- **Native `moonshot` provider** for Kimi models via the [langchain-moonshot](https://pypi.org/project/langchain-moonshot/) package. New top-level `thinking: bool` field on the workspace model config replaces the old `extra_body.thinking` workaround. Temperature is auto-corrected to `0.6` / `1.0` based on `thinking` when the framework default (`0.7`) reaches the provider — the override is logged as a `WARNING` so users who deliberately set `0.7` see the substitution. Reasoning content is now separated by ChatMoonshot rather than emitted as inline `<think>` tags. Install with `pip install 'openpaw-ai[moonshot]'`.
+- **First-class `ollama` provider** for local models via the official [langchain-ollama](https://pypi.org/project/langchain-ollama/) package. No API key required; talks to a local Ollama server (default `http://localhost:11434`). Supports `bind_tools` on tool-capable models (llama3.1, qwen2.5, mistral-nemo, gemma3:27b, etc.). Install with `pip install 'openpaw-ai[ollama]'`.
+- **`thinking: bool | None`** field on `WorkspaceModelConfig` — opt-in reasoning mode for providers that support it natively.
+- **`base_url`** promoted from extras to a typed field on `WorkspaceModelConfig` for clearer schema and validation.
+- New `tests/test_native_providers.py` covers ChatMoonshot wiring (thinking flag, temperature auto-correct, ImportError) and ChatOllama wiring (no api_key, ollama-specific kwargs, no retries, ImportError) plus provider catalog integration for both.
+- `openpaw init` workspace scaffolder learned `moonshot` and `ollama` providers. `openpaw init my_agent --model moonshot:kimi-k2.5` scaffolds a config with `thinking: false` + `temperature: 0.6`; `--model ollama:llama3.1` scaffolds keyless with `base_url: http://localhost:11434` and `num_ctx: 16384`. New tests in `tests/cli_init/test_scaffolder.py` round-trip the generated YAML through `WorkspaceConfig` to ensure it boots cleanly.
+
+### Changed
+
+- `create_chat_model()` consolidated to `openpaw/agent/model_factory.py`. The duplicate copy in `openpaw/agent/runner.py` has been removed; `AgentRunner` now imports from `model_factory`. External imports of `create_chat_model`, `THINKING_MODELS`, `BEDROCK_TOOL_NAME_PATTERN`, `MAX_TOOL_NAME_LENGTH`, and `validate_tool_names` from `openpaw.agent.runner` still work via re-export.
+- `AgentRunner._validate_tool_names` now delegates to the shared `validate_tool_names` helper in `model_factory`, removing duplicated tool-name validation logic.
+- `THINKING_MODELS` trimmed to the single verified Bedrock-routed Kimi entry (`moonshot.kimi-k2-thinking`). The native `moonshot:` provider returns reasoning content via `additional_kwargs`, so it does not need regex stripping by `ThinkingTokenMiddleware`.
+- Provider catalog example in `config.example.yaml` updated to show native `moonshot` and `ollama` entries.
+- `docs/concepts.md` and `docs/architecture.md` rewritten to describe the native dispatch path through `create_chat_model()` instead of the retired `init_chat_model("openai:kimi-k2.5", ...)` route.
+
+### Removed
+
+- **Legacy Moonshot-via-OpenAI-compat shape** is no longer accepted. Configurations with `provider: openai` + `base_url: https://api.moonshot.ai/v1`, or an `extra_body.thinking` block **under the `openai` provider specifically**, now raise a `ValueError` at workspace load time pointing at the new shape. Anthropic's native extended-thinking via `extra_body.thinking` is unaffected — the validator is scoped to `provider == "openai"` only. **Migration:**
+  ```yaml
+  # Before (0.4.2 and earlier)
+  model:
+    provider: openai
+    model: kimi-k2.5
+    api_key: ${MOONSHOT_API_KEY}
+    base_url: https://api.moonshot.ai/v1
+    temperature: 0.6
+    extra_body:
+      thinking:
+        type: disabled
+
+  # After (0.4.3)
+  model:
+    provider: moonshot
+    model: kimi-k2.5
+    api_key: ${MOONSHOT_API_KEY}
+    thinking: false
+  ```
+
+### Fixed
+
 ## [0.4.2] - 2026-06-10
 
 ### Added

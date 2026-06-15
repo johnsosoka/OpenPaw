@@ -2439,6 +2439,40 @@ openai = ">=2.0.0,<3.0.0"
 requests = ">=2.0.0,<3.0.0"
 
 [[package]]
+name = "langchain-moonshot"
+version = "0.1.0"
+description = "An integration package connecting Moonshot AI and LangChain"
+optional = true
+python-versions = "<4.0,>=3.10"
+groups = ["main"]
+markers = "extra == \"moonshot\" or extra == \"all-builtins\""
+files = [
+    {file = "langchain_moonshot-0.1.0-py3-none-any.whl", hash = "sha256:1f62d84ae7b0dcdd544c643778149437a632acd034c7f0e9e148f55285bf5796"},
+    {file = "langchain_moonshot-0.1.0.tar.gz", hash = "sha256:0d98b5ca0f707b631a138008087815990b8fc7e2cbc369205724ed5d322d056a"},
+]
+
+[package.dependencies]
+langchain-core = ">=1.2.21,<2.0.0"
+langchain-openai = ">=1.1.0,<2.0.0"
+
+[[package]]
+name = "langchain-ollama"
+version = "1.1.0"
+description = "An integration package connecting Ollama and LangChain"
+optional = true
+python-versions = "<4.0.0,>=3.10.0"
+groups = ["main"]
+markers = "extra == \"ollama\" or extra == \"all-builtins\""
+files = [
+    {file = "langchain_ollama-1.1.0-py3-none-any.whl", hash = "sha256:43ac83a6eacb0f43855810739794dd55019e0d9b17bdcf3ecb3b1991ac3b59dd"},
+    {file = "langchain_ollama-1.1.0.tar.gz", hash = "sha256:f776f56f6782ae4da7692579b94a6575906118318d1023b455d7207f9d059811"},
+]
+
+[package.dependencies]
+langchain-core = ">=1.2.21,<2.0.0"
+ollama = ">=0.6.1,<1.0.0"
+
+[[package]]
 name = "langchain-openai"
 version = "1.1.12"
 description = "An integration package connecting OpenAI and LangChain"
@@ -4115,6 +4149,23 @@ files = [
 Click = ">=7.0"
 pillow = "*"
 pyobjc-framework-Vision = "*"
+
+[[package]]
+name = "ollama"
+version = "0.6.2"
+description = "The official Python client for Ollama."
+optional = true
+python-versions = ">=3.8"
+groups = ["main"]
+markers = "extra == \"ollama\" or extra == \"all-builtins\""
+files = [
+    {file = "ollama-0.6.2-py3-none-any.whl", hash = "sha256:3ad7daab28e5a973445c36a73882a3ef698c2ebb00e21e308652741577509f7d"},
+    {file = "ollama-0.6.2.tar.gz", hash = "sha256:936d55daa684f474364c098611c933626f8d6c7d67065c5b7ae0c477b508b07f"},
+]
+
+[package.dependencies]
+httpx = ">=0.27"
+pydantic = ">=2.9"
 
 [[package]]
 name = "omegaconf"
@@ -8144,9 +8195,11 @@ files = [
 cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and python_version < \"3.14\"", "cffi (>=2.0.0b) ; platform_python_implementation != \"PyPy\" and python_version >= \"3.14\""]
 
 [extras]
-all-builtins = ["elevenlabs", "google-api-python-client", "google-auth", "httpx", "langchain-community", "openai", "sqlite-vec", "websockets"]
+all-builtins = ["elevenlabs", "google-api-python-client", "google-auth", "httpx", "langchain-community", "langchain-moonshot", "langchain-ollama", "openai", "sqlite-vec", "websockets"]
 email = ["google-api-python-client", "google-auth"]
 memory = ["sqlite-vec"]
+moonshot = ["langchain-moonshot"]
+ollama = ["langchain-ollama"]
 researcher = ["httpx", "websockets"]
 voice = ["elevenlabs", "openai"]
 web = ["langchain-community"]
@@ -8154,4 +8207,4 @@ web = ["langchain-community"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "89f8a609f80ee4a6954ec82f9de1b968b3d37f9a23aa6d9c55b9efda50360d7b"
+content-hash = "c0ecc7ab25747a119d4a2d8fccfadceeadf4bac60b4ef0787ee7035f3082aa70"

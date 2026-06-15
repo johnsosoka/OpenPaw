@@ -525,10 +525,10 @@ providers:
     api_key: ${ANTHROPIC_API_KEY}
   openai:
     api_key: ${OPENAI_API_KEY}
-  moonshot:
-    type: openai                          # Uses OpenAI-compatible API
+  moonshot:                                # Native Kimi via langchain-moonshot
     api_key: ${MOONSHOT_API_KEY}
-    base_url: https://api.moonshot.ai/v1
+  ollama:                                  # Local models via Ollama server
+    base_url: http://localhost:11434
 ```
 
 With the catalog defined, individual workspaces reference providers by name using a simple `provider:model` shorthand:
@@ -536,14 +536,14 @@ With the catalog defined, individual workspaces reference providers by name usin
 ```yaml
 # agent.yaml (workspace)
 model: moonshot:kimi-k2.5
-temperature: 0.6
+thinking: false       # native top-level field (auto-sets temperature to 0.6)
 ```
 
-When the workspace starts, the framework resolves "moonshot" against the catalog, retrieves the API key and base URL, and passes them to the model — no duplication required. Adding a new workspace that uses the same provider takes one line instead of five.
+When the workspace starts, the framework resolves "moonshot" against the catalog, retrieves the API key, and instantiates `ChatMoonshot` — no duplication required. Adding a new workspace that uses the same provider takes one line instead of five.
 
 The catalog also powers the `/model` command. When you switch models at runtime with `/model moonshot:kimi-k2.5`, the framework resolves the provider name through the catalog and applies the correct connection details automatically.
 
-The provider catalog supports all connection types that OpenPaw understands: Anthropic, OpenAI, xAI (Grok), Fireworks.ai (DeepSeek, Llama, Qwen), AWS Bedrock, and any OpenAI-compatible API endpoint. For Bedrock, there is no API key field — the framework uses your configured AWS credentials instead. The catalog handles that detail automatically based on the provider type.
+The provider catalog supports all connection types that OpenPaw understands: Anthropic, OpenAI, xAI (Grok), Fireworks.ai (DeepSeek, Llama, Qwen), AWS Bedrock, Moonshot (Kimi), Ollama (local), and any OpenAI-compatible API endpoint. For Bedrock, there is no API key field — the framework uses your configured AWS credentials instead. For Ollama, there is no API key field at all. The catalog handles those details automatically based on the provider type.
 
 See [Configuration](configuration.md) for the full provider catalog reference, all supported provider types, and AWS Bedrock configuration.
 

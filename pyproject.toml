@@ -1,6 +1,6 @@
 [project]
 name = "openpaw-ai"
-version = "0.4.2"
+version = "0.4.3"
 description = "OpenPaw - Multi-Channel AI Agent Framework with LangGraph"
 authors = [
     {name = "John Sosoka"}
@@ -75,6 +75,12 @@ email = [
     "google-auth (>=2.0.0)",              # Google service account auth
     "google-api-python-client (>=2.0.0)", # Gmail API client
 ]
+moonshot = [
+    "langchain-moonshot (>=0.1.0,<1.0.0)",  # Native Kimi (K2.5 etc.) via Moonshot API
+]
+ollama = [
+    "langchain-ollama (>=1.0.1,<2.0.0)",    # Local models via Ollama server
+]
 all-builtins = [
     "openai (>=1.0.0)",
     "elevenlabs (>=1.0.0)",
@@ -84,6 +90,8 @@ all-builtins = [
     "httpx (>=0.27.0)",
     "google-auth (>=2.0.0)",
     "google-api-python-client (>=2.0.0)",
+    "langchain-moonshot (>=0.1.0,<1.0.0)",
+    "langchain-ollama (>=1.0.1,<2.0.0)",
 ]
 
 
@@ -121,7 +129,7 @@ warn_unused_ignores = false
 
 [tool.poetry]
 name = "openpaw-ai"
-version = "0.4.2"
+version = "0.4.3"
 description = "OpenPaw - Multi-Channel AI Agent Framework with LangGraph"
 authors = ["John Sosoka"]
 packages = [{include = "openpaw"}]
