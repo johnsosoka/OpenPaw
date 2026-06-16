@@ -81,6 +81,9 @@ moonshot = [
 ollama = [
     "langchain-ollama (>=1.0.1,<2.0.0)",    # Local models via Ollama server
 ]
+mcp = [
+    "langchain-mcp-adapters (>=0.3.0,<1.0.0)",  # MCP server adapter for LangChain tools
+]
 all-builtins = [
     "openai (>=1.0.0)",
     "elevenlabs (>=1.0.0)",
@@ -92,6 +95,7 @@ all-builtins = [
     "google-api-python-client (>=2.0.0)",
     "langchain-moonshot (>=0.1.0,<1.0.0)",
     "langchain-ollama (>=1.0.1,<2.0.0)",
+    "langchain-mcp-adapters (>=0.3.0,<1.0.0)",
 ]
 
 
@@ -138,3 +142,6 @@ include = ["CHANGELOG.md"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: marks tests as integration tests (run against real subprocesses/servers)",
+]

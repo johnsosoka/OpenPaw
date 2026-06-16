@@ -37,6 +37,7 @@ from openpaw.workspace.profile_loader import load_spawn_profiles
 from openpaw.workspace.profile_resolver import SpawnProfileResolver
 from openpaw.workspace.roster import TeamRosterBuilder
 from openpaw.workspace.task_service import TaskMaintenanceService
+from openpaw.runtime.mcp.manager import MCPManager
 from openpaw.workspace.tool_loader import load_workspace_tools  # noqa: F401
 
 
@@ -118,6 +119,11 @@ class WorkspaceRunner:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db_conn: aiosqlite.Connection | None = None
         self._checkpointer: Any | None = None
+
+        # MCP manager (config-only at this point; I/O happens in start())
+        self._mcp_manager: MCPManager | None = None
+        if self._workspace.config and self._workspace.config.mcp.enabled:
+            self._mcp_manager = MCPManager(self._workspace.config.mcp, workspace_name)
 
         # Session manager
         self._session_manager = SessionManager(self._workspace.path)
@@ -461,6 +467,29 @@ class WorkspaceRunner:
         await self._checkpointer.setup()
         self._agent_runner.update_checkpointer(self._checkpointer)
         self.logger.info(f"Initialized SQLite checkpointer: {self._db_path}")
+
+        # MCP: connect servers and inject tools into the agent.
+        if self._mcp_manager is not None:
+            try:
+                await self._mcp_manager.connect()
+                mcp_tools = self._mcp_manager.get_tools()
+                if mcp_tools:
+                    # Register with the factory FIRST so any later rebuild
+                    # (e.g. connectors removing search_conversations) keeps MCP tools.
+                    self._agent_factory.set_mcp_tools(mcp_tools)
+                    current = list(self._agent_runner.additional_tools)
+                    self._agent_runner.update_tools(current + mcp_tools)
+                    self.logger.info(
+                        f"[{self.workspace_name}] Injected {len(mcp_tools)} MCP tools into agent."
+                    )
+            except Exception as exc:
+                self.logger.exception(f"[{self.workspace_name}] MCP startup failed: {exc}")
+                # Close the db connection opened earlier this start() so we don't leak it.
+                if self._db_conn is not None:
+                    await self._db_conn.close()
+                    self._db_conn = None
+                    self._checkpointer = None
+                raise
 
         # Prune orphaned checkpoint data at startup
         retention_days = (
@@ -937,6 +966,14 @@ class WorkspaceRunner:
         if self._vector_store:
             await self._vector_store.close()
             self.logger.info("Closed vector store connection")
+
+        # Close MCP manager before DB
+        if self._mcp_manager is not None:
+            try:
+                await self._mcp_manager.close()
+                self.logger.info("Closed MCP manager")
+            except Exception as exc:
+                self.logger.warning(f"[{self.workspace_name}] MCP shutdown error: {exc}")
 
         # Close database
         if self._db_conn:

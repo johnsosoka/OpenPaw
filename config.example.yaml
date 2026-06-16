@@ -348,3 +348,5 @@ builtins:
 # workspace_tools:
 #   allow: []                     # Empty = allow all tools in tools/ directory
 #   deny: []                      # Tool function names to exclude
+
+# MCP server connections are per-workspace (not global) — see the mcp: block in agent.yaml.

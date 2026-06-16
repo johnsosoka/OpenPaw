@@ -30,5 +30,31 @@ queue:
   mode: collect
   debounce_ms: 1000
 
+# MCP (Model Context Protocol) server connections — per-workspace only, not global.
+# Uncomment the block below to activate. Requires the mcp extra:
+#   pip install 'openpaw-ai[mcp]'
+# mcp:
+#   enabled: true                     # master toggle; per-server enabled: field also available
+#   servers:
+#     # HTTP (Streamable HTTP — preferred transport):
+#     - name: weather
+#       transport: http
+#       url: https://mcp.example.com/weather
+#       headers:
+#         Authorization: "Bearer ${MCP_WEATHER_TOKEN}"  # ${VAR} expands from environment
+#       # tool_prefix: weather_       # default = "{name}_" (e.g., weather_get_forecast)
+#       #                             # set to "" to disable prefixing
+#       # required: false             # true = abort workspace start on connection failure
+#       # allowed_tools: []           # non-empty = only expose these tool names (pre-prefix)
+#       # denied_tools: []            # exclude specific tools (applied after allowed_tools)
+#
+#     # stdio (local subprocess):
+#     - name: math
+#       transport: stdio
+#       command: python
+#       args: ["./mcp_servers/math.py"]
+#       env:
+#         PYTHONUNBUFFERED: "1"
+
 # Auto-reset conversation after this many minutes of inactivity
 session_ttl_minutes: 180

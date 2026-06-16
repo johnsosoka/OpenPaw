@@ -211,6 +211,19 @@ class AgentRunner:
         self._agent = self._build_agent()
         logger.info(f"Updated checkpointer for workspace: {self.workspace.name}")
 
+    def update_tools(self, extra_tools: list[Any]) -> None:
+        """Replace additional_tools and rebuild the agent graph.
+
+        Used to inject MCP-loaded tools after async connect().
+        Filesystem tools (always present) are unaffected; only the
+        'additional' bucket is replaced.
+        """
+        self.additional_tools = list(extra_tools)
+        self._agent = self._build_agent()
+        logger.info(
+            f"Updated additional tools ({len(extra_tools)}) for workspace: {self.workspace.name}"
+        )
+
     def update_model(
         self,
         model: str,

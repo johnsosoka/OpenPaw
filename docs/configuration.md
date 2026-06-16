@@ -233,6 +233,38 @@ See [builtins.md](builtins.md) for detailed builtin configuration.
 
 ---
 
+## MCP Servers (Per-Workspace)
+
+MCP (Model Context Protocol) server connections are configured per workspace in `agent.yaml` under the `mcp:` key. Each server connects independently and exposes its tools to the agent alongside builtins and workspace tools. Three transports are supported: `http` (Streamable HTTP — preferred), `sse`, and `stdio` (local subprocess). Install the extra before enabling: `pip install 'openpaw-ai[mcp]'`. See [mcp.md](mcp.md) for the full guide.
+
+```yaml
+mcp:
+  enabled: true
+  servers:
+    # Streamable HTTP server with a bearer-token header:
+    - name: weather
+      transport: http
+      url: https://mcp.example.com/weather
+      headers:
+        Authorization: "Bearer ${MCP_WEATHER_TOKEN}"
+      # tool_prefix: weather_   # default = "{name}_" (e.g., weather_get_forecast)
+      # required: false         # true = abort workspace start on connection failure
+      # allowed_tools: []       # non-empty = only expose these tool names (pre-prefix)
+      # denied_tools: []        # exclude specific tool names (applied after allowed_tools)
+
+    # Local subprocess server:
+    - name: math
+      transport: stdio
+      command: python
+      args: ["./mcp_servers/math.py"]
+      env:
+        PYTHONUNBUFFERED: "1"
+```
+
+MCP is per-workspace only — there is no global `mcp:` block in `config.yaml`.
+
+---
+
 ## Workspace Configuration
 
 Per-workspace configuration (`agent.yaml`) overrides global defaults for a specific agent.

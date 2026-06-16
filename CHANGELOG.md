@@ -9,11 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **First-class MCP (Model Context Protocol) server support** via [langchain-mcp-adapters](https://reference.langchain.com/python/langchain-mcp-adapters/). Per-workspace `mcp:` configuration block supports multiple servers per workspace and three transports: `http` (Streamable HTTP — preferred), `sse`, and `stdio` (local subprocess). MCP tools are exposed to the agent alongside builtins, workspace tools, and filesystem tools — they flow through the existing approval middleware and tool-timeout machinery unchanged. Install with `pip install 'openpaw-ai[mcp]'`.
+- **`MCPServerConfig` / `WorkspaceMCPConfig`** Pydantic models in `openpaw/core/config/models/mcp.py`. Transport-specific validation rejects mismatched fields at config-load time (e.g. `command:` on an `http` server, `url:` on a `stdio` server). Duplicate server names within a workspace fail loudly. `${ENV_VAR}` expansion works in `headers`/`env` via the existing loader pipeline.
+- **`MCPManager`** in `openpaw/runtime/mcp/manager.py` wraps `MultiServerMCPClient`. Connects each configured server independently, applies per-server tool prefixing (default `{server.name}_`, opt out with `tool_prefix: ""`) and allow/deny filters, and honors a per-server `required:` flag — non-required server failures log a warning and skip; required failures abort workspace start. Idempotent `connect()` and clean `close()`.
+- **`AgentRunner.update_tools()`** — surgical agent-graph rebuild that mirrors the existing `update_checkpointer()` pattern, used by `WorkspaceRunner.start()` to inject MCP-loaded tools after the async checkpointer is ready.
+- New `mcp` extra in `pyproject.toml` pulling `langchain-mcp-adapters >=0.3.0,<1.0.0`. Also added to `all-builtins`. Runtime guard raises an actionable `RuntimeError` with the install hint if MCP is enabled in config but the extra is missing.
+- Example `mcp:` block in `example_agent_workspaces/assistant/agent.yaml` covering both an HTTP server with a bearer-token header and a stdio subprocess server. Pointer comment in `config.example.yaml` clarifies MCP is per-workspace, not global.
+- 39 unit tests (`tests/test_mcp_config.py`, `tests/test_mcp_manager.py`) plus 12 integration tests (`tests/integration/test_mcp_integration.py`) driving a vendored FastMCP echo server in `tests/fixtures/mcp/` over both stdio and streamable-http. Integration tests cover discovery, invocation, allow/deny filtering, prefix opt-out, multi-server fan-out, and non-required server skip-on-failure.
+- 6 regression tests in `tests/test_agent_factory_mcp.py` that lock the contract that `AgentFactory` retains MCP tools across rebuilds (see Fixed). Full suite: 3142 passed.
+
 ### Changed
 
 ### Removed
 
 ### Fixed
+
+- **`AgentFactory.create_agent` was silently dropping MCP tools on rebuild.** Connectors that rebuild the agent after startup (`connect_memory_search_tool` removing `search_conversations` when the vector store is uninitialized; `connect_channel_history_tool` removing `browse_channel_history` when no history-capable channels are connected) call `agent_factory.create_agent()` to construct a fresh `AgentRunner`. The factory's `all_tools` list was `builtin_tools + workspace_tools` only — MCP tools that had been injected directly onto the runner via `update_tools()` were not stored on the factory and were therefore lost. Discovered during live smoke-test on a Telegram workspace: model could see ~56 builtins but never the 29 MCP tools, falling back to `shell` with the MCP tool name as a string argument. Fixed by storing MCP tools on the factory via a new `set_mcp_tools()` method and including them in subsequent rebuilds; `WorkspaceRunner.start()` now calls `set_mcp_tools()` before the connectors run. (`create_stateless_agent` is intentionally unchanged — cron/heartbeat agents remain MCP-free, tracked as future work.)
 
 ## [0.4.3] - 2026-06-13
 
@@ -179,7 +190,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Various race conditions in approval gate resolution and sub-agent cancellation.
 - Path traversal protection hardened across filesystem tools and inbound processors.
 
-[Unreleased]: https://github.com/johnsosoka/OpenPaw/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/johnsosoka/OpenPaw/compare/v0.4.3...HEAD
 [0.4.2]: https://github.com/johnsosoka/OpenPaw/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/johnsosoka/openpaw/releases/tag/v0.4.1
 [0.4.0]: https://github.com/johnsosoka/openpaw/releases/tag/v0.4.0

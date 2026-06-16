@@ -125,6 +125,7 @@ Runtime services that coordinate across a workspace's lifetime.
 - **`session/manager.py`** — `SessionManager`: maps session keys to active conversation IDs, persisted to `.openpaw/sessions.json`
 - **`session/archiver.py`** — `ConversationArchiver`: exports LangGraph checkpoint state to `memory/conversations/` as `conv_*.md` + `conv_*.json` pairs
 - **`subagent/runner.py`** — `SubAgentRunner`: manages spawned agents with a semaphore, filtered tools, and session log writing
+- **`mcp/manager.py`** — `MCPManager`: per-workspace MCP (Model Context Protocol) client. Connects to one or more remote (Streamable HTTP / SSE) or local (stdio) MCP servers, fetches their tools, applies per-server prefix and allow/deny filters, and exposes the result to `WorkspaceRunner.start()` for injection into the agent's toolbelt. Honors a per-server `required:` flag — non-required failures log a warning and skip; required failures abort workspace start.
 
 ### `openpaw/stores/`
 
@@ -283,6 +284,10 @@ See [Built-ins](builtins.md) for the full builtin reference and existing impleme
 ### Adding workspace tools
 
 Drop a Python file containing `@tool`-decorated functions into a workspace's `tools/` directory. `ToolLoader` discovers and imports them at startup, merging them into the agent's tool set alongside framework builtins. List any additional packages in `tools/requirements.txt` — the loader installs missing dependencies automatically before importing. Files prefixed with `_` are skipped. Each workspace can carry a completely different tool set, enabling purpose-built agents without any framework changes.
+
+### Connecting MCP servers
+
+Declare one or more MCP (Model Context Protocol) servers under the `mcp:` block of a workspace's `agent.yaml`. The framework connects to each server during `WorkspaceRunner.start()` via `MCPManager`, fetches the server's tool list, applies per-server namespacing and filtering, and injects the resulting `BaseTool` instances into the agent alongside builtins and workspace tools. Supports remote transports (`http`, `sse`) and local subprocess (`stdio`). See [MCP Servers](mcp.md) for the configuration reference and transport details.
 
 ### Adding a command
 

@@ -9,6 +9,7 @@ from openpaw.core.config.models.builtin import WorkspaceBuiltinsConfig
 from openpaw.core.config.models.channel import WorkspaceChannelConfig
 from openpaw.core.config.models.cron import HeartbeatConfig
 from openpaw.core.config.models.lifecycle import LifecycleConfig, StatusReminderConfig
+from openpaw.core.config.models.mcp import WorkspaceMCPConfig
 from openpaw.core.config.models.memory import AutoCompactConfig, MemoryConfig
 from openpaw.core.config.models.security import ApprovalGatesConfig, ToolTimeoutsConfig
 from openpaw.core.config.models.status_updates import StatusUpdatesConfig
@@ -220,6 +221,10 @@ class WorkspaceConfig(BaseModel):
     status_updates: StatusUpdatesConfig = Field(
         default_factory=StatusUpdatesConfig,
         description="Status updates middleware configuration",
+    )
+    mcp: WorkspaceMCPConfig = Field(
+        default_factory=WorkspaceMCPConfig,
+        description="MCP (Model Context Protocol) server bindings for this workspace.",
     )
 
     @field_validator("session_ttl_minutes")
