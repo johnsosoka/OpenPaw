@@ -11,7 +11,10 @@ class MCPServerConfig(BaseModel):
 
     name: str = Field(description="Unique server name within the workspace (used for tool prefix and logs).")
     transport: Literal["http", "sse", "stdio"] = Field(
-        description="Transport type. 'http' = Streamable HTTP (preferred), 'sse' = legacy SSE, 'stdio' = local subprocess."
+        description=(
+            "Transport type. 'http' = Streamable HTTP (preferred), "
+            "'sse' = legacy SSE, 'stdio' = local subprocess."
+        )
     )
     enabled: bool = Field(default=True, description="Per-server toggle.")
     required: bool = Field(
@@ -53,7 +56,7 @@ class MCPServerConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_transport_fields(self) -> "MCPServerConfig":
+    def validate_transport_fields(self) -> MCPServerConfig:
         if self.transport in ("http", "sse"):
             if not self.url:
                 raise ValueError(
@@ -94,7 +97,7 @@ class WorkspaceMCPConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_unique_names(self) -> "WorkspaceMCPConfig":
+    def validate_unique_names(self) -> WorkspaceMCPConfig:
         names = [s.name for s in self.servers]
         if len(names) != len(set(names)):
             dupes = {n for n in names if names.count(n) > 1}

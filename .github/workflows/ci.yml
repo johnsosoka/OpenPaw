@@ -98,7 +98,7 @@ jobs:
 
       - name: Install dependencies
         if: needs.changes.outputs.code == 'true'
-        run: poetry install
+        run: poetry install -E mcp
 
       - name: Run tests
         if: needs.changes.outputs.code == 'true'

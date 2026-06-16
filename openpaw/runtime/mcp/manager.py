@@ -53,12 +53,7 @@ class MCPManager:
             return
 
         try:
-            from langchain_mcp_adapters.client import (
-                MultiServerMCPClient,
-                SSEConnection,
-                StdioConnection,
-                StreamableHttpConnection,
-            )
+            from langchain_mcp_adapters.client import MultiServerMCPClient
         except ImportError as exc:
             raise RuntimeError(_MCP_INSTALL_HINT) from exc
 
@@ -114,12 +109,13 @@ class MCPManager:
     @staticmethod
     def _server_to_connection(
         server: MCPServerConfig,
-    ) -> "StdioConnection | SSEConnection | StreamableHttpConnection":
+    ) -> StdioConnection | SSEConnection | StreamableHttpConnection:
         """Translate MCPServerConfig → a typed connection object for MultiServerMCPClient.
 
-        The langchain-mcp-adapters import is deferred so that importing MCPManager does not
-        require the 'mcp' extra to be installed. This method is only called from
-        connect(), where the import has already been validated.
+        Only called from connect(), which has already validated that
+        langchain-mcp-adapters is installed. Annotation references are
+        TYPE_CHECKING-only — no runtime import needed thanks to
+        `from __future__ import annotations`.
 
         Transport mapping:
             "http"  → StreamableHttpConnection  (transport="streamable_http"; "http" is a
@@ -127,8 +123,6 @@ class MCPManager:
             "sse"   → SSEConnection
             "stdio" → StdioConnection
         """
-        from langchain_mcp_adapters.client import SSEConnection, StdioConnection, StreamableHttpConnection
-
         if server.transport == "http":
             # Validator guarantees url is non-None for http transport.
             conn: StreamableHttpConnection = {"transport": "streamable_http", "url": server.url}  # type: ignore[typeddict-item]

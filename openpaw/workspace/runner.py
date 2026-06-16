@@ -24,6 +24,7 @@ from openpaw.core.paths import CONVERSATIONS_DB, DOT_ENV, TEAM_DIR
 from openpaw.core.utils import resolve_user_name
 from openpaw.model.message import Message, MessageDirection
 from openpaw.model.spawn_profile import SpawnProfile
+from openpaw.runtime.mcp.manager import MCPManager
 from openpaw.runtime.queue.lane import LaneQueue, QueueItem, QueueMode
 from openpaw.runtime.queue.manager import QueueManager
 from openpaw.runtime.session.manager import SessionManager
@@ -37,7 +38,6 @@ from openpaw.workspace.profile_loader import load_spawn_profiles
 from openpaw.workspace.profile_resolver import SpawnProfileResolver
 from openpaw.workspace.roster import TeamRosterBuilder
 from openpaw.workspace.task_service import TaskMaintenanceService
-from openpaw.runtime.mcp.manager import MCPManager
 from openpaw.workspace.tool_loader import load_workspace_tools  # noqa: F401
 
 
