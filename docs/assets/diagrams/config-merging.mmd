@@ -1,0 +1,98 @@
+flowchart TD
+    GC["config.yaml\nGlobal Defaults"]
+    WC["agent.yaml\nWorkspace Overrides"]
+    EV["Environment Variables\n\${ANTHROPIC_API_KEY}, \${TELEGRAM_BOT_TOKEN}, ..."]
+
+    GC --> MERGE
+    WC --> MERGE
+    EV --> EXP
+
+    subgraph EXP["Variable Expansion"]
+        direction TB
+        RAW["Raw config value\n'\${MOONSHOT_API_KEY}'"]
+        RES["Resolved value\n'sk-abc123...'"]
+        RAW -->|"os.environ lookup"| RES
+    end
+
+    EXP --> MERGE
+
+    subgraph MERGE["Deep Merge — Effective Configuration"]
+        direction TB
+        M1["Global defaults apply first"]
+        M2["Workspace fields override globals"]
+        M3["Missing workspace fields inherit from global"]
+        M1 --> M2 --> M3
+    end
+
+    MERGE --> EC
+
+    subgraph EC["Effective Config"]
+        direction TB
+        ECM["model: moonshot:kimi-k2.5\ntemperature: 1.0\ntimezone: America/Denver"]
+        ECC["channel: telegram\nqueue: collect\ndebounce_ms: 1000"]
+        ECB["builtins: brave_search, cron\nheartbeat: enabled, interval: 30m"]
+    end
+
+    EC --> PR
+
+    subgraph PR["Provider Catalog Resolution"]
+        direction TB
+        MS["Workspace model string\n'moonshot:kimi-k2.5'"]
+        EX["Extract provider name\n'moonshot'"]
+        LU["Lookup in providers catalog"]
+
+        subgraph CAT["Catalog Entry: moonshot"]
+            direction TB
+            CT["type: openai"]
+            CAK["api_key: \${MOONSHOT_API_KEY} (resolved)"]
+            CBU["base_url: https://api.moonshot.ai/v1"]
+        end
+
+        RP["ResolvedProvider\nmodel_str: 'openai:kimi-k2.5'\ndisplay_str: 'moonshot:kimi-k2.5'\napi_key: 'sk-abc123...'"]
+
+        MS --> EX
+        EX --> LU
+        LU --> CAT
+        CAT --> RP
+    end
+
+    PR --> AG
+
+    subgraph AG["Agent Creation"]
+        direction TB
+        CC["create_chat_model(\n  'openai:kimi-k2.5',\n  api_key=...,\n  base_url=...\n)"]
+        LG["LangGraph ReAct Agent\nready for invocation"]
+        CC --> LG
+    end
+
+    style GC fill:#1e3a5f,stroke:#2e6aaf,color:#a8d8ff
+    style WC fill:#1e3a5f,stroke:#2e6aaf,color:#a8d8ff
+    style EV fill:#2d2d44,stroke:#6a6aaa,color:#e0e0ff
+
+    style EXP fill:#3b3b10,stroke:#8a8a1e,stroke-width:2px,color:#ffffa8
+    style RAW fill:#3b3b10,stroke:#8a8a1e,color:#ffffa8
+    style RES fill:#3b3b10,stroke:#8a8a1e,color:#ffffa8
+
+    style MERGE fill:#16213e,stroke:#0f3460,stroke-width:2px,color:#a8d8ff
+    style M1 fill:#16213e,stroke:#0f3460,color:#a8d8ff
+    style M2 fill:#16213e,stroke:#0f3460,color:#a8d8ff
+    style M3 fill:#16213e,stroke:#0f3460,color:#a8d8ff
+
+    style EC fill:#0d3b2e,stroke:#1a7a5e,stroke-width:2px,color:#a8ffda
+    style ECM fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+    style ECC fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+    style ECB fill:#0d3b2e,stroke:#1a7a5e,color:#a8ffda
+
+    style PR fill:#3b2a1e,stroke:#8a5a2e,stroke-width:2px,color:#ffd8a8
+    style MS fill:#3b2a1e,stroke:#8a5a2e,color:#ffd8a8
+    style EX fill:#3b2a1e,stroke:#8a5a2e,color:#ffd8a8
+    style LU fill:#3b2a1e,stroke:#8a5a2e,color:#ffd8a8
+    style CAT fill:#2e1e0d,stroke:#6a3a1a,stroke-width:1px,color:#ffd8a8
+    style CT fill:#2e1e0d,stroke:#6a3a1a,color:#ffd8a8
+    style CAK fill:#2e1e0d,stroke:#6a3a1a,color:#ffd8a8
+    style CBU fill:#2e1e0d,stroke:#6a3a1a,color:#ffd8a8
+    style RP fill:#3b2a1e,stroke:#8a5a2e,color:#ffd8a8
+
+    style AG fill:#3b1e3b,stroke:#8a2e8a,stroke-width:2px,color:#f0a8ff
+    style CC fill:#3b1e3b,stroke:#8a2e8a,color:#f0a8ff
+    style LG fill:#3b1e3b,stroke:#8a2e8a,color:#f0a8ff

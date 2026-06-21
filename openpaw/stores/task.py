@@ -1,0 +1,451 @@
+"""Task storage for managing long-running agent operations.
+
+This module handles persistence of task state, allowing agents to track
+asynchronous operations across heartbeat invocations and restarts.
+"""
+
+import logging
+import uuid
+from datetime import UTC, datetime
+from pathlib import Path
+from threading import Lock
+from typing import Any
+
+import yaml
+
+from openpaw.core.paths import TASKS_YAML
+from openpaw.model.task import Task, TaskPriority, TaskStatus
+
+logger = logging.getLogger(__name__)
+
+
+class TaskStore:
+    """Manages persistent storage of task state in data/TASKS.yaml.
+
+    Provides CRUD operations for task management with thread-safe file access.
+    Tasks are stored in YAML format at {workspace_path}/data/TASKS.yaml.
+
+    Example:
+        >>> store = TaskStore(Path("agent_workspaces/gilfoyle"))
+        >>> task = Task(
+        ...     id=str(uuid.uuid4()),
+        ...     type="research",
+        ...     status=TaskStatus.IN_PROGRESS,
+        ...     description="Market research for Q1 2026"
+        ... )
+        >>> store.create(task)
+        >>> tasks = store.list(status=TaskStatus.IN_PROGRESS)
+        >>> store.update(task.id, status=TaskStatus.COMPLETED)
+    """
+
+    VERSION = 1
+
+    def __init__(self, workspace_path: Path):
+        """Initialize the task store.
+
+        Args:
+            workspace_path: Path to the agent workspace root.
+        """
+        self.workspace_path = Path(workspace_path)
+        self.storage_file = self.workspace_path / str(TASKS_YAML)
+        self._lock = Lock()
+
+        # Ensure the data/ directory exists
+        self.storage_file.parent.mkdir(parents=True, exist_ok=True)
+
+        logger.info(f"TaskStore initialized: {self.storage_file}")
+
+    def _load_unlocked(self) -> dict[str, Any]:
+        """Load raw YAML data from storage. Caller must hold self._lock.
+
+        Returns:
+            Dictionary with 'version', 'last_updated', and 'tasks' keys.
+            Returns default structure if file doesn't exist.
+        """
+        if not self.storage_file.exists():
+            logger.debug(f"Storage file does not exist: {self.storage_file}")
+            return {
+                "version": self.VERSION,
+                "last_updated": datetime.now(UTC).isoformat(),
+                "tasks": []
+            }
+
+        try:
+            with self.storage_file.open("r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+
+            if not isinstance(data, dict):
+                logger.error(f"Invalid storage format (expected dict): {self.storage_file}")
+                return {
+                    "version": self.VERSION,
+                    "last_updated": datetime.now(UTC).isoformat(),
+                    "tasks": []
+                }
+
+            # Ensure required keys exist
+            if "tasks" not in data:
+                data["tasks"] = []
+            if "version" not in data:
+                data["version"] = self.VERSION
+
+            logger.debug(f"Loaded {len(data.get('tasks', []))} task(s) from storage")
+            return data
+
+        except yaml.YAMLError as e:
+            logger.error(f"Corrupted storage file {self.storage_file}: {e}")
+            return {
+                "version": self.VERSION,
+                "last_updated": datetime.now(UTC).isoformat(),
+                "tasks": []
+            }
+        except Exception as e:
+            logger.error(f"Unexpected error loading {self.storage_file}: {e}", exc_info=True)
+            return {
+                "version": self.VERSION,
+                "last_updated": datetime.now(UTC).isoformat(),
+                "tasks": []
+            }
+
+    def _load(self) -> dict[str, Any]:
+        """Load raw YAML data from storage (thread-safe).
+
+        Returns:
+            Dictionary with 'version', 'last_updated', and 'tasks' keys.
+            Returns default structure if file doesn't exist.
+        """
+        with self._lock:
+            return self._load_unlocked()
+
+    def _save_unlocked(self, data: dict[str, Any]) -> None:
+        """Persist YAML data to storage. Caller must hold self._lock.
+
+        Args:
+            data: Dictionary with version, last_updated, and tasks.
+        """
+        try:
+            # Update timestamp
+            data["last_updated"] = datetime.now(UTC).isoformat()
+
+            # Atomic write: write to temp file, then rename
+            temp_file = self.storage_file.with_suffix(".tmp")
+
+            with temp_file.open("w", encoding="utf-8") as f:
+                yaml.dump(
+                    data,
+                    f,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                    sort_keys=False,
+                    indent=2
+                )
+
+            # Atomic rename (POSIX guarantees atomicity)
+            temp_file.replace(self.storage_file)
+
+            logger.debug(f"Saved {len(data.get('tasks', []))} task(s) to storage")
+
+        except Exception as e:
+            logger.error(f"Failed to save tasks to {self.storage_file}: {e}", exc_info=True)
+            raise
+
+    def _save(self, data: dict[str, Any]) -> None:
+        """Persist YAML data to storage (thread-safe).
+
+        Args:
+            data: Dictionary with version, last_updated, and tasks.
+        """
+        with self._lock:
+            self._save_unlocked(data)
+
+    def create(self, task: Task) -> None:
+        """Create a new task and persist immediately.
+
+        Args:
+            task: Task instance to create.
+
+        Raises:
+            ValueError: If a task with the same ID already exists.
+        """
+        with self._lock:
+            data = self._load_unlocked()
+
+            # Check for duplicate ID
+            if any(t["id"] == task.id for t in data["tasks"]):
+                raise ValueError(f"Task with ID {task.id} already exists")
+
+            data["tasks"].append(task.to_dict())
+            self._save_unlocked(data)
+
+        logger.info(f"Created task: {task.id} ({task.type}, {task.status.value})")
+
+    def _resolve_task_id(self, tasks: list[dict[str, Any]], task_id: str) -> str | None:
+        """Resolve a task ID, supporting prefix matching as fallback.
+
+        Tries an exact match first (fast path). If no exact match is found,
+        falls back to prefix matching. Ambiguous prefixes (matching multiple
+        tasks) return None to avoid incorrect mutations.
+
+        Args:
+            tasks: List of task dicts from storage.
+            task_id: Full or prefix task ID.
+
+        Returns:
+            The resolved full task ID, or None if not found or ambiguous.
+        """
+        # Exact match (fast path)
+        for task_data in tasks:
+            if task_data["id"] == task_id:
+                return task_id
+
+        # Prefix match fallback
+        matches = [t["id"] for t in tasks if t["id"].startswith(task_id)]
+
+        if len(matches) == 1:
+            logger.info(f"Resolved task ID prefix '{task_id}' to '{matches[0]}'")
+            return str(matches[0])
+
+        if len(matches) > 1:
+            logger.warning(f"Ambiguous task ID prefix '{task_id}': matches {len(matches)} tasks")
+            return None
+
+        return None
+
+    def get(self, task_id: str) -> Task | None:
+        """Retrieve a single task by ID.
+
+        Supports full UUID or unambiguous prefix match.
+
+        Args:
+            task_id: Full or prefix task identifier.
+
+        Returns:
+            Task instance if found, None otherwise.
+        """
+        with self._lock:
+            data = self._load_unlocked()
+
+        resolved_id = self._resolve_task_id(data["tasks"], task_id)
+        if resolved_id is None:
+            return None
+
+        for task_data in data["tasks"]:
+            if task_data["id"] == resolved_id:
+                return Task.from_dict(task_data)
+
+        return None
+
+    def list(
+        self,
+        status: TaskStatus | None = None,
+        type: str | None = None,
+        priority: TaskPriority | None = None,
+    ) -> list[Task]:
+        """List tasks with optional filtering.
+
+        Args:
+            status: Filter by task status (None = all).
+            type: Filter by task type (None = all).
+            priority: Filter by priority level (None = all).
+
+        Returns:
+            List of Task instances matching filters.
+        """
+        with self._lock:
+            data = self._load_unlocked()
+
+        tasks = []
+
+        for task_data in data["tasks"]:
+            try:
+                task = Task.from_dict(task_data)
+
+                # Apply filters
+                if status is not None and task.status != status:
+                    continue
+                if type is not None and task.type != type:
+                    continue
+                if priority is not None and task.priority != priority:
+                    continue
+
+                tasks.append(task)
+            except Exception as e:
+                logger.error(f"Failed to parse task {task_data.get('id', 'unknown')}: {e}")
+                continue
+
+        return tasks
+
+    def update(self, task_id: str, **kwargs: Any) -> bool:
+        """Update an existing task's fields.
+
+        Args:
+            task_id: Unique task identifier.
+            **kwargs: Fields to update (status, notes, result_summary, etc.).
+
+        Returns:
+            True if task was found and updated, False otherwise.
+
+        Example:
+            >>> store.update(
+            ...     "task-123",
+            ...     status=TaskStatus.COMPLETED,
+            ...     result_summary="Research complete",
+            ...     completed_at=datetime.now(timezone.utc)
+            ... )
+        """
+        with self._lock:
+            data = self._load_unlocked()
+
+            resolved_id = self._resolve_task_id(data["tasks"], task_id)
+            if resolved_id is None:
+                logger.warning(f"Task not found for update: {task_id}")
+                return False
+
+            for i, task_data in enumerate(data["tasks"]):
+                if task_data["id"] == resolved_id:
+                    # Load existing task
+                    task = Task.from_dict(task_data)
+
+                    # Update fields
+                    for key, value in kwargs.items():
+                        if hasattr(task, key):
+                            setattr(task, key, value)
+                        else:
+                            logger.warning(f"Ignoring unknown field: {key}")
+
+                    # Replace in data
+                    data["tasks"][i] = task.to_dict()
+                    self._save_unlocked(data)
+
+                    logger.info(f"Updated task: {task_id}")
+                    return True
+
+        return False
+
+    def delete(self, task_id: str) -> bool:
+        """Delete a task by ID.
+
+        Args:
+            task_id: Unique task identifier.
+
+        Returns:
+            True if task was found and deleted, False otherwise.
+        """
+        with self._lock:
+            data = self._load_unlocked()
+
+            resolved_id = self._resolve_task_id(data["tasks"], task_id)
+            if resolved_id is None:
+                logger.warning(f"Task not found for deletion: {task_id}")
+                return False
+
+            data["tasks"] = [t for t in data["tasks"] if t["id"] != resolved_id]
+            self._save_unlocked(data)
+            logger.info(f"Deleted task: {task_id}")
+            return True
+
+    def cleanup_old_tasks(self, max_age_days: int = 3, stale_threshold_hours: int = 48) -> int:
+        """Remove completed tasks older than specified age and handle stale tasks.
+
+        This method performs two operations:
+        1. Auto-fails tasks stuck in pending/in_progress for longer than stale_threshold_hours
+        2. Removes terminal-status tasks (completed/failed/cancelled) older than max_age_days
+
+        Args:
+            max_age_days: Maximum age in days for completed/failed/cancelled tasks.
+            stale_threshold_hours: Hours before pending/in_progress tasks are auto-failed.
+
+        Returns:
+            Number of tasks removed (does not count stale tasks transitioned to failed).
+        """
+        with self._lock:
+            data = self._load_unlocked()
+            now = datetime.now(UTC)
+            stale_cutoff = now.timestamp() - (stale_threshold_hours * 3600)
+            age_cutoff = now.timestamp() - (max_age_days * 86400)
+
+            initial_count = len(data["tasks"])
+            stale_count = 0
+
+            # First pass: detect and transition stale tasks to failed
+            for task_data in data["tasks"]:
+                status = task_data.get("status")
+                if status in ["pending", "in_progress"]:
+                    # Check task age using created_at
+                    created_at_str = task_data.get("created_at")
+                    if created_at_str:
+                        created_at = datetime.fromisoformat(created_at_str).timestamp()
+                        if created_at < stale_cutoff:
+                            # Mark as failed with auto-transition note
+                            task_data["status"] = "failed"
+                            task_data["completed_at"] = now.isoformat()
+                            notes = task_data.get("notes", "")
+                            auto_note = f"[auto] Marked failed: stale for >{stale_threshold_hours} hours"
+                            task_data["notes"] = f"{notes}\n{auto_note}".strip()
+                            stale_count += 1
+
+            if stale_count > 0:
+                logger.info(f"Auto-failed {stale_count} stale task(s) (older than {stale_threshold_hours} hours)")
+
+            # Second pass: remove old terminal-status tasks
+            # Keep tasks that are:
+            # 1. Not completed/failed/cancelled, OR
+            # 2. Completed/failed/cancelled recently (within max_age_days)
+            data["tasks"] = [
+                t for t in data["tasks"]
+                if (
+                    t["status"] not in ["completed", "failed", "cancelled"]
+                    or (
+                        # Fall back to created_at if completed_at is missing
+                        (timestamp_str := t.get("completed_at") or t.get("created_at"))
+                        is not None
+                        and datetime.fromisoformat(timestamp_str).timestamp() >= age_cutoff
+                    )
+                )
+            ]
+
+            removed = initial_count - len(data["tasks"])
+
+            if removed > 0 or stale_count > 0:
+                self._save_unlocked(data)
+                if removed > 0:
+                    logger.info(f"Cleaned up {removed} old task(s) (older than {max_age_days} days)")
+
+        return removed
+
+
+def create_task(
+    type: str,
+    description: str,
+    status: TaskStatus = TaskStatus.PENDING,
+    priority: TaskPriority = TaskPriority.NORMAL,
+    **kwargs: Any,
+) -> Task:
+    """Factory function for creating a new task with auto-generated ID.
+
+    Args:
+        type: Task type (research, deployment, batch, etc.).
+        description: Human-readable task description.
+        status: Initial task status (default: pending).
+        priority: Task priority level (default: normal).
+        **kwargs: Additional task fields (expected_duration_minutes, metadata, etc.).
+
+    Returns:
+        Task instance with unique ID.
+
+    Example:
+        >>> task = create_task(
+        ...     type="research",
+        ...     description="Market analysis for Q1 2026",
+        ...     status=TaskStatus.IN_PROGRESS,
+        ...     expected_duration_minutes=20,
+        ...     metadata={"tool": "gpt_researcher"}
+        ... )
+    """
+    return Task(
+        id=str(uuid.uuid4()),
+        type=type,
+        description=description,
+        status=status,
+        priority=priority,
+        **kwargs,
+    )

@@ -1,0 +1,84 @@
+sequenceDiagram
+    %% ─────────────────────────────────────────────
+    %% COLLECT MODE
+    %% ─────────────────────────────────────────────
+    rect rgb(30, 50, 80)
+        note over User,Agent: COLLECT MODE — Agent finishes current work, then processes new message
+        User->>Queue: Message A
+        Queue->>Agent: Dispatch Message A
+        activate Agent
+        Agent->>Agent: Tool call 1
+        User->>Queue: Message B arrives
+        Queue-->>Queue: Buffer Message B (debounce)
+        Agent->>Agent: Tool call 2
+        Agent->>Agent: Tool call 3
+        Agent->>User: Response to A
+        deactivate Agent
+        Queue->>Agent: Dispatch Message B
+        activate Agent
+        Agent->>Agent: Tool calls...
+        Agent->>User: Response to B
+        deactivate Agent
+    end
+
+    %% ─────────────────────────────────────────────
+    %% STEER MODE
+    %% ─────────────────────────────────────────────
+    rect rgb(30, 70, 50)
+        note over User,Agent: STEER MODE — New message detected at tool boundary, agent redirects
+        User->>Queue: Message A
+        Queue->>Agent: Dispatch Message A
+        activate Agent
+        Agent->>Agent: Tool call 1
+        User->>Queue: Message B (steer flagged)
+        Queue-->>Queue: Mark pending
+        Agent->>Agent: Tool call 2 — middleware detects pending
+        note right of Agent: Remaining tools skipped\n[Skipped: redirecting]
+        Agent->>User: Partial / redirect response
+        deactivate Agent
+        Queue->>Agent: Dispatch Message B (injected)
+        activate Agent
+        Agent->>Agent: Tool calls for B...
+        Agent->>User: Response to B
+        deactivate Agent
+    end
+
+    %% ─────────────────────────────────────────────
+    %% INTERRUPT MODE
+    %% ─────────────────────────────────────────────
+    rect rgb(80, 30, 30)
+        note over User,Agent: INTERRUPT MODE — Agent aborts immediately, processes new message
+        User->>Queue: Message A
+        Queue->>Agent: Dispatch Message A
+        activate Agent
+        Agent->>Agent: Tool call 1
+        User->>Queue: Message B (interrupt signal)
+        Queue-->>Agent: InterruptSignalError raised
+        note right of Agent: Current run discarded\nResponse for A is lost
+        deactivate Agent
+        Queue->>Agent: Dispatch Message B
+        activate Agent
+        Agent->>Agent: Tool calls for B...
+        Agent->>User: Response to B
+        deactivate Agent
+    end
+
+    %% ─────────────────────────────────────────────
+    %% FOLLOWUP MODE
+    %% ─────────────────────────────────────────────
+    rect rgb(60, 40, 80)
+        note over User,Agent: FOLLOWUP MODE - Agent self-continues, messages chain sequentially
+        User->>Queue: Message A
+        Queue->>Agent: Dispatch Message A
+        activate Agent
+        Agent->>Agent: Tool calls...
+        Agent->>Agent: request_followup() — schedules re-invocation
+        Agent->>User: Partial response / progress update
+        deactivate Agent
+        Queue->>Agent: Followup invocation (depth N+1)
+        activate Agent
+        Agent->>Agent: Tool calls continue...
+        Agent->>User: Final response
+        deactivate Agent
+        note over Queue,Agent: User messages arriving during followup\nbuffer normally and process after chain completes
+    end

@@ -1,0 +1,350 @@
+# OpenPaw Global Configuration
+# Copy to config.yaml and customize. Per-workspace overrides go in agent.yaml.
+
+# Path to agent workspaces directory
+workspaces_path: agent_workspaces
+
+# Path to system-wide team profiles (shared across all workspaces)
+# team_profiles_path: team_profiles
+
+# Logging
+logging:
+  level: INFO
+  directory: logs
+  max_size_mb: 10
+  backup_count: 5
+  per_workspace: true
+
+# Message queue defaults (can be overridden per workspace via agent.yaml)
+queue:
+  mode: collect            # collect, steer, followup, interrupt
+  debounce_ms: 1000        # Wait this long after last message before processing
+  cap: 20                  # Max queued messages per session before drop policy fires
+  drop_policy: summarize   # overflow policy: old (drop oldest), new (drop newest), summarize
+
+# Lane concurrency (controls how many agent runs happen simultaneously per lane)
+lanes:
+  main_concurrency: 4      # User-facing message lanes
+  subagent_concurrency: 8  # Background sub-agent workers
+  cron_concurrency: 2      # Scheduled job runners
+
+# Default agent model — applies to all workspaces unless overridden in agent.yaml
+# Format: provider:model_id
+# Examples:
+#   anthropic:claude-sonnet-4-20250514
+#   openai:gpt-4o
+#   xai:grok-3-mini
+#   fireworks:accounts/fireworks/models/deepseek-v3p1
+#   bedrock_converse:moonshot.kimi-k2-thinking
+#   moonshot:kimi-k2.5                      # requires `pip install 'openpaw-ai[moonshot]'`
+#   ollama:llama3.1                         # requires `pip install 'openpaw-ai[ollama]'`
+agent:
+  model: anthropic:claude-sonnet-4-20250514
+  max_turns: 50
+  temperature: 0.7
+
+# Per-workspace model config (in agent.yaml) supports these additional fields:
+#
+# model:
+#   provider: anthropic
+#   model: claude-sonnet-4-20250514
+#   max_retries: 3        # Retry attempts on transient errors (504, 429, connection).
+#                         # Default: 3. Set to 0 or null to disable.
+#                         # OpenAI/Anthropic/xAI use native SDK retry (with logging).
+#                         # Fireworks wraps with LangChain .with_retry() (SDK retry is a no-op).
+#                         # Bedrock is excluded — boto3 manages its own retry strategy.
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Provider catalog — define provider connection details once, reference by name.
+# Workspaces use shorthand: model: "provider_name:model_id"
+# The /model command can switch between any configured provider.
+# ──────────────────────────────────────────────────────────────────────────────
+# providers:
+#   anthropic:
+#     api_key: ${ANTHROPIC_API_KEY}
+#   openai:
+#     api_key: ${OPENAI_API_KEY}
+#   moonshot:                         # Native Kimi via ChatMoonshot
+#     api_key: ${MOONSHOT_API_KEY}    # (install with: pip install 'openpaw-ai[moonshot]')
+#   ollama:                           # Local models via Ollama server
+#     base_url: http://localhost:11434  # (install with: pip install 'openpaw-ai[ollama]')
+#   xai:
+#     api_key: ${XAI_API_KEY}
+#   fireworks:
+#     api_key: ${FIREWORKS_API_KEY}
+#   bedrock:
+#     type: bedrock_converse
+#     region: us-east-1
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Builtins — tools and processors conditionally loaded based on API key
+# availability and installed packages. All sections below are commented out;
+# uncomment only what you need.
+# ──────────────────────────────────────────────────────────────────────────────
+builtins:
+  allow: []    # Empty = allow all available builtins
+  deny: []     # Deny specific builtins or groups: e.g., ["group:voice", "browser"]
+
+  # Web search via Brave API (requires BRAVE_API_KEY)
+  # brave_search:
+  #   enabled: true
+  #   config:
+  #     count: 5              # Number of search results to return
+
+  # Audio transcription for voice messages (requires OPENAI_API_KEY)
+  # whisper:
+  #   enabled: true
+  #   config:
+  #     model: whisper-1
+
+  # Text-to-speech for voice responses (requires ELEVENLABS_API_KEY)
+  # elevenlabs:
+  #   enabled: true
+  #   config:
+  #     voice_id: 21m00Tcm4TlvDq8ikWAM
+
+  # Async shell command execution (no API key required)
+  # shell:
+  #   enabled: true
+
+  # Agent self-scheduling — lets agents schedule their own follow-up tasks
+  # (no API key required; see "Dynamic Scheduling" in CLAUDE.md)
+  # cron:
+  #   enabled: true
+  #   config:
+  #     min_interval_seconds: 300   # Minimum recurring task interval (5 min default)
+  #     max_tasks: 50               # Maximum pending scheduled tasks per workspace
+
+  # Sub-agent spawning — agents can launch background workers for concurrent tasks
+  # (no API key required; see "Sub-Agent Spawning" in CLAUDE.md)
+  # spawn:
+  #   enabled: true
+  #   config:
+  #     max_concurrent: 8           # Maximum simultaneous sub-agents
+  #     default_progress_interval: 0  # Minutes between progress updates (0 = disabled)
+
+  # Email integration — send and receive email via Gmail service account
+  # (requires: poetry install --extras email)
+  # email:
+  #   enabled: true
+  #   config:
+  #     provider: gmail
+  #     service_account_file: config/service-account.json  # Relative to workspace root
+  #     delegated_user: agent@yourdomain.com               # Email to impersonate (domain-wide delegation)
+  #     allowed_recipients:                                 # Empty = block all sends (safe default)
+  #       - "*@yourdomain.com"
+  #       - "partner@external.com"
+  #     max_recipients: 10                                  # Max recipients per outbound message
+
+  # Browser automation via Playwright with accessibility tree navigation
+  # (requires: poetry add playwright && poetry run playwright install chromium)
+  # browser:
+  #   enabled: true
+  #   config:
+  #     headless: true
+  #     allowed_domains: []         # Empty = allow all; e.g., ["calendly.com", "*.google.com"]
+  #     blocked_domains: []         # Always denied, even if in allowed_domains
+  #     timeout_seconds: 30
+  #     persist_cookies: false      # Persist auth state across agent runs within a session
+  #     downloads_dir: downloads    # Relative to workspace root
+  #     screenshots_dir: screenshots
+
+  # Save all uploaded files to uploads/{YYYY-MM-DD}/ (no API key required)
+  file_persistence:
+    enabled: true
+    config:
+      max_file_size: 52428800     # 50 MB in bytes
+      clear_data_after_save: false
+
+  # PDF/DOCX/PPTX → markdown conversion (core dependency, no API key required)
+  docling:
+    enabled: true
+    config:
+      max_file_size: 52428800     # 50 MB in bytes
+      ocr_backend: auto           # auto, mac, easyocr, tesseract, rapidocr
+      ocr_languages: [en]
+      force_full_page_ocr: true   # Recommended for scanned documents
+      do_table_structure: true
+
+  # Conversation memory search via vector store (requires memory embedding config)
+  # memory_search:
+  #   enabled: true
+
+  # Acknowledge message receipt (no API key required)
+  # acknowledge:
+  #   enabled: true
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Approval gates — pause execution and require user confirmation before
+# running specified tools. Disabled by default. Per-workspace override in agent.yaml.
+# ──────────────────────────────────────────────────────────────────────────────
+# approval_gates:
+#   enabled: false
+#   timeout_seconds: 120          # Seconds to wait before applying default_action
+#   default_action: deny          # Action on timeout: "deny" or "approve"
+#   tools:
+#     overwrite_file:
+#       require_approval: true
+#       show_args: true           # Show tool arguments in the approval prompt
+#     shell_run:
+#       require_approval: true
+#       show_args: true
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tool timeouts — cap how long any individual tool call can run.
+# Defaults apply globally; per-tool overrides take precedence.
+# Per-workspace override in agent.yaml.
+# ──────────────────────────────────────────────────────────────────────────────
+# tool_timeouts:
+#   default_seconds: 120          # Applied to any tool without a specific override
+#   overrides:
+#     shell_run: 300              # Shell commands often need more time
+#     browser_navigate: 60
+#     brave_search: 30
+
+# ──────────────────────────────────────────────────────────────────────────────
+# The sections below are workspace-level settings. They can be placed here as
+# global defaults, but are typically configured per-workspace in agent.yaml.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Auto-compact — rotate to a fresh conversation when context window fills
+# auto_compact:
+#   enabled: false
+#   trigger: 0.8                  # Trigger at 80% context window utilization
+#   summary_model: null           # Model for summary generation (null = workspace model)
+
+# Lifecycle notifications — best-effort channel messages on workspace events
+# lifecycle:
+#   notify_startup: false         # Notify users when workspace starts
+#   notify_shutdown: true         # Notify users when workspace stops
+#   notify_auto_compact: true     # Notify users when auto-compact fires
+
+# Session TTL — auto-reset conversations after inactivity
+# session_ttl_minutes: 180          # Default: 3 hours (0 to disable)
+
+# Checkpoint pruning — remove old conversation data from conversations.db at startup
+# checkpoint_retention_days: 7     # Default: 7 days (0 to disable)
+
+# Status reminder middleware — reminds agents to use send_message() during long silent runs
+# (only active when send_message builtin is enabled)
+# status_reminder:
+#   enabled: true
+#   threshold: 5              # Tool-calling turns before first reminder
+#   max_reminders: 3          # Max reminders per agent run
+#   cooldown_turns: 1         # Min turns between consecutive reminders
+
+# Heartbeat — periodic proactive agent check-ins (workspace-level only, in agent.yaml)
+# heartbeat:
+#   enabled: false
+#   interval_minutes: 30          # How often the agent checks in
+#   active_hours: "09:00-17:00"   # Only run during this window (workspace timezone)
+#   suppress_ok: true             # Suppress messages when agent responds HEARTBEAT_OK
+#   max_output_tokens: 2000        # Cap output tokens per heartbeat run (default: uncapped)
+#   delivery: channel             # channel, agent, or both
+#   target_channel: telegram
+#   target_id: 123456789          # Preferred (channel-agnostic). Legacy: target_chat_id
+
+# Conversation memory (vector search) — requires embedding API key
+# memory:
+#   enabled: false
+#   embedding:
+#     provider: openai
+#     model: text-embedding-3-small
+#     api_key: ${OPENAI_API_KEY}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Per-workspace model config (typically in agent.yaml, not here)
+# Two equivalent formats:
+#   Combined:  model: "anthropic:claude-sonnet-4-20250514"
+#   Explicit:
+#     model:
+#       provider: anthropic
+#       model: claude-sonnet-4-20250514
+#       temperature: 0.5
+#       max_turns: 50
+#       max_output_tokens: 4096    # Cap output tokens for stateless agents (default: uncapped)
+#
+# AWS Bedrock:
+#   model:
+#     provider: bedrock_converse
+#     model: moonshot.kimi-k2-thinking
+#     region: us-east-1
+#
+# Moonshot (native ChatMoonshot — requires `pip install 'openpaw-ai[moonshot]'`):
+#   model:
+#     provider: moonshot
+#     model: kimi-k2.5
+#     api_key: ${MOONSHOT_API_KEY}
+#     thinking: false           # true = reasoning mode (auto-sets temperature=1.0)
+#                               # false = standard mode (auto-sets temperature=0.6)
+#
+# Ollama (local models — requires `pip install 'openpaw-ai[ollama]'`
+# and a running Ollama server):
+#   model:
+#     provider: ollama
+#     model: llama3.1           # any locally-pulled model name; tool-calling models
+#                               # include llama3.1, llama3-groq-tool-use, qwen2.5,
+#                               # mistral-nemo, gemma3:27b-instruct-q4_K_M
+#     base_url: http://localhost:11434
+#     num_ctx: 8192             # Ollama context window (optional)
+#     num_predict: 2048         # Max tokens to generate (optional)
+#     keep_alive: 5m            # How long the model stays loaded (optional)
+#
+# OpenAI-compatible (Together, Groq, etc. — custom base_url):
+#   model:
+#     provider: openai
+#     model: meta-llama/Llama-3-70b-chat-hf
+#     api_key: ${TOGETHER_API_KEY}
+#     base_url: https://api.together.xyz/v1
+#
+# Note: as of 0.4.3 the legacy pattern of pointing the 'openai' provider at
+# https://api.moonshot.ai/v1 with `extra_body.thinking` is no longer supported.
+# Use the native `moonshot` provider above instead.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Per-workspace channel settings (typically in agent.yaml, not here)
+# Single channel (backward compatible):
+# channel:
+#   type: telegram
+#   token: ${TELEGRAM_BOT_TOKEN}
+#   allowed_users:
+#     - 123456789
+#   allowed_groups: []
+#   allow_all: false              # Insecure — allow any user; use only for testing
+#   mention_required: false       # Require @mention in group chats
+#   triggers: []                  # Keyword triggers for group chat activation (OR with mention)
+#   context_messages: 25          # Messages fetched on group chat trigger (0-100, default: 25)
+#   channel_log:
+#     enabled: true               # Log all visible messages to JSONL (default: true)
+#     retention_days: 30          # Days before archival (default: 30)
+#   user_aliases:                 # Map user IDs to display names for multi-user workspaces
+#     123456789: "John"
+#     987654321: "Sarah"
+#
+# Multi-channel (same workspace, multiple platforms):
+# channels:
+#   - type: telegram
+#     token: ${TELEGRAM_BOT_TOKEN}
+#     allowed_users: [123456789]
+#   - type: discord
+#     token: ${DISCORD_BOT_TOKEN}
+#     allowed_users: [987654321]
+#     allowed_groups: [111222333]  # Guild IDs
+#     mention_required: true
+#     triggers: ["!ask", "hey bot"]
+#
+# Two channels of the same type (requires unique names):
+# channels:
+#   - name: telegram-personal
+#     type: telegram
+#     token: ${TELEGRAM_BOT_TOKEN_1}
+#     allowed_users: [123456789]
+#   - name: telegram-work
+#     type: telegram
+#     token: ${TELEGRAM_BOT_TOKEN_2}
+#     allowed_users: [987654321]
+
+# Per-workspace tool allow/deny (typically in agent.yaml, not here)
+# workspace_tools:
+#   allow: []                     # Empty = allow all tools in tools/ directory
+#   deny: []                      # Tool function names to exclude

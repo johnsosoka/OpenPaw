@@ -1,0 +1,345 @@
+"""Lifecycle management for WorkspaceRunner components."""
+
+import logging
+from collections.abc import Awaitable, Callable, Coroutine
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from openpaw.agent.session_logger import SessionLogger
+from openpaw.builtins.loader import BuiltinLoader
+from openpaw.channels.base import ChannelAdapter
+from openpaw.channels.factory import create_channel
+from openpaw.core.config import Config
+from openpaw.model.message import Message
+from openpaw.runtime.queue.manager import QueueManager
+from openpaw.runtime.scheduling.heartbeat import HeartbeatScheduler
+from openpaw.runtime.session.manager import SessionManager
+
+if TYPE_CHECKING:
+    from openpaw.core.config.models import WorkspaceConfig
+
+
+class LifecycleManager:
+    """Manages startup and shutdown of workspace components."""
+
+    def __init__(
+        self,
+        workspace_name: str,
+        workspace_path: Path,
+        workspace_config: "WorkspaceConfig | None",
+        merged_config: dict[str, Any],
+        config: Config,
+        queue_manager: QueueManager,
+        message_handler: Callable[[Message], Awaitable[None]],
+        queue_handler: Callable[[str, list[Any]], Coroutine[Any, Any, None]],
+        builtin_loader: BuiltinLoader,
+        workspace_timezone: str,
+        session_manager: SessionManager,
+        approval_handler: Callable[[str, bool], Coroutine[Any, Any, None]],
+        logger: logging.Logger,
+        result_callback: Callable[[str, str], Awaitable[None]] | None = None,
+    ):
+        """Initialize lifecycle manager.
+
+        Args:
+            workspace_name: Name of the workspace.
+            workspace_path: Path to workspace directory.
+            workspace_config: Workspace configuration object.
+            merged_config: Merged global + workspace config.
+            config: Global configuration.
+            queue_manager: Queue manager instance.
+            message_handler: Raw inbound message callback (from channel).
+            queue_handler: Batched message processing callback (after debounce).
+            builtin_loader: Builtin tool/processor loader.
+            workspace_timezone: Workspace timezone string.
+            session_manager: Session management.
+            approval_handler: Approval resolution callback.
+            logger: Logger instance.
+            result_callback: Optional callback for queue injection of scheduled results.
+        """
+        self._workspace_name = workspace_name
+        self._workspace_path = workspace_path
+        self._workspace_config = workspace_config
+        self._merged_config = merged_config
+        self._config = config
+        self._queue_manager = queue_manager
+        self._message_handler = message_handler
+        self._queue_handler = queue_handler
+        self._builtin_loader = builtin_loader
+        self._workspace_timezone = workspace_timezone
+        self._session_manager = session_manager
+        self._approval_handler = approval_handler
+        self._logger = logger
+        self._result_callback = result_callback
+
+        self._channels: dict[str, ChannelAdapter] = {}
+        self._cron_scheduler: Any = None
+        self._heartbeat_scheduler: HeartbeatScheduler | None = None
+        self._channel_logger: Any = None
+
+    async def setup_channels(self) -> dict[str, ChannelAdapter]:
+        """Initialize configured channels via factory.
+
+        Returns:
+            Dictionary of initialized channels keyed by channel name.
+
+        Raises:
+            ValueError: If channel configuration is invalid or names conflict.
+        """
+        channel_configs: list[dict[str, Any]] = self._merged_config.get("channels", [])
+        if not channel_configs:
+            raise ValueError(
+                f"Workspace '{self._workspace_name}' must define at least one channel in agent.yaml"
+            )
+
+        seen_names: set[str] = set()
+
+        for channel_config in channel_configs:
+            channel_type = channel_config.get("type", "telegram")
+
+            # Resolve unique channel name (explicit name or type)
+            channel_name = channel_config.get("name") or channel_type
+            if channel_name in seen_names:
+                raise ValueError(
+                    f"Workspace '{self._workspace_name}': duplicate channel name '{channel_name}'. "
+                    f"Use the 'name' field to distinguish channels of the same type."
+                )
+            seen_names.add(channel_name)
+
+            # Token required for bot-based channels; stdio does not need one
+            token = channel_config.get("token")
+            if channel_type in ("telegram", "discord") and not token:
+                raise ValueError(
+                    f"Workspace '{self._workspace_name}': channel '{channel_name}' must define a token"
+                )
+
+            channel = create_channel(
+                channel_type, channel_config, self._workspace_name, channel_name=channel_name
+            )
+            channel.on_message(self._message_handler)
+            self._channels[channel_name] = channel
+            await self._queue_manager.register_handler(channel_name, self._queue_handler)
+
+            # Log security mode
+            self._log_channel_security(channel_name, channel_config)
+
+        self._logger.info(
+            f"Initialized {len(self._channels)} channel(s) for workspace: {self._workspace_name}"
+        )
+
+        # Wire ChannelLogger if any channel has channel_log.enabled=true.
+        self._setup_channel_logger(channel_configs)
+
+        return self._channels
+
+    def _log_channel_security(self, channel_name: str, config: dict[str, Any]) -> None:
+        """Log security mode for a channel."""
+        allow_all = config.get("allow_all", False)
+        allowed_users = config.get("allowed_users", [])
+        allowed_groups = config.get("allowed_groups", [])
+        prefix = f"Workspace '{self._workspace_name}' [{channel_name}]"
+
+        if allow_all:
+            self._logger.warning(f"{prefix}: allow_all=true (insecure mode)")
+        elif allowed_users or allowed_groups:
+            self._logger.info(
+                f"{prefix}: Allowlist mode ({len(allowed_users)} users, {len(allowed_groups)} groups)"
+            )
+        else:
+            self._logger.warning(f"{prefix}: Empty allowlist - all requests will be denied")
+
+    def _setup_channel_logger(self, channel_configs: list[dict[str, Any]]) -> None:
+        """Wire a ChannelLogger if any channel has channel_log.enabled=true.
+
+        Creates a single ChannelLogger instance for the workspace and registers
+        its log_event method as the on_channel_event observer on each channel
+        that has logging enabled. Runs archive_old_logs() at startup to move
+        files beyond the retention window into the _archive/ directory.
+
+        Args:
+            channel_configs: List of raw channel config dicts from merged_config.
+        """
+        # Collect channels that have logging enabled and their retention settings.
+        log_enabled: dict[str, int] = {}
+        for channel_config in channel_configs:
+            channel_name = channel_config.get("name") or channel_config.get("type", "telegram")
+            log_cfg = channel_config.get("channel_log", {})
+            # Support both raw dict (from merged_config) and Pydantic model instances.
+            if isinstance(log_cfg, dict):
+                enabled = log_cfg.get("enabled", True)
+                retention_days = log_cfg.get("retention_days", 30)
+            else:
+                enabled = getattr(log_cfg, "enabled", False)
+                retention_days = getattr(log_cfg, "retention_days", 30)
+
+            if enabled:
+                log_enabled[channel_name] = int(retention_days)
+
+        if not log_enabled:
+            return
+
+        from openpaw.runtime.channel_logger import ChannelLogger
+
+        # Use the maximum retention_days across all logging-enabled channels.
+        max_retention = max(log_enabled.values())
+        self._channel_logger = ChannelLogger(
+            workspace_path=self._workspace_path,
+            timezone=self._workspace_timezone,
+            retention_days=max_retention,
+        )
+
+        # Register the observer on each channel that has logging enabled.
+        for channel_name in log_enabled:
+            if channel_name in self._channels:
+                self._channels[channel_name].on_channel_event(
+                    self._channel_logger.log_event
+                )
+
+        # Move old logs to _archive/ at startup.
+        archived = self._channel_logger.archive_old_logs()
+        if archived > 0:
+            self._logger.info(f"Archived {archived} old channel log file(s)")
+
+    async def start_channels(self) -> None:
+        """Start all configured channels."""
+        for name, channel in self._channels.items():
+            await channel.start()
+            self._logger.info(f"Started channel: {name}")
+
+        # Connect approval callback to channels
+        for channel in self._channels.values():
+            channel.on_approval(self._approval_handler)
+
+    async def stop_channels(self) -> None:
+        """Stop all configured channels."""
+        for name, channel in self._channels.items():
+            await channel.stop()
+            self._logger.info(f"Stopped channel: {name}")
+
+    async def setup_cron_scheduler(
+        self,
+        workspace_crons: list[Any],
+        agent_factory: Any,
+        token_logger: Any,
+    ) -> None:
+        """Initialize and start cron scheduler.
+
+        Args:
+            workspace_crons: List of cron job definitions.
+            agent_factory: Callable that creates agent instances.
+            token_logger: Token usage logger.
+        """
+        try:
+            from openpaw.runtime.scheduling.cron import CronScheduler
+
+            session_logger = SessionLogger(self._workspace_path, session_type="cron")
+            self._cron_scheduler = CronScheduler(
+                workspace_path=self._workspace_path,
+                agent_factory=agent_factory,
+                channels=self._channels,
+                token_logger=token_logger,
+                workspace_name=self._workspace_name,
+                timezone=self._workspace_timezone,
+                result_callback=self._result_callback,
+                session_logger=session_logger,
+            )
+
+            await self._cron_scheduler.start()
+            self._logger.info(f"Started cron scheduler with {len(workspace_crons)} jobs")
+
+            # Connect CronTool to live scheduler for dynamic task scheduling
+            self._connect_cron_tool_to_scheduler()
+            # Connect CronManager to live scheduler for persistent cron hot-reload
+            self._connect_cron_manager_to_scheduler()
+
+        except ImportError as e:
+            self._logger.warning(f"Cron scheduler not available: {e}")
+        except Exception as e:
+            self._logger.error(f"Failed to start cron scheduler: {e}", exc_info=True)
+
+    async def stop_cron_scheduler(self) -> None:
+        """Stop cron scheduler if running."""
+        if self._cron_scheduler:
+            await self._cron_scheduler.stop()
+            self._logger.info("Stopped cron scheduler")
+
+    async def setup_heartbeat_scheduler(
+        self,
+        agent_factory: Any,
+        token_logger: Any,
+    ) -> None:
+        """Initialize and start heartbeat scheduler if enabled.
+
+        Args:
+            agent_factory: Callable that creates agent instances.
+            token_logger: Token usage logger.
+        """
+        # Get heartbeat config from workspace only - no global fallback
+        if not self._workspace_config or not self._workspace_config.heartbeat:
+            return
+
+        heartbeat_config = self._workspace_config.heartbeat
+        if not heartbeat_config.enabled:
+            return
+
+        try:
+            session_logger = SessionLogger(self._workspace_path, session_type="heartbeat")
+            ack_tool = self._builtin_loader.get_tool_instance("acknowledge")
+            self._heartbeat_scheduler = HeartbeatScheduler(
+                workspace_name=self._workspace_name,
+                workspace_path=self._workspace_path,
+                agent_factory=agent_factory,
+                channels=self._channels,
+                config=heartbeat_config,
+                timezone=self._workspace_timezone,
+                token_logger=token_logger,
+                result_callback=self._result_callback,
+                session_logger=session_logger,
+                ack_tool=ack_tool,
+            )
+
+            await self._heartbeat_scheduler.start()
+            self._logger.info(
+                f"Started heartbeat scheduler (interval: {heartbeat_config.interval_minutes}min)"
+            )
+
+        except Exception as e:
+            self._logger.error(f"Failed to start heartbeat scheduler: {e}", exc_info=True)
+
+    async def stop_heartbeat_scheduler(self) -> None:
+        """Stop heartbeat scheduler if running."""
+        if self._heartbeat_scheduler:
+            await self._heartbeat_scheduler.stop()
+            self._logger.info("Stopped heartbeat scheduler")
+
+    def _connect_cron_tool_to_scheduler(self) -> None:
+        """Connect CronTool builtin to the live CronScheduler."""
+        try:
+            cron_tool = self._builtin_loader.get_tool_instance("cron")
+            if cron_tool:
+                cron_tool.set_scheduler(self._cron_scheduler)
+                self._logger.info("Connected CronTool to live scheduler")
+            else:
+                self._logger.debug("CronTool not loaded for this workspace")
+        except Exception as e:
+            self._logger.warning(f"Failed to connect CronTool to scheduler: {e}")
+
+    def _connect_cron_manager_to_scheduler(self) -> None:
+        """Connect CronManagerBuiltin to the live CronScheduler for hot-reload support."""
+        try:
+            cron_manager = self._builtin_loader.get_tool_instance("cron_manager")
+            if cron_manager:
+                cron_manager.set_scheduler(self._cron_scheduler)
+                self._logger.info("Connected CronManager to live scheduler")
+            else:
+                self._logger.debug("CronManager not loaded for this workspace")
+        except Exception as e:
+            self._logger.warning(f"Failed to connect CronManager to scheduler: {e}")
+
+    def get_channels(self) -> dict[str, ChannelAdapter]:
+        """Get the initialized channels.
+
+        Returns:
+            Dictionary of channels.
+        """
+        return self._channels

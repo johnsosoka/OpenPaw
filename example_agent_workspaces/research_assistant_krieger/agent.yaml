@@ -1,0 +1,67 @@
+name: Research Assistant
+description: Deep research agent with GPT Researcher, PDF publishing, and multi-model vision
+timezone: America/Denver
+
+model:
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+  api_key: ${ANTHROPIC_API_KEY}
+  temperature: 0.7
+  max_turns: 150
+  timeout_seconds: 900
+
+# Alternative: native Moonshot via langchain-moonshot
+# (requires: pip install 'openpaw-ai[moonshot]')
+# model:
+#   provider: moonshot
+#   model: kimi-k2.5
+#   api_key: ${MOONSHOT_API_KEY}
+#   thinking: false        # true = reasoning mode (auto-sets temperature=1.0)
+#                          # false = standard mode (auto-sets temperature=0.6)
+#   max_turns: 150
+#   timeout_seconds: 900
+
+# Alternative: local models via Ollama
+# (requires: pip install 'openpaw-ai[ollama]' + a running Ollama server)
+# model:
+#   provider: ollama
+#   model: llama3.1
+#   base_url: http://localhost:11434
+#   num_ctx: 16384
+#   max_turns: 150
+#   timeout_seconds: 900
+
+channels:
+  - type: telegram
+    token: ${TELEGRAM_BOT_TOKEN}
+    allowed_users:
+      - 123456789  # Replace with your Telegram user ID
+    context_messages: 25  # Fetch recent messages on group trigger
+
+  # - type: discord
+  #   token: ${DISCORD_BOT_TOKEN}
+  #   allowed_users:
+  #     - 916552354470461470
+  #   allowed_groups:
+  #     - 111222333444555666
+  #   mention_required: true
+  #   context_messages: 50  # More context for research discussions
+  #   triggers:
+  #     - "!research"
+  #     - "!ask"
+
+queue:
+  mode: steer
+  debounce_ms: 1500
+
+# Shorter TTL suitable for group/multi-user research settings
+session_ttl_minutes: 120
+
+heartbeat:
+  enabled: true
+  interval_minutes: 30
+  active_hours: "08:00-22:00"
+  suppress_ok: true
+  output:
+    channel: telegram
+    target_id: 123456789  # Replace with your Telegram chat ID
