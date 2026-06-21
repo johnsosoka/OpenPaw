@@ -1,0 +1,674 @@
+# Workspaces
+
+<div align="center">
+  <img src="../assets/images/openpaw-team.png" alt="OpenPaw Workspaces" width="500">
+</div>
+
+Workspaces are isolated agent instances with their own personality, configuration, and capabilities. Each workspace represents a distinct AI agent with specific behavior patterns and access permissions.
+
+[![Workspace Structure](../assets/diagrams/workspace-structure.png)](../assets/diagrams/workspace-structure.png)
+
+## Directory Structure
+
+```
+agent_workspaces/<name>/
+├── agent/                  # Identity and extensions
+│   ├── AGENT.md            # Capabilities, behavior guidelines
+│   ├── USER.md             # User context/preferences
+│   ├── SOUL.md             # Core personality, values
+│   ├── HEARTBEAT.md        # Session state scratchpad (agent-writable)
+│   ├── tools/              # Custom LangChain @tool functions
+│   │   ├── *.py
+│   │   └── requirements.txt
+│   └── skills/             # Reusable knowledge and behavior patterns
+│       └── <skill-name>/
+│           └── SKILL.md
+├── config/                 # Configuration (write-protected from agent)
+│   ├── agent.yaml          # Per-workspace settings (model, channel, queue)
+│   ├── .env                # API keys and secrets
+│   └── crons/              # Scheduled task definitions
+│       └── *.yaml
+├── data/                   # Framework-managed state (write-protected from agent)
+│   ├── conversations.db    # AsyncSqliteSaver checkpoint database
+│   ├── sessions.json       # Session/conversation thread state
+│   ├── token_usage.jsonl   # Token usage metrics (append-only)
+│   ├── subagents.yaml      # Sub-agent state
+│   ├── TASKS.yaml          # Persistent task tracking
+│   ├── dynamic_crons.json  # Agent-scheduled tasks
+│   ├── heartbeat_log.jsonl # Heartbeat event log
+│   └── uploads/            # User-uploaded files (from FilePersistenceProcessor)
+│       └── {YYYY-MM-DD}/   # Date-partitioned storage
+│           ├── report.pdf        # Original uploaded file
+│           ├── report.md         # Docling-converted markdown (sibling)
+│           ├── voice_123.ogg     # Original audio file
+│           └── voice_123.txt     # Whisper transcript (sibling)
+├── memory/                 # Archived conversations and session logs
+│   ├── conversations/      # Conversation exports (markdown + JSON)
+│   │   ├── conv_*.md       # Markdown archives (human-readable)
+│   │   └── conv_*.json     # JSON sidecars (machine-readable)
+│   └── logs/               # Heartbeat, cron, and sub-agent session logs
+│       ├── heartbeat/
+│       ├── cron/
+│       └── subagent/
+└── workspace/              # Agent work area (default write target)
+    ├── downloads/          # Browser-downloaded files
+    └── screenshots/        # Browser screenshots
+```
+
+## Required Files
+
+Every workspace must contain four markdown files that define the agent's identity and behavior.
+
+### AGENT.md - Capabilities and Behavior
+
+Defines what the agent can do and how it should behave.
+
+**Example:**
+
+```markdown
+# Agent Profile
+
+You are Gilfoyle, a senior systems architect and DevOps engineer.
+
+## Capabilities
+
+- AWS infrastructure management (Lambda, S3, DynamoDB)
+- Python development (FastAPI, SQLAlchemy, Pydantic)
+- Terraform infrastructure-as-code
+- CI/CD pipeline design
+- System architecture and design patterns
+
+## Communication Style
+
+- Be direct and technically precise
+- Avoid unnecessary pleasantries
+- Use sarcasm sparingly but effectively
+- Cite specific technologies and patterns when relevant
+
+## Constraints
+
+- Do not make AWS changes without confirmation
+- Always explain architectural decisions
+- Prioritize security and scalability
+```
+
+### USER.md - User Context
+
+Information about the user(s) this agent serves.
+
+**Example:**
+
+```markdown
+# User Profile
+
+## Name
+John Sosoka
+
+## Role
+Engineering Lead
+
+## Preferences
+- Prefers concise technical explanations
+- Works in Pacific Time (PT)
+- Uses AWS us-west-2 region by default
+
+## Context
+- Manages multiple client projects
+- Values clean, maintainable code
+- Follows Clean Code and Clean Architecture principles
+```
+
+### SOUL.md - Core Personality
+
+The agent's fundamental values and personality traits.
+
+**Example:**
+
+```markdown
+# Core Values
+
+## Technical Excellence
+Always prioritize correctness, clarity, and maintainability over cleverness.
+
+## Honesty
+If you don't know something, say so. Don't speculate or guess about critical systems.
+
+## Efficiency
+Value the user's time. Be concise but complete.
+
+## Professionalism
+Maintain professional communication standards. You represent the engineering team.
+```
+
+### HEARTBEAT.md - Current State
+
+Session state and notes. The agent can read and modify this file to persist information across conversations.
+
+**Example:**
+
+```markdown
+# Current State
+
+## Session Started
+2026-02-05
+
+## Active Projects
+- OpenPaw: Multi-channel agent framework
+- ClientX: AWS Lambda migration
+
+## Pending Tasks
+- Review OpenPaw documentation
+- Update Terraform modules for ClientX
+
+## Recent Learnings
+- Conversation persistence via AsyncSqliteSaver
+- APScheduler for cron implementation
+```
+
+The agent can update HEARTBEAT.md during conversations to track ongoing work, decisions, and context. This file serves as a scratchpad for agent-maintained notes and is especially useful for heartbeat check-ins.
+
+## Optional Configuration
+
+### agent.yaml - Workspace Configuration
+
+Place at `config/agent.yaml` to override global configuration for this specific workspace.
+
+**Example:**
+
+```yaml
+name: Gilfoyle
+description: Sarcastic systems architect
+timezone: America/Denver  # IANA timezone identifier (default: UTC)
+
+model:
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+  api_key: ${ANTHROPIC_API_KEY}
+  temperature: 0.5
+  max_turns: 50
+
+channel:
+  type: telegram
+  token: ${TELEGRAM_BOT_TOKEN}
+  allowed_users: [123456789]
+  allowed_groups: []
+
+queue:
+  mode: steer
+  debounce_ms: 500
+
+builtins:
+  allow: []    # Empty = allow all available
+  deny:
+    - elevenlabs
+
+heartbeat:
+  enabled: true
+  interval_minutes: 30
+  active_hours: "09:00-17:00"  # Interpreted in workspace timezone
+  suppress_ok: true
+  output:
+    channel: telegram
+    chat_id: 123456789
+```
+
+See the main CLAUDE.md documentation for detailed configuration options.
+
+### .env - Environment Variables
+
+Workspace-specific environment variables are automatically loaded from `config/.env`.
+
+**Example:**
+
+```bash
+# API keys specific to this workspace
+CALENDAR_API_KEY=abc123
+JIRA_API_TOKEN=xyz789
+
+# Workspace-specific configuration
+DEFAULT_PROJECT=ClientX
+TEAM_EMAIL=team@example.com
+```
+
+These variables are available to custom tools and can be referenced in `agent.yaml` using `${VAR_NAME}` syntax.
+
+## Workspace Isolation
+
+Each workspace is fully isolated:
+
+- **Separate channels** - Own Telegram bot or dedicated channel
+- **Independent queue** - Own queue manager and concurrency limits
+- **Isolated filesystem** - Can only read/write within workspace directory
+- **Dedicated agent instance** - Own LangGraph agent with separate memory
+- **Per-workspace crons** - Scheduled tasks scoped to workspace
+- **Isolated sub-agents** - Background workers managed per workspace
+- **Protected framework internals** - `data/` and `config/` directories are write-protected from agents
+
+This enables running multiple agents simultaneously without interference:
+
+```bash
+poetry run openpaw -c config.yaml -w gilfoyle,assistant,scheduler
+```
+
+Each agent operates independently with its own configuration and personality.
+
+## Filesystem Access
+
+Agents have sandboxed filesystem access to their workspace directory via `FilesystemTools` in `openpaw/agent/tools/filesystem.py`.
+
+### Available Operations
+
+- `ls` - List directory contents
+- `read_file` - Read file contents (100K character safety valve)
+- `write_file` - Create new files or append to existing files
+- `overwrite_file` - Replace file contents entirely
+- `edit_file` - Make precise edits to existing files
+- `glob_files` - Find files by pattern (e.g., `*.md`, `**/*.py`)
+- `grep_files` - Search file contents with regex (supports `context_lines` for surrounding context)
+- `file_info` - Get metadata (size, line count, binary detection) without reading content
+
+### Path Security
+
+All filesystem operations use `resolve_sandboxed_path()` from `openpaw/agent/tools/sandbox.py` for path traversal protection:
+
+- **Workspace-scoped** - Cannot access files outside workspace directory
+- **No absolute paths** - Rejects paths starting with `/` or `~`
+- **No parent traversal** - Rejects `..` in paths
+- **Framework protection** - Cannot write to `data/` or `config/` directories
+
+### Example Use Cases
+
+**Persistent notes:**
+```
+Agent reads HEARTBEAT.md → Updates pending tasks → Writes back to file
+```
+
+**Data organization:**
+```
+Agent creates notes/ directory → Saves meeting summaries → Retrieves on demand
+```
+
+**File analysis:**
+```
+Agent uses file_info to check size → Uses grep_files to search content → Reads specific files
+```
+
+**Uploaded file processing:**
+```
+User uploads document → FilePersistenceProcessor saves to uploads/ → Agent reads processed markdown
+```
+
+## Custom Tools
+
+Workspaces can define custom LangChain tools in the `agent/tools/` directory. These are Python files containing `@tool` decorated functions that are automatically loaded and made available to the agent.
+
+### Creating Custom Tools
+
+**Example: Calendar tool** (`agent/tools/calendar.py`)
+
+```python
+from langchain_core.tools import tool
+from datetime import datetime, timedelta
+import os
+
+@tool
+def get_upcoming_events(days_ahead: int = 7) -> str:
+    """Get upcoming calendar events.
+
+    Args:
+        days_ahead: Number of days to look ahead
+
+    Returns:
+        Formatted list of events.
+    """
+    api_key = os.getenv("CALENDAR_API_KEY")
+    if not api_key:
+        return "Error: CALENDAR_API_KEY not configured"
+
+    # Implementation here
+    events = fetch_calendar_events(api_key, days_ahead)
+    return format_events(events)
+
+@tool
+def check_availability(date: str) -> str:
+    """Check if a specific date is free.
+
+    Args:
+        date: Date in YYYY-MM-DD format
+
+    Returns:
+        Availability status with free time blocks.
+    """
+    # Implementation here
+    return check_calendar_availability(date)
+```
+
+### Tool Dependencies
+
+Add a `agent/tools/requirements.txt` for tool-specific packages:
+
+```
+# agent/tools/requirements.txt
+icalendar>=5.0.0
+caldav>=1.0.0
+requests>=2.31.0
+```
+
+Missing dependencies are automatically installed at workspace startup.
+
+### Tool Loading
+
+- Files must be in `{workspace}/agent/tools/*.py`
+- Use LangChain's `@tool` decorator from `langchain_core.tools`
+- Tools are merged with framework builtins (brave_search, cron, browser, etc.)
+- Environment variables from workspace `.env` are available
+- Multiple tools per file are supported
+- Files starting with `_` are ignored
+- Tools are dynamically imported at workspace startup
+
+### Tool Best Practices
+
+1. **Clear documentation** - Use comprehensive docstrings with Args/Returns sections
+2. **Error handling** - Return error messages rather than raising exceptions
+3. **Environment variables** - Use `.env` for API keys and configuration
+4. **Type hints** - LangChain uses type hints for parameter validation
+5. **Focused functionality** - Each tool should have a single, clear purpose
+6. **Examples in docstring** - Help the agent understand when to use the tool
+
+## Skills
+
+Skills are reusable knowledge documents or behavioral patterns. Each skill lives in its own subdirectory under `agent/skills/` and is defined by a `SKILL.md` file. Skills are loaded at workspace startup and injected into the agent's system prompt as a `<skills>` XML block.
+
+### Directory Structure
+
+```
+agent/skills/
+├── research-patterns/
+│   └── SKILL.md
+├── code-review/
+│   └── SKILL.md
+└── _disabled-skill/     # Skipped (underscore prefix)
+    └── SKILL.md
+```
+
+### SKILL.md Format
+
+Skills support optional YAML frontmatter followed by markdown content:
+
+```markdown
+---
+name: research-patterns
+description: Patterns for conducting technical research across multiple sources
+version: "1.0"
+---
+
+# Research Patterns
+
+When conducting research, follow these steps:
+1. Identify primary sources...
+2. Cross-reference findings across at least three independent sources...
+3. Summarize findings with citations...
+```
+
+**Frontmatter fields:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | No | Display name (falls back to directory name) |
+| `description` | No | Short description, truncated to 1024 chars |
+| `version` | No | Optional version string (not used by framework) |
+
+### Key Behaviors
+
+- Skills are loaded at workspace startup
+- Full content is injected into the system prompt as a `<skills>` XML block
+- Directories prefixed with `_` are skipped (useful for disabling a skill without deleting it)
+- If no frontmatter is present, the entire file becomes the content with the directory name as skill name
+- Invalid YAML frontmatter degrades gracefully (logged warning, falls back to directory name)
+- Empty or missing `agent/skills/` directory is silently ignored
+
+### Example: Writing Style Skill
+
+**`agent/skills/writing-style/SKILL.md`:**
+
+```markdown
+---
+name: writing-style
+description: House style guide for all written output
+---
+
+# Writing Style Guide
+
+## Tone
+- Direct and professional — no filler phrases ("Certainly!", "Great question!")
+- Use active voice; avoid passive constructions where possible
+- Prefer concrete nouns and specific verbs over vague generalities
+
+## Formatting
+- Use bullet points for lists of three or more items
+- Code examples belong in fenced code blocks with language tags
+- Section headers use title case
+```
+
+## Scheduled Tasks (Crons)
+
+Define scheduled tasks in the `config/crons/` directory using YAML files.
+
+**Example: config/crons/daily-summary.yaml**
+
+```yaml
+name: daily-summary
+schedule: "0 9 * * *"  # 9 AM daily (workspace timezone)
+enabled: true
+
+prompt: |
+  Generate a daily summary by reviewing:
+  - Active projects in HEARTBEAT.md
+  - TASKS.yaml for pending work
+  - Recent conversation archives in memory/conversations/
+
+  Provide a concise status update focusing on what requires attention today.
+
+output:
+  channel: telegram
+  chat_id: 123456789
+```
+
+**Schedule Format:**
+- Standard cron expression: `"minute hour day-of-month month day-of-week"`
+- Fires in the workspace timezone
+- Examples:
+  - `"0 9 * * *"` - Every day at 9:00 AM
+  - `"*/15 * * * *"` - Every 15 minutes
+  - `"0 0 * * 0"` - Every Sunday at midnight
+  - `"0 9 * * 1-5"` - Weekdays at 9:00 AM
+
+**Enable/Disable:** Set `enabled: false` to disable without deleting the file.
+
+Agents can also schedule their own follow-up actions at runtime. See [Scheduling](scheduling.md) for the full scheduling reference including dynamic scheduling tools.
+
+## Heartbeats
+
+Heartbeats enable proactive agent check-ins on a configurable schedule. HEARTBEAT.md serves as the agent's scratchpad for tracking what to check during each heartbeat cycle — the agent reads and updates it during normal conversations.
+
+See [Scheduling](scheduling.md) for heartbeat configuration, the HEARTBEAT_OK protocol, active hours, and pre-flight skip behavior.
+
+## Conversation Memory
+
+Conversations persist across restarts via durable checkpointing. The `memory/conversations/` directory stores archived conversations in dual format — markdown for human reading and JSON for machine processing.
+
+Key commands:
+
+- `/new` — Archive current conversation and start fresh
+- `/compact` — Summarize conversation, archive it, and start new with summary injected
+- Auto-compact triggers automatically when context window fills up
+
+Agents can read archived conversations via `read_file()` to maintain long-term memory across conversation resets. See [Concepts](concepts.md) for a deeper look at how conversation memory works.
+
+## Creating a New Workspace
+
+The fastest way to create a workspace is with the `init` command:
+
+```bash
+# Basic scaffold with TODO markers
+poetry run openpaw init my_agent
+
+# Pre-configure model and channel
+poetry run openpaw init my_agent --model anthropic:claude-sonnet-4-20250514 --channel telegram
+
+# Scaffold in a custom directory
+poetry run openpaw init my_agent --path /path/to/workspaces
+```
+
+This creates the workspace directory with the full 5-directory structure (`agent/`, `config/`, `data/`, `memory/`, `workspace/`) and pre-populates required files with templates and TODO markers.
+
+**After scaffolding:**
+
+1. Edit `config/agent.yaml` with your model and channel settings
+2. Add API keys to `config/.env`
+3. Customize `agent/AGENT.md`, `agent/USER.md`, and `agent/SOUL.md` to define personality
+4. Optionally add custom tools in `agent/tools/` and cron jobs in `config/crons/`
+5. Optionally add skills in `agent/skills/` for reusable knowledge patterns
+6. Run the workspace:
+
+```bash
+poetry run openpaw -c config.yaml -w my_agent
+```
+
+**List available workspaces:**
+
+```bash
+poetry run openpaw list
+```
+
+**Name requirements:** Workspace names must be 2-64 characters, start with a lowercase letter, and contain only lowercase letters, digits, hyphens, and underscores (e.g., `my_agent`, `test-bot`, `gilfoyle`).
+
+## Example Workspaces
+
+### Technical Support Agent
+
+**AGENT.md:**
+```markdown
+# Technical Support Specialist
+
+You are a technical support specialist for SaaS products.
+
+## Capabilities
+- Troubleshooting common issues
+- API debugging assistance
+- Documentation lookup via brave_search
+- Issue escalation when needed
+
+## Communication Style
+- Patient and helpful
+- Ask clarifying questions
+- Provide step-by-step solutions
+- Link to relevant documentation
+```
+
+**agent.yaml:**
+```yaml
+queue:
+  mode: followup  # Process support requests sequentially
+
+builtins:
+  allow:
+    - brave_search  # Enable documentation search
+    - send_message  # Progress updates during troubleshooting
+```
+
+### Scheduled Reporter
+
+**AGENT.md:**
+```markdown
+# Daily Reporter
+
+You generate daily reports by analyzing system state and recent activity.
+
+## Capabilities
+- Reading workspace files (HEARTBEAT.md, TASKS.yaml)
+- Summarizing project status
+- Identifying pending tasks and blockers
+- Analyzing conversation archives for trends
+```
+
+**config/crons/daily-report.yaml:**
+```yaml
+name: daily-report
+schedule: "0 9 * * 1-5"  # Weekdays at 9 AM
+enabled: true
+
+prompt: |
+  Review all workspace files and generate a status report.
+
+  Include:
+  - Active projects from HEARTBEAT.md
+  - Task status from TASKS.yaml
+  - Recent conversation topics from memory/conversations/
+  - Any blockers requiring human attention
+```
+
+### Multi-User Team Assistant
+
+**AGENT.md:**
+```markdown
+# Team Assistant
+
+You are a team assistant supporting multiple engineers in a group chat.
+
+## Capabilities
+- Task tracking via TASKS.yaml
+- Calendar management (custom tools)
+- Documentation lookup
+- Meeting note summarization
+
+## Communication Style
+- Tag users when addressing them directly
+- Be concise in group contexts
+- Use threads for detailed discussions
+```
+
+**agent.yaml:**
+```yaml
+channel:
+  type: telegram
+  allowed_groups: [-1001234567890]  # Team group chat
+
+builtins:
+  task_tracker:
+    enabled: true
+  brave_search:
+    enabled: true
+```
+
+**agent/tools/calendar.py:**
+```python
+from langchain_core.tools import tool
+
+@tool
+def check_team_availability(date: str) -> str:
+    """Check team calendar for available meeting slots.
+
+    Args:
+        date: Date in YYYY-MM-DD format
+
+    Returns:
+        Available time slots for team meetings.
+    """
+    # Implementation using workspace calendar API
+    return get_team_availability(date)
+```
+
+## Best Practices
+
+1. **Clear identity** - Give each workspace a distinct personality and purpose
+2. **Focused capabilities** - Don't try to make one agent do everything
+3. **Consistent voice** - Maintain personality across all markdown files
+4. **Appropriate permissions** - Use `allowed_users`/`allowed_groups` to restrict access
+5. **Regular updates** - Keep HEARTBEAT.md current with ongoing work
+6. **Tool organization** - Use descriptive names and comprehensive docstrings
+7. **Cron hygiene** - Disable unused cron jobs (`enabled: false`) rather than deleting
+8. **Timezone awareness** - Set workspace timezone for accurate scheduling and display
+9. **Task management** - Use TASKS.yaml for long-running work across conversations
+10. **Archive review** - Encourage agents to review conversation archives for long-term context
+11. **Security** - Never commit API keys or tokens; use `.env` and environment variables

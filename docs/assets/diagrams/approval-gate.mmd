@@ -1,0 +1,36 @@
+sequenceDiagram
+    participant Agent
+    participant Middleware as ApprovalMiddleware
+    participant Runner as WorkspaceRunner
+    participant Channel
+    participant User
+
+    Agent->>Middleware: tool_call(overwrite_file, args)
+    Middleware->>Middleware: detect gated tool
+    Middleware->>Middleware: create PendingApproval
+    Middleware-->>Runner: raise ApprovalRequiredError
+
+    Runner->>Channel: send_approval_request(tool, args)
+    Channel->>User: inline keyboard (Approve / Deny)
+
+    alt User approves
+        User->>Channel: click Approve
+        Channel->>Runner: on_approval(approved=True)
+        Runner->>Runner: ApprovalGateManager.resolve(approved)
+        Runner->>Runner: resolve_orphaned_tool_calls()
+        Runner->>Agent: re-run with same message
+        Agent->>Middleware: tool_call(overwrite_file, args)
+        Middleware->>Middleware: check_recent_approval() -> bypass
+        Middleware->>Agent: tool executes normally
+        Middleware->>Middleware: clear_recent_approval()
+        Agent-->>Channel: final response
+    else User denies (or timeout)
+        User->>Channel: click Deny
+        Channel->>Runner: on_approval(approved=False)
+        Runner->>Runner: ApprovalGateManager.resolve(denied)
+        Runner->>Runner: resolve_orphaned_tool_calls()
+        Runner->>Agent: inject [SYSTEM] Tool denied message
+        Agent-->>Channel: acknowledgement response
+    end
+
+    Channel-->>User: response delivered

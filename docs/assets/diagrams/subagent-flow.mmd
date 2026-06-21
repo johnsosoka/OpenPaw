@@ -1,0 +1,52 @@
+sequenceDiagram
+    participant U as User
+    participant MA as MainAgent
+    participant SAR as SubAgentRunner
+    participant SS as SubAgentStore
+    participant SA as SubAgent
+    participant QM as QueueManager
+
+    U->>MA: "Research topic X in the background"
+    activate MA
+
+    MA->>SS: spawn_agent(task="Research X", label="research")
+    SS-->>MA: SubAgentRequest (id="abc123", status=pending)
+
+    MA->>U: "Spawning background research agent..."
+    note over MA: MainAgent continues<br/>working on other tasks
+    MA->>MA: Continue current work
+    deactivate MA
+
+    SAR->>SS: Poll for pending requests
+    SS-->>SAR: SubAgentRequest(id="abc123")
+
+    SAR->>SAR: Acquire semaphore slot<br/>(max_concurrent=8)
+    SAR->>SS: Update status: pending → running
+
+    SAR->>SA: Create fresh AgentRunner<br/>(filtered tools, no checkpointer)
+    activate SA
+
+    note over SA: Excluded tools:<br/>spawn_agent, send_message,<br/>send_file, cron tools
+
+    SA->>SA: Execute task prompt
+    SA->>SA: Tool call: brave_search("topic X")
+    SA->>SA: Tool call: read_file("notes.md")
+    SA->>SA: Generate final result
+
+    SA-->>SAR: Result (raw output)
+    deactivate SA
+
+    SAR->>SS: Store result (truncated at 50K chars)
+    SAR->>SS: Update status: running → completed
+    SAR->>SAR: Release semaphore slot
+
+    alt notify=true
+        SAR->>QM: Inject [SYSTEM] notification<br/>via QueueMode.COLLECT
+        QM->>MA: Next agent turn triggered
+        activate MA
+        MA->>MA: Process [SYSTEM] notification<br/>"Sub-agent research completed..."
+        MA->>SS: get_subagent_result(id="abc123")
+        SS-->>MA: Full result text
+        MA->>U: Summary of research findings
+        deactivate MA
+    end

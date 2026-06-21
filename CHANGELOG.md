@@ -1,0 +1,185 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Removed
+
+### Fixed
+
+## [0.4.3] - 2026-06-13
+
+> **BREAKING:** Workspaces using the pre-0.4.3 Moonshot configuration shape
+> (`provider: openai` with `base_url: https://api.moonshot.ai/v1`, or any
+> `extra_body.thinking` block) will now fail to load. Switch to the native
+> `moonshot` provider — see migration note below.
+
+### Added
+
+- **Native `moonshot` provider** for Kimi models via the [langchain-moonshot](https://pypi.org/project/langchain-moonshot/) package. New top-level `thinking: bool` field on the workspace model config replaces the old `extra_body.thinking` workaround. Temperature is auto-corrected to `0.6` / `1.0` based on `thinking` when the framework default (`0.7`) reaches the provider — the override is logged as a `WARNING` so users who deliberately set `0.7` see the substitution. Reasoning content is now separated by ChatMoonshot rather than emitted as inline `<think>` tags. Install with `pip install 'openpaw-ai[moonshot]'`.
+- **First-class `ollama` provider** for local models via the official [langchain-ollama](https://pypi.org/project/langchain-ollama/) package. No API key required; talks to a local Ollama server (default `http://localhost:11434`). Supports `bind_tools` on tool-capable models (llama3.1, qwen2.5, mistral-nemo, gemma3:27b, etc.). Install with `pip install 'openpaw-ai[ollama]'`.
+- **`thinking: bool | None`** field on `WorkspaceModelConfig` — opt-in reasoning mode for providers that support it natively.
+- **`base_url`** promoted from extras to a typed field on `WorkspaceModelConfig` for clearer schema and validation.
+- New `tests/test_native_providers.py` covers ChatMoonshot wiring (thinking flag, temperature auto-correct, ImportError) and ChatOllama wiring (no api_key, ollama-specific kwargs, no retries, ImportError) plus provider catalog integration for both.
+- `openpaw init` workspace scaffolder learned `moonshot` and `ollama` providers. `openpaw init my_agent --model moonshot:kimi-k2.5` scaffolds a config with `thinking: false` + `temperature: 0.6`; `--model ollama:llama3.1` scaffolds keyless with `base_url: http://localhost:11434` and `num_ctx: 16384`. New tests in `tests/cli_init/test_scaffolder.py` round-trip the generated YAML through `WorkspaceConfig` to ensure it boots cleanly.
+
+### Changed
+
+- `create_chat_model()` consolidated to `openpaw/agent/model_factory.py`. The duplicate copy in `openpaw/agent/runner.py` has been removed; `AgentRunner` now imports from `model_factory`. External imports of `create_chat_model`, `THINKING_MODELS`, `BEDROCK_TOOL_NAME_PATTERN`, `MAX_TOOL_NAME_LENGTH`, and `validate_tool_names` from `openpaw.agent.runner` still work via re-export.
+- `AgentRunner._validate_tool_names` now delegates to the shared `validate_tool_names` helper in `model_factory`, removing duplicated tool-name validation logic.
+- `THINKING_MODELS` trimmed to the single verified Bedrock-routed Kimi entry (`moonshot.kimi-k2-thinking`). The native `moonshot:` provider returns reasoning content via `additional_kwargs`, so it does not need regex stripping by `ThinkingTokenMiddleware`.
+- Provider catalog example in `config.example.yaml` updated to show native `moonshot` and `ollama` entries.
+- `docs/concepts.md` and `docs/architecture.md` rewritten to describe the native dispatch path through `create_chat_model()` instead of the retired `init_chat_model("openai:kimi-k2.5", ...)` route.
+
+### Removed
+
+- **Legacy Moonshot-via-OpenAI-compat shape** is no longer accepted. Configurations with `provider: openai` + `base_url: https://api.moonshot.ai/v1`, or an `extra_body.thinking` block **under the `openai` provider specifically**, now raise a `ValueError` at workspace load time pointing at the new shape. Anthropic's native extended-thinking via `extra_body.thinking` is unaffected — the validator is scoped to `provider == "openai"` only. **Migration:**
+  ```yaml
+  # Before (0.4.2 and earlier)
+  model:
+    provider: openai
+    model: kimi-k2.5
+    api_key: ${MOONSHOT_API_KEY}
+    base_url: https://api.moonshot.ai/v1
+    temperature: 0.6
+    extra_body:
+      thinking:
+        type: disabled
+
+  # After (0.4.3)
+  model:
+    provider: moonshot
+    model: kimi-k2.5
+    api_key: ${MOONSHOT_API_KEY}
+    thinking: false
+  ```
+
+### Fixed
+
+## [0.4.2] - 2026-06-10
+
+### Added
+
+- **Per-sub-agent status messages** — Each spawned sub-agent now gets its own live status message that is created on dispatch, edited as the sub-agent runs each tool, and finalized to `✅ Completed`, `❌ Failed`, or `🚫 Cancelled` on completion. Gives the user real-time visibility into long-running team members. New `SubAgentToolMiddleware` is injected into each sub-agent's runner; events bridge back to the parent `StatusUpdateMiddleware` via a `status_callback` on `SubAgentRunner`. (#144)
+- **`StatusUpdatesConfig.subagent_status`** (default `true`) and **`subagent_status_cleanup`** (`"edit"` / `"delete"`, default `"edit"`) configuration fields to control per-sub-agent status behavior.
+- **Automatic status updates** — `StatusUpdateMiddleware` reports agent start, tool usage, and sub-agent dispatch to the user channel with configurable throttling.
+- **Live in-place status pattern** — Status updates edit a single message in place instead of sending multiple messages. Supports `edit_message`/`delete_message` on Telegram and Discord. Configurable via `status_updates.edit_in_place` (default: `true`).
+- **Run-aware status labels** — First user-message run shows `"Starting work..."`, subsequent runs show `"Continuing work..."`. System events (cron, heartbeat, sub-agent completions) skip the status update to avoid mid-task confusion.
+- **`report_progress` builtin tool** — Agent-driven structured progress reporting with `status`, `detail`, and optional `percentage` (0-100).
+- **`StatusUpdatesConfig`** configuration model with workspace-level toggles (`agent_start`, `tool_calls_detected`, `tool_start`, `tool_complete`, `subagent_spawned`, `edit_in_place`) and throttling (`min_interval_seconds`, `max_updates_per_run`).
+- **Typing indicators** — `status_updates.typing_indicator` (default: `true`) sends a channel typing indicator while the agent is processing.
+- **Emoji reactions** — `status_updates.reactions` (default: `true`) adds an emoji reaction to the user's original message to indicate the agent is working. Reactions are removed when the agent finishes.
+- **Emoji-enriched status updates** — `status_updates.use_emojis` (default: `true`) prefixes auto-generated status messages with relevant emoji (e.g., `⚙️` for tool calls, `🚀` for starting work, `🤖` for sub-agent dispatch).
+- **Optional `emoji` parameter for `report_progress`** — Agents can pass a custom emoji to `report_progress` to prefix the status message with a visual indicator.
+- **Steer-mode-aware status notifications** — `StatusUpdateMiddleware` now detects `STEER`, `INTERRUPT`, and `COLLECT` mode events and sends user-facing emoji-prefixed notifications via the existing status message. Messages: `🔄 Redirecting to your new message...`, `🛑 Stopping current run — processing your new message`, `📨 New messages received — bundling...`. Configurable via `steer_redirected`, `run_interrupted`, and `collect_queued` (default: `true`).
+- Background task supervisor in `WorkspaceRunner` that monitors queue processor health, restarts crashed tasks, and sends direct crash notifications to active sessions.
+- Entry/exit logging to critical async paths (`AgentRunner.run`, `SubAgentRunner._execute_subagent`, `SubAgentProfiler.setup`, `MessageProcessor.process_messages`, `LaneQueue.process`).
+- Enriched subagent timeout/error notifications with last tool context and tools used list.
+
+### Changed
+
+- Updated `docs/builtins.md`, `docs/configuration.md`, and `docs/architecture.md` with status updates and `report_progress` documentation.
+- Updated `ChannelAdapter` base class with `edit_message` and `delete_message` default no-ops.
+- Implemented `edit_message`/`delete_message` in Telegram and Discord channel adapters.
+- `aafter_model` status messages now include per-tool argument details (e.g., `read_file (notes.md)` instead of just `read_file`).
+- `min_interval_seconds` default lowered from `3` to `1` to allow `tool_start` messages to get through during multi-step operations.
+- `tool_start` now defaults to `true` so granular status details are visible without manual configuration.
+- Interrupt mode fallback notification now uses emoji-prefixed `🛑 Stopping current run — processing your new message` instead of bracketed `[Run interrupted — processing new message]`, making it unmistakably user-facing.
+- `BrowserSession` typed with explicit `Playwright | Browser | BrowserContext | Page` annotations and `_require_page()` / `_require_context()` accessors. Calling a browser tool before launch now raises a clear `RuntimeError("Browser not launched")` instead of an opaque `AttributeError` on `None`.
+- Develop CI mypy step is now a hard gate. Previously the step was annotated `continue-on-error: true`, which silently allowed type regressions onto develop and would have failed the publish workflow at tag-push time.
+
+### Removed
+
+- **`status_updates.max_updates_per_run`** configuration field has been removed. The per-agent-run budget cap (default `10`) silently dropped status updates after the budget was exhausted, which produced a "frozen status" UX during tool-heavy runs (e.g., browser sessions with 30+ tool calls). `min_interval_seconds` remains the active throttle; the agent loop's own recursion ceiling caps total iterations.
+
+### Fixed
+
+- Resolved all outstanding mypy errors across the codebase (40 errors → 0). The bulk were in `openpaw/builtins/tools/browser/session.py` from a prior browser refactor where Playwright lifecycle fields were initialized to `None` without `Optional` annotations.
+- `StatusUpdateMiddleware` now sends the steer redirect notification exactly once per steer event instead of re-editing the status message for every skipped tool. Adds a `_steer_notified` guard that is reset in `set_context()` and `reset()` so subsequent runs can notify again. (#146)
+- Fixed `AttributeError: 'CronToolBuiltin' object has no attribute '_add_to_live_scheduler'` in `FollowupScheduler` and `MessageProcessor` — both callers now use the standalone `_add_to_live_scheduler(scheduler, task)` bridge function from `scheduler_bridge.py` instead of calling a non-existent instance method. This was crashing the queue processor on delayed followup scheduling.
+- `LaneQueue.process()` now catches handler exceptions and continues the loop, preventing a single handler crash from killing the entire message pipeline.
+- `SubAgentStore` converted to async-safe operations with `asyncio.to_thread()`, preventing synchronous YAML I/O from blocking the event loop.
+- Added outer timeout (10 minutes) to lane handler execution to prevent a single hung session from starving the entire lane.
+- `QueueManager._debounce_flush` now logs exceptions instead of silently swallowing them.
+- Telegram `set_message_reaction` now uses `ReactionTypeEmoji` objects instead of raw emoji strings, fixing `Reaction_invalid` and `Can't parse reactiontype` API errors.
+- Reaction emojis changed to Telegram-valid set: `👍` (success) and `👎` (failure) instead of `✅` and `❌`.
+- Fixed `UnboundLocalError` in `runner.py` when processing tool call updates without `messages_in_update` defined.
+
+## [0.4.1] - 2026-05-30
+
+### Added
+
+- `AGENTS.md` — comprehensive agent guidance covering release process, changelog standards, and coding standards.
+- PyPI badge added to README.
+- GitHub issue templates (bug report, feature request, documentation).
+- GitHub pull request template.
+- `SECURITY.md` — security policy and vulnerability reporting.
+- `CODE_OF_CONDUCT.md` — Contributor Covenant v2.1.
+- Release process documented in `AGENTS.md`.
+- Changelog standards documented in `AGENTS.md`.
+
+### Changed
+
+- `.gitignore` updated to include `*.sh`.
+- `CONTRIBUTING.md` updated to reference `AGENTS.md` and the `holding/*` branching model.
+- `README.md` refined as a first-class landing page with clearer install and quick-start instructions.
+- `pyproject.toml` updated with `Changelog` URL in `[project.urls]`.
+
+### Removed
+
+- `CLAUDE.md` consolidated into `AGENTS.md`.
+- `start.sh` local development script removed.
+
+## [0.4.0] - 2026-05-29
+
+### Added
+
+- **Structural refactor** — Layered architecture with clear stability contract: `model` (pure data) → `core` (config, prompts, utilities) → `agent` (runner, tools, middleware) → `workspace` (loader, runner, lifecycle) → `runtime` (orchestrator, queue, scheduling, subagents) → `channels` (external adapters).
+- **Multi-channel support** — Run multiple channels (Telegram, Discord) simultaneously in a single workspace. Each channel is isolated with its own session keys, activation filters, and trigger keywords.
+- **Workspace isolation** — Every workspace gets its own channels, queue, agent runner, and cron scheduler. No state leakage between workspaces.
+- **Cron & heartbeat scheduling** — APScheduler-based cron jobs from YAML definitions; proactive heartbeat check-ins with active-hours support, HEARTBEAT_OK suppression, and task summary injection.
+- **Sub-agent spawning** — Background concurrent workers via `spawn_agent` with isolated contexts, tool filtering, and session-scoped lifecycle tracking. Supports spawn profiles (`agent/team/*.yaml`) for specialized personas.
+- **Browser automation** — Playwright-based web browsing with accessibility tree navigation, domain allowlists/blocklists, cookie persistence, and screenshot/download support.
+- **Email integration** — Gmail send/receive via service account + domain-wide delegation. Supports search, reply, attachments, and recipient policy enforcement.
+- **GPT-Researcher builtin** — Deep research via WebSocket with streaming progress and report generation.
+- **Dynamic & persistent scheduling** — Agents can schedule one-time (`schedule_at`) or recurring (`schedule_every`) tasks at runtime, or create persistent YAML cron jobs via `cron_manager`.
+- **Queue-aware middleware** — Steer and interrupt modes let agents respond to new user messages mid-execution without losing context.
+- **Approval gates** — Human-in-the-loop authorization for dangerous tools with configurable timeout and default action.
+- **Token usage tracking** — Per-invocation metrics logged to JSONL for cost monitoring and `/status` queries.
+- **Runtime model switching** — Live provider/model switching via `/model` command without restart.
+- **Auto-compact** — Automatic conversation compaction when context window utilization exceeds a threshold.
+- **Session TTL** — Lazy conversation auto-reset after inactivity in group channels.
+- **Checkpoint pruning** — Automatic cleanup of orphaned conversation checkpoints on startup.
+- **Provider catalog** — Define provider connection details once in global config and reference by name from workspaces.
+- **Skills system** — Reusable knowledge patterns via `SKILL.md` files with progressive disclosure (summary vs full injection).
+- **Framework skills** — Bundled reference skills for team management, web browsing, and channel awareness.
+- **Status reminder middleware** — Automatic nudges for agents to update users after long silent tool chains.
+- **Session logging** — JSONL session logs for heartbeat, cron, and sub-agent runs readable by the main agent.
+- **Channel history & logs** — On-demand context fetch and persistent JSONL channel logging for group awareness.
+- **File persistence & enrichment** — Universal upload handling with Whisper transcription and Docling document conversion.
+- **Trusted Publishing support** — CI/CD workflows configured for PEP 740 Trusted Publishing to PyPI.
+- **Pre-commit hooks** — Ruff, mypy, and version sync checks.
+
+### Changed
+
+- CLI now supports single workspace, multiple workspaces, or wildcard `--all`.
+- Configuration deep-merges workspace `agent.yaml` over global `config.yaml`.
+- Error sanitization prevents internal details from leaking to channel users.
+
+### Fixed
+
+- Various race conditions in approval gate resolution and sub-agent cancellation.
+- Path traversal protection hardened across filesystem tools and inbound processors.
+
+[Unreleased]: https://github.com/johnsosoka/OpenPaw/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/johnsosoka/OpenPaw/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/johnsosoka/openpaw/releases/tag/v0.4.1
+[0.4.0]: https://github.com/johnsosoka/openpaw/releases/tag/v0.4.0

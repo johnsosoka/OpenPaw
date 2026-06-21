@@ -1,0 +1,52 @@
+# Managed by Devin / Sosoka Labs
+# AI Council v0.2.0 configuration for OpenPaw (Python project)
+council:
+  skip_patterns:
+    # Lockfiles
+    - "poetry.lock"
+    - "uv.lock"
+    - "Pipfile.lock"
+    - "package-lock.json"
+    - "yarn.lock"
+    - "pnpm-lock.yaml"
+    - "bun.lockb"
+    - "Cargo.lock"
+    - "Gemfile.lock"
+    # Python build/test artifacts
+    - "__pycache__/"
+    - "*.pyc"
+    - "*.pyo"
+    - "*.egg-info/"
+    - ".eggs/"
+    - ".tox/"
+    - "htmlcov/"
+    - ".coverage"
+    - "coverage.json"
+    - ".pytest_cache/"
+    - ".mypy_cache/"
+    - ".ruff_cache/"
+    # Virtual environments
+    - ".venv/"
+    - "venv/"
+    - ".env"
+    # Node artifacts (if any)
+    - "node_modules/"
+    - "dist/"
+    - "build/"
+    # Documentation assets
+    - "docs/assets/"
+    - "*.png"
+    - "*.jpg"
+    - "*.jpeg"
+    - "*.gif"
+    - "*.svg"
+    - "*.ico"
+    - "*.mmd"
+    # IDE/OS
+    - ".idea/"
+    - ".vscode/"
+    - ".DS_Store"
+    - "*.swp"
+    # Misc
+    - ".git/"
+    - ".github/workflows/"

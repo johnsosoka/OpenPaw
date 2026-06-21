@@ -1,0 +1,34 @@
+name: Assistant
+description: Personal assistant for daily tasks and questions
+
+model:
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+  api_key: ${ANTHROPIC_API_KEY}
+  temperature: 0.7
+  max_turns: 50
+
+channel:
+  type: telegram
+  token: ${TELEGRAM_BOT_TOKEN}
+  allowed_users:
+    - 123456789  # Replace with your Telegram user ID
+
+# Multi-channel alternative (Telegram + Discord):
+# channels:
+#   - type: telegram
+#     token: ${TELEGRAM_BOT_TOKEN}
+#     allowed_users:
+#       - 123456789
+#   - type: discord
+#     token: ${DISCORD_BOT_TOKEN}
+#     allowed_users:
+#       - 916552354470461470
+#     mention_required: true
+
+queue:
+  mode: collect
+  debounce_ms: 1000
+
+# Auto-reset conversation after this many minutes of inactivity
+session_ttl_minutes: 180

@@ -1,0 +1,117 @@
+"""Tests for channel factory."""
+
+import pytest
+
+from openpaw.channels.base import ChannelAdapter
+from openpaw.channels.factory import create_channel
+from openpaw.channels.telegram import TelegramChannel
+
+
+def test_create_telegram_channel() -> None:
+    """Test creating a Telegram channel via factory."""
+    config = {
+        "token": "test_token_123",
+        "allowed_users": [123, 456],
+        "allowed_groups": [-789],
+        "allow_all": False,
+    }
+
+    channel = create_channel("telegram", config, "test_workspace")
+
+    assert isinstance(channel, TelegramChannel)
+    assert isinstance(channel, ChannelAdapter)
+    assert channel.token == "test_token_123"
+    assert channel.allowed_users == {123, 456}
+    assert channel.allowed_groups == {-789}
+    assert channel.allow_all is False
+    assert channel.workspace_name == "test_workspace"
+
+
+def test_create_telegram_channel_with_allow_all() -> None:
+    """Test creating a Telegram channel with allow_all mode."""
+    config = {
+        "token": "test_token_456",
+        "allow_all": True,
+    }
+
+    channel = create_channel("telegram", config, "public_workspace")
+
+    assert isinstance(channel, TelegramChannel)
+    assert channel.allow_all is True
+    assert channel.workspace_name == "public_workspace"
+
+
+def test_create_telegram_channel_empty_allowlists() -> None:
+    """Test creating a Telegram channel with empty allowlists (defaults)."""
+    config = {
+        "token": "test_token_789",
+    }
+
+    channel = create_channel("telegram", config, "restricted_workspace")
+
+    assert isinstance(channel, TelegramChannel)
+    assert channel.allowed_users == set()
+    assert channel.allowed_groups == set()
+    assert channel.allow_all is False
+
+
+def test_create_channel_unsupported_type() -> None:
+    """Test that unsupported channel types raise ValueError."""
+    config = {"token": "test_token"}
+
+    with pytest.raises(ValueError, match="Unsupported channel type: slack"):
+        create_channel("slack", config, "test_workspace")
+
+
+def test_create_channel_passes_workspace_name() -> None:
+    """Test that workspace name is correctly passed to channel."""
+    config = {"token": "test_token"}
+
+    channel = create_channel("telegram", config, "my_custom_workspace")
+
+    assert isinstance(channel, TelegramChannel)
+    assert channel.workspace_name == "my_custom_workspace"
+
+
+def test_create_telegram_channel_mention_required() -> None:
+    """Test that mention_required is passed through factory for Telegram."""
+    config = {"token": "test_token", "mention_required": True}
+    channel = create_channel("telegram", config, "test_workspace")
+    assert isinstance(channel, TelegramChannel)
+    assert channel.mention_required is True
+
+
+def test_create_telegram_channel_mention_required_defaults_false() -> None:
+    """Test that mention_required defaults to False for Telegram."""
+    config = {"token": "test_token"}
+    channel = create_channel("telegram", config, "test_workspace")
+    assert isinstance(channel, TelegramChannel)
+    assert channel.mention_required is False
+
+
+def test_create_discord_channel_mention_required() -> None:
+    """Test that mention_required is passed through factory for Discord."""
+    from openpaw.channels.discord import DiscordChannel
+
+    config = {"token": "test_token", "mention_required": True}
+    channel = create_channel("discord", config, "test_workspace")
+    assert isinstance(channel, DiscordChannel)
+    assert channel.mention_required is True
+
+
+def test_create_telegram_with_triggers() -> None:
+    """Test that triggers list is passed through factory to TelegramChannel."""
+    config = {"token": "test_token", "triggers": ["!ask", "hey bot"]}
+    channel = create_channel("telegram", config, "test_workspace")
+    assert isinstance(channel, TelegramChannel)
+    assert channel.triggers == ["!ask", "hey bot"]
+
+
+def test_create_discord_with_triggers() -> None:
+    """Test that triggers list is passed through factory to DiscordChannel."""
+    from openpaw.channels.discord import DiscordChannel
+
+    config = {"token": "test_token", "triggers": ["!ask", "hey bot"]}
+    channel = create_channel("discord", config, "test_workspace")
+    assert isinstance(channel, DiscordChannel)
+    assert channel.triggers == ["!ask", "hey bot"]
