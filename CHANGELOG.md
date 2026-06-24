@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Migrated AI code review from the legacy single-pass reviewer to AI Council v0.2.0. (#162)
+- Replaced `.github/workflows/ai-code-review.yml` with `.github/workflows/ai-council-review.yml` using `Sosoka-Labs/ai-council-code-review@v0.2.0`.
+- Added `.ai-council/config.yaml` tuned for the Python project.
+
 ### Removed
 
 ### Fixed
@@ -179,7 +183,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Various race conditions in approval gate resolution and sub-agent cancellation.
 - Path traversal protection hardened across filesystem tools and inbound processors.
 
-[Unreleased]: https://github.com/johnsosoka/OpenPaw/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/johnsosoka/OpenPaw/compare/v0.4.3...HEAD
 [0.4.2]: https://github.com/johnsosoka/OpenPaw/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/johnsosoka/openpaw/releases/tag/v0.4.1
 [0.4.0]: https://github.com/johnsosoka/openpaw/releases/tag/v0.4.0
