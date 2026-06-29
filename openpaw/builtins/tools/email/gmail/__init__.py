@@ -63,9 +63,12 @@ class GmailProvider(EmailProvider):
             if self._service is not None:
                 return self._service
 
+            # Imports are deferred to here (inside the lock) on purpose: the Google
+            # libraries ship only with the optional `email` extra, so importing them
+            # at module load would break workspaces that don't enable email.
             import httplib2
             from google.oauth2 import service_account
-            from google_auth_httplib2 import AuthorizedHttp
+            from google_auth_httplib2 import AuthorizedHttp, Request
             from googleapiclient.discovery import build
             from googleapiclient.http import HttpRequest
 
@@ -81,14 +84,16 @@ class GmailProvider(EmailProvider):
             # TLS connection across threads corrupts OpenSSL's write buffer and
             # SIGTRAPs the whole process. See
             # llm_memory/BUG-gmail-builtin-sigtrap-macos-py314.md
-            #
-            # The credentials object is shared across threads; concurrent refresh()
-            # calls are possible but benign — the Python-level attribute writes are
-            # GIL-serialized, and each AuthorizedHttp has its own Http for the token
-            # endpoint, so the worst case is a redundant token fetch.
             def _build_request(_http: Any, *args: Any, **kwargs: Any) -> Any:
                 thread_local_http = AuthorizedHttp(credentials, http=httplib2.Http())
                 return HttpRequest(thread_local_http, *args, **kwargs)
+
+            # Fetch the initial access token once, here under the lock, so the first
+            # burst of concurrent requests reuses it. Otherwise every worker thread
+            # would find the shared credentials unpopulated and refresh() at once — a
+            # thundering herd of token fetches. Later expiries refresh lazily; those
+            # races are benign (GIL-serialized writes, per-request token transport).
+            credentials.refresh(Request(httplib2.Http()))
 
             discovery_http = AuthorizedHttp(credentials, http=httplib2.Http())
             self._service = build(

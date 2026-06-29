@@ -192,6 +192,7 @@ class TestGmailProviderBuildWiring:
         # itself so patch() finds it in sys.modules without triggering a real import.
         gah_mod = types.ModuleType("google_auth_httplib2")
         gah_mod.AuthorizedHttp = MagicMock(name="AuthorizedHttp")  # type: ignore[attr-defined]
+        gah_mod.Request = MagicMock(name="Request")  # type: ignore[attr-defined]
 
         return {
             "googleapiclient.http": http_mod,
@@ -287,3 +288,25 @@ class TestGmailProviderBuildWiring:
         assert "credentials" not in captured_kwargs, (
             "build() must NOT receive credentials= — passing both http= and credentials= raises"
         )
+
+    def test_credentials_refreshed_eagerly_under_lock(self) -> None:
+        """_get_service() must prime the access token once before returning.
+
+        Eager refresh avoids a thundering herd: without it, the first burst of
+        concurrent worker threads would each find the shared credentials
+        unpopulated and call refresh() simultaneously.
+        """
+        with patch.dict(sys.modules, self._conftest_gap_stubs()):
+            with (
+                patch("httplib2.Http"),
+                patch("google_auth_httplib2.AuthorizedHttp"),
+                patch("googleapiclient.discovery.build", return_value=MagicMock()),
+                patch(
+                    "google.oauth2.service_account.Credentials.from_service_account_file"
+                ) as mock_from_file,
+            ):
+                prov = self._fresh_provider()
+                prov._get_service()
+
+        credentials = mock_from_file.return_value
+        credentials.refresh.assert_called_once()
