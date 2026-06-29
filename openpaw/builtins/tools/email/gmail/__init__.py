@@ -63,15 +63,41 @@ class GmailProvider(EmailProvider):
             if self._service is not None:
                 return self._service
 
+            import httplib2
             from google.oauth2 import service_account
+            from google_auth_httplib2 import AuthorizedHttp
             from googleapiclient.discovery import build
+            from googleapiclient.http import HttpRequest
 
             credentials = service_account.Credentials.from_service_account_file(  # type: ignore
                 self._service_account_file,
                 scopes=_SCOPES,
                 subject=self._delegated_user,
             )
-            self._service = build("gmail", "v1", credentials=credentials)
+
+            # googleapiclient + httplib2 are NOT thread-safe. Gmail fetches fan out
+            # over asyncio.to_thread() worker threads (GmailFetcher.list_messages/
+            # search), so we hand every request its own httplib2.Http. Sharing one
+            # TLS connection across threads corrupts OpenSSL's write buffer and
+            # SIGTRAPs the whole process. See
+            # llm_memory/BUG-gmail-builtin-sigtrap-macos-py314.md
+            #
+            # The credentials object is shared across threads; concurrent refresh()
+            # calls are possible but benign — the Python-level attribute writes are
+            # GIL-serialized, and each AuthorizedHttp has its own Http for the token
+            # endpoint, so the worst case is a redundant token fetch.
+            def _build_request(_http: Any, *args: Any, **kwargs: Any) -> Any:
+                thread_local_http = AuthorizedHttp(credentials, http=httplib2.Http())
+                return HttpRequest(thread_local_http, *args, **kwargs)
+
+            discovery_http = AuthorizedHttp(credentials, http=httplib2.Http())
+            self._service = build(
+                "gmail",
+                "v1",
+                http=discovery_http,            # used only for the discovery doc
+                requestBuilder=_build_request,  # per-request, per-thread Http
+                cache_discovery=False,          # silences oauth2client file_cache warning
+            )
 
         return self._service
 

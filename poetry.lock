@@ -8359,8 +8359,8 @@ files = [
 cffi = ["cffi (>=1.17,<2.0) ; platform_python_implementation != \"PyPy\" and python_version < \"3.14\"", "cffi (>=2.0.0b) ; platform_python_implementation != \"PyPy\" and python_version >= \"3.14\""]
 
 [extras]
-all-builtins = ["elevenlabs", "google-api-python-client", "google-auth", "httpx", "langchain-community", "langchain-mcp-adapters", "langchain-moonshot", "langchain-ollama", "openai", "sqlite-vec", "websockets"]
-email = ["google-api-python-client", "google-auth"]
+all-builtins = ["elevenlabs", "google-api-python-client", "google-auth", "google-auth-httplib2", "httpx", "langchain-community", "langchain-mcp-adapters", "langchain-moonshot", "langchain-ollama", "openai", "sqlite-vec", "websockets"]
+email = ["google-api-python-client", "google-auth", "google-auth-httplib2"]
 mcp = ["langchain-mcp-adapters"]
 memory = ["sqlite-vec"]
 moonshot = ["langchain-moonshot"]
@@ -8372,4 +8372,4 @@ web = ["langchain-community"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "b7660d7e2eb19ddcfbda3e34217fda436095214da879a9f3f23aff9de240e09e"
+content-hash = "74242d15c1b29ff674b037f3e680cb721e3fb36081126cc8bb4645195fe1e35e"
