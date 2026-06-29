@@ -6,6 +6,8 @@
 
 Builtins are optional capabilities conditionally loaded based on API key availability and installed packages. They come in two types: **tools** (agent-invokable functions) and **processors** (message transformers).
 
+> Looking for MCP server connections? MCP is a separate per-workspace concept — see [mcp.md](mcp.md).
+
 ## Overview
 
 OpenPaw ships with 17 built-in tools and 4 message processors. Builtins are discovered at runtime — if prerequisites (API keys, packages) are missing, the builtin is unavailable. The allow/deny system provides fine-grained control over which capabilities are active in each workspace.

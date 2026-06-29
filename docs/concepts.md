@@ -95,6 +95,8 @@ The built-in tools cover several categories:
 
 Tools are registered with the agent at startup. If a tool's prerequisites are not met — for example, the Brave Search tool requires a `BRAVE_API_KEY` — the tool is silently skipped and the agent does not see it. You can also explicitly deny tools or entire capability groups using the `builtins.deny` configuration.
 
+Beyond builtins, a workspace can also pull tools from one or more external MCP (Model Context Protocol) servers. MCP servers are not built into the framework — they are third-party services your agent connects to. Once connected, their tools appear in the agent's toolbelt with a per-server prefix and are usable just like any other tool. This is how you give an agent first-class access to your ticket board, knowledge base, or any other system that speaks MCP, without writing a workspace tool. See [MCP Servers](mcp.md) for the configuration reference.
+
 ### Processors
 
 Processors run automatically on every inbound message before the agent sees it. They are transparent middleware: the user sends a message, processors transform it, and the agent receives the enriched result. The agent never sees raw file bytes or unprocessed audio.
