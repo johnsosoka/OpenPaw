@@ -1,6 +1,6 @@
 [project]
 name = "openpaw-ai"
-version = "0.4.2"
+version = "0.4.3"
 description = "OpenPaw - Multi-Channel AI Agent Framework with LangGraph"
 authors = [
     {name = "John Sosoka"}
@@ -32,7 +32,10 @@ dependencies = [
     "langchain-aws (>=1.0.0,<2.0.0)",
     "langchain-openai (>=1.1.7,<2.0.0)",
     "langchain-xai (>=1.2.2,<2.0.0)",
-    "langchain-fireworks (>=1.0.0,<2.0.0)",
+    # >=1.3.1 fixes MCP tool-result serialization (strips the lc_ id from content
+    # blocks that Fireworks' API rejects). <1.4.0 keeps us on the stable fireworks-ai
+    # 0.x SDK; 1.4.x requires an alpha SDK that relocates fireworks.client.error.
+    "langchain-fireworks (>=1.3.1,<1.4.0)",
     # Channel adapters
     "python-telegram-bot[job-queue] (>=22.6,<23.0)",
     "discord.py (>=2.6.0,<3.0.0)",
@@ -74,6 +77,16 @@ researcher = [
 email = [
     "google-auth (>=2.0.0)",              # Google service account auth
     "google-api-python-client (>=2.0.0)", # Gmail API client
+    "google-auth-httplib2 (>=0.2.0)",     # Per-request httplib2 transport (thread safety)
+]
+moonshot = [
+    "langchain-moonshot (>=0.1.0,<1.0.0)",  # Native Kimi (K2.5 etc.) via Moonshot API
+]
+ollama = [
+    "langchain-ollama (>=1.0.1,<2.0.0)",    # Local models via Ollama server
+]
+mcp = [
+    "langchain-mcp-adapters (>=0.3.0,<1.0.0)",  # MCP server adapter for LangChain tools
 ]
 all-builtins = [
     "openai (>=1.0.0)",
@@ -84,6 +97,10 @@ all-builtins = [
     "httpx (>=0.27.0)",
     "google-auth (>=2.0.0)",
     "google-api-python-client (>=2.0.0)",
+    "google-auth-httplib2 (>=0.2.0)",
+    "langchain-moonshot (>=0.1.0,<1.0.0)",
+    "langchain-ollama (>=1.0.1,<2.0.0)",
+    "langchain-mcp-adapters (>=0.3.0,<1.0.0)",
 ]
 
 
@@ -121,7 +138,7 @@ warn_unused_ignores = false
 
 [tool.poetry]
 name = "openpaw-ai"
-version = "0.4.2"
+version = "0.4.3"
 description = "OpenPaw - Multi-Channel AI Agent Framework with LangGraph"
 authors = ["John Sosoka"]
 packages = [{include = "openpaw"}]
@@ -130,3 +147,6 @@ include = ["CHANGELOG.md"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: marks tests as integration tests (run against real subprocesses/servers)",
+]

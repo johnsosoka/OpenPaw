@@ -438,14 +438,19 @@ class MessageProcessor:
 
                 # Send response if not steered
                 if not steered and channel:
-                    # Check for silent acknowledgment on system events
-                    ack_tool = self._builtin_loader.get_tool_instance("acknowledge")
-                    ack = ack_tool.get_pending_ack() if ack_tool else None
-
-                    if is_system_batch and ack:
+                    if is_system_batch:
+                        # Suppress-by-default for [SYSTEM] events (cron/heartbeat/sub-agent/
+                        # dynamic-task injections). The agent surfaces anything user-facing via
+                        # send_message DURING the run. The terminal text is intentionally NOT
+                        # channel-delivered, but it IS still recorded in conversation history by
+                        # the checkpointer inside agent_runner.run() — so the agent stays aware of
+                        # what it did. This makes user-bombardment structurally impossible.
+                        ack_tool = self._builtin_loader.get_tool_instance("acknowledge")
+                        ack = ack_tool.get_pending_ack() if ack_tool else None
+                        ack_note = f" (agent note: {ack.reason})" if ack else ""
                         self._logger.info(
-                            f"System event acknowledged for {session_key}: {ack.reason} "
-                            f"(suppressing channel delivery, {len(response or '')} chars)"
+                            f"System event for {session_key}: terminal text suppressed "
+                            f"({len(response or '')} chars){ack_note}"
                         )
                         self._session_manager.increment_message_count(session_key)
                     elif response and response.strip():
@@ -642,8 +647,8 @@ class MessageProcessor:
 
         System events have user_id == "system" and are injected by the
         framework (cron results, heartbeat injections, sub-agent completions).
-        Only a system-only batch allows acknowledge_event to suppress delivery —
-        this prevents user messages from ever being silently swallowed.
+        For system-only batches, the terminal agent reply is suppressed by default;
+        for mixed batches (any real user message present), delivery proceeds normally.
 
         Args:
             messages: The message batch to inspect.

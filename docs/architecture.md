@@ -108,7 +108,7 @@ Workspace lifecycle management — the layer that assembles all services into a 
 6. Handle `followup` depth tracking for self-continuation workflows
 7. Process `[SYSTEM]` events from sub-agents and schedulers
 
-`AgentFactory` manages the middleware list, the `RuntimeModelOverride` for `/model` switching (ephemeral — lost on restart), and `create_stateless_agent()` for cron/heartbeat runs (always uses the configured model, ignoring any runtime override).
+`AgentFactory` manages the middleware list, the `RuntimeModelOverride` for `/model` switching (ephemeral — lost on restart), and `create_stateless_agent()` for cron/heartbeat runs (always uses the configured model, ignoring any runtime override; includes builtin, workspace, and MCP tools).
 
 `WorkspaceLoader` reads identity files and returns an `AgentWorkspace` with the fully assembled system prompt. `ToolLoader` discovers and imports `@tool`-decorated functions from the workspace's `tools/` directory, auto-installing packages from `tools/requirements.txt`.
 
@@ -125,6 +125,7 @@ Runtime services that coordinate across a workspace's lifetime.
 - **`session/manager.py`** — `SessionManager`: maps session keys to active conversation IDs, persisted to `.openpaw/sessions.json`
 - **`session/archiver.py`** — `ConversationArchiver`: exports LangGraph checkpoint state to `memory/conversations/` as `conv_*.md` + `conv_*.json` pairs
 - **`subagent/runner.py`** — `SubAgentRunner`: manages spawned agents with a semaphore, filtered tools, and session log writing
+- **`mcp/manager.py`** — `MCPManager`: per-workspace MCP (Model Context Protocol) client. Connects to one or more remote (Streamable HTTP / SSE) or local (stdio) MCP servers, fetches their tools, applies per-server prefix and allow/deny filters, and exposes the result to `WorkspaceRunner.start()` for injection into the agent's toolbelt. Honors a per-server `required:` flag — non-required failures log a warning and skip; required failures abort workspace start.
 
 ### `openpaw/stores/`
 
@@ -179,9 +180,9 @@ A user message travels through the following stages:
 
 ### Scheduled Execution
 
-Cron jobs and heartbeats bypass the queue entirely. The scheduler fires at the configured time (workspace timezone), builds a fresh stateless `AgentRunner` (no checkpointer, no conversation history), injects the prompt, and invokes the agent. Session logs write to `memory/sessions/{cron,heartbeat}/` as three JSONL records: prompt, response, and metadata (tools used, token metrics, duration).
+Cron jobs and heartbeats bypass the queue entirely. The scheduler fires at the configured time (workspace timezone), builds a fresh stateless `AgentRunner` (no checkpointer, no conversation history), injects the prompt, and invokes the agent. The stateless toolbelt includes builtins, workspace tools, and MCP server tools — the same set the interactive agent has. Session logs write to `memory/sessions/{cron,heartbeat}/` as three JSONL records: prompt, response, and metadata (tools used, token metrics, duration).
 
-The `delivery` field controls output routing: `channel` sends directly to the configured chat, `agent` injects a `[SYSTEM]` event into the main lane queue, and `both` does both. Heartbeats add a pre-flight skip: if `HEARTBEAT.md` is trivial and no active tasks exist, the LLM call skips entirely and a `skip` outcome logs to `heartbeat_log.jsonl`.
+The `delivery` field controls output routing: `channel` sends directly to the configured chat, `agent` injects a `[SYSTEM]` event into the main lane queue, and `both` does both. Cron defaults to `both` (raw output to the channel plus a main-agent injection for context awareness); heartbeats default to `channel`. When a result is injected as a `[SYSTEM]` event, the main agent's terminal reply is suppressed by default — recorded in history for awareness but not delivered; the agent calls `send_message` to surface anything user-facing. Heartbeats add a pre-flight skip: if `HEARTBEAT.md` is trivial and no active tasks exist, the LLM call skips entirely and a `skip` outcome logs to `heartbeat_log.jsonl`.
 
 ### Sub-Agent Flow
 
@@ -217,7 +218,7 @@ Global defaults merge with workspace overrides, environment variables expand, an
 
 The merge is a deep dictionary merge: nested keys in `agent.yaml` override only the fields they specify; everything else inherits from `config.yaml`. A workspace that sets only `model.temperature` inherits the global model provider, API key, and all channel settings.
 
-`${VAR}` substitution runs after merging. Any unresolved reference fails fast at startup with an error naming the missing variable and its source file. Provider catalog entries under `providers:` in `config.yaml` let multiple workspaces share connection details. The shorthand `model: moonshot:kimi-k2.5` triggers resolution: `moonshot` maps to `type: openai`, `api_key`, and `base_url` in the catalog, producing a call to `init_chat_model("openai:kimi-k2.5", ...)` with those values. The user-visible display string stays `moonshot:kimi-k2.5` in `/status` output.
+`${VAR}` substitution runs after merging. Any unresolved reference fails fast at startup with an error naming the missing variable and its source file. Provider catalog entries under `providers:` in `config.yaml` let multiple workspaces share connection details. The shorthand `model: moonshot:kimi-k2.5` triggers resolution against the catalog and then dispatches to the native `ChatMoonshot` provider in `openpaw.agent.model_factory.create_chat_model()`. Catalog entries with a `type:` override (e.g. `type: bedrock_converse`) are remapped before dispatch — the original name stays the user-visible display string in `/status` output.
 
 See [Configuration](configuration.md) for the full field reference and provider catalog examples.
 
@@ -283,6 +284,10 @@ See [Built-ins](builtins.md) for the full builtin reference and existing impleme
 ### Adding workspace tools
 
 Drop a Python file containing `@tool`-decorated functions into a workspace's `tools/` directory. `ToolLoader` discovers and imports them at startup, merging them into the agent's tool set alongside framework builtins. List any additional packages in `tools/requirements.txt` — the loader installs missing dependencies automatically before importing. Files prefixed with `_` are skipped. Each workspace can carry a completely different tool set, enabling purpose-built agents without any framework changes.
+
+### Connecting MCP servers
+
+Declare one or more MCP (Model Context Protocol) servers under the `mcp:` block of a workspace's `agent.yaml`. The framework connects to each server during `WorkspaceRunner.start()` via `MCPManager`, fetches the server's tool list, applies per-server namespacing and filtering, and injects the resulting `BaseTool` instances into the agent alongside builtins and workspace tools. Supports remote transports (`http`, `sse`) and local subprocess (`stdio`). See [MCP Servers](mcp.md) for the configuration reference and transport details.
 
 ### Adding a command
 

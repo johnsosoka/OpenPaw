@@ -71,6 +71,7 @@ class AgentFactory:
         self._timeout_seconds = timeout_seconds
         self._builtin_tools = builtin_tools
         self._workspace_tools = workspace_tools
+        self._mcp_tools: list[Any] = []
         self._enabled_builtin_names = enabled_builtin_names
         self._middleware = middleware
         self._logger = logger
@@ -121,6 +122,15 @@ class AgentFactory:
     # Agent creation
     # ------------------------------------------------------------------
 
+    def set_mcp_tools(self, tools: list[Any]) -> None:
+        """Register MCP-sourced tools so subsequent agent rebuilds include them.
+
+        Without this, connectors that rebuild via create_agent() (e.g. when
+        removing search_conversations after vector-store init failure) would
+        silently drop the MCP tools previously injected via update_tools().
+        """
+        self._mcp_tools = list(tools)
+
     def create_agent(self, checkpointer: Any | None = None) -> AgentRunner:
         """Create a configured AgentRunner instance.
 
@@ -130,7 +140,7 @@ class AgentFactory:
         Returns:
             Configured AgentRunner instance.
         """
-        all_tools = list(self._builtin_tools) + list(self._workspace_tools)
+        all_tools = list(self._builtin_tools) + list(self._workspace_tools) + list(self._mcp_tools)
 
         raw_model = (
             self._runtime_override.model
@@ -180,7 +190,7 @@ class AgentFactory:
 
         Always uses configured model, ignoring runtime overrides.
         """
-        all_tools = list(self._builtin_tools) + list(self._workspace_tools)
+        all_tools = list(self._builtin_tools) + list(self._workspace_tools) + list(self._mcp_tools)
 
         resolved = self._resolver.resolve(self._configured_model)
         api_key = (
@@ -220,7 +230,7 @@ class AgentFactory:
         Uses the profile's model, temperature, and max_turns when set,
         falling back to workspace defaults.
         """
-        all_tools = list(self._builtin_tools) + list(self._workspace_tools)
+        all_tools = list(self._builtin_tools) + list(self._workspace_tools) + list(self._mcp_tools)
 
         if profile.model is not None:
             resolved = self._resolver.resolve(profile.model)

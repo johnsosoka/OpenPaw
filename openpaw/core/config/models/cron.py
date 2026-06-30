@@ -39,8 +39,13 @@ class CronOutputConfig(BaseModel):
     guild_id: int | None = Field(default=None, description="Discord guild ID")
     channel_id: int | None = Field(default=None, description="Discord channel ID (deprecated, use target_id)")
     delivery: Literal["channel", "agent", "both"] = Field(
-        default="channel",
-        description="Where to deliver results: channel (direct), agent (queue injection), or both",
+        default="both",
+        description=(
+            "Where to deliver results: channel (direct to user), agent (inject into main agent), "
+            "or both. Default 'both': raw output goes to channel AND the main agent receives "
+            "the result for context awareness. The agent's terminal reply is suppressed — "
+            "use send_message within the agent run to add commentary."
+        ),
     )
 
 

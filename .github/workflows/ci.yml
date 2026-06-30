@@ -51,6 +51,15 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         run: pipx install poetry
 
+      - name: Free disk space
+        if: needs.changes.outputs.code == 'true'
+        run: |
+          echo "Before:"; df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          sudo docker image prune --all --force || true
+          echo "After:"; df -h /
+
       - name: Install dependencies
         if: needs.changes.outputs.code == 'true'
         run: poetry install --only main,dev
@@ -96,9 +105,18 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         run: pipx install poetry
 
+      - name: Free disk space
+        if: needs.changes.outputs.code == 'true'
+        run: |
+          echo "Before:"; df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          sudo docker image prune --all --force || true
+          echo "After:"; df -h /
+
       - name: Install dependencies
         if: needs.changes.outputs.code == 'true'
-        run: poetry install
+        run: poetry install -E mcp
 
       - name: Run tests
         if: needs.changes.outputs.code == 'true'

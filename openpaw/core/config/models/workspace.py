@@ -9,6 +9,7 @@ from openpaw.core.config.models.builtin import WorkspaceBuiltinsConfig
 from openpaw.core.config.models.channel import WorkspaceChannelConfig
 from openpaw.core.config.models.cron import HeartbeatConfig
 from openpaw.core.config.models.lifecycle import LifecycleConfig, StatusReminderConfig
+from openpaw.core.config.models.mcp import WorkspaceMCPConfig
 from openpaw.core.config.models.memory import AutoCompactConfig, MemoryConfig
 from openpaw.core.config.models.security import ApprovalGatesConfig, ToolTimeoutsConfig
 from openpaw.core.config.models.status_updates import StatusUpdatesConfig
@@ -17,12 +18,27 @@ from openpaw.core.config.models.status_updates import StatusUpdatesConfig
 class WorkspaceModelConfig(BaseModel):
     """LLM configuration for a workspace agent."""
 
-    provider: str | None = Field(default=None, description="Model provider (anthropic, openai, bedrock_converse, etc.)")
+    provider: str | None = Field(
+        default=None,
+        description="Model provider (anthropic, openai, bedrock_converse, moonshot, ollama, etc.)",
+    )
     model: str | None = Field(default=None, description="Model identifier")
     api_key: str | None = Field(default=None, description="API key for the model provider")
     temperature: float | None = Field(default=None, description="Model temperature")
     max_turns: int | None = Field(default=None, description="Max agent turns per run")
     region: str | None = Field(default=None, description="AWS region for Bedrock models (e.g., us-east-1)")
+    base_url: str | None = Field(
+        default=None,
+        description="Custom API endpoint URL (e.g., Ollama server). Forwarded to providers that accept base_url.",
+    )
+    thinking: bool | None = Field(
+        default=None,
+        description=(
+            "Enable native reasoning mode on supported providers. "
+            "Moonshot: maps to ChatMoonshot(thinking=...) — temperature is auto-set "
+            "to 1.0 (thinking=True) or 0.6 (thinking=False) when left at the framework default."
+        ),
+    )
     max_output_tokens: int | None = Field(
         default=None,
         description="Maximum output tokens per LLM call (None = provider default). Applied to all agent types.",
@@ -53,6 +69,36 @@ class WorkspaceModelConfig(BaseModel):
             data["provider"] = provider
             data["model"] = model_id
         return data
+
+    @model_validator(mode="after")
+    def reject_legacy_moonshot_shape(self) -> "WorkspaceModelConfig":
+        """Catch the pre-0.4.3 Moonshot-via-OpenAI-compat shape at load time.
+
+        Both retired signals only apply when ``provider == "openai"``:
+        (1) base_url pointed at ``api.moonshot.ai``, and (2) ``extra_body.thinking``.
+        Other providers (notably Anthropic) use ``extra_body.thinking`` natively
+        for extended-thinking budgets and must NOT be caught by this validator.
+        """
+        if self.provider == "openai" and self.base_url and "moonshot.ai" in self.base_url:
+            raise ValueError(
+                "The 'openai' provider with base_url 'https://api.moonshot.ai/v1' "
+                "was removed in 0.4.3. Use the native 'moonshot' provider instead:\n"
+                "    model:\n"
+                "      provider: moonshot\n"
+                "      model: kimi-k2.5\n"
+                "      thinking: false   # or true\n"
+                "      api_key: ${MOONSHOT_API_KEY}"
+            )
+        if self.provider == "openai":
+            extra_body = (self.__pydantic_extra__ or {}).get("extra_body")
+            if isinstance(extra_body, dict) and "thinking" in extra_body:
+                raise ValueError(
+                    "'extra_body.thinking' under the 'openai' provider was removed in 0.4.3. "
+                    "Use the native 'moonshot' provider with the top-level 'thinking' field instead. "
+                    "(This restriction does NOT affect Anthropic, whose extended-thinking budgets "
+                    "use the same key on a different provider.)"
+                )
+        return self
 
     model_config = {"extra": "allow"}
 
@@ -175,6 +221,10 @@ class WorkspaceConfig(BaseModel):
     status_updates: StatusUpdatesConfig = Field(
         default_factory=StatusUpdatesConfig,
         description="Status updates middleware configuration",
+    )
+    mcp: WorkspaceMCPConfig = Field(
+        default_factory=WorkspaceMCPConfig,
+        description="MCP (Model Context Protocol) server bindings for this workspace.",
     )
 
     @field_validator("session_ttl_minutes")

@@ -6,6 +6,8 @@
 
 Builtins are optional capabilities conditionally loaded based on API key availability and installed packages. They come in two types: **tools** (agent-invokable functions) and **processors** (message transformers).
 
+> Looking for MCP server connections? MCP is a separate per-workspace concept — see [mcp.md](mcp.md).
+
 ## Overview
 
 OpenPaw ships with 17 built-in tools and 4 message processors. Builtins are discovered at runtime — if prerequisites (API keys, packages) are missing, the builtin is unavailable. The allow/deny system provides fine-grained control over which capabilities are active in each workspace.
@@ -21,7 +23,7 @@ BuiltinRegistry
 │  ├─ spawn            Sub-agent spawning
 │  ├─ cron             Agent self-scheduling
 │  ├─ cron_manager     Persistent YAML cron management
-│  ├─ acknowledge      Silent system event acknowledgment
+│  ├─ acknowledge      Optional audit note for system events
 │  ├─ task_tracker     Persistent task management
 │  ├─ send_message     Mid-execution messaging
 │  ├─ report_progress  Structured progress reporting
@@ -645,17 +647,18 @@ Agent: [Proceeds to execute each step, updating the plan as steps complete]
 **Type:** Tool
 **Prerequisites:** None (always available)
 
-Silent acknowledgment for system events. When the agent receives a `[SYSTEM]` event (cron result, heartbeat injection, sub-agent completion) and determines there is nothing the user needs to know, it calls `acknowledge_event` to suppress channel delivery. Everything is still logged — conversation history, token usage, and the acknowledgment reason. Silence means "don't message the user," not "don't record."
+Optional audit acknowledgment for system events. The main agent **no longer needs this tool to stay quiet**: when it processes a `[SYSTEM]` event (cron result, heartbeat injection, sub-agent completion), its terminal reply is suppressed by default and never delivered to the channel — the agent surfaces anything user-facing by calling `send_message`. In the main-agent path, `acknowledge_event` is therefore reduced to an optional audit note ("I reviewed this event and consciously chose not to surface it"), recorded in the log line. It still has a real effect on the **heartbeat's own delivery path**, where calling it suppresses a routine heartbeat result.
 
 **When to use:**
 
-The agent receives a `[SYSTEM]` notification with routine information — a cron ran successfully with no notable output, a heartbeat check found nothing actionable, or a background sub-agent completed a task the user doesn't need to hear about. Instead of sending a noisy "nothing to report" message, the agent calls `acknowledge_event` with a brief reason.
+On the heartbeat path, the agent can call `acknowledge_event` with a brief reason to suppress a routine result without relying on the `HEARTBEAT_OK` protocol. In the main-agent path it is purely a record-keeping note — suppression happens automatically, so the agent does not need to call it to avoid messaging the user.
 
 **Key Behaviors:**
 
-- Only suppresses channel delivery for system-originated events. Has no effect on user messages.
+- In the main-agent path it does **not** gate delivery — `[SYSTEM]`-event terminal replies are suppressed regardless. It only enriches the audit log with the supplied reason.
+- On the heartbeat path it still suppresses the heartbeat executor's own channel delivery.
 - One `acknowledge_event` call per agent invocation — duplicate calls return an error.
-- The agent's text response is still written to conversation history; it just isn't delivered to the channel.
+- The agent's text response is always written to conversation history either way.
 
 **Configuration:**
 
@@ -670,8 +673,8 @@ builtins:
 ```
 System: [SYSTEM] Cron 'daily-check' completed. Session log: memory/sessions/cron/daily-check_2026-03-25T09-00-00.jsonl
 Agent: [Reads session log — routine status, no anomalies found]
-Agent: [Calls acknowledge_event(reason="daily-check ran clean, no anomalies to report")]
-Agent: "Checked the daily-check cron result — all systems nominal." (not delivered to user)
+Agent: [Optionally calls acknowledge_event(reason="daily-check ran clean, no anomalies to report") as an audit note]
+Agent: "Checked the daily-check cron result — all systems nominal." (terminal reply suppressed by default — not delivered to user; the agent would call send_message to surface anything that mattered)
 ```
 
 ---

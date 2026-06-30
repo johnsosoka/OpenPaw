@@ -74,8 +74,13 @@ def test_extra_model_kwargs_defaults_to_empty_dict(mock_workspace: AgentWorkspac
 
 
 def test_openai_provider_creates_chat_openai(mock_workspace: AgentWorkspace) -> None:
-    """Test that openai provider instantiates ChatOpenAI with all kwargs."""
-    extra_kwargs = {"base_url": "https://api.moonshot.ai/v1", "timeout": 60}
+    """Test that openai provider instantiates ChatOpenAI with all kwargs.
+
+    Uses a generic OpenAI-compat base_url (Together, Groq, etc.). The legacy
+    Moonshot pass-through (api.moonshot.ai) is rejected in 0.4.3 — see
+    test_legacy_moonshot_openai_base_url_rejected for that path.
+    """
+    extra_kwargs = {"base_url": "https://api.together.xyz/v1", "timeout": 60}
 
     with patch(_PATCH_OPENAI) as mock_cls, \
          patch(_PATCH_FS), patch(_PATCH_AGENT):
@@ -83,8 +88,8 @@ def test_openai_provider_creates_chat_openai(mock_workspace: AgentWorkspace) -> 
 
         AgentRunner(
             workspace=mock_workspace,
-            model="openai:kimi-k2.5",
-            api_key="test-moonshot-key",
+            model="openai:gpt-4o",
+            api_key="test-key",
             temperature=0.6,
             extra_model_kwargs=extra_kwargs,
         )
@@ -92,18 +97,18 @@ def test_openai_provider_creates_chat_openai(mock_workspace: AgentWorkspace) -> 
         mock_cls.assert_called_once()
         call_kwargs = mock_cls.call_args[1]
 
-        assert call_kwargs["model"] == "kimi-k2.5"
+        assert call_kwargs["model"] == "gpt-4o"
         assert call_kwargs["temperature"] == 0.6
-        assert call_kwargs["api_key"] == "test-moonshot-key"
-        assert call_kwargs["base_url"] == "https://api.moonshot.ai/v1"
+        assert call_kwargs["api_key"] == "test-key"
+        assert call_kwargs["base_url"] == "https://api.together.xyz/v1"
         assert call_kwargs["timeout"] == 60
 
 
 def test_model_kwargs_flattened_into_direct_args(mock_workspace: AgentWorkspace) -> None:
     """Test that nested model_kwargs are flattened so extra_body reaches the provider."""
     extra_kwargs = {
-        "base_url": "https://api.moonshot.ai/v1",
-        "model_kwargs": {"extra_body": {"thinking": {"type": "disabled"}}},
+        "base_url": "https://api.together.xyz/v1",
+        "model_kwargs": {"extra_body": {"some_provider_flag": True}},
     }
 
     with patch(_PATCH_OPENAI) as mock_cls, \
@@ -112,7 +117,7 @@ def test_model_kwargs_flattened_into_direct_args(mock_workspace: AgentWorkspace)
 
         AgentRunner(
             workspace=mock_workspace,
-            model="openai:kimi-k2.5",
+            model="openai:gpt-4o",
             api_key="test-key",
             temperature=0.6,
             extra_model_kwargs=extra_kwargs,
@@ -123,8 +128,37 @@ def test_model_kwargs_flattened_into_direct_args(mock_workspace: AgentWorkspace)
 
         # extra_body should be a direct kwarg, NOT nested under model_kwargs
         assert "model_kwargs" not in call_kwargs
-        assert call_kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
-        assert call_kwargs["base_url"] == "https://api.moonshot.ai/v1"
+        assert call_kwargs["extra_body"] == {"some_provider_flag": True}
+        assert call_kwargs["base_url"] == "https://api.together.xyz/v1"
+
+
+def test_legacy_moonshot_openai_base_url_rejected(mock_workspace: AgentWorkspace) -> None:
+    """Pre-0.4.3 'openai + base_url=api.moonshot.ai' raises a clear migration error."""
+    extra_kwargs = {"base_url": "https://api.moonshot.ai/v1"}
+
+    with patch(_PATCH_FS), patch(_PATCH_AGENT), \
+         pytest.raises(ValueError, match="native 'moonshot' provider"):
+        AgentRunner(
+            workspace=mock_workspace,
+            model="openai:kimi-k2.5",
+            api_key="test-key",
+            temperature=0.6,
+            extra_model_kwargs=extra_kwargs,
+        )
+
+
+def test_legacy_extra_body_thinking_rejected(mock_workspace: AgentWorkspace) -> None:
+    """Pre-0.4.3 'extra_body.thinking' under openai provider raises a migration error."""
+    extra_kwargs = {"extra_body": {"thinking": {"type": "disabled"}}}
+
+    with patch(_PATCH_FS), patch(_PATCH_AGENT), \
+         pytest.raises(ValueError, match="extra_body.thinking"):
+        AgentRunner(
+            workspace=mock_workspace,
+            model="openai:gpt-4o",
+            api_key="test-key",
+            extra_model_kwargs=extra_kwargs,
+        )
 
 
 def test_bedrock_excludes_api_key_but_includes_extra_kwargs(mock_workspace: AgentWorkspace) -> None:

@@ -61,7 +61,9 @@ TEMPLATE_ENV = """\
 # ANTHROPIC_API_KEY=
 # OPENAI_API_KEY=
 # XAI_API_KEY=
+# MOONSHOT_API_KEY=
 # BRAVE_API_KEY=
+# TELEGRAM_BOT_TOKEN=
 # DISCORD_BOT_TOKEN=
 """
 
@@ -69,8 +71,10 @@ _PROVIDER_API_KEY_ENV: dict[str, str | None] = {
     "anthropic": "ANTHROPIC_API_KEY",
     "openai": "OPENAI_API_KEY",
     "xai": "XAI_API_KEY",
+    "moonshot": "MOONSHOT_API_KEY",
     "bedrock_converse": None,
     "bedrock": None,
+    "ollama": None,
 }
 
 
@@ -147,9 +151,27 @@ def _build_agent_yaml(name: str, channel: str | None, model: str | None) -> str:
         ]
         if api_key_env:
             lines.append(f"  api_key: ${{{api_key_env}}}")
-        lines += [
-            "  temperature: 0.7",
-        ]
+
+        # Provider-specific fields with sensible defaults.
+        if provider == "moonshot":
+            # kimi-k2.5 enforces temperature=0.6 (thinking off) or 1.0 (on); scaffold
+            # the matching pair so the file is valid out-of-the-box.
+            lines += [
+                "  thinking: false        # true = reasoning mode (then set temperature: 1.0)",
+                "  temperature: 0.6",
+            ]
+        elif provider == "ollama":
+            # Local server — keyless, with a non-default num_ctx since 2048 is
+            # too small for any non-trivial agent conversation.
+            lines += [
+                "  base_url: http://localhost:11434",
+                "  num_ctx: 16384",
+                "  temperature: 0.7",
+            ]
+        else:
+            lines += [
+                "  temperature: 0.7",
+            ]
 
         # For well-known native providers, hint at the shorthand alternative.
         if provider in _PROVIDER_API_KEY_ENV:

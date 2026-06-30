@@ -559,13 +559,7 @@ class TestResponseHandler:
         # Should not raise
 
     @pytest.mark.asyncio
-    async def test_send_response_system_ack_suppresses(self, mock_handler: ResponseHandler):
-        from openpaw.builtins.tools.acknowledge import AcknowledgeRequest
-
-        ack_tool = MagicMock()
-        ack_tool.get_pending_ack.return_value = AcknowledgeRequest(reason="routine check")
-        mock_handler._builtin_loader.get_tool_instance.return_value = ack_tool
-
+    async def test_send_response_system_suppresses_by_default(self, mock_handler: ResponseHandler):
         channel = AsyncMock()
         await mock_handler.send_response(
             "telegram:sys", "system response", channel,
@@ -573,6 +567,17 @@ class TestResponseHandler:
         )
         channel.send_message.assert_not_called()
         mock_handler._session_manager.increment_message_count.assert_called_once_with("telegram:sys")
+
+    @pytest.mark.asyncio
+    async def test_send_response_system_no_ack_still_suppressed(self, mock_handler: ResponseHandler):
+        """System batch with no ack → still suppressed (suppress-by-default)."""
+        # mock_handler has no ack tool loaded by default
+        channel = AsyncMock()
+        await mock_handler.send_response(
+            "telegram:sys", "any response", channel,
+            [Message(id="1", channel="telegram", session_key="telegram:sys", user_id="system", content="cron")],
+        )
+        channel.send_message.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_send_response_user_ack_not_suppressed(self, mock_handler: ResponseHandler):

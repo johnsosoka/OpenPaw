@@ -46,7 +46,7 @@ Define cron jobs for periodic tasks, or enable heartbeats for proactive agent ch
 
 ### Approval Gates
 
-Require human authorization before sensitive tools execute. The agent pauses, the user sees approve/deny buttons in their chat, and the agent resumes or gracefully handles the denial. Use the `acknowledge` builtin to suppress routine results from gated tools when full approval is unnecessary.
+Require human authorization before sensitive tools execute. The agent pauses, the user sees approve/deny buttons in their chat, and the agent resumes or gracefully handles the denial.
 
 ### Safe Shell Execution
 
@@ -97,6 +97,7 @@ For a deeper understanding, start with [Concepts](concepts.md) for the mental mo
 | [Workspaces](workspaces.md) | Workspace structure, identity files, and custom tools |
 | [Scheduling](scheduling.md) | Cron jobs, heartbeats, and dynamic scheduling |
 | [Built-ins](builtins.md) | Optional tools (search, browser, spawn) and processors (Whisper, Docling) |
+| [MCP Servers](mcp.md) | Per-workspace MCP server connections (HTTP and stdio) |
 | [Channels](channels.md) | Channel adapters, access control, and adding new providers |
 | [Queue System](queue-system.md) | Message queueing and the four queue modes |
 | [Architecture](architecture.md) | System design, data flows, and architectural decisions |

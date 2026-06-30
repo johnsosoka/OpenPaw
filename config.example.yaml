@@ -36,6 +36,8 @@ lanes:
 #   xai:grok-3-mini
 #   fireworks:accounts/fireworks/models/deepseek-v3p1
 #   bedrock_converse:moonshot.kimi-k2-thinking
+#   moonshot:kimi-k2.5                      # requires `pip install 'openpaw-ai[moonshot]'`
+#   ollama:llama3.1                         # requires `pip install 'openpaw-ai[ollama]'`
 agent:
   model: anthropic:claude-sonnet-4-20250514
   max_turns: 50
@@ -62,10 +64,10 @@ agent:
 #     api_key: ${ANTHROPIC_API_KEY}
 #   openai:
 #     api_key: ${OPENAI_API_KEY}
-#   moonshot:
-#     type: openai                    # LangChain backend class to use
-#     api_key: ${MOONSHOT_API_KEY}
-#     base_url: https://api.moonshot.ai/v1
+#   moonshot:                         # Native Kimi via ChatMoonshot
+#     api_key: ${MOONSHOT_API_KEY}    # (install with: pip install 'openpaw-ai[moonshot]')
+#   ollama:                           # Local models via Ollama server
+#     base_url: http://localhost:11434  # (install with: pip install 'openpaw-ai[ollama]')
 #   xai:
 #     api_key: ${XAI_API_KEY}
 #   fireworks:
@@ -112,6 +114,11 @@ builtins:
   #   config:
   #     min_interval_seconds: 300   # Minimum recurring task interval (5 min default)
   #     max_tasks: 50               # Maximum pending scheduled tasks per workspace
+
+  # Static cron job YAML files (workspace/crons/*.yaml) support per-job output.delivery:
+  #   # delivery: both   # Default: raw output sent to channel + result injected into agent
+  #                      # (agent reply is suppressed unless it calls send_message,
+  #                      # so the user gets exactly one message; agent stays context-aware)
 
   # Sub-agent spawning — agents can launch background workers for concurrent tasks
   # (no API key required; see "Sub-Agent Spawning" in CLAUDE.md)
@@ -168,7 +175,9 @@ builtins:
   # memory_search:
   #   enabled: true
 
-  # Acknowledge message receipt (no API key required)
+  # Acknowledge event receipt — optional audit tool for system events
+  # (main-agent delivery is now suppressed automatically; this tool logs audit notes
+  # and still gates heartbeat's own delivery on the heartbeat path)
   # acknowledge:
   #   enabled: true
 
@@ -238,7 +247,9 @@ builtins:
 #   active_hours: "09:00-17:00"   # Only run during this window (workspace timezone)
 #   suppress_ok: true             # Suppress messages when agent responds HEARTBEAT_OK
 #   max_output_tokens: 2000        # Cap output tokens per heartbeat run (default: uncapped)
-#   delivery: channel             # channel, agent, or both
+#   delivery: channel             # channel, agent, or both. Heartbeat stays 'channel' by design
+#                                 # (fires frequently; per-fire main-agent turn cost is high).
+#                                 # Cron jobs default to 'both' (raw output + main-agent context).
 #   target_channel: telegram
 #   target_id: 123456789          # Preferred (channel-agnostic). Legacy: target_chat_id
 
@@ -268,12 +279,36 @@ builtins:
 #     model: moonshot.kimi-k2-thinking
 #     region: us-east-1
 #
-# OpenAI-compatible (custom base_url):
+# Moonshot (native ChatMoonshot — requires `pip install 'openpaw-ai[moonshot]'`):
 #   model:
-#     provider: openai
+#     provider: moonshot
 #     model: kimi-k2.5
 #     api_key: ${MOONSHOT_API_KEY}
-#     base_url: https://api.moonshot.ai/v1
+#     thinking: false           # true = reasoning mode (auto-sets temperature=1.0)
+#                               # false = standard mode (auto-sets temperature=0.6)
+#
+# Ollama (local models — requires `pip install 'openpaw-ai[ollama]'`
+# and a running Ollama server):
+#   model:
+#     provider: ollama
+#     model: llama3.1           # any locally-pulled model name; tool-calling models
+#                               # include llama3.1, llama3-groq-tool-use, qwen2.5,
+#                               # mistral-nemo, gemma3:27b-instruct-q4_K_M
+#     base_url: http://localhost:11434
+#     num_ctx: 8192             # Ollama context window (optional)
+#     num_predict: 2048         # Max tokens to generate (optional)
+#     keep_alive: 5m            # How long the model stays loaded (optional)
+#
+# OpenAI-compatible (Together, Groq, etc. — custom base_url):
+#   model:
+#     provider: openai
+#     model: meta-llama/Llama-3-70b-chat-hf
+#     api_key: ${TOGETHER_API_KEY}
+#     base_url: https://api.together.xyz/v1
+#
+# Note: as of 0.4.3 the legacy pattern of pointing the 'openai' provider at
+# https://api.moonshot.ai/v1 with `extra_body.thinking` is no longer supported.
+# Use the native `moonshot` provider above instead.
 # ──────────────────────────────────────────────────────────────────────────────
 
 # Per-workspace channel settings (typically in agent.yaml, not here)
@@ -322,3 +357,5 @@ builtins:
 # workspace_tools:
 #   allow: []                     # Empty = allow all tools in tools/ directory
 #   deny: []                      # Tool function names to exclude
+
+# MCP server connections are per-workspace (not global) — see the mcp: block in agent.yaml.

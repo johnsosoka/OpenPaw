@@ -1,9 +1,24 @@
 """Tests for GmailProvider integration — send, list, get, search."""
 
+import importlib.util
+import sys
+import types
+from typing import Any
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock
 
 from .conftest import _b64, _make_raw_message
+
+# Marker applied to tests that require the email extra (google_auth_httplib2).
+# We use find_spec() rather than importorskip() because find_spec() stat-checks the
+# package without executing its __init__.py: the conftest registers a bare `google`
+# stub that would make a real import of google_auth_httplib2 fail (it needs
+# google.auth.*), so importorskip() would wrongly skip even when the package exists.
+_skip_no_email_extra = pytest.mark.skipif(
+    importlib.util.find_spec("google_auth_httplib2") is None,
+    reason="google_auth_httplib2 not installed (email extra required)",
+)
 
 
 class TestGmailProviderSend:
@@ -131,3 +146,167 @@ class TestGmailProviderListMessages:
 
         result = await provider.list_messages()
         assert result == []
+
+
+@_skip_no_email_extra
+class TestGmailProviderBuildWiring:
+    """Regression guard: _get_service() must isolate httplib2.Http per request.
+
+    These tests verify the fix for the SIGTRAP crash caused by sharing one
+    httplib2.Http object across concurrent asyncio.to_thread workers. Without the
+    fix, GmailFetcher.list_messages/search fan out up to 100 concurrent calls that
+    all drive the same TLS connection, corrupting the OpenSSL write buffer.
+
+    See llm_memory/BUG-gmail-builtin-sigtrap-macos-py314.md for full context.
+
+    Skipped in environments where google_auth_httplib2 is not installed (no email extra).
+    """
+
+    def _fresh_provider(self) -> Any:
+        """GmailProvider with _service=None so _get_service() reaches the build path.
+
+        The shared ``provider`` fixture pre-injects ``_service``, bypassing the
+        build block entirely. These tests need a clean instance.
+        """
+        from openpaw.builtins.tools.email.gmail import GmailProvider
+
+        return GmailProvider(
+            service_account_file="/fake/sa.json",
+            delegated_user="agent@example.com",
+        )
+
+    def _conftest_gap_stubs(self) -> dict[str, Any]:
+        """Stub modules the new _get_service() imports that the conftest does not cover.
+
+        The conftest stubs ``googleapiclient.discovery`` but not
+        ``googleapiclient.http``. It also stubs ``google`` as a bare module, which
+        blocks ``google_auth_httplib2`` from importing (it needs ``google.auth``).
+        We add minimal stubs here so every import inside ``_get_service()``
+        resolves without touching disk or network.
+        """
+        http_mod = types.ModuleType("googleapiclient.http")
+        http_mod.HttpRequest = MagicMock(name="HttpRequest")  # type: ignore[attr-defined]
+
+        # google_auth_httplib2 needs google.auth at import time. Rather than
+        # unwinding the conftest's google stub, we register google_auth_httplib2
+        # itself so patch() finds it in sys.modules without triggering a real import.
+        gah_mod = types.ModuleType("google_auth_httplib2")
+        gah_mod.AuthorizedHttp = MagicMock(name="AuthorizedHttp")  # type: ignore[attr-defined]
+        gah_mod.Request = MagicMock(name="Request")  # type: ignore[attr-defined]
+
+        return {
+            "googleapiclient.http": http_mod,
+            "google_auth_httplib2": gah_mod,
+        }
+
+    def test_request_builder_isolates_http_per_call(self) -> None:
+        """requestBuilder must instantiate a fresh httplib2.Http on every invocation.
+
+        Two successive builder calls (simulating two concurrent worker threads) must
+        each produce a distinct Http instance. Sharing one object across threads
+        corrupts the OpenSSL write buffer, causing SIGTRAP on macOS + Python 3.14.
+        """
+        captured_build_kwargs: dict[str, Any] = {}
+        http_instances: list[MagicMock] = []
+
+        def fake_build(*args: Any, **kwargs: Any) -> MagicMock:
+            captured_build_kwargs.update(kwargs)
+            return MagicMock()
+
+        def new_http() -> MagicMock:
+            inst = MagicMock(name=f"Http#{len(http_instances)}")
+            http_instances.append(inst)
+            return inst
+
+        with patch.dict(sys.modules, self._conftest_gap_stubs()):
+            with (
+                patch("httplib2.Http", side_effect=new_http),
+                patch("google_auth_httplib2.AuthorizedHttp"),
+                patch("googleapiclient.discovery.build", side_effect=fake_build),
+                patch("google.oauth2.service_account.Credentials.from_service_account_file"),
+            ):
+                prov = self._fresh_provider()
+                prov._get_service()
+
+                builder = captured_build_kwargs.get("requestBuilder")
+                assert callable(builder), "build() must receive a requestBuilder callable"
+
+                # Simulate two concurrent worker threads each triggering a request.
+                builder(None)
+                builder(None)
+
+        # _get_service() creates one Http for discovery_http, then each builder
+        # call creates another — three total Http() instantiations.
+        assert len(http_instances) >= 3, (
+            f"Expected at least 3 Http() calls (1 discovery + 2 per-request), "
+            f"got {len(http_instances)}"
+        )
+        request_http_1 = http_instances[-2]
+        request_http_2 = http_instances[-1]
+        assert request_http_1 is not request_http_2, (
+            "requestBuilder must create a distinct httplib2.Http per call — "
+            "sharing one instance across threads corrupts TLS (SIGTRAP)."
+        )
+
+    def test_build_called_with_correct_kwargs(self) -> None:
+        """build() must receive requestBuilder, cache_discovery=False, and http= not credentials=.
+
+        Passing both ``http=`` and ``credentials=`` to build() raises; this test
+        guards against accidentally reverting to the old ``credentials=`` form.
+        """
+        captured_args: tuple[Any, ...] = ()
+        captured_kwargs: dict[str, Any] = {}
+
+        def fake_build(*args: Any, **kwargs: Any) -> MagicMock:
+            nonlocal captured_args, captured_kwargs
+            captured_args = args
+            captured_kwargs = kwargs
+            return MagicMock()
+
+        with patch.dict(sys.modules, self._conftest_gap_stubs()):
+            with (
+                patch("httplib2.Http"),
+                patch("google_auth_httplib2.AuthorizedHttp"),
+                patch("googleapiclient.discovery.build", side_effect=fake_build),
+                patch("google.oauth2.service_account.Credentials.from_service_account_file"),
+            ):
+                prov = self._fresh_provider()
+                prov._get_service()
+
+        assert captured_args == ("gmail", "v1"), (
+            f"build() positional args must be ('gmail', 'v1'), got {captured_args!r}"
+        )
+        assert callable(captured_kwargs.get("requestBuilder")), (
+            "build() must receive a requestBuilder callable"
+        )
+        assert captured_kwargs.get("cache_discovery") is False, (
+            "cache_discovery must be False to silence oauth2client file_cache warning"
+        )
+        assert "http" in captured_kwargs, (
+            "build() must receive http= kwarg (AuthorizedHttp for the discovery doc)"
+        )
+        assert "credentials" not in captured_kwargs, (
+            "build() must NOT receive credentials= — passing both http= and credentials= raises"
+        )
+
+    def test_credentials_refreshed_eagerly_under_lock(self) -> None:
+        """_get_service() must prime the access token once before returning.
+
+        Eager refresh avoids a thundering herd: without it, the first burst of
+        concurrent worker threads would each find the shared credentials
+        unpopulated and call refresh() simultaneously.
+        """
+        with patch.dict(sys.modules, self._conftest_gap_stubs()):
+            with (
+                patch("httplib2.Http"),
+                patch("google_auth_httplib2.AuthorizedHttp"),
+                patch("googleapiclient.discovery.build", return_value=MagicMock()),
+                patch(
+                    "google.oauth2.service_account.Credentials.from_service_account_file"
+                ) as mock_from_file,
+            ):
+                prov = self._fresh_provider()
+                prov._get_service()
+
+        credentials = mock_from_file.return_value
+        credentials.refresh.assert_called_once()

@@ -223,7 +223,12 @@ class WorkspaceInitializer:
             model_str = f"{agent_config['provider']}:{agent_config['model']}"
         self._logger.info(f"Initializing agent with model: {model_str}")
 
-        # Extract extra model kwargs beyond the known set.
+        # Anything not in this set falls into extra_model_kwargs and reaches
+        # create_chat_model() as **extra_kwargs. Declared-but-unlisted fields
+        # on WorkspaceModelConfig (e.g. `thinking`, `base_url`) are intentionally
+        # excluded here so they flow through to provider-specific branches in
+        # model_factory — moving them into known_model_keys would silently break
+        # the providers that depend on them.
         known_model_keys = {
             "provider",
             "model",

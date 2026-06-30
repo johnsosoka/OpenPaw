@@ -7,13 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-06-30
+
+> **BREAKING:** Workspaces using the pre-0.4.3 Moonshot configuration shape
+> (`provider: openai` with `base_url: https://api.moonshot.ai/v1`, or any
+> `extra_body.thinking` block) will now fail to load. Switch to the native
+> `moonshot` provider — see migration note below.
+
 ### Added
+
+- **Native `moonshot` provider** for Kimi models via the [langchain-moonshot](https://pypi.org/project/langchain-moonshot/) package. New top-level `thinking: bool` field on the workspace model config replaces the old `extra_body.thinking` workaround. Temperature is auto-corrected to `0.6` / `1.0` based on `thinking` when the framework default (`0.7`) reaches the provider — the override is logged as a `WARNING` so users who deliberately set `0.7` see the substitution. Reasoning content is now separated by ChatMoonshot rather than emitted as inline `<think>` tags. Install with `pip install 'openpaw-ai[moonshot]'`.
+- **First-class `ollama` provider** for local models via the official [langchain-ollama](https://pypi.org/project/langchain-ollama/) package. No API key required; talks to a local Ollama server (default `http://localhost:11434`). Supports `bind_tools` on tool-capable models (llama3.1, qwen2.5, mistral-nemo, gemma3:27b, etc.). Install with `pip install 'openpaw-ai[ollama]'`.
+- **`thinking: bool | None`** field on `WorkspaceModelConfig` — opt-in reasoning mode for providers that support it natively.
+- **`base_url`** promoted from extras to a typed field on `WorkspaceModelConfig` for clearer schema and validation.
+- New `tests/test_native_providers.py` covers ChatMoonshot wiring (thinking flag, temperature auto-correct, ImportError) and ChatOllama wiring (no api_key, ollama-specific kwargs, no retries, ImportError) plus provider catalog integration for both.
+- `openpaw init` workspace scaffolder learned `moonshot` and `ollama` providers. `openpaw init my_agent --model moonshot:kimi-k2.5` scaffolds a config with `thinking: false` + `temperature: 0.6`; `--model ollama:llama3.1` scaffolds keyless with `base_url: http://localhost:11434` and `num_ctx: 16384`. New tests in `tests/cli_init/test_scaffolder.py` round-trip the generated YAML through `WorkspaceConfig` to ensure it boots cleanly.
+- **First-class MCP (Model Context Protocol) server support** via [langchain-mcp-adapters](https://reference.langchain.com/python/langchain-mcp-adapters/). Per-workspace `mcp:` configuration block supports multiple servers per workspace and three transports: `http` (Streamable HTTP — preferred), `sse`, and `stdio` (local subprocess). MCP tools are exposed to the agent alongside builtins, workspace tools, and filesystem tools — they flow through the existing approval middleware and tool-timeout machinery unchanged. Install with `pip install 'openpaw-ai[mcp]'`.
+- **`MCPServerConfig` / `WorkspaceMCPConfig`** Pydantic models in `openpaw/core/config/models/mcp.py`. Transport-specific validation rejects mismatched fields at config-load time (e.g. `command:` on an `http` server, `url:` on a `stdio` server). Duplicate server names within a workspace fail loudly. `${ENV_VAR}` expansion works in `headers`/`env` via the existing loader pipeline.
+- **`MCPManager`** in `openpaw/runtime/mcp/manager.py` wraps `MultiServerMCPClient`. Connects each configured server independently, applies per-server tool prefixing (default `{server.name}_`, opt out with `tool_prefix: ""`) and allow/deny filters, and honors a per-server `required:` flag — non-required server failures log a warning and skip; required failures abort workspace start. Idempotent `connect()` and clean `close()`.
+- **`AgentRunner.update_tools()`** — surgical agent-graph rebuild that mirrors the existing `update_checkpointer()` pattern, used by `WorkspaceRunner.start()` to inject MCP-loaded tools after the async checkpointer is ready.
+- New `mcp` extra in `pyproject.toml` pulling `langchain-mcp-adapters >=0.3.0,<1.0.0`. Also added to `all-builtins`. Runtime guard raises an actionable `RuntimeError` with the install hint if MCP is enabled in config but the extra is missing.
+- Example `mcp:` block in `example_agent_workspaces/assistant/agent.yaml` covering both an HTTP server with a bearer-token header and a stdio subprocess server. Pointer comment in `config.example.yaml` clarifies MCP is per-workspace, not global.
+- 39 unit tests (`tests/test_mcp_config.py`, `tests/test_mcp_manager.py`) plus 12 integration tests (`tests/integration/test_mcp_integration.py`) driving a vendored FastMCP echo server in `tests/fixtures/mcp/` over both stdio and streamable-http. Integration tests cover discovery, invocation, allow/deny filtering, prefix opt-out, multi-server fan-out, and non-required server skip-on-failure.
+- 6 regression tests in `tests/test_agent_factory_mcp.py` that lock the contract that `AgentFactory` retains MCP tools across rebuilds (see Fixed). Full suite: 3142 passed.
 
 ### Changed
 
+- `create_chat_model()` consolidated to `openpaw/agent/model_factory.py`. The duplicate copy in `openpaw/agent/runner.py` has been removed; `AgentRunner` now imports from `model_factory`. External imports of `create_chat_model`, `THINKING_MODELS`, `BEDROCK_TOOL_NAME_PATTERN`, `MAX_TOOL_NAME_LENGTH`, and `validate_tool_names` from `openpaw.agent.runner` still work via re-export.
+- `AgentRunner._validate_tool_names` now delegates to the shared `validate_tool_names` helper in `model_factory`, removing duplicated tool-name validation logic.
+- `THINKING_MODELS` trimmed to the single verified Bedrock-routed Kimi entry (`moonshot.kimi-k2-thinking`). The native `moonshot:` provider returns reasoning content via `additional_kwargs`, so it does not need regex stripping by `ThinkingTokenMiddleware`.
+- Provider catalog example in `config.example.yaml` updated to show native `moonshot` and `ollama` entries.
+- `docs/concepts.md` and `docs/architecture.md` rewritten to describe the native dispatch path through `create_chat_model()` instead of the retired `init_chat_model("openai:kimi-k2.5", ...)` route.
+- **Stateless scheduled agents now receive MCP tools.** `create_stateless_agent` and `create_profiled_agent` include the workspace's MCP tools alongside builtins and workspace tools, so cron jobs, heartbeats, and profiled sub-agent spawns can call MCP tools when they fire. Previously MCP tools were omitted from the stateless path by design.
+- **Cron `delivery` now defaults to `both`** (was `channel`). The raw cron output still goes to the channel, and the run is also injected into the main agent so it stays aware of what fired. Heartbeat `delivery` still defaults to `channel` (heartbeats fire too often to inject every check-in).
+- **`[SYSTEM]`-event terminal replies are now suppressed by default in the main agent.** When the interactive (checkpointed) agent processes a cron/heartbeat/sub-agent/dynamic-task injection, its terminal reply is recorded in conversation history for awareness but is no longer delivered to the user automatically — the agent must call `send_message` to surface anything user-facing. This makes accidental message bombardment structurally impossible. `acknowledge_event` is demoted to an optional audit note on the main-agent path but still gates the heartbeat executor's own delivery.
+- Migrated AI code review from the legacy single-pass reviewer to AI Council v0.2.0. (#162)
+- Replaced `.github/workflows/ai-code-review.yml` with `.github/workflows/ai-council-review.yml` using `Sosoka-Labs/ai-council-code-review@v0.2.0`.
+- Added `.ai-council/config.yaml` tuned for the Python project.
+
 ### Removed
 
+- **Legacy Moonshot-via-OpenAI-compat shape** is no longer accepted. Configurations with `provider: openai` + `base_url: https://api.moonshot.ai/v1`, or an `extra_body.thinking` block **under the `openai` provider specifically**, now raise a `ValueError` at workspace load time pointing at the new shape. Anthropic's native extended-thinking via `extra_body.thinking` is unaffected — the validator is scoped to `provider == "openai"` only. **Migration:**
+  ```yaml
+  # Before (0.4.2 and earlier)
+  model:
+    provider: openai
+    model: kimi-k2.5
+    api_key: ${MOONSHOT_API_KEY}
+    base_url: https://api.moonshot.ai/v1
+    temperature: 0.6
+    extra_body:
+      thinking:
+        type: disabled
+
+  # After (0.4.3)
+  model:
+    provider: moonshot
+    model: kimi-k2.5
+    api_key: ${MOONSHOT_API_KEY}
+    thinking: false
+  ```
+
 ### Fixed
+
+- **`AgentFactory.create_agent` was silently dropping MCP tools on rebuild.** Connectors that rebuild the agent after startup (`connect_memory_search_tool` removing `search_conversations` when the vector store is uninitialized; `connect_channel_history_tool` removing `browse_channel_history` when no history-capable channels are connected) call `agent_factory.create_agent()` to construct a fresh `AgentRunner`. The factory's `all_tools` list was `builtin_tools + workspace_tools` only — MCP tools that had been injected directly onto the runner via `update_tools()` were not stored on the factory and were therefore lost. Discovered during live smoke-test on a Telegram workspace: model could see ~56 builtins but never the 29 MCP tools, falling back to `shell` with the MCP tool name as a string argument. Fixed by storing MCP tools on the factory via a new `set_mcp_tools()` method and including them in subsequent rebuilds; `WorkspaceRunner.start()` now calls `set_mcp_tools()` before the connectors run. (At the time of this fix `create_stateless_agent` was intentionally left MCP-free; that limitation has since been removed — see *Changed* below.)
+- **MCP tools were unusable on the Fireworks provider.** `langchain-mcp-adapters` returns every tool result as a list of content blocks, and langchain-core stamps each with an `lc_` id. The Fireworks API rejects that shape (`messages[N].content` must be a string; the `id` field is "not permitted"), so any Fireworks workspace using MCP tools failed the moment the agent fed a tool result back to the model. Builtin tools (plain-string results) were unaffected; ollama/moonshot tolerate the block-list. Fixed by bumping `langchain-fireworks` to `>=1.3.1,<1.4.0`, which sanitizes the content blocks provider-side (the maintainers explicitly declined to normalize on the adapter side). The `<1.4.0` cap is deliberate: 1.4.x requires an alpha `fireworks-ai` SDK that relocates `fireworks.client.error` and breaks the provider import. Pulls `langchain-core` 1.2.x → 1.4.x as a transitive consequence (full suite green).
+- **Gmail builtin aborted the runner with SIGTRAP under concurrent access.** `GmailProvider` shared a single non-thread-safe `httplib2.Http` transport across the `asyncio.to_thread` workers used for Gmail API calls, so concurrent tool calls (e.g. parallel `check_email` / `send_email`) corrupted the shared connection and crashed the process with SIGTRAP. Fixed by constructing a per-request `Http` transport via the Google API-client `requestBuilder` (isolating each call) and priming the OAuth access token once under a lock so the first burst of concurrent calls does not trigger a refresh herd. (#164)
 
 ## [0.4.2] - 2026-06-10
 
@@ -130,7 +189,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Various race conditions in approval gate resolution and sub-agent cancellation.
 - Path traversal protection hardened across filesystem tools and inbound processors.
 
-[Unreleased]: https://github.com/johnsosoka/OpenPaw/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/johnsosoka/OpenPaw/compare/v0.4.3...HEAD
 [0.4.2]: https://github.com/johnsosoka/OpenPaw/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/johnsosoka/openpaw/releases/tag/v0.4.1
 [0.4.0]: https://github.com/johnsosoka/openpaw/releases/tag/v0.4.0

@@ -95,6 +95,8 @@ The built-in tools cover several categories:
 
 Tools are registered with the agent at startup. If a tool's prerequisites are not met — for example, the Brave Search tool requires a `BRAVE_API_KEY` — the tool is silently skipped and the agent does not see it. You can also explicitly deny tools or entire capability groups using the `builtins.deny` configuration.
 
+Beyond builtins, a workspace can also pull tools from one or more external MCP (Model Context Protocol) servers. MCP servers are not built into the framework — they are third-party services your agent connects to. Once connected, their tools appear in the agent's toolbelt with a per-server prefix and are usable just like any other tool. This is how you give an agent first-class access to your ticket board, knowledge base, or any other system that speaks MCP, without writing a workspace tool. See [MCP Servers](mcp.md) for the configuration reference.
+
 ### Processors
 
 Processors run automatically on every inbound message before the agent sees it. They are transparent middleware: the user sends a message, processors transform it, and the agent receives the enriched result. The agent never sees raw file bytes or unprocessed audio.
@@ -180,7 +182,7 @@ output:
 
 The `schedule` field uses standard cron syntax: `minute hour day-of-month month day-of-week`. Schedules fire in the workspace's configured timezone. A job scheduled at `0 9 * * *` runs at 9:00 AM in your local timezone, not UTC.
 
-The `delivery` field controls where the result goes. `channel` sends it directly to you. `agent` injects the result into the main agent's message queue as a system event, so the interactive agent can react to it and take follow-up actions. `both` does both simultaneously.
+The `delivery` field controls where the result goes. `channel` sends it directly to you. `agent` injects the result into the main agent's message queue as a system event, so the interactive agent can react to it and take follow-up actions. `both` does both simultaneously. Cron jobs default to `both`: the raw output reaches you and the main agent stays aware of what fired. (Heartbeats default to `channel`, since they fire too often to inject every check-in.) When a result is injected as a `[SYSTEM]` event, the main agent's terminal reply is suppressed by default — it is recorded in history for awareness, and the agent calls `send_message` only if you need to hear about it.
 
 Cron agents are stateless — each run starts with a fresh context and no conversation history. This is by design. A cron job that relies on prior state is fragile. Instead, write prompts that instruct the agent where to look for current state: "read TASKS.yaml and summarize what is in progress," or "read the latest file in uploads/ and report its contents." The workspace filesystem bridges stateless cron runs — the cron agent writes output to a file, and the main agent or the next cron run can read it.
 
@@ -525,10 +527,10 @@ providers:
     api_key: ${ANTHROPIC_API_KEY}
   openai:
     api_key: ${OPENAI_API_KEY}
-  moonshot:
-    type: openai                          # Uses OpenAI-compatible API
+  moonshot:                                # Native Kimi via langchain-moonshot
     api_key: ${MOONSHOT_API_KEY}
-    base_url: https://api.moonshot.ai/v1
+  ollama:                                  # Local models via Ollama server
+    base_url: http://localhost:11434
 ```
 
 With the catalog defined, individual workspaces reference providers by name using a simple `provider:model` shorthand:
@@ -536,14 +538,14 @@ With the catalog defined, individual workspaces reference providers by name usin
 ```yaml
 # agent.yaml (workspace)
 model: moonshot:kimi-k2.5
-temperature: 0.6
+thinking: false       # native top-level field (auto-sets temperature to 0.6)
 ```
 
-When the workspace starts, the framework resolves "moonshot" against the catalog, retrieves the API key and base URL, and passes them to the model — no duplication required. Adding a new workspace that uses the same provider takes one line instead of five.
+When the workspace starts, the framework resolves "moonshot" against the catalog, retrieves the API key, and instantiates `ChatMoonshot` — no duplication required. Adding a new workspace that uses the same provider takes one line instead of five.
 
 The catalog also powers the `/model` command. When you switch models at runtime with `/model moonshot:kimi-k2.5`, the framework resolves the provider name through the catalog and applies the correct connection details automatically.
 
-The provider catalog supports all connection types that OpenPaw understands: Anthropic, OpenAI, xAI (Grok), Fireworks.ai (DeepSeek, Llama, Qwen), AWS Bedrock, and any OpenAI-compatible API endpoint. For Bedrock, there is no API key field — the framework uses your configured AWS credentials instead. The catalog handles that detail automatically based on the provider type.
+The provider catalog supports all connection types that OpenPaw understands: Anthropic, OpenAI, xAI (Grok), Fireworks.ai (DeepSeek, Llama, Qwen), AWS Bedrock, Moonshot (Kimi), Ollama (local), and any OpenAI-compatible API endpoint. For Bedrock, there is no API key field — the framework uses your configured AWS credentials instead. For Ollama, there is no API key field at all. The catalog handles those details automatically based on the provider type.
 
 See [Configuration](configuration.md) for the full provider catalog reference, all supported provider types, and AWS Bedrock configuration.
 

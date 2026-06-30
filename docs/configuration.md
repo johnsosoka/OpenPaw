@@ -233,6 +233,38 @@ See [builtins.md](builtins.md) for detailed builtin configuration.
 
 ---
 
+## MCP Servers (Per-Workspace)
+
+MCP (Model Context Protocol) server connections are configured per workspace in `agent.yaml` under the `mcp:` key. Each server connects independently and exposes its tools to the agent alongside builtins and workspace tools. Three transports are supported: `http` (Streamable HTTP — preferred), `sse`, and `stdio` (local subprocess). Install the extra before enabling: `pip install 'openpaw-ai[mcp]'`. See [mcp.md](mcp.md) for the full guide.
+
+```yaml
+mcp:
+  enabled: true
+  servers:
+    # Streamable HTTP server with a bearer-token header:
+    - name: weather
+      transport: http
+      url: https://mcp.example.com/weather
+      headers:
+        Authorization: "Bearer ${MCP_WEATHER_TOKEN}"
+      # tool_prefix: weather_   # default = "{name}_" (e.g., weather_get_forecast)
+      # required: false         # true = abort workspace start on connection failure
+      # allowed_tools: []       # non-empty = only expose these tool names (pre-prefix)
+      # denied_tools: []        # exclude specific tool names (applied after allowed_tools)
+
+    # Local subprocess server:
+    - name: math
+      transport: stdio
+      command: python
+      args: ["./mcp_servers/math.py"]
+      env:
+        PYTHONUNBUFFERED: "1"
+```
+
+MCP is per-workspace only — there is no global `mcp:` block in `config.yaml`.
+
+---
+
 ## Workspace Configuration
 
 Per-workspace configuration (`agent.yaml`) overrides global defaults for a specific agent.
@@ -733,22 +765,98 @@ aws configure
 
 ---
 
+### Moonshot (Kimi)
+
+Native [Moonshot API](https://platform.moonshot.ai) support via the optional
+`langchain-moonshot` package — install with `pip install 'openpaw-ai[moonshot]'`.
+
+**Configuration:**
+
+```yaml
+model:
+  provider: moonshot
+  model: kimi-k2.5
+  api_key: ${MOONSHOT_API_KEY}
+  thinking: false   # true = reasoning mode, false = standard mode
+```
+
+**Thinking mode and temperature:**
+
+`kimi-k2.5` enforces a hard temperature constraint:
+
+- `thinking: true` requires `temperature: 1.0`
+- `thinking: false` requires `temperature: 0.6`
+
+If you leave `temperature` at the framework default (`0.7`), OpenPaw
+auto-corrects it to match `thinking`. If you set `temperature` explicitly and
+it conflicts, ChatMoonshot raises a `400` at request time — set the matching
+value or remove the override.
+
+**Available models:**
+- `kimi-k2.5` — reasoning, tool calling, vision
+- `moonshot-v1-32k-vision-preview` — multimodal
+
+**Migration from 0.4.2 and earlier:** the old pattern of routing through the
+`openai` provider with `base_url: https://api.moonshot.ai/v1` (plus
+`extra_body: { thinking: { type: disabled } }`) was removed in 0.4.3. OpenPaw
+will refuse to load that shape at workspace-load time and point you at this
+native configuration.
+
+---
+
+### Ollama (local models)
+
+Run any [Ollama](https://ollama.com)-hosted model locally via the optional
+`langchain-ollama` package — install with `pip install 'openpaw-ai[ollama]'`.
+Requires a running Ollama server (default: `http://localhost:11434`).
+
+**Configuration:**
+
+```yaml
+model:
+  provider: ollama
+  model: llama3.1
+  base_url: http://localhost:11434   # optional, defaults shown
+  num_ctx: 8192                      # context window (optional)
+  num_predict: 2048                  # max output tokens (optional)
+  keep_alive: 5m                     # how long the model stays loaded (optional)
+```
+
+**Tool-calling capable models** (required for agents that use tools):
+
+- `llama3.1`, `llama3.2`, `llama3.3`
+- `llama3-groq-tool-use`
+- `qwen2.5`, `qwen3`
+- `mistral-nemo`, `mistral-small`
+- `gemma3:27b-instruct-q4_K_M`, `gemma4:31b-it-q4_K_M`
+
+Models not in this list may still work for basic chat but cannot drive an
+agent's tool loop.
+
+**No API key:** Ollama is keyless. Any `api_key` value is ignored.
+
+**Retries:** `max_retries` is forced to `0` for the Ollama provider since the
+server is local; transient retries don't help and they hide real failures.
+
+---
+
 ### OpenAI-Compatible APIs
 
-Any OpenAI-compatible provider can be used by specifying `base_url` in the workspace model config. Extra kwargs beyond the standard set (`provider`, `model`, `api_key`, `temperature`, `max_turns`, `timeout_seconds`, `region`) are passed through to `init_chat_model()`.
-
-**Example (Moonshot Kimi K2.5):**
+Any OpenAI-compatible provider (Together AI, Groq, etc.) can be used by
+specifying `base_url` on the `openai` provider.
 
 ```yaml
 model:
   provider: openai
-  model: kimi-k2.5
-  api_key: ${MOONSHOT_API_KEY}
-  base_url: https://api.moonshot.ai/v1
-  temperature: 1.0
+  model: meta-llama/Llama-3-70b-chat-hf
+  api_key: ${TOGETHER_API_KEY}
+  base_url: https://api.together.xyz/v1
+  temperature: 0.7
 ```
 
-This enables any provider that implements the OpenAI API interface (Moonshot, Together AI, Groq, etc.).
+> Note: as of 0.4.3 the `openai` provider refuses `base_url`s pointing at
+> `api.moonshot.ai` — use the native [Moonshot](#moonshot-kimi) provider
+> above instead.
 
 ---
 

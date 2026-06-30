@@ -8,7 +8,7 @@ from openpaw.runtime.session.manager import SessionManager
 
 
 class ResponseHandler:
-    """Handles sending agent responses to channels, including ack suppression and audio."""
+    """Handles sending agent responses to channels, with suppress-by-default for system events."""
 
     def __init__(
         self,
@@ -33,8 +33,8 @@ class ResponseHandler:
 
         System events have user_id == "system" and are injected by the
         framework (cron results, heartbeat injections, sub-agent completions).
-        Only a system-only batch allows acknowledge_event to suppress delivery —
-        this prevents user messages from ever being silently swallowed.
+        A system-only batch triggers suppress-by-default — terminal text is
+        never channel-delivered, preventing user-message bombardment.
 
         Args:
             messages: The message batch to inspect.
@@ -55,7 +55,7 @@ class ResponseHandler:
         channel: ChannelAdapter | None,
         messages: list[Any],
     ) -> None:
-        """Send the agent response to the channel, handling ack suppression.
+        """Send the agent response to the channel using suppress-by-default semantics.
 
         Args:
             session_key: The session identifier.
@@ -68,14 +68,17 @@ class ResponseHandler:
 
         is_system_batch = self.is_system_event_batch(messages)
 
-        # Check for silent acknowledgment on system events
-        ack_tool = self._builtin_loader.get_tool_instance("acknowledge")
-        ack = ack_tool.get_pending_ack() if ack_tool else None
-
-        if is_system_batch and ack:
+        if is_system_batch:
+            # Suppress-by-default for [SYSTEM] events (cron/heartbeat/sub-agent/
+            # dynamic-task injections). The agent surfaces anything user-facing via
+            # send_message DURING the run. The terminal text is intentionally NOT
+            # channel-delivered.
+            ack_tool = self._builtin_loader.get_tool_instance("acknowledge")
+            ack = ack_tool.get_pending_ack() if ack_tool else None
+            ack_note = f" (agent note: {ack.reason})" if ack else ""
             self._logger.info(
-                f"System event acknowledged for {session_key}: {ack.reason} "
-                f"(suppressing channel delivery, {len(response or '')} chars)"
+                f"System event for {session_key}: terminal text suppressed "
+                f"({len(response or '')} chars){ack_note}"
             )
             self._session_manager.increment_message_count(session_key)
         elif response and response.strip():

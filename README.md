@@ -77,6 +77,7 @@ Each agent gets its own SOUL (personality), AGENT (capabilities), USER (context)
 - **Document processing** -- Docling OCR/ICR turns scanned PDFs, DOCX, and PPTX into markdown automatically. Whisper transcribes voice messages on arrival.
 - **Browser automation** -- Playwright-driven web interaction via the accessibility tree. Agents reference elements by number, not CSS selectors.
 - **Email integration** -- Send and receive via Gmail with safe-by-default recipient policies. Search, reply with threading, manage attachments.
+- **MCP servers** -- Connect any MCP-compatible service (local stdio or remote Streamable HTTP) per workspace. Tools flow into the agent alongside builtins.
 - **Deep research** -- Connect to a self-hosted GPT-Researcher instance for multi-source reports with citations.
 - **Web search** -- Brave Search and other providers for direct search-and-summarize.
 - **Drop-in custom tools** -- Write a `@tool` function, save it to `agent/tools/`, restart. Auto-discovered, no wiring needed.
@@ -206,6 +207,7 @@ Once running, agents respond to framework commands in chat:
 - [Workspaces](docs/workspaces.md) -- Workspace structure, identity files, and custom tools
 - [Scheduling](docs/scheduling.md) -- Cron jobs, heartbeats, and dynamic scheduling
 - [Built-ins](docs/builtins.md) -- Web search, browser automation, email, voice, sub-agents, and more
+- [MCP Servers](docs/mcp.md) -- Per-workspace MCP server connections (HTTP and stdio)
 - [Channels](docs/channels.md) -- Channel adapters and access control
 - [Queue System](docs/queue-system.md) -- Queue modes and message handling
 - [Architecture](docs/architecture.md) -- System design, data flows, and architectural decisions

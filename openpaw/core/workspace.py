@@ -322,15 +322,15 @@ class AgentWorkspace:
             sections.append(SECTION_AUTONOMOUS_PLANNING)
 
         # System events - include when any system event source is active:
-        # spawn builtin (sub-agent completions), cron with delivery: agent,
-        # or heartbeat with delivery: agent
+        # spawn builtin (sub-agent completions), cron with delivery: agent or both,
+        # or heartbeat with delivery: agent or both
         heartbeat_agent_delivery = (
             self.config is not None
             and self.config.heartbeat is not None
-            and self.config.heartbeat.delivery == "agent"
+            and self.config.heartbeat.delivery in ("agent", "both")
         )
         cron_agent_delivery = any(
-            cron.output.delivery == "agent"
+            cron.output.delivery in ("agent", "both")
             for cron in self.crons
             if cron.output is not None
         )

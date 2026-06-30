@@ -37,15 +37,16 @@ class AcknowledgeEventInput(BaseModel):
 
 
 class AcknowledgeTool(BaseBuiltinTool):
-    """Enables agents to silently acknowledge system events without messaging the user.
+    """Provides an optional audit signal for [SYSTEM]-event processing.
 
-    When the agent processes a [SYSTEM] event (cron result, heartbeat injection,
-    sub-agent completion) and determines there is nothing actionable to report,
-    it calls this tool. The message processor checks the flag after the agent run
-    and suppresses channel delivery.
+    In the main-agent path, terminal responses to [SYSTEM] events (cron result,
+    heartbeat injection, sub-agent completion) are suppressed automatically —
+    calling this tool is NOT required for silence. Its only effect in the main-agent
+    path is to attach an audit note to the suppress log line.
 
-    Everything is still logged: conversation history, token usage, and the
-    acknowledgment reason. Silence means "don't message the user," not "don't record."
+    On the heartbeat executor path, this tool still gates the heartbeat's own
+    channel delivery — the heartbeat executor reads get_pending_ack() to decide
+    whether to send the heartbeat result to the channel.
 
     Uses instance attribute instead of contextvars because LangGraph's astream()
     executes tools in child asyncio.Tasks whose contextvar writes are not visible
@@ -55,7 +56,7 @@ class AcknowledgeTool(BaseBuiltinTool):
     metadata = BuiltinMetadata(
         name="acknowledge",
         display_name="Acknowledge Event",
-        description="Silently acknowledge a system event without messaging the user",
+        description="Audit-log acknowledgment for system events (delivery suppressed automatically in main-agent path)",
         builtin_type=BuiltinType.TOOL,
         group="automation",
         prerequisites=BuiltinPrerequisite(),  # Always available, no API keys needed
@@ -89,17 +90,20 @@ class AcknowledgeTool(BaseBuiltinTool):
         tool_instance = self
 
         def acknowledge_event(reason: str) -> str:
-            """Silently acknowledge a system event without sending a message to the user.
+            """Optionally record that a [SYSTEM] event was reviewed and needs no user-facing action.
 
-            Use this when you receive a [SYSTEM] event (cron result, heartbeat,
-            sub-agent completion) and determine there is nothing the user needs
-            to know right now. Your text response will NOT be delivered to the
-            user's chat, but everything is still logged.
+            In the main-agent path, terminal responses to system events are suppressed
+            automatically — you do NOT need to call this to stay silent. If you call it,
+            the reason is logged as an audit note alongside the suppression log line.
 
-            Only works for system-originated events. Has no effect on user messages.
+            To surface something for the user, use send_message instead.
+
+            On the heartbeat path only, this tool still gates the heartbeat's own
+            channel delivery.
 
             Args:
-                reason: Brief explanation of why no response is needed.
+                reason: Brief explanation of why no user-facing response is needed.
+                        This is logged for audit purposes.
 
             Returns:
                 Confirmation message.
@@ -125,10 +129,12 @@ class AcknowledgeTool(BaseBuiltinTool):
             func=acknowledge_event,
             name="acknowledge_event",
             description=(
-                "Silently acknowledge a [SYSTEM] event (cron result, heartbeat, "
-                "sub-agent completion) without sending a message to the user. "
-                "Use when the event contains routine information with no action needed. "
-                "Everything is still logged — only channel delivery is suppressed."
+                "Optionally record that a [SYSTEM] event (cron result, heartbeat, "
+                "sub-agent completion) was reviewed and needs no user-facing action. "
+                "In the main agent path, terminal responses to system events are "
+                "suppressed automatically — this tool adds an audit note only. "
+                "Use send_message to surface anything the user must see. "
+                "(On the heartbeat path this still gates the heartbeat's own delivery.)"
             ),
             args_schema=AcknowledgeEventInput,
         )

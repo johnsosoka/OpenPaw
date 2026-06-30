@@ -10,13 +10,24 @@ model:
   max_turns: 150
   timeout_seconds: 900
 
-# Alternative: Use OpenAI-compatible API (e.g., Moonshot Kimi K2.5)
+# Alternative: native Moonshot via langchain-moonshot
+# (requires: pip install 'openpaw-ai[moonshot]')
 # model:
-#   provider: openai
+#   provider: moonshot
 #   model: kimi-k2.5
 #   api_key: ${MOONSHOT_API_KEY}
-#   base_url: https://api.moonshot.ai/v1
-#   temperature: 0.6
+#   thinking: false        # true = reasoning mode (auto-sets temperature=1.0)
+#                          # false = standard mode (auto-sets temperature=0.6)
+#   max_turns: 150
+#   timeout_seconds: 900
+
+# Alternative: local models via Ollama
+# (requires: pip install 'openpaw-ai[ollama]' + a running Ollama server)
+# model:
+#   provider: ollama
+#   model: llama3.1
+#   base_url: http://localhost:11434
+#   num_ctx: 16384
 #   max_turns: 150
 #   timeout_seconds: 900
 
