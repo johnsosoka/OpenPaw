@@ -123,6 +123,10 @@ Two optional lists control which tools are exposed from each server. Both operat
     - get_historical   # redundant here but shows ordering
 ```
 
+## Availability
+
+MCP tools are exposed to the interactive agent **and** to stateless scheduled runs — cron jobs, heartbeats, and profiled sub-agent spawns all receive the workspace's MCP tools alongside builtins and workspace tools. A cron job authored to call an MCP tool when it fires will have that tool available.
+
 ## Middleware Integration
 
 MCP tools flow through the existing middleware pipeline unchanged — approval gates and tool timeouts apply to MCP tools exactly as they do to builtins and workspace tools.

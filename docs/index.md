@@ -46,7 +46,7 @@ Define cron jobs for periodic tasks, or enable heartbeats for proactive agent ch
 
 ### Approval Gates
 
-Require human authorization before sensitive tools execute. The agent pauses, the user sees approve/deny buttons in their chat, and the agent resumes or gracefully handles the denial. Use the `acknowledge` builtin to suppress routine results from gated tools when full approval is unnecessary.
+Require human authorization before sensitive tools execute. The agent pauses, the user sees approve/deny buttons in their chat, and the agent resumes or gracefully handles the denial.
 
 ### Safe Shell Execution
 

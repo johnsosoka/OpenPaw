@@ -235,7 +235,11 @@ Three lanes (`main`, `subagent`, `cron`) with independent concurrency limits pre
 
 ### Stateless Scheduled Agents
 
-Cron jobs and heartbeats use fresh agent instances with no checkpointer. Scheduled agents communicate state through workspace files (`HEARTBEAT.md`, `TASKS.yaml`) rather than conversation history.
+Cron jobs and heartbeats use fresh agent instances with no checkpointer. Scheduled agents communicate state through workspace files (`HEARTBEAT.md`, `TASKS.yaml`) rather than conversation history. Their toolbelt is otherwise the same as the interactive agent's — builtins, workspace tools, and MCP server tools are all available to stateless cron/heartbeat runs and profiled sub-agent spawns.
+
+### System Event Delivery
+
+When the main (interactive) agent processes a `[SYSTEM]` event — a cron/heartbeat injection, a sub-agent completion, or a dynamic-task result — its terminal reply is **suppressed by default**. The reply is recorded in conversation history so the agent stays aware of what happened, but it is not delivered to the user. To surface anything user-facing, the agent must call `send_message` during the run. This makes accidental bombardment (duplicate "nothing to report" messages) structurally impossible. Cron's `delivery` defaults to `both` — the raw output reaches the channel while the run is also injected for awareness; heartbeats default to `channel`.
 
 ---
 

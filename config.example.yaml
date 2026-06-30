@@ -115,6 +115,11 @@ builtins:
   #     min_interval_seconds: 300   # Minimum recurring task interval (5 min default)
   #     max_tasks: 50               # Maximum pending scheduled tasks per workspace
 
+  # Static cron job YAML files (workspace/crons/*.yaml) support per-job output.delivery:
+  #   # delivery: both   # Default: raw output sent to channel + result injected into agent
+  #                      # (agent reply is suppressed unless it calls send_message,
+  #                      # so the user gets exactly one message; agent stays context-aware)
+
   # Sub-agent spawning — agents can launch background workers for concurrent tasks
   # (no API key required; see "Sub-Agent Spawning" in CLAUDE.md)
   # spawn:
@@ -170,7 +175,9 @@ builtins:
   # memory_search:
   #   enabled: true
 
-  # Acknowledge message receipt (no API key required)
+  # Acknowledge event receipt — optional audit tool for system events
+  # (main-agent delivery is now suppressed automatically; this tool logs audit notes
+  # and still gates heartbeat's own delivery on the heartbeat path)
   # acknowledge:
   #   enabled: true
 
@@ -240,7 +247,9 @@ builtins:
 #   active_hours: "09:00-17:00"   # Only run during this window (workspace timezone)
 #   suppress_ok: true             # Suppress messages when agent responds HEARTBEAT_OK
 #   max_output_tokens: 2000        # Cap output tokens per heartbeat run (default: uncapped)
-#   delivery: channel             # channel, agent, or both
+#   delivery: channel             # channel, agent, or both. Heartbeat stays 'channel' by design
+#                                 # (fires frequently; per-fire main-agent turn cost is high).
+#                                 # Cron jobs default to 'both' (raw output + main-agent context).
 #   target_channel: telegram
 #   target_id: 123456789          # Preferred (channel-agnostic). Legacy: target_chat_id
 

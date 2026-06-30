@@ -108,7 +108,7 @@ Workspace lifecycle management — the layer that assembles all services into a 
 6. Handle `followup` depth tracking for self-continuation workflows
 7. Process `[SYSTEM]` events from sub-agents and schedulers
 
-`AgentFactory` manages the middleware list, the `RuntimeModelOverride` for `/model` switching (ephemeral — lost on restart), and `create_stateless_agent()` for cron/heartbeat runs (always uses the configured model, ignoring any runtime override).
+`AgentFactory` manages the middleware list, the `RuntimeModelOverride` for `/model` switching (ephemeral — lost on restart), and `create_stateless_agent()` for cron/heartbeat runs (always uses the configured model, ignoring any runtime override; includes builtin, workspace, and MCP tools).
 
 `WorkspaceLoader` reads identity files and returns an `AgentWorkspace` with the fully assembled system prompt. `ToolLoader` discovers and imports `@tool`-decorated functions from the workspace's `tools/` directory, auto-installing packages from `tools/requirements.txt`.
 
@@ -180,9 +180,9 @@ A user message travels through the following stages:
 
 ### Scheduled Execution
 
-Cron jobs and heartbeats bypass the queue entirely. The scheduler fires at the configured time (workspace timezone), builds a fresh stateless `AgentRunner` (no checkpointer, no conversation history), injects the prompt, and invokes the agent. Session logs write to `memory/sessions/{cron,heartbeat}/` as three JSONL records: prompt, response, and metadata (tools used, token metrics, duration).
+Cron jobs and heartbeats bypass the queue entirely. The scheduler fires at the configured time (workspace timezone), builds a fresh stateless `AgentRunner` (no checkpointer, no conversation history), injects the prompt, and invokes the agent. The stateless toolbelt includes builtins, workspace tools, and MCP server tools — the same set the interactive agent has. Session logs write to `memory/sessions/{cron,heartbeat}/` as three JSONL records: prompt, response, and metadata (tools used, token metrics, duration).
 
-The `delivery` field controls output routing: `channel` sends directly to the configured chat, `agent` injects a `[SYSTEM]` event into the main lane queue, and `both` does both. Heartbeats add a pre-flight skip: if `HEARTBEAT.md` is trivial and no active tasks exist, the LLM call skips entirely and a `skip` outcome logs to `heartbeat_log.jsonl`.
+The `delivery` field controls output routing: `channel` sends directly to the configured chat, `agent` injects a `[SYSTEM]` event into the main lane queue, and `both` does both. Cron defaults to `both` (raw output to the channel plus a main-agent injection for context awareness); heartbeats default to `channel`. When a result is injected as a `[SYSTEM]` event, the main agent's terminal reply is suppressed by default — recorded in history for awareness but not delivered; the agent calls `send_message` to surface anything user-facing. Heartbeats add a pre-flight skip: if `HEARTBEAT.md` is trivial and no active tasks exist, the LLM call skips entirely and a `skip` outcome logs to `heartbeat_log.jsonl`.
 
 ### Sub-Agent Flow
 

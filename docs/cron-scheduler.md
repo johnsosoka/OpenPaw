@@ -70,13 +70,15 @@ Common Schedules:
 output:
   channel: telegram
   chat_id: 123456789  # Telegram user ID or group ID
-  delivery: channel   # channel (default), agent, or both
+  delivery: both      # both (default), channel, or agent
 ```
 
 **delivery** - Where to send results:
-- `channel` (default) — Sends directly to the configured channel
-- `agent` — Injects into the main agent's message queue as a `[SYSTEM]` event
-- `both` — Sends to the channel AND injects into the agent queue
+- `both` (default) — Sends the raw output to the channel **and** injects the result into the main agent's queue as a `[SYSTEM]` event for context awareness
+- `channel` — Sends directly to the configured channel only
+- `agent` — Injects into the main agent's message queue as a `[SYSTEM]` event only
+
+When a result is injected as a `[SYSTEM]` event, the main agent's terminal reply is suppressed by default — it must call `send_message` to surface anything the user needs to see. The raw channel output already reaches the user, so for `both` the agent typically stays silent unless it has something to add.
 
 To get a Telegram chat ID:
 - User ID: Message [@userinfobot](https://t.me/userinfobot)

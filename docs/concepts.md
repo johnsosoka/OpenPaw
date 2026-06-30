@@ -182,7 +182,7 @@ output:
 
 The `schedule` field uses standard cron syntax: `minute hour day-of-month month day-of-week`. Schedules fire in the workspace's configured timezone. A job scheduled at `0 9 * * *` runs at 9:00 AM in your local timezone, not UTC.
 
-The `delivery` field controls where the result goes. `channel` sends it directly to you. `agent` injects the result into the main agent's message queue as a system event, so the interactive agent can react to it and take follow-up actions. `both` does both simultaneously.
+The `delivery` field controls where the result goes. `channel` sends it directly to you. `agent` injects the result into the main agent's message queue as a system event, so the interactive agent can react to it and take follow-up actions. `both` does both simultaneously. Cron jobs default to `both`: the raw output reaches you and the main agent stays aware of what fired. (Heartbeats default to `channel`, since they fire too often to inject every check-in.) When a result is injected as a `[SYSTEM]` event, the main agent's terminal reply is suppressed by default — it is recorded in history for awareness, and the agent calls `send_message` only if you need to hear about it.
 
 Cron agents are stateless — each run starts with a fresh context and no conversation history. This is by design. A cron job that relies on prior state is fragile. Instead, write prompts that instruct the agent where to look for current state: "read TASKS.yaml and summarize what is in progress," or "read the latest file in uploads/ and report its contents." The workspace filesystem bridges stateless cron runs — the cron agent writes output to a file, and the main agent or the next cron run can read it.
 

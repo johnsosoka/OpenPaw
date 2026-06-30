@@ -157,8 +157,10 @@ SECTION_PROGRESS_UPDATES = (
     "Use progress updates between steps, not as a substitute for completing the work.\n\n"
     "**IMPORTANT: Never duplicate content.** If you already sent your answer via "
     "send_message, do NOT repeat the same content as your final response. Your final "
-    "response is always delivered to the user too—sending the same thing twice creates "
-    "duplicate messages. If you've already communicated everything via send_message, "
+    "response is always delivered to the user too (except for [SYSTEM] event batches — "
+    "see the System Events section, where replies are suppressed unless you call "
+    "send_message)—sending the same thing twice creates duplicate messages. "
+    "If you've already communicated everything via send_message, "
     "keep your final response brief (e.g., a short summary or next-steps question)."
 )
 
@@ -291,29 +293,21 @@ SECTION_PLANNING = (
 )
 
 # System events - conditional on any system event source being active
-# (spawn builtin, cron with delivery: agent, or heartbeat with delivery: agent)
+# (spawn builtin, cron with delivery: agent or both, or heartbeat with delivery: agent or both)
 SECTION_SYSTEM_EVENTS = (
     "\n\n## System Events\n\n"
-    "You may receive `[SYSTEM]` messages from the framework. These are injected "
-    "by scheduled tasks (cron jobs, heartbeats) or background workers (sub-agents). "
-    "They are NOT from the user.\n\n"
-    "**Default behavior: silence.** Most system events are routine. Your default "
-    "response should be to call `acknowledge_event(reason)` to suppress message "
-    "delivery. Only message the user when the event contains something that "
-    "genuinely requires their attention or action.\n\n"
-    "**When you receive a system event:**\n"
-    "1. Read and process the information\n"
-    "2. Call `acknowledge_event(reason)` — this is the default. Use it when:\n"
-    "   - The result is routine (all checks passed, no issues found)\n"
-    "   - There is nothing the user needs to act on\n"
-    "   - You already reported this information to the user\n"
-    "3. Only respond normally (without calling `acknowledge_event`) when:\n"
-    "   - Something requires the user's attention or decision\n"
-    "   - An error, failure, or unexpected condition was detected\n"
-    "   - The user explicitly asked to be notified about this topic\n\n"
-    "Everything is still recorded in conversation history and logs regardless "
-    "of whether you acknowledge silently or respond. The tool only suppresses "
-    "channel delivery for system-originated events — it has no effect on user messages."
+    "You may receive `[SYSTEM]` messages from the framework (cron jobs, heartbeats, "
+    "sub-agents). They are NOT from the user.\n\n"
+    "**Your terminal reply to a system event is NOT delivered to the user.** "
+    "It is still recorded in conversation history so you stay aware of what you did, "
+    "but the user never sees it. This prevents accidental bombardment.\n\n"
+    "**To tell the user something about a system event, you MUST call `send_message`.**\n"
+    "Do this only when the event genuinely needs their attention — a failure, a result "
+    "they are waiting on, something they asked to be notified about. For routine events, "
+    "just process and move on.\n\n"
+    "Note: `acknowledge_event` is still available as an optional audit signal — it has "
+    "no effect on main-agent delivery, but its reason is logged. It has no effect "
+    "on user messages."
 )
 
 # Channel context - always included (group messages prepend recent history)
