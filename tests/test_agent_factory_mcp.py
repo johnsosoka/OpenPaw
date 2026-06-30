@@ -7,8 +7,8 @@ isn't ready) called create_agent() and lost every MCP tool that had been injecte
 via update_tools() during start().
 
 Fix: AgentFactory stores MCP tools via set_mcp_tools() and includes them in every
-subsequent create_agent() call.  create_stateless_agent() deliberately excludes
-MCP tools (cron/heartbeat are stateless by design).
+subsequent create_agent() call.  create_stateless_agent() and create_profiled_agent()
+also include MCP tools so that cron/heartbeat/profiled-spawn agents can use them.
 """
 
 from __future__ import annotations
@@ -170,13 +170,13 @@ class TestAgentFactoryMcpTools:
 
         assert mcp not in tools
 
-    def test_create_stateless_agent_excludes_mcp_tools(self) -> None:
-        """create_stateless_agent intentionally omits MCP tools.
+    def test_create_stateless_agent_includes_mcp_tools(self) -> None:
+        """create_stateless_agent includes MCP tools alongside builtin and workspace tools.
 
-        Cron and heartbeat jobs are stateless by design and do not receive
-        MCP tools today.  This test documents the current intentional limitation
-        so that any future change to include MCP tools in stateless agents is
-        a conscious decision.
+        Cron and heartbeat agents now receive the full tool set so that scheduled
+        work can use the same MCP-provided capabilities as the main channel agent.
+        MCP tools are fully loaded at startup before any scheduler fires, so there
+        is no ordering hazard.
         """
         builtin = _mock_tool("send_message")
         mcp = _mock_tool("weather_get_forecast")
@@ -189,7 +189,29 @@ class TestAgentFactoryMcpTools:
             tools = _tools_from_call(MockRunner)
 
         assert builtin in tools
-        assert mcp not in tools, (
-            "MCP tools should NOT appear in stateless agents — "
-            "update this test if the design changes."
-        )
+        assert mcp in tools
+
+    def test_create_profiled_agent_includes_mcp_tools(self) -> None:
+        """create_profiled_agent includes MCP tools alongside builtin and workspace tools.
+
+        Profiled spawns are the same class of background/scheduled work as stateless
+        agents.  They should have access to MCP tools for the same reason.
+        """
+        from openpaw.model.spawn_profile import SpawnProfile
+
+        builtin = _mock_tool("send_message")
+        workspace = _mock_tool("my_custom_tool")
+        mcp = _mock_tool("weather_get_forecast")
+
+        factory = _make_factory(builtin_tools=[builtin], workspace_tools=[workspace])
+        factory.set_mcp_tools([mcp])
+
+        profile = SpawnProfile(name="test-profile", description="Test")
+
+        with patch("openpaw.workspace.agent_factory.AgentRunner") as MockRunner:
+            factory.create_profiled_agent(profile)
+            tools = _tools_from_call(MockRunner)
+
+        assert builtin in tools
+        assert workspace in tools
+        assert mcp in tools

@@ -190,7 +190,7 @@ class AgentFactory:
 
         Always uses configured model, ignoring runtime overrides.
         """
-        all_tools = list(self._builtin_tools) + list(self._workspace_tools)
+        all_tools = list(self._builtin_tools) + list(self._workspace_tools) + list(self._mcp_tools)
 
         resolved = self._resolver.resolve(self._configured_model)
         api_key = (
@@ -230,7 +230,7 @@ class AgentFactory:
         Uses the profile's model, temperature, and max_turns when set,
         falling back to workspace defaults.
         """
-        all_tools = list(self._builtin_tools) + list(self._workspace_tools)
+        all_tools = list(self._builtin_tools) + list(self._workspace_tools) + list(self._mcp_tools)
 
         if profile.model is not None:
             resolved = self._resolver.resolve(profile.model)
