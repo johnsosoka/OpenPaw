@@ -96,8 +96,16 @@ jobs:
           virtualenvs-create: true
           virtualenvs-in-project: true
 
+      - name: Free disk space
+        run: |
+          echo "Before:"; df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          sudo docker image prune --all --force || true
+          echo "After:"; df -h /
+
       - name: Install dependencies
-        run: poetry install --no-interaction
+        run: poetry install -E mcp --no-interaction
 
       - name: Run linting
         run: poetry run ruff check openpaw/
