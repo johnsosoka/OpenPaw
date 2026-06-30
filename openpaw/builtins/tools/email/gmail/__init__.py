@@ -63,15 +63,46 @@ class GmailProvider(EmailProvider):
             if self._service is not None:
                 return self._service
 
+            # Imports are deferred to here (inside the lock) on purpose: the Google
+            # libraries ship only with the optional `email` extra, so importing them
+            # at module load would break workspaces that don't enable email.
+            import httplib2
             from google.oauth2 import service_account
+            from google_auth_httplib2 import AuthorizedHttp, Request
             from googleapiclient.discovery import build
+            from googleapiclient.http import HttpRequest
 
             credentials = service_account.Credentials.from_service_account_file(  # type: ignore
                 self._service_account_file,
                 scopes=_SCOPES,
                 subject=self._delegated_user,
             )
-            self._service = build("gmail", "v1", credentials=credentials)
+
+            # googleapiclient + httplib2 are NOT thread-safe. Gmail fetches fan out
+            # over asyncio.to_thread() worker threads (GmailFetcher.list_messages/
+            # search), so we hand every request its own httplib2.Http. Sharing one
+            # TLS connection across threads corrupts OpenSSL's write buffer and
+            # SIGTRAPs the whole process. See
+            # llm_memory/BUG-gmail-builtin-sigtrap-macos-py314.md
+            def _build_request(_http: Any, *args: Any, **kwargs: Any) -> Any:
+                thread_local_http = AuthorizedHttp(credentials, http=httplib2.Http())
+                return HttpRequest(thread_local_http, *args, **kwargs)
+
+            # Fetch the initial access token once, here under the lock, so the first
+            # burst of concurrent requests reuses it. Otherwise every worker thread
+            # would find the shared credentials unpopulated and refresh() at once — a
+            # thundering herd of token fetches. Later expiries refresh lazily; those
+            # races are benign (GIL-serialized writes, per-request token transport).
+            credentials.refresh(Request(httplib2.Http()))
+
+            discovery_http = AuthorizedHttp(credentials, http=httplib2.Http())
+            self._service = build(
+                "gmail",
+                "v1",
+                http=discovery_http,            # used only for the discovery doc
+                requestBuilder=_build_request,  # per-request, per-thread Http
+                cache_discovery=False,          # silences oauth2client file_cache warning
+            )
 
         return self._service
 
