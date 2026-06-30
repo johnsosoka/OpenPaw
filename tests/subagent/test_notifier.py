@@ -363,3 +363,121 @@ async def test_send_notification_includes_exc_info_on_failure():
 
         mock_logger.warning.assert_called_once()
         assert mock_logger.warning.call_args.kwargs.get("exc_info") is True
+
+
+def test_format_notification_completed_short_contains_send_message_instruction():
+    """SUBAGENT_COMPLETED_SHORT_TEMPLATE instructs agent to use send_message.
+
+    Short template fires when output is <= 500 chars (dispatch threshold is > 500).
+    """
+    runner = SubAgentRunner(
+        agent_factory=lambda: Mock(),
+        store=Mock(),
+        channels={},
+        workspace_name="test",
+    )
+
+    request = SubAgentRequest(
+        id="req-1",
+        task="Test task",
+        label="my-agent",
+        status=SubAgentStatus.COMPLETED,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+    )
+
+    result = SubAgentResult(
+        request_id="req-1",
+        output="Done.",  # 5 chars — well below 500, uses SHORT template
+    )
+
+    content = runner._format_notification(request, result)
+    assert "send_message" in content
+
+
+def test_format_notification_completed_long_contains_send_message_instruction():
+    """SUBAGENT_COMPLETED_TEMPLATE (long) instructs agent to use send_message.
+
+    Long template fires when output is > 500 chars (truncation threshold).
+    """
+    runner = SubAgentRunner(
+        agent_factory=lambda: Mock(),
+        store=Mock(),
+        channels={},
+        workspace_name="test",
+    )
+
+    request = SubAgentRequest(
+        id="req-3",
+        task="Test task",
+        label="my-agent",
+        status=SubAgentStatus.COMPLETED,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+    )
+
+    result = SubAgentResult(
+        request_id="req-3",
+        output="X" * 501,  # > 500 chars — triggers SUBAGENT_COMPLETED_TEMPLATE
+    )
+
+    content = runner._format_notification(request, result)
+    assert "send_message" in content
+    # Long template also includes get_subagent_result reference
+    assert "get_subagent_result" in content
+
+
+def test_format_notification_timed_out_contains_send_message_instruction():
+    """SUBAGENT_TIMED_OUT_TEMPLATE instructs agent to use send_message."""
+    runner = SubAgentRunner(
+        agent_factory=lambda: Mock(),
+        store=Mock(),
+        channels={},
+        workspace_name="test",
+    )
+
+    request = SubAgentRequest(
+        id="req-4",
+        task="Test task",
+        label="my-agent",
+        status=SubAgentStatus.TIMED_OUT,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+    )
+
+    result = SubAgentResult(
+        request_id="req-4",
+        output="",
+        error="Sub-agent timed out after 30 minutes",
+    )
+
+    content = runner._format_notification(request, result)
+    assert "send_message" in content
+
+
+def test_format_notification_failed_contains_send_message_instruction():
+    """SUBAGENT_FAILED_TEMPLATE now instructs agent to use send_message."""
+    runner = SubAgentRunner(
+        agent_factory=lambda: Mock(),
+        store=Mock(),
+        channels={},
+        workspace_name="test",
+    )
+
+    request = SubAgentRequest(
+        id="req-2",
+        task="Test task",
+        label="my-agent",
+        status=SubAgentStatus.FAILED,
+        session_key="telegram:12345",
+        timeout_minutes=30,
+    )
+
+    result = SubAgentResult(
+        request_id="req-2",
+        output="",
+        error="Something broke",
+    )
+
+    content = runner._format_notification(request, result)
+    assert "send_message" in content

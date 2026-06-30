@@ -8,7 +8,7 @@ Covers:
 """
 
 import logging
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -233,9 +233,9 @@ class TestAcknowledgeIntegration:
         return loader
 
     @pytest.mark.asyncio
-    async def test_system_ack_suppresses_channel_delivery(self) -> None:
-        """System batch + acknowledge_event called → no send_message to channel."""
-        loader = self._make_loader_with_ack(ack_pending=True)
+    async def test_system_batch_suppresses_terminal_by_default(self) -> None:
+        """System batch is always suppressed — no ack call needed."""
+        loader = self._make_loader_with_ack(ack_pending=False)  # no ack
         processor = _make_processor(builtin_loader=loader)
         channel = AsyncMock()
 
@@ -250,7 +250,7 @@ class TestAcknowledgeIntegration:
     @pytest.mark.asyncio
     async def test_system_ack_increments_message_count(self) -> None:
         """Message count is still incremented even when delivery is suppressed."""
-        loader = self._make_loader_with_ack(ack_pending=True)
+        loader = self._make_loader_with_ack(ack_pending=False)  # no ack needed
         session_manager = MagicMock()
         session_manager.get_thread_id.return_value = "telegram:sys:conv_1"
         session_manager.is_session_expired.return_value = False
@@ -288,7 +288,7 @@ class TestAcknowledgeIntegration:
         assert "agent response text" in call_args.args[1]
 
     @pytest.mark.asyncio
-    async def test_acknowledge_ignored_for_mixed_batch(self) -> None:
+    async def test_mixed_batch_still_delivered(self) -> None:
         """Mixed batch (user + system) + ack → response still sent (not suppressed)."""
         loader = self._make_loader_with_ack(ack_pending=True)
         processor = _make_processor(builtin_loader=loader)
@@ -303,8 +303,8 @@ class TestAcknowledgeIntegration:
         channel.send_message.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_system_batch_no_ack_sends_response(self) -> None:
-        """System batch with NO acknowledge call → response delivered normally."""
+    async def test_system_batch_no_ack_still_suppressed(self) -> None:
+        """System batch with NO acknowledge call → terminal still suppressed (core bombardment fix)."""
         loader = self._make_loader_with_ack(ack_pending=False)
         processor = _make_processor(builtin_loader=loader)
         channel = AsyncMock()
@@ -315,11 +315,11 @@ class TestAcknowledgeIntegration:
             channel=channel,
         )
 
-        channel.send_message.assert_called_once()
+        channel.send_message.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_no_acknowledge_tool_loaded_sends_response(self) -> None:
-        """When the acknowledge builtin is absent, delivery is unaffected."""
+    async def test_system_batch_no_ack_tool_still_suppressed(self) -> None:
+        """System batch with no ack tool loaded → still suppressed (suppression is unconditional)."""
         loader = MagicMock()
         loader.get_tool_instance.return_value = None  # tool not loaded
 
@@ -332,7 +332,42 @@ class TestAcknowledgeIntegration:
             channel=channel,
         )
 
-        channel.send_message.assert_called_once()
+        channel.send_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_system_batch_empty_response_no_fallback(self) -> None:
+        """System batch + empty response → no fallback noise sent to channel."""
+        loader = self._make_loader_with_ack(ack_pending=False)
+        processor = _make_processor(builtin_loader=loader)
+        # Override agent runner to return empty response
+        processor._agent_runner.run = AsyncMock(return_value="")
+        channel = AsyncMock()
+
+        await processor.process_messages(
+            session_key="telegram:sys",
+            messages=[_system_message()],
+            channel=channel,
+        )
+
+        channel.send_message.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_system_batch_with_ack_logs_audit_note(self) -> None:
+        """System batch + acknowledge_event called → ack reason appears as audit note in log."""
+        loader = self._make_loader_with_ack(ack_pending=True)
+        processor = _make_processor(builtin_loader=loader)
+        channel = AsyncMock()
+
+        with patch.object(processor._logger, "info") as mock_log:
+            await processor.process_messages(
+                session_key="telegram:sys",
+                messages=[_system_message()],
+                channel=channel,
+            )
+
+        info_calls = [str(c) for c in mock_log.call_args_list]
+        assert any("agent note:" in c for c in info_calls)
+        channel.send_message.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_ack_reset_called_after_loop(self) -> None:

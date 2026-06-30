@@ -78,8 +78,16 @@ class TestSystemEventsSectionContent:
     """Verify SECTION_SYSTEM_EVENTS text contains required guidance."""
 
     def test_section_mentions_acknowledge_event(self) -> None:
-        """Section text references the acknowledge_event tool by name."""
+        """Section still references acknowledge_event (now as optional audit signal)."""
         assert "acknowledge_event" in SECTION_SYSTEM_EVENTS
+
+    def test_section_teaches_send_message_for_user_facing_output(self) -> None:
+        """Section instructs agent to use send_message to surface anything for the user."""
+        assert "send_message" in SECTION_SYSTEM_EVENTS
+
+    def test_section_teaches_suppress_by_default(self) -> None:
+        """Section explains that terminal replies to system events are NOT delivered."""
+        assert "NOT delivered" in SECTION_SYSTEM_EVENTS
 
     def test_section_mentions_system_messages(self) -> None:
         """Section explains that [SYSTEM] messages come from the framework."""
@@ -139,18 +147,27 @@ class TestSystemEventsSectionWithSpawn:
 
 
 # ---------------------------------------------------------------------------
-# Conditional inclusion: cron with delivery: agent
+# Conditional inclusion: cron with delivery: agent or both
 # ---------------------------------------------------------------------------
 
 
 class TestSystemEventsSectionWithAgentDeliveryCron:
-    """Section is included when at least one cron uses delivery: agent."""
+    """Section is included when at least one cron uses delivery: agent or both."""
 
     def test_section_included_with_agent_delivery_cron(
         self, mock_workspace: AgentWorkspace
     ) -> None:
         """System events section appears when a cron uses delivery: agent."""
         mock_workspace.crons = [_make_cron(delivery="agent")]
+        # Exclude spawn to isolate the cron trigger
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=["task_tracker"])
+        assert "## System Events" in prompt
+
+    def test_section_included_with_both_delivery_cron(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """System events section appears when a cron uses delivery: both (the default)."""
+        mock_workspace.crons = [_make_cron(delivery="both")]
         # Exclude spawn to isolate the cron trigger
         prompt = mock_workspace.build_system_prompt(enabled_builtins=["task_tracker"])
         assert "## System Events" in prompt
@@ -162,6 +179,17 @@ class TestSystemEventsSectionWithAgentDeliveryCron:
         mock_workspace.crons = [
             _make_cron(name="channel-cron", delivery="channel"),
             _make_cron(name="agent-cron", delivery="agent"),
+        ]
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=["task_tracker"])
+        assert "## System Events" in prompt
+
+    def test_section_included_when_one_of_many_crons_uses_both_delivery(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """Section appears when any cron uses both delivery, even if others use channel."""
+        mock_workspace.crons = [
+            _make_cron(name="channel-cron", delivery="channel"),
+            _make_cron(name="both-cron", delivery="both"),
         ]
         prompt = mock_workspace.build_system_prompt(enabled_builtins=["task_tracker"])
         assert "## System Events" in prompt
@@ -180,12 +208,12 @@ class TestSystemEventsSectionWithAgentDeliveryCron:
 
 
 # ---------------------------------------------------------------------------
-# Conditional inclusion: heartbeat with delivery: agent
+# Conditional inclusion: heartbeat with delivery: agent or both
 # ---------------------------------------------------------------------------
 
 
 class TestSystemEventsSectionWithAgentDeliveryHeartbeat:
-    """Section is included when heartbeat uses delivery: agent."""
+    """Section is included when heartbeat uses delivery: agent or both."""
 
     def test_section_included_with_heartbeat_agent_delivery(
         self, mock_workspace: AgentWorkspace
@@ -193,6 +221,17 @@ class TestSystemEventsSectionWithAgentDeliveryHeartbeat:
         """System events section appears when heartbeat delivery is 'agent'."""
         config = MagicMock()
         config.heartbeat = _make_heartbeat_config(delivery="agent")
+        mock_workspace.config = config
+
+        prompt = mock_workspace.build_system_prompt(enabled_builtins=["task_tracker"])
+        assert "## System Events" in prompt
+
+    def test_section_included_with_heartbeat_both_delivery(
+        self, mock_workspace: AgentWorkspace
+    ) -> None:
+        """System events section appears when heartbeat delivery is 'both'."""
+        config = MagicMock()
+        config.heartbeat = _make_heartbeat_config(delivery="both")
         mock_workspace.config = config
 
         prompt = mock_workspace.build_system_prompt(enabled_builtins=["task_tracker"])

@@ -19,13 +19,19 @@ STEER_SKIP_MESSAGE = "[Skipped: user sent new message — redirecting]"
 
 # Sub-agent timeout notification
 SUBAGENT_TIMED_OUT_TEMPLATE = PromptTemplate(
-    template="[SYSTEM] Sub-agent '{label}' timed out{origin_suffix} after {timeout_minutes} minutes.",
+    template=(
+        "[SYSTEM] Sub-agent '{label}' timed out{origin_suffix} after {timeout_minutes} minutes.\n"
+        "If the user should know about this failure, call send_message to tell them."
+    ),
     input_variables=["label", "timeout_minutes", "origin_suffix"],
 )
 
 # Sub-agent failure notification
 SUBAGENT_FAILED_TEMPLATE = PromptTemplate(
-    template="[SYSTEM] Sub-agent '{label}' failed{origin_suffix}.\nError: {error}",
+    template=(
+        "[SYSTEM] Sub-agent '{label}' failed{origin_suffix}.\nError: {error}\n"
+        "If the user should know about this failure, call send_message to tell them."
+    ),
     input_variables=["label", "error", "origin_suffix"],
 )
 
@@ -34,14 +40,21 @@ SUBAGENT_COMPLETED_TEMPLATE = PromptTemplate(
     template=(
         "[SYSTEM] Sub-agent '{label}' completed{origin_suffix}.\n\n"
         "{output}\n\n"
-        'Use get_subagent_result(id="{request_id}") to read the full output.'
+        'Use get_subagent_result(id="{request_id}") to read the full output.\n'
+        "If the user is waiting on this result, call send_message to report it now. "
+        "Otherwise note it for the record — your reply is not delivered automatically."
     ),
     input_variables=["label", "output", "request_id", "origin_suffix"],
 )
 
 # Sub-agent completion (short output, no truncation)
 SUBAGENT_COMPLETED_SHORT_TEMPLATE = PromptTemplate(
-    template="[SYSTEM] Sub-agent '{label}' completed{origin_suffix}.\n\n{output}",
+    template=(
+        "[SYSTEM] Sub-agent '{label}' completed{origin_suffix}.\n\n"
+        "{output}\n\n"
+        "If the user is waiting on this result, call send_message to report it now. "
+        "Otherwise note it for the record — your reply is not delivered automatically."
+    ),
     input_variables=["label", "output", "origin_suffix"],
 )
 
@@ -131,7 +144,8 @@ HEARTBEAT_RESULT_TEMPLATE = PromptTemplate(
         "[SYSTEM] Heartbeat completed.\n\n"
         "{output}\n\n"
         "Full session log: {session_path}\n"
-        "Call acknowledge_event(reason) if this is routine and the user does not need to be notified."
+        "If the user needs to know this, call send_message to tell them. "
+        "Otherwise just note it — your reply is not delivered automatically."
     ),
     input_variables=["output", "session_path"],
 )
@@ -143,7 +157,8 @@ HEARTBEAT_RESULT_TRUNCATED_TEMPLATE = PromptTemplate(
         "{output}\n\n"
         "Full session log: {session_path}\n"
         'Use read_file("{session_path}") for full context.\n'
-        "Call acknowledge_event(reason) if this is routine and the user does not need to be notified."
+        "If the user needs to know this, call send_message to tell them. "
+        "Otherwise just note it — your reply is not delivered automatically."
     ),
     input_variables=["output", "session_path"],
 )
@@ -154,7 +169,8 @@ CRON_RESULT_TEMPLATE = PromptTemplate(
         "[SYSTEM] Scheduled task '{cron_name}' completed.\n\n"
         "{output}\n\n"
         "Full session log: {session_path}\n"
-        "Call acknowledge_event(reason) if this is routine and the user does not need to be notified."
+        "If the user needs to know this, call send_message to tell them. "
+        "Otherwise just note it — your reply is not delivered automatically."
     ),
     input_variables=["cron_name", "output", "session_path"],
 )
@@ -166,7 +182,8 @@ CRON_RESULT_TRUNCATED_TEMPLATE = PromptTemplate(
         "{output}\n\n"
         "Full session log: {session_path}\n"
         'Use read_file("{session_path}") for full context.\n'
-        "Call acknowledge_event(reason) if this is routine and the user does not need to be notified."
+        "If the user needs to know this, call send_message to tell them. "
+        "Otherwise just note it — your reply is not delivered automatically."
     ),
     input_variables=["cron_name", "output", "session_path"],
 )
@@ -178,7 +195,7 @@ DYNAMIC_TASK_RESULT_TEMPLATE = PromptTemplate(
         "Original prompt: {prompt_preview}\n\n"
         "{output}\n\n"
         "Full session log: {session_path}\n"
-        "Review and take action if needed."
+        "Review and take action if needed. If the user needs to know, use send_message."
     ),
     input_variables=["task_id", "prompt_preview", "output", "session_path"],
 )
@@ -190,7 +207,8 @@ DYNAMIC_TASK_RESULT_TRUNCATED_TEMPLATE = PromptTemplate(
         "Original prompt: {prompt_preview}\n\n"
         "{output}\n\n"
         "Full session log: {session_path}\n"
-        'Use read_file("{session_path}") for full context.'
+        'Use read_file("{session_path}") for full context.\n'
+        "If the user needs to know, use send_message."
     ),
     input_variables=["task_id", "prompt_preview", "output", "session_path"],
 )

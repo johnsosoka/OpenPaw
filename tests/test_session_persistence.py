@@ -225,9 +225,9 @@ class TestConfigModels:
         assert config.delivery == "both"
 
     def test_cron_output_delivery_default(self):
-        """Verify default is 'channel'."""
+        """Verify default is 'both' (cron now defaults to both channel + agent injection)."""
         output = CronOutputConfig(channel="telegram", chat_id=123)
-        assert output.delivery == "channel"
+        assert output.delivery == "both"
 
     def test_cron_output_delivery_validator(self):
         """Verify 'invalid' raises ValidationError."""
@@ -254,7 +254,7 @@ class TestSystemEventTemplates:
         assert "[SYSTEM] Heartbeat completed." in result
         assert "Test output" in result
         assert "memory/sessions/heartbeat/test.jsonl" in result
-        assert "acknowledge_event" in result
+        assert "send_message" in result
 
     def test_heartbeat_result_truncated_template_format(self):
         """Verify truncated template includes read_file hint."""

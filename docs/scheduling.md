@@ -42,7 +42,7 @@ prompt: |
 output:
   channel: telegram
   chat_id: 123456789
-  delivery: channel  # channel (default) or agent
+  delivery: both  # both (default), channel, or agent
 ```
 
 #### Field Reference
@@ -55,7 +55,7 @@ output:
 | `prompt` | Yes | The prompt sent to the agent at execution time |
 | `output.channel` | Yes | Channel type to deliver output to |
 | `output.chat_id` | Yes | Channel-specific destination (e.g., Telegram user or group ID) |
-| `output.delivery` | No | Where to send results: `channel` (default) or `agent` |
+| `output.delivery` | No | Where to send results: `both` (default), `channel`, or `agent` |
 
 Both `.yaml` and `.yml` file extensions are supported.
 
@@ -89,11 +89,12 @@ Use [crontab.guru](https://crontab.guru) to validate expressions before deployin
 
 The `delivery` field controls where cron results go:
 
-- **`channel`** (default) — Sends the agent's response directly to the configured channel
-- **`agent`** — Injects the cron output into the main agent's message queue as a `[SYSTEM]` event. The main agent receives a notification with the session log path so it can read the full output.
+- **`both`** (default) — Sends the raw cron output to the configured channel **and** injects the result into the main agent's queue as a `[SYSTEM]` event, so the main agent stays aware of what fired. The main agent's terminal reply to that event is suppressed (see note below), so the user receives exactly one message — the raw output.
+- **`channel`** — Sends the agent's response directly to the configured channel only; the main agent is not notified.
+- **`agent`** — Injects the cron output into the main agent's message queue as a `[SYSTEM]` event only. The main agent receives a notification with the session log path so it can read the full output.
 
-!!! note "Delivery modes"
-    Use `delivery: channel` for direct output, `delivery: agent` to inject results into the main agent's queue as a `[SYSTEM]` event, or `delivery: both` to do both simultaneously. When using `agent` delivery, the main agent can call `acknowledge_event` to silently acknowledge routine results without messaging the user.
+!!! note "System event delivery"
+    When a cron result is injected as a `[SYSTEM]` event (`both` or `agent`), the main agent's terminal reply is **suppressed by default** — it is recorded in conversation history for awareness but is not delivered to the user. To surface anything user-facing, the agent must call `send_message` during the run. This makes duplicate "nothing to report" messages structurally impossible.
 
 ```yaml
 # Route output to the main agent instead of the channel
@@ -370,7 +371,7 @@ heartbeat:
   interval_minutes: 30           # How often to check in
   active_hours: "09:00-17:00"    # Only fire during these hours (workspace timezone)
   suppress_ok: true              # Suppress output when nothing to report
-  delivery: channel              # channel (default) or agent
+  delivery: channel              # channel (default), agent, or both
   output:
     channel: telegram
     chat_id: 123456789
@@ -384,7 +385,7 @@ heartbeat:
 | `interval_minutes` | Yes | How often to fire (in minutes) |
 | `active_hours` | No | Time window to fire within, e.g. `"09:00-17:00"` (workspace timezone) |
 | `suppress_ok` | No | When `true`, suppress output if the agent responds `HEARTBEAT_OK` |
-| `delivery` | No | Where to send results: `channel` (default) or `agent` |
+| `delivery` | No | Where to send results: `channel` (default), `agent`, or `both` |
 | `output.channel` | Yes | Channel type to deliver output to |
 | `output.chat_id` | Yes | Channel-specific destination |
 
@@ -460,11 +461,12 @@ When `HEARTBEAT.md` is empty, the pre-flight skip may prevent heartbeats from fi
 
 The `delivery` field controls where heartbeat results go:
 
-- **`channel`** (default) — Sends the agent's response directly to the configured channel
+- **`channel`** (default) — Sends the agent's response directly to the configured channel. Heartbeats keep `channel` as the default because they fire frequently; injecting every check-in into the main agent would burn a turn each time.
 - **`agent`** — Injects the heartbeat output into the main agent's message queue as a `[SYSTEM]` event, with a reference to the full session log file
+- **`both`** — Sends to the channel **and** injects into the main agent's queue
 
-!!! note "Delivery modes"
-    Use `delivery: channel` for direct output, `delivery: agent` to inject results into the main agent's queue as a `[SYSTEM]` event, or `delivery: both` to do both simultaneously. When using `agent` delivery, the main agent can call `acknowledge_event` to silently acknowledge routine results without messaging the user.
+!!! note "System event delivery"
+    When a heartbeat result is injected as a `[SYSTEM]` event (`agent` or `both`), the main agent's terminal reply is **suppressed by default** — it is recorded in history for awareness but not delivered to the user, which must be surfaced via `send_message`. On the heartbeat's own channel path, the agent can still call `acknowledge_event` to suppress a routine result.
 
 ```yaml
 # Deliver heartbeat output to the main agent's queue
@@ -594,7 +596,7 @@ prompt: |
   If everything is normal, do not send a message.
 ```
 
-For heartbeats, the `HEARTBEAT_OK` protocol handles this automatically when `suppress_ok: true`. When using `delivery: agent`, the main agent can call `acknowledge_event` to suppress channel delivery for routine injections without needing `HEARTBEAT_OK`.
+For heartbeats, the `HEARTBEAT_OK` protocol handles this automatically when `suppress_ok: true`. And when a scheduled result is injected into the main agent as a `[SYSTEM]` event, the agent's terminal reply is suppressed automatically — it stays silent unless it calls `send_message`, so routine injections never reach the user.
 
 ### Use filesystem for shared state
 
