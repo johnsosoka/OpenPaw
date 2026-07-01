@@ -162,6 +162,11 @@ class TestFormatUnauthorizedResponse:
         result = format_unauthorized_response(12345, "test_ws")
         assert "⛔" in result
 
+    def test_config_path_includes_config_segment(self) -> None:
+        # The allowlist lives at config/agent.yaml, not agent.yaml (issue #175).
+        result = format_unauthorized_response(12345, "test_ws")
+        assert "agent_workspaces/test_ws/config/agent.yaml" in result
+
 
 # ---------------------------------------------------------------------------
 # map_mime_type_to_attachment_type
