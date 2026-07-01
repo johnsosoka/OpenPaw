@@ -8,6 +8,8 @@ from pathlib import Path
 
 from .scaffolder import (
     _create_workspace,
+    _ensure_root_config,
+    _print_next_steps,
     _validate_workspace_name,
 )
 from .templates import _parse_model_string
@@ -69,8 +71,6 @@ def _handle_init(args: list[str]) -> None:
     except OSError as exc:
         print(f"Error creating workspace: {exc}", file=sys.stderr)
         sys.exit(1)
-
-    from .scaffolder import _ensure_root_config, _print_next_steps
 
     config_path = _ensure_root_config(parsed.path)
     _print_next_steps(workspace_path, parsed.name, config_path, parsed.channel)

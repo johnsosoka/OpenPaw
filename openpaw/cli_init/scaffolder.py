@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 from openpaw.core.paths import (
@@ -185,16 +186,27 @@ def _ensure_root_config(workspaces_path: Path) -> Path | None:
         workspaces_path: Directory that holds the workspaces (e.g. ``agent_workspaces``).
 
     Returns:
-        Path to the created config.yaml, or None if one already existed.
+        Path to the created config.yaml, or None if one already existed or could
+        not be written. Failure is non-fatal: the workspace is still usable and
+        the user can author config.yaml themselves.
     """
-    config_path = workspaces_path.parent / "config.yaml"
+    resolved = workspaces_path.resolve()
+    config_path = resolved.parent / "config.yaml"
     if config_path.exists():
         return None
 
-    config_path.write_text(
-        TEMPLATE_CONFIG_YAML.format(workspaces_path=workspaces_path.name),
-        encoding="utf-8",
-    )
+    try:
+        config_path.write_text(
+            TEMPLATE_CONFIG_YAML.format(workspaces_path=resolved.name),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        print(
+            f"Warning: could not write {config_path}: {exc}. "
+            "Create a config.yaml before running (see 'openpaw init --help').",
+            file=sys.stderr,
+        )
+        return None
     return config_path
 
 
