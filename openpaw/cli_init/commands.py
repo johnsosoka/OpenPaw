@@ -70,9 +70,10 @@ def _handle_init(args: list[str]) -> None:
         print(f"Error creating workspace: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    from .scaffolder import _print_next_steps
+    from .scaffolder import _ensure_root_config, _print_next_steps
 
-    _print_next_steps(workspace_path, parsed.name)
+    config_path = _ensure_root_config(parsed.path)
+    _print_next_steps(workspace_path, parsed.name, config_path)
 
 
 def _handle_list(args: list[str]) -> None:

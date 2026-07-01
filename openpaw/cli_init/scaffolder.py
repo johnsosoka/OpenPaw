@@ -27,6 +27,7 @@ from openpaw.core.paths import (
 
 from .templates import (
     TEMPLATE_AGENT_MD,
+    TEMPLATE_CONFIG_YAML,
     TEMPLATE_ENV,
     TEMPLATE_HEARTBEAT_MD,
     TEMPLATE_SOUL_MD,
@@ -168,7 +169,38 @@ def _create_workspace(
     return workspace_path
 
 
-def _print_next_steps(workspace_path: Path, name: str) -> None:
+def _ensure_root_config(workspaces_path: Path) -> Path | None:
+    """Scaffold a top-level ``config.yaml`` next to the workspaces directory.
+
+    ``openpaw`` requires a global config file to run. Without one, a freshly
+    scaffolded workspace is unrunnable — a hard block for pip users who have no
+    ``config.example.yaml`` to copy (issue #171). This writes a minimal, valid
+    ``config.yaml`` when one does not already exist.
+
+    The file is written to the parent of ``workspaces_path`` (the directory the
+    user runs ``openpaw`` from), and its ``workspaces_path`` field is set to
+    match the scaffolded workspaces directory.
+
+    Args:
+        workspaces_path: Directory that holds the workspaces (e.g. ``agent_workspaces``).
+
+    Returns:
+        Path to the created config.yaml, or None if one already existed.
+    """
+    config_path = workspaces_path.parent / "config.yaml"
+    if config_path.exists():
+        return None
+
+    config_path.write_text(
+        TEMPLATE_CONFIG_YAML.format(workspaces_path=workspaces_path.name),
+        encoding="utf-8",
+    )
+    return config_path
+
+
+def _print_next_steps(
+    workspace_path: Path, name: str, config_path: Path | None
+) -> None:
     """Print the post-creation summary and suggested next steps.
 
     Args:
@@ -177,6 +209,8 @@ def _print_next_steps(workspace_path: Path, name: str) -> None:
     """
     print(f"Created workspace: {name}")
     print(f"  Path: {workspace_path}/")
+    if config_path is not None:
+        print(f"  Config: {config_path} (global defaults — edit as needed)")
     print()
     print("Next steps:")
     print("  1. Edit config/agent.yaml with your model and channel settings")

@@ -54,6 +54,23 @@ class TestHandleInit:
         assert "Next steps:" in captured.out
         assert "openpaw -c config.yaml -w my_agent" in captured.out
 
+    def test_scaffolds_root_config_yaml(self, tmp_path: Path) -> None:
+        # init must leave a runnable config.yaml so `run` works immediately (#171).
+        ws_root = tmp_path / "agent_workspaces"
+        _handle_init(["my_agent", "--path", str(ws_root)])
+        config_path = tmp_path / "config.yaml"
+        assert config_path.exists()
+        data = yaml.safe_load(config_path.read_text())
+        assert data["workspaces_path"] == "agent_workspaces"
+        assert data["agent"]["model"]
+
+    def test_does_not_clobber_existing_config(self, tmp_path: Path) -> None:
+        ws_root = tmp_path / "agent_workspaces"
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("workspaces_path: custom\n", encoding="utf-8")
+        _handle_init(["my_agent", "--path", str(ws_root)])
+        assert config_path.read_text() == "workspaces_path: custom\n"
+
     def test_model_flag_passed_through(self, tmp_path: Path) -> None:
         _handle_init(["agent_x", "--path", str(tmp_path), "--model", "anthropic:claude-sonnet-4-20250514"])
         data = yaml.safe_load((tmp_path / "agent_x" / "config" / "agent.yaml").read_text())
