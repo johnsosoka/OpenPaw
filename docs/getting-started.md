@@ -98,7 +98,9 @@ export ELEVENLABS_API_KEY="your-elevenlabs-key"      # Text-to-speech
 
 ## Initial Configuration
 
-### 1. Copy the Example Configuration
+### 1. Get a config.yaml
+
+`openpaw init` (in the next section) scaffolds a minimal `config.yaml` for you, so you can skip ahead. To start from the fully-commented reference instead, copy it from the repo (source checkouts only — this file is not shipped in the PyPI wheel):
 
 ```bash
 cp config.example.yaml config.yaml
@@ -158,7 +160,7 @@ Each file includes TODO markers to guide customization.
 
 ### 2. Configure Your Workspace
 
-Edit `config/agent.yaml` with your model and channel settings. If you used `--model` and `--channel` flags, the relevant sections are already populated:
+Edit `config/agent.yaml` with your model and channel settings. If you passed `--model` and `--channel` to `init`, these sections are already populated (as shown below). If you did **not** pass them, `init` leaves the `model:` and `channel:` blocks commented out, and the workspace inherits the global default from `config.yaml`. Uncomment and edit them to override per workspace:
 
 ```yaml
 name: my_agent
@@ -186,6 +188,8 @@ Add your API keys to `config/.env`:
 ANTHROPIC_API_KEY=your-key-here
 TELEGRAM_BOT_TOKEN=your-bot-token
 ```
+
+**Model precedence:** The effective model resolves in this order — the global `config.yaml` `agent.model` default → an optional per-workspace `config/agent.yaml` `model:` override → API keys referenced via `${VAR}` are read from the workspace `config/.env` (or your shell environment).
 
 **Timezone:** Add a `timezone` field (IANA identifier, e.g., `America/New_York`) to control cron timing, heartbeat hours, and display timestamps. Defaults to UTC.
 
