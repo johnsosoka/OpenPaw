@@ -8372,4 +8372,4 @@ web = ["langchain-community"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "74242d15c1b29ff674b037f3e680cb721e3fb36081126cc8bb4645195fe1e35e"
+content-hash = "f6ed1e3c1e3555cba89940fabbbced658e74563a1887d5980b713d0b3da13c20"
