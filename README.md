@@ -103,7 +103,25 @@ Anthropic, OpenAI, AWS Bedrock, xAI, Fireworks, and any OpenAI-compatible endpoi
 
 > **Fastest first run:** scaffold with `--channel stdio` to chat with your agent right in the terminal — no Telegram or Discord token required (you still need one LLM provider API key). Swap in `--channel telegram` or `--channel discord` when you're ready to go live.
 
-### 1. Install
+### Install from PyPI
+
+The quickest path — no clone required:
+
+```bash
+pip install openpaw-ai
+openpaw init my_agent --model anthropic:claude-sonnet-4-20250514 --channel stdio
+openpaw -c config.yaml -w my_agent
+```
+
+`openpaw init` scaffolds the workspace **and** a starter `config.yaml`, so `run` works right away. Add your LLM provider key to `agent_workspaces/my_agent/config/.env` (e.g. `ANTHROPIC_API_KEY=...`) before running.
+
+Optional capabilities install as extras: `pip install 'openpaw-ai[documents]'` (Docling OCR/PDF), plus `[voice]`, `[web]`, `[memory]`, `[email]`, `[mcp]`, or `[all-builtins]`.
+
+### Install from source (Poetry)
+
+The steps below use the from-source workflow; prefix commands with `poetry run`.
+
+#### 1. Install
 
 ```bash
 git clone https://github.com/johnsosoka/OpenPaw.git
@@ -111,7 +129,7 @@ cd OpenPaw
 poetry install
 ```
 
-### 2. Scaffold a workspace
+#### 2. Scaffold a workspace
 
 ```bash
 poetry run openpaw init my_agent \
@@ -119,11 +137,9 @@ poetry run openpaw init my_agent \
   --channel telegram
 ```
 
-### 3. Configure
+This also writes a starter `config.yaml` in the current directory (it won't overwrite an existing one). To start from the fully-commented reference instead, copy it first: `cp config.example.yaml config.yaml`.
 
-```bash
-cp config.example.yaml config.yaml
-```
+#### 3. Configure
 
 Add your API keys to `agent_workspaces/my_agent/config/.env`:
 
@@ -132,7 +148,7 @@ ANTHROPIC_API_KEY=your-key-here
 TELEGRAM_BOT_TOKEN=your-token-here
 ```
 
-### 4. Run
+#### 4. Run
 
 ```bash
 poetry run openpaw -c config.yaml -w my_agent
