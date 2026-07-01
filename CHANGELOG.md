@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-07-01
+
+A first-run onboarding polish release. Found during an install-and-run evaluation of 0.4.3 across both `poetry` and `pip`, these fixes unblock pip users, trim the default install, and correct docs and CLI output.
+
+### Added
+
+- **`openpaw init` scaffolds a runnable `config.yaml`.** Fresh pip installs were hard-blocked at first run: `init` printed a run command that failed with `Config file not found: config.yaml`, and no `config.example.yaml` ships in the wheel to copy. `init` now writes a minimal, valid top-level `config.yaml` (when one does not already exist) next to the workspaces directory, so `run` works immediately after `init`. (#171)
+- **`[documents]` extra** for the Docling OCR/CV document stack. (#174)
+- **Top-level `openpaw --help` now lists the `init` and `list` subcommands** — previously it showed only the run flags, hiding the first commands a new user needs. (#177)
+- **"Install from PyPI" quickstart** in the README (`pip install` → `init` → run), plus documented extras. The existing steps are labelled as the from-source (Poetry) workflow. (#172)
+
+### Changed
+
+- **Bare `pip install openpaw-ai` is now lean.** `docling`, `easyocr`, and `opencv` were core dependencies, so a default install pulled `torch` and hundreds of MB even for a text-only chat bot. They now live behind the optional `[documents]` extra (`pip install 'openpaw-ai[documents]'`), also included in `all-builtins`. The Docling processor already degrades gracefully when the package is absent. (#174)
+- **`init` "Next steps" show the correct invocation per install mode** — both the `poetry run openpaw …` and bare `openpaw …` forms — instead of a single bare command that failed under Poetry with `command not found`. Telegram/Discord scaffolds also warn that the bot denies all users by default until you add your ID to the allowlist. (#176, #179)
+- **Pinned `fireworks-ai` to the tested line (`>=0.16.4,<0.17.0`).** A bare pip install drifted to 0.19.x, which leaks aiohttp client sessions and prints `Unclosed client session` ERRORs during model init; the pin keeps pip close to `poetry.lock`. (#180)
+- Advertised the token-free `stdio` channel as the fastest first-run path (README Quick Start, CLI `--channel` help) and reworded "no tokens needed" to "no channel token needed (still requires an LLM API key)". (#178)
+
+### Fixed
+
+- **Access-denied reply pointed to the wrong config path.** The Telegram/Discord unauthorized message told users to edit `agent_workspaces/<ws>/agent.yaml`, which does not exist — the file lives under `config/`. (#175)
+- **Suppressed the `langgraph` `allowed_objects` `LangChainPendingDeprecationWarning`** that printed to stderr on every CLI invocation (including `--help`). It is an upstream default we cannot pass through, so it is filtered at the package root. (#181)
+- The `Config file not found` error is now actionable, pointing users to `openpaw init` and the getting-started docs. (#171)
+
+### Documentation
+
+- Logo now uses an absolute raw URL so it renders on the PyPI project page (repo-relative paths do not resolve there). (#170)
+- Replaced the decommissioned Fireworks example model (`deepseek-v3p1`) with `kimi-k2p6` and added a note to verify against the provider's live catalog. (#173)
+- Corrected `docs/channels.md`: non-allowlisted messages are **not** "silently ignored" — the bot replies with an access-denied message and logs a warning. (#179)
+- Getting Started polish: `config.yaml` is scaffolded by `init` (copying `config.example.yaml` is an optional source-only step), the `agent.yaml` `model:` block is commented out unless `--model` is passed, model precedence is documented, and the Playwright browser install is noted as needed only for the browser builtin. (#182)
+
 ## [0.4.3] - 2026-06-30
 
 > **BREAKING:** Workspaces using the pre-0.4.3 Moonshot configuration shape
@@ -189,7 +220,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Various race conditions in approval gate resolution and sub-agent cancellation.
 - Path traversal protection hardened across filesystem tools and inbound processors.
 
-[Unreleased]: https://github.com/johnsosoka/OpenPaw/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/johnsosoka/OpenPaw/compare/v0.4.4...HEAD
+[0.4.4]: https://github.com/johnsosoka/OpenPaw/compare/v0.4.3...v0.4.4
+[0.4.3]: https://github.com/johnsosoka/OpenPaw/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/johnsosoka/OpenPaw/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/johnsosoka/openpaw/releases/tag/v0.4.1
 [0.4.0]: https://github.com/johnsosoka/openpaw/releases/tag/v0.4.0
