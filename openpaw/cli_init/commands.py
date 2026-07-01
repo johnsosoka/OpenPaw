@@ -73,7 +73,7 @@ def _handle_init(args: list[str]) -> None:
     from .scaffolder import _ensure_root_config, _print_next_steps
 
     config_path = _ensure_root_config(parsed.path)
-    _print_next_steps(workspace_path, parsed.name, config_path)
+    _print_next_steps(workspace_path, parsed.name, config_path, parsed.channel)
 
 
 def _handle_list(args: list[str]) -> None:

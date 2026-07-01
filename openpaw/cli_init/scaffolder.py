@@ -199,7 +199,7 @@ def _ensure_root_config(workspaces_path: Path) -> Path | None:
 
 
 def _print_next_steps(
-    workspace_path: Path, name: str, config_path: Path | None
+    workspace_path: Path, name: str, config_path: Path | None, channel: str | None = None
 ) -> None:
     """Print the post-creation summary and suggested next steps.
 
@@ -220,3 +220,10 @@ def _print_next_steps(
     print("  5. Run your agent:")
     print(f"       from a poetry checkout:  poetry run openpaw -c config.yaml -w {name}")
     print(f"       from a pip install:      openpaw -c config.yaml -w {name}")
+    if channel in ("telegram", "discord"):
+        print()
+        print(
+            "  Note: the bot denies all users by default — message it once to get your "
+            "user ID,\n        then add it to config/agent.yaml -> channel.allowed_users "
+            "and restart."
+        )
