@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/assets/images/logo.png" alt="OpenPaw" width="400">
+  <img src="https://raw.githubusercontent.com/johnsosoka/OpenPaw/main/docs/assets/images/logo.png" alt="OpenPaw" width="400">
   <p><strong>A Friendly <a href="https://langchain-ai.github.io/langgraph/">LangChain/LangGraph</a> Multi-Agent Runner</strong></p>
   <p>
     <a href="https://github.com/johnsosoka/OpenPaw/actions/workflows/ci.yml"><img src="https://github.com/johnsosoka/OpenPaw/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
