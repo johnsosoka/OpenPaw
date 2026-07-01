@@ -101,6 +101,8 @@ Anthropic, OpenAI, AWS Bedrock, xAI, Fireworks, and any OpenAI-compatible endpoi
 
 ## Quick Start
 
+> **Fastest first run:** scaffold with `--channel stdio` to chat with your agent right in the terminal — no Telegram or Discord token required (you still need one LLM provider API key). Swap in `--channel telegram` or `--channel discord` when you're ready to go live.
+
 ### 1. Install
 
 ```bash
@@ -142,7 +144,8 @@ poetry run openpaw -c config.yaml -w my_agent
 |---------|-------------|
 | `openpaw init <name>` | Scaffold a new agent workspace |
 | `openpaw init <name> --model <provider:model>` | Scaffold with a pre-configured model |
-| `openpaw init <name> --channel telegram` | Scaffold with channel pre-configured (`telegram` or `discord`) |
+| `openpaw init <name> --channel stdio` | Scaffold with the local terminal channel (no channel token needed) |
+| `openpaw init <name> --channel telegram` | Scaffold with channel pre-configured (`stdio`, `telegram`, or `discord`) |
 | `openpaw list` | List available workspaces |
 | `openpaw -c config.yaml -w <name>` | Run a single workspace |
 | `openpaw -c config.yaml -w name1,name2` | Run multiple workspaces |

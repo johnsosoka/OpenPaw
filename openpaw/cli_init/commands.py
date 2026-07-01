@@ -36,7 +36,7 @@ def _handle_init(args: list[str]) -> None:
     parser.add_argument(
         "--channel",
         default=None,
-        help="Pre-configure channel type (e.g., telegram)",
+        help="Pre-configure channel type: stdio (local terminal), telegram, or discord",
     )
     parser.add_argument(
         "--model",

@@ -11,7 +11,7 @@ This guide walks through installing OpenPaw, creating your first agent workspace
 - **Python 3.11+**
 - **Poetry 2.0+** for dependency management ([installation guide](https://python-poetry.org/docs/#installation))
 - **A channel (choose one):**
-  - **Stdio** — Zero-config terminal channel, no tokens needed (great for testing)
+  - **Stdio** — Zero-config terminal channel, no *channel* token needed — you still need an LLM provider key (great for testing)
   - **Telegram** — Bot token from [@BotFather](https://core.telegram.org/bots#botfather)
   - **Discord** — Bot token from [Developer Portal](https://discord.com/developers/applications)
 - **At least one model provider credential:**
@@ -270,16 +270,16 @@ See [scheduling.md](scheduling.md) for detailed configuration.
 
 ## Running Your Agent
 
-### 1. Quick Start with Stdio (No Tokens Required)
+### 1. Quick Start with Stdio (No Channel Token Required)
 
-The fastest way to test OpenPaw without setting up Telegram or Discord:
+The fastest way to test OpenPaw without setting up Telegram or Discord. No *channel* token is required — you still need one LLM provider key (e.g. `ANTHROPIC_API_KEY`) for the agent to respond:
 
 ```bash
 # Scaffold a workspace with stdio channel
 poetry run openpaw init my_agent --model anthropic:claude-sonnet-4-20250514 --channel stdio
 
 # Run it
-poetry run openpaw -c config.yaml -w my-agent
+poetry run openpaw -c config.yaml -w my_agent
 ```
 
 Type messages directly in your terminal. The agent responds to stdout. Press `Ctrl+D` or send an empty line to stop.
