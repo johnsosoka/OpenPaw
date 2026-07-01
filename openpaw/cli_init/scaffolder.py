@@ -183,4 +183,6 @@ def _print_next_steps(workspace_path: Path, name: str) -> None:
     print("  2. Add API keys to config/.env")
     print("  3. Customize agent/AGENT.md, agent/USER.md, and agent/SOUL.md")
     print("  4. Review agent/team/ for default sub-agent profiles (edit or remove)")
-    print(f"  5. Run: openpaw -c config.yaml -w {name}")
+    print("  5. Run your agent:")
+    print(f"       from a poetry checkout:  poetry run openpaw -c config.yaml -w {name}")
+    print(f"       from a pip install:      openpaw -c config.yaml -w {name}")
