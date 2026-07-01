@@ -49,11 +49,11 @@ dependencies = [
     "pyyaml (>=6.0.3,<7.0.0)",
     "apscheduler (>=3.10.0,<4.0.0)",
     "python-dotenv (>=1.2.1,<2.0.0)",
-    # Document processing and browser automation
-    "docling (>=2.72.0,<3.0.0)",
-    "easyocr (>=1.7.2,<2.0.0)",
-    "opencv-python-headless (>=4.13.0.92,<5.0.0.0)",
+    # Browser automation
     "playwright (>=1.58.0,<2.0.0)",
+    # NOTE: The OCR/CV document stack (docling, easyocr, opencv) lives behind the
+    # optional [documents] extra — it pulls torch and hundreds of MB, which a
+    # bare install should not incur (issue #174).
 ]
 
 [project.urls]
@@ -65,6 +65,11 @@ Changelog = "https://github.com/johnsosoka/OpenPaw/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # Optional builtins — install extras for specific capabilities
+documents = [
+    "docling (>=2.72.0,<3.0.0)",              # PDF/DOCX/PPTX → markdown conversion
+    "easyocr (>=1.7.2,<2.0.0)",               # OCR for scanned/image PDFs (Linux)
+    "opencv-python-headless (>=4.13.0.92,<5.0.0.0)",  # image preprocessing for OCR
+]
 voice = [
     "openai (>=1.0.0)",      # Whisper transcription
     "elevenlabs (>=1.0.0)",  # Text-to-speech
@@ -94,6 +99,9 @@ mcp = [
     "langchain-mcp-adapters (>=0.3.0,<1.0.0)",  # MCP server adapter for LangChain tools
 ]
 all-builtins = [
+    "docling (>=2.72.0,<3.0.0)",
+    "easyocr (>=1.7.2,<2.0.0)",
+    "opencv-python-headless (>=4.13.0.92,<5.0.0.0)",
     "openai (>=1.0.0)",
     "elevenlabs (>=1.0.0)",
     "langchain-community (>=0.4.0)",

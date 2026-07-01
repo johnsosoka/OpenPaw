@@ -31,10 +31,10 @@ cd OpenPaw
 ### 2. Install Dependencies
 
 ```bash
-# Core installation (includes Docling + Playwright)
+# Core installation (lean — no OCR/CV stack)
 poetry install
 
-# Install Playwright browser
+# Install the Playwright browser (only needed for the browser builtin)
 poetry run playwright install chromium
 ```
 
@@ -43,6 +43,9 @@ poetry run playwright install chromium
 Install additional builtins based on your needs:
 
 ```bash
+# Document conversion + OCR (Docling; pulls torch — large)
+poetry install -E documents
+
 # Voice capabilities (Whisper transcription + ElevenLabs TTS)
 poetry install -E voice
 
@@ -60,12 +63,13 @@ poetry install -E all-builtins
 
 | Extra | Provides | Requires |
 |-------|----------|----------|
+| `documents` | Docling PDF/DOCX/PPTX → markdown conversion with OCR | pulls `torch`, `easyocr`, `opencv` (large) |
 | `voice` | Whisper audio transcription, ElevenLabs text-to-speech | `OPENAI_API_KEY`, `ELEVENLABS_API_KEY` |
 | `web` | Brave Search web search | `BRAVE_API_KEY` |
 | `memory` | Semantic search over conversation archives | `sqlite-vec` package |
 | `all-builtins` | All of the above | All API keys above |
 
-**Note:** Docling (document conversion), Playwright (browser automation), and all LLM providers (Anthropic, OpenAI, AWS Bedrock, xAI, Fireworks.ai) are **core dependencies** installed automatically with `poetry install`.
+**Note:** Playwright (browser automation) and all LLM providers (Anthropic, OpenAI, AWS Bedrock, xAI, Fireworks.ai) are **core dependencies** installed automatically with `poetry install`. Document conversion (Docling) lives behind the `documents` extra because its OCR/CV stack pulls `torch` and hundreds of MB — install it only if you need scanned-PDF/OCR features.
 
 ### 4. Set Up Environment Variables
 
@@ -418,10 +422,10 @@ poetry run playwright install --help
 
 ### Docling OCR Issues
 
-If scanned PDFs produce `<!-- image -->` instead of text:
+First ensure the document stack is installed: `poetry install -E documents` (or `pip install 'openpaw-ai[documents]'`). If scanned PDFs produce `<!-- image -->` instead of text:
 
 - **macOS:** Docling uses native OCR (no additional setup needed)
-- **Linux:** Docling falls back to EasyOCR (auto-installed)
+- **Linux:** Docling falls back to EasyOCR (included in the `documents` extra)
 
 Check logs for OCR-related errors when processing PDFs.
 
