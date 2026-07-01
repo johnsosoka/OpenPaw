@@ -11,7 +11,7 @@ This guide walks through installing OpenPaw, creating your first agent workspace
 - **Python 3.11+**
 - **Poetry 2.0+** for dependency management ([installation guide](https://python-poetry.org/docs/#installation))
 - **A channel (choose one):**
-  - **Stdio** — Zero-config terminal channel, no tokens needed (great for testing)
+  - **Stdio** — Zero-config terminal channel, no *channel* token needed — you still need an LLM provider key (great for testing)
   - **Telegram** — Bot token from [@BotFather](https://core.telegram.org/bots#botfather)
   - **Discord** — Bot token from [Developer Portal](https://discord.com/developers/applications)
 - **At least one model provider credential:**
@@ -31,10 +31,10 @@ cd OpenPaw
 ### 2. Install Dependencies
 
 ```bash
-# Core installation (includes Docling + Playwright)
+# Core installation (lean — no OCR/CV stack)
 poetry install
 
-# Install Playwright browser
+# Install the Playwright browser (only needed for the browser builtin)
 poetry run playwright install chromium
 ```
 
@@ -43,6 +43,9 @@ poetry run playwright install chromium
 Install additional builtins based on your needs:
 
 ```bash
+# Document conversion + OCR (Docling; pulls torch — large)
+poetry install -E documents
+
 # Voice capabilities (Whisper transcription + ElevenLabs TTS)
 poetry install -E voice
 
@@ -60,12 +63,13 @@ poetry install -E all-builtins
 
 | Extra | Provides | Requires |
 |-------|----------|----------|
+| `documents` | Docling PDF/DOCX/PPTX → markdown conversion with OCR | pulls `torch`, `easyocr`, `opencv` (large) |
 | `voice` | Whisper audio transcription, ElevenLabs text-to-speech | `OPENAI_API_KEY`, `ELEVENLABS_API_KEY` |
 | `web` | Brave Search web search | `BRAVE_API_KEY` |
 | `memory` | Semantic search over conversation archives | `sqlite-vec` package |
 | `all-builtins` | All of the above | All API keys above |
 
-**Note:** Docling (document conversion), Playwright (browser automation), and all LLM providers (Anthropic, OpenAI, AWS Bedrock, xAI, Fireworks.ai) are **core dependencies** installed automatically with `poetry install`.
+**Note:** Playwright (browser automation) and all LLM providers (Anthropic, OpenAI, AWS Bedrock, xAI, Fireworks.ai) are **core dependencies** installed automatically with `poetry install`. Document conversion (Docling) lives behind the `documents` extra because its OCR/CV stack pulls `torch` and hundreds of MB — install it only if you need scanned-PDF/OCR features.
 
 ### 4. Set Up Environment Variables
 
@@ -94,7 +98,9 @@ export ELEVENLABS_API_KEY="your-elevenlabs-key"      # Text-to-speech
 
 ## Initial Configuration
 
-### 1. Copy the Example Configuration
+### 1. Get a config.yaml
+
+`openpaw init` (in the next section) scaffolds a minimal `config.yaml` for you, so you can skip ahead. To start from the fully-commented reference instead, copy it from the repo (source checkouts only — this file is not shipped in the PyPI wheel):
 
 ```bash
 cp config.example.yaml config.yaml
@@ -154,7 +160,7 @@ Each file includes TODO markers to guide customization.
 
 ### 2. Configure Your Workspace
 
-Edit `config/agent.yaml` with your model and channel settings. If you used `--model` and `--channel` flags, the relevant sections are already populated:
+Edit `config/agent.yaml` with your model and channel settings. If you passed `--model` and `--channel` to `init`, these sections are already populated (as shown below). If you did **not** pass them, `init` leaves the `model:` and `channel:` blocks commented out, and the workspace inherits the global default from `config.yaml`. Uncomment and edit them to override per workspace:
 
 ```yaml
 name: my_agent
@@ -182,6 +188,8 @@ Add your API keys to `config/.env`:
 ANTHROPIC_API_KEY=your-key-here
 TELEGRAM_BOT_TOKEN=your-bot-token
 ```
+
+**Model precedence:** The effective model resolves in this order — the global `config.yaml` `agent.model` default → an optional per-workspace `config/agent.yaml` `model:` override → API keys referenced via `${VAR}` are read from the workspace `config/.env` (or your shell environment).
 
 **Timezone:** Add a `timezone` field (IANA identifier, e.g., `America/New_York`) to control cron timing, heartbeat hours, and display timestamps. Defaults to UTC.
 
@@ -270,16 +278,16 @@ See [scheduling.md](scheduling.md) for detailed configuration.
 
 ## Running Your Agent
 
-### 1. Quick Start with Stdio (No Tokens Required)
+### 1. Quick Start with Stdio (No Channel Token Required)
 
-The fastest way to test OpenPaw without setting up Telegram or Discord:
+The fastest way to test OpenPaw without setting up Telegram or Discord. No *channel* token is required — you still need one LLM provider key (e.g. `ANTHROPIC_API_KEY`) for the agent to respond:
 
 ```bash
 # Scaffold a workspace with stdio channel
 poetry run openpaw init my_agent --model anthropic:claude-sonnet-4-20250514 --channel stdio
 
 # Run it
-poetry run openpaw -c config.yaml -w my-agent
+poetry run openpaw -c config.yaml -w my_agent
 ```
 
 Type messages directly in your terminal. The agent responds to stdout. Press `Ctrl+D` or send an empty line to stop.
@@ -418,10 +426,10 @@ poetry run playwright install --help
 
 ### Docling OCR Issues
 
-If scanned PDFs produce `<!-- image -->` instead of text:
+First ensure the document stack is installed: `poetry install -E documents` (or `pip install 'openpaw-ai[documents]'`). If scanned PDFs produce `<!-- image -->` instead of text:
 
 - **macOS:** Docling uses native OCR (no additional setup needed)
-- **Linux:** Docling falls back to EasyOCR (auto-installed)
+- **Linux:** Docling falls back to EasyOCR (included in the `documents` extra)
 
 Check logs for OCR-related errors when processing PDFs.
 

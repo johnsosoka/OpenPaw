@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 from openpaw.core.paths import (
@@ -27,6 +28,7 @@ from openpaw.core.paths import (
 
 from .templates import (
     TEMPLATE_AGENT_MD,
+    TEMPLATE_CONFIG_YAML,
     TEMPLATE_ENV,
     TEMPLATE_HEARTBEAT_MD,
     TEMPLATE_SOUL_MD,
@@ -168,7 +170,49 @@ def _create_workspace(
     return workspace_path
 
 
-def _print_next_steps(workspace_path: Path, name: str) -> None:
+def _ensure_root_config(workspaces_path: Path) -> Path | None:
+    """Scaffold a top-level ``config.yaml`` next to the workspaces directory.
+
+    ``openpaw`` requires a global config file to run. Without one, a freshly
+    scaffolded workspace is unrunnable — a hard block for pip users who have no
+    ``config.example.yaml`` to copy (issue #171). This writes a minimal, valid
+    ``config.yaml`` when one does not already exist.
+
+    The file is written to the parent of ``workspaces_path`` (the directory the
+    user runs ``openpaw`` from), and its ``workspaces_path`` field is set to
+    match the scaffolded workspaces directory.
+
+    Args:
+        workspaces_path: Directory that holds the workspaces (e.g. ``agent_workspaces``).
+
+    Returns:
+        Path to the created config.yaml, or None if one already existed or could
+        not be written. Failure is non-fatal: the workspace is still usable and
+        the user can author config.yaml themselves.
+    """
+    resolved = workspaces_path.resolve()
+    config_path = resolved.parent / "config.yaml"
+    if config_path.exists():
+        return None
+
+    try:
+        config_path.write_text(
+            TEMPLATE_CONFIG_YAML.format(workspaces_path=resolved.name),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        print(
+            f"Warning: could not write {config_path}: {exc}. "
+            "Create a config.yaml before running (see 'openpaw init --help').",
+            file=sys.stderr,
+        )
+        return None
+    return config_path
+
+
+def _print_next_steps(
+    workspace_path: Path, name: str, config_path: Path | None, channel: str | None = None
+) -> None:
     """Print the post-creation summary and suggested next steps.
 
     Args:
@@ -177,10 +221,21 @@ def _print_next_steps(workspace_path: Path, name: str) -> None:
     """
     print(f"Created workspace: {name}")
     print(f"  Path: {workspace_path}/")
+    if config_path is not None:
+        print(f"  Config: {config_path} (global defaults — edit as needed)")
     print()
     print("Next steps:")
     print("  1. Edit config/agent.yaml with your model and channel settings")
     print("  2. Add API keys to config/.env")
     print("  3. Customize agent/AGENT.md, agent/USER.md, and agent/SOUL.md")
     print("  4. Review agent/team/ for default sub-agent profiles (edit or remove)")
-    print(f"  5. Run: openpaw -c config.yaml -w {name}")
+    print("  5. Run your agent:")
+    print(f"       from a poetry checkout:  poetry run openpaw -c config.yaml -w {name}")
+    print(f"       from a pip install:      openpaw -c config.yaml -w {name}")
+    if channel in ("telegram", "discord"):
+        print()
+        print(
+            "  Note: the bot denies all users by default — message it once to get your "
+            "user ID,\n        then add it to config/agent.yaml -> channel.allowed_users "
+            "and restart."
+        )

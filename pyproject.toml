@@ -1,6 +1,6 @@
 [project]
 name = "openpaw-ai"
-version = "0.4.3"
+version = "0.4.4"
 description = "OpenPaw - Multi-Channel AI Agent Framework with LangGraph"
 authors = [
     {name = "John Sosoka"}
@@ -36,6 +36,11 @@ dependencies = [
     # blocks that Fireworks' API rejects). <1.4.0 keeps us on the stable fireworks-ai
     # 0.x SDK; 1.4.x requires an alpha SDK that relocates fireworks.client.error.
     "langchain-fireworks (>=1.3.1,<1.4.0)",
+    # Pin the Fireworks SDK to the tested line. langchain-fireworks allows a wide
+    # range, so a bare `pip install` drifts to fireworks-ai 0.19.x, which leaks
+    # aiohttp client sessions ("Unclosed client session" ERRORs) during model
+    # init. 0.16.x matches poetry.lock and does not leak (issue #180).
+    "fireworks-ai (>=0.16.4,<0.17.0)",
     # Channel adapters
     "python-telegram-bot[job-queue] (>=22.6,<23.0)",
     "discord.py (>=2.6.0,<3.0.0)",
@@ -44,11 +49,11 @@ dependencies = [
     "pyyaml (>=6.0.3,<7.0.0)",
     "apscheduler (>=3.10.0,<4.0.0)",
     "python-dotenv (>=1.2.1,<2.0.0)",
-    # Document processing and browser automation
-    "docling (>=2.72.0,<3.0.0)",
-    "easyocr (>=1.7.2,<2.0.0)",
-    "opencv-python-headless (>=4.13.0.92,<5.0.0.0)",
+    # Browser automation
     "playwright (>=1.58.0,<2.0.0)",
+    # NOTE: The OCR/CV document stack (docling, easyocr, opencv) lives behind the
+    # optional [documents] extra — it pulls torch and hundreds of MB, which a
+    # bare install should not incur (issue #174).
 ]
 
 [project.urls]
@@ -60,6 +65,11 @@ Changelog = "https://github.com/johnsosoka/OpenPaw/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 # Optional builtins — install extras for specific capabilities
+documents = [
+    "docling (>=2.72.0,<3.0.0)",              # PDF/DOCX/PPTX → markdown conversion
+    "easyocr (>=1.7.2,<2.0.0)",               # OCR for scanned/image PDFs (Linux)
+    "opencv-python-headless (>=4.13.0.92,<5.0.0.0)",  # image preprocessing for OCR
+]
 voice = [
     "openai (>=1.0.0)",      # Whisper transcription
     "elevenlabs (>=1.0.0)",  # Text-to-speech
@@ -89,6 +99,9 @@ mcp = [
     "langchain-mcp-adapters (>=0.3.0,<1.0.0)",  # MCP server adapter for LangChain tools
 ]
 all-builtins = [
+    "docling (>=2.72.0,<3.0.0)",
+    "easyocr (>=1.7.2,<2.0.0)",
+    "opencv-python-headless (>=4.13.0.92,<5.0.0.0)",
     "openai (>=1.0.0)",
     "elevenlabs (>=1.0.0)",
     "langchain-community (>=0.4.0)",
@@ -138,7 +151,7 @@ warn_unused_ignores = false
 
 [tool.poetry]
 name = "openpaw-ai"
-version = "0.4.3"
+version = "0.4.4"
 description = "OpenPaw - Multi-Channel AI Agent Framework with LangGraph"
 authors = ["John Sosoka"]
 packages = [{include = "openpaw"}]

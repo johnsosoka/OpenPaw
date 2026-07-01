@@ -56,6 +56,55 @@ TEMPLATE_HEARTBEAT_MD = """\
 <!-- Leave empty if heartbeat is not configured -->
 """
 
+TEMPLATE_CONFIG_YAML = """\
+# OpenPaw Global Configuration
+# Scaffolded by `openpaw init`. Per-workspace overrides go in each
+# workspace's config/agent.yaml.
+
+# Path to agent workspaces directory
+workspaces_path: {workspaces_path}
+
+# Logging
+logging:
+  level: INFO
+  directory: logs
+  max_size_mb: 10
+  backup_count: 5
+  per_workspace: true
+
+# Message queue defaults (can be overridden per workspace via agent.yaml)
+queue:
+  mode: collect            # collect, steer, followup, interrupt
+  debounce_ms: 1000        # Wait this long after last message before processing
+  cap: 20                  # Max queued messages per session before drop policy fires
+  drop_policy: summarize   # old (drop oldest), new (drop newest), summarize
+
+# Lane concurrency (how many agent runs happen simultaneously per lane)
+lanes:
+  main_concurrency: 4      # User-facing message lanes
+  subagent_concurrency: 8  # Background sub-agent workers
+  cron_concurrency: 2      # Scheduled job runners
+
+# Default agent model — applies to any workspace that does not set its own
+# model in config/agent.yaml. Format: provider:model_id
+# Provider model IDs change over time — verify against your provider's live
+# catalog before use.
+agent:
+  model: anthropic:claude-sonnet-4-20250514
+  max_turns: 50
+  temperature: 0.7
+
+# Provider catalog (optional) — define connection details once and reference
+# providers by name from any workspace. Uncomment and fill in as needed.
+# providers:
+#   anthropic:
+#     api_key: ${{ANTHROPIC_API_KEY}}
+#   openai:
+#     api_key: ${{OPENAI_API_KEY}}
+#   fireworks:
+#     api_key: ${{FIREWORKS_API_KEY}}
+"""
+
 TEMPLATE_ENV = """\
 # API keys for this workspace
 # ANTHROPIC_API_KEY=
