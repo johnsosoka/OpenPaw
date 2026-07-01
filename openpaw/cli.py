@@ -38,7 +38,18 @@ def parse_workspace_arg(value: str, workspaces_path: Path) -> list[str]:
 
 async def main() -> None:
     """CLI entry point."""
-    parser = argparse.ArgumentParser(description="OpenPaw - AI Agent Framework")
+    parser = argparse.ArgumentParser(
+        description="OpenPaw - AI Agent Framework",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "subcommands:\n"
+            "  init <name>           Scaffold a new agent workspace\n"
+            "  list                  List available workspaces\n"
+            "\n"
+            "Run 'openpaw init --help' or 'openpaw list --help' for subcommand options.\n"
+            "The options below apply when running workspaces (e.g. openpaw -c config.yaml -w <name>)."
+        ),
+    )
     parser.add_argument(
         "-c",
         "--config",
