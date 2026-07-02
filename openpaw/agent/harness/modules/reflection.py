@@ -23,6 +23,7 @@ from openpaw.agent.harness.modules.base import (
     ModuleKind,
     ReasoningArtifact,
     ReasoningContext,
+    ReasoningModule,
     ReflectAction,
     ReflectionVerdict,
 )
@@ -95,7 +96,7 @@ def _next_ordinal(plan: Plan, current_step_id: str) -> int:
     return highest + 1
 
 
-class LightReflection:
+class LightReflection(ReasoningModule):
     """One structured verdict per step; never rewrites the plan.
 
     The 0.5.0 default (``harness.reflection.module: light``). A model verdict
@@ -127,7 +128,7 @@ class LightReflection:
         return ReasoningArtifact(kind=self.kind, verdict=verdict, raw=json.dumps(schema.model_dump()))
 
 
-class FullReflection:
+class FullReflection(ReasoningModule):
     """Verdict plus authority to rewrite the remaining plan.
 
     On ``revise_plan`` a second structured call produces the rewritten

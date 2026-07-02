@@ -9,7 +9,12 @@ import json
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 
-from openpaw.agent.harness.modules.base import ModuleKind, ReasoningArtifact, ReasoningContext
+from openpaw.agent.harness.modules.base import (
+    ModuleKind,
+    ReasoningArtifact,
+    ReasoningContext,
+    ReasoningModule,
+)
 from openpaw.model.plan import Plan, PlanStep
 
 
@@ -19,7 +24,7 @@ class _PlanSchema(BaseModel):
     steps: list[str] = Field(description="Ordered, concrete steps to accomplish the task")
 
 
-class DirectPlanner:
+class DirectPlanner(ReasoningModule):
     """One structured-output LLM call: task -> Plan."""
 
     name = "direct"

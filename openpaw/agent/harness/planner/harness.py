@@ -29,10 +29,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 from openpaw.agent.harness.base import AgentHarness, HarnessKind
 from openpaw.agent.harness.modules.base import ModuleKind, ReasoningModule, ToolSummary, WorkspaceInfo
-from openpaw.agent.harness.modules.direct import DirectPlanner
-from openpaw.agent.harness.modules.ideonomy import IdeonomyModule
-from openpaw.agent.harness.modules.reflection import FullReflection, LightReflection
-from openpaw.agent.harness.modules.self_discover import SelfDiscoverPlanner, StructureCache
+from openpaw.agent.harness.modules.registry import candidates_for
 from openpaw.agent.harness.planner.equipment import (
     EquipmentContext,
     build_tool_catalog,
@@ -187,19 +184,21 @@ class PlannerHarness:
     # ------------------------------------------------------------------
 
     def _build_module_candidates(self) -> dict[ModuleKind, dict[str, ReasoningModule]]:
-        """Instantiate every registered reasoning module with its dependencies.
+        """Instantiate every registered reasoning module via its build() entrypoint.
 
-        Explicit per-module construction (mirroring MODULE_REGISTRY): modules
-        with dependencies (SelfDiscover's structure cache) get them here; a
-        registry loop would hide the wiring.
+        Uniform construction: each module class assembles its own
+        dependencies from the workspace context (ReasoningModule.build), so
+        adding a module is one class + one MODULE_REGISTRY entry — no edit
+        here.
         """
+        info = WorkspaceInfo(
+            name=self.workspace.name,
+            timezone=self.workspace.config.timezone if self.workspace.config else "UTC",
+            workspace_path=self.workspace.path,
+        )
         return {
-            ModuleKind.PLANNING: {
-                "direct": DirectPlanner(),
-                "self_discover": SelfDiscoverPlanner(StructureCache(self.workspace.path)),
-            },
-            ModuleKind.CREATIVE: {"ideonomy": IdeonomyModule()},
-            ModuleKind.REFLECTION: {"light": LightReflection(), "full": FullReflection()},
+            kind: {name: cls.build(info) for name, cls in candidates_for(kind).items()}
+            for kind in ModuleKind
         }
 
     def _build_node_models(self) -> PlannerNodeModels:

@@ -16,7 +16,13 @@ import json
 
 from langchain_core.messages import BaseMessage, HumanMessage
 
-from openpaw.agent.harness.modules.base import ModuleKind, ReasoningArtifact, ReasoningContext
+from openpaw.agent.harness.modules.base import (
+    ModuleKind,
+    ReasoningArtifact,
+    ReasoningContext,
+    ReasoningModule,
+    WorkspaceInfo,
+)
 from openpaw.agent.harness.modules.direct import _PlanSchema
 from openpaw.agent.harness.modules.self_discover.cache import StructureCache
 from openpaw.agent.harness.modules.self_discover.seed_modules import SEED_REASONING_MODULES
@@ -69,7 +75,7 @@ def _parse_structure(raw: str) -> dict[str, object]:
     return {"structure_text": raw}
 
 
-class SelfDiscoverPlanner:
+class SelfDiscoverPlanner(ReasoningModule):
     """Discover (or reuse) a task-type reasoning structure, then plan with it.
 
     Cache miss: 3 discovery calls + 1 solve call. Cache hit: 1 solve call.
@@ -84,6 +90,11 @@ class SelfDiscoverPlanner:
 
     def __init__(self, cache: StructureCache) -> None:
         self._cache = cache
+
+    @classmethod
+    def build(cls, workspace: WorkspaceInfo) -> "SelfDiscoverPlanner":
+        """Assemble with a workspace-local structure cache (ADR-102 §3)."""
+        return cls(StructureCache(workspace.workspace_path))
 
     async def run(self, ctx: ReasoningContext) -> ReasoningArtifact:
         """Produce a Plan by following a discovered reasoning structure.

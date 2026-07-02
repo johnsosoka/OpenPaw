@@ -13,7 +13,12 @@ import logging
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 
-from openpaw.agent.harness.modules.base import ModuleKind, ReasoningArtifact, ReasoningContext
+from openpaw.agent.harness.modules.base import (
+    ModuleKind,
+    ReasoningArtifact,
+    ReasoningContext,
+    ReasoningModule,
+)
 from openpaw.agent.harness.modules.ideonomy.divisions import Division
 from openpaw.agent.harness.modules.ideonomy.selector import select_lenses
 from openpaw.model.plan import IdeationResult
@@ -29,7 +34,7 @@ class _SynthesisSchema(BaseModel):
     recommended_directions: list[str] = Field(description="The most promising directions to pursue")
 
 
-class IdeonomyModule:
+class IdeonomyModule(ReasoningModule):
     """Deterministic lens selection, then one LLM pass per lens plus one synthesis call."""
 
     name = "ideonomy"

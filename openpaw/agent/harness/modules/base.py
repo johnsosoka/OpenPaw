@@ -8,10 +8,11 @@ the resolved per-node model (ADR-103) and the status emitter (ADR-106) arrive
 via :class:`ReasoningContext` rather than imports.
 """
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal, Protocol, runtime_checkable
+from typing import Literal
 
 from langchain_core.language_models import BaseChatModel
 
@@ -119,9 +120,14 @@ class ReasoningArtifact:
     raw: str = ""
 
 
-@runtime_checkable
-class ReasoningModule(Protocol):
+class ReasoningModule(ABC):
     """A pluggable reasoning strategy used by the planner harness.
+
+    The extension contract (ADR-102): subclass, set the three class
+    attributes, implement ``run()``, and add one ``MODULE_REGISTRY`` entry —
+    nothing else in the framework needs touching. Modules whose constructor
+    takes dependencies override ``build()`` to assemble them from the
+    workspace context; the harness only ever calls ``build()``.
 
     Attributes:
         name: Config key (e.g. ``harness.planning.module: <name>``).
@@ -134,6 +140,22 @@ class ReasoningModule(Protocol):
     kind: ModuleKind
     tagline: str
 
+    @classmethod
+    def build(cls, workspace: WorkspaceInfo) -> "ReasoningModule":
+        """Construct this module for a workspace (the uniform entrypoint).
+
+        The default suits dependency-free modules. Modules needing
+        workspace-scoped collaborators (caches, stores) override this —
+        see SelfDiscoverPlanner.
+
+        Args:
+            workspace: Workspace context (name, timezone, path).
+
+        Returns:
+            A ready-to-run module instance.
+        """
+        return cls()
+
+    @abstractmethod
     async def run(self, ctx: ReasoningContext) -> ReasoningArtifact:
         """Produce a plan, ideation, or verdict artifact for the given task."""
-        ...

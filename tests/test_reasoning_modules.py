@@ -287,3 +287,44 @@ async def test_full_reflection_empty_rewrite_coerces_to_advance():
     assert artifact.verdict is not None
     assert artifact.verdict.action == "advance"
     assert "no steps" in artifact.verdict.notes
+
+
+class TestModuleEntrypointContract:
+    """Every module declares the ReasoningModule interface explicitly and is
+    constructible through the uniform build() entrypoint (John's review)."""
+
+    def test_all_registry_entries_subclass_the_interface(self):
+        from openpaw.agent.harness.modules.base import ReasoningModule
+        from openpaw.agent.harness.modules.registry import MODULE_REGISTRY
+
+        for name, cls in MODULE_REGISTRY.items():
+            assert issubclass(cls, ReasoningModule), name
+
+    def test_run_is_abstract(self):
+        from openpaw.agent.harness.modules.base import ModuleKind, ReasoningModule
+
+        class Incomplete(ReasoningModule):
+            name = "incomplete"
+            kind = ModuleKind.PLANNING
+            tagline = "missing run()"
+
+        with pytest.raises(TypeError):
+            Incomplete()  # type: ignore[abstract]
+
+    def test_uniform_build_constructs_every_module(self, tmp_path):
+        from openpaw.agent.harness.modules.base import WorkspaceInfo
+        from openpaw.agent.harness.modules.registry import MODULE_REGISTRY
+
+        info = WorkspaceInfo(name="t", timezone="UTC", workspace_path=tmp_path)
+        for name, cls in MODULE_REGISTRY.items():
+            instance = cls.build(info)
+            assert instance.name == name
+
+    def test_self_discover_build_wires_workspace_cache(self, tmp_path):
+        from openpaw.agent.harness.modules.base import WorkspaceInfo
+        from openpaw.agent.harness.modules.self_discover import SelfDiscoverPlanner
+
+        info = WorkspaceInfo(name="t", timezone="UTC", workspace_path=tmp_path)
+        planner = SelfDiscoverPlanner.build(info)
+        planner._cache.put("k", {"structure_text": "x"})
+        assert (tmp_path / "data" / "reasoning_structures.json").exists()
