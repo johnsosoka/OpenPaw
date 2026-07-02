@@ -17,6 +17,7 @@ Edit-in-place pattern (default):
 import logging
 import time
 from typing import Any
+from uuid import uuid4
 
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import AIMessage, ToolMessage
@@ -28,6 +29,12 @@ from openpaw.core.prompts.system_events import (
     INTERRUPT_USER_NOTIFICATION,
     STEER_SKIP_MESSAGE,
     STEER_USER_NOTIFICATION,
+)
+from openpaw.model.status_event import (
+    JsonValue,
+    StatusEmitter,
+    StatusEvent,
+    StatusEventKind,
 )
 
 logger = logging.getLogger(__name__)
@@ -139,14 +146,25 @@ class StatusUpdateMiddleware(AgentMiddleware):
     - When False, each update sends a separate message (legacy behavior).
     """
 
-    def __init__(self, config: StatusUpdatesConfig) -> None:
+    def __init__(
+        self,
+        config: StatusUpdatesConfig,
+        emitter: StatusEmitter | None = None,
+        workspace: str = "",
+    ) -> None:
         """Initialize the middleware.
 
         Args:
             config: StatusUpdatesConfig instance controlling which events
                 to report and throttling parameters.
+            emitter: Optional StatusEmitter (ADR-106). When set, hooks emit
+                machine-readable StatusEvents alongside channel rendering.
+            workspace: Workspace name stamped onto emitted events.
         """
         self._config = config
+        self._emitter = emitter
+        self._workspace = workspace
+        self._run_id: str = uuid4().hex
         self._channel: Any | None = None
         self._session_key: str | None = None
         self._last_update_time: float = 0.0
@@ -181,6 +199,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._session_key = session_key
         self._run_count = run_count
         self._is_system_batch = is_system_batch
+        self._run_id = uuid4().hex
         self._last_update_time = 0.0
         self._last_reported_tools = frozenset()
         self._status_message_id = None
@@ -196,6 +215,31 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._last_reported_tools = frozenset()
         self._status_message_id = None
         self._steer_notified = False
+        # _run_id intentionally NOT cleared: late sub-agent events after
+        # reset() still correlate with the run that dispatched them.
+
+    async def _emit(
+        self, kind: StatusEventKind, payload: dict[str, JsonValue] | None = None
+    ) -> None:
+        """Emit a StatusEvent to the injected emitter (ADR-106 Phase A).
+
+        Best-effort: emission failures are debug-logged and swallowed so
+        status plumbing never breaks an agent run. No-op without an emitter.
+        """
+        if self._emitter is None:
+            return
+        try:
+            await self._emitter.emit(
+                StatusEvent(
+                    kind=kind,
+                    workspace=self._workspace,
+                    session_key=self._session_key,
+                    run_id=self._run_id,
+                    payload=payload or {},
+                )
+            )
+        except Exception:
+            logger.debug("Status event emission failed for %s", kind, exc_info=True)
 
     async def delete_status(self) -> None:
         """Delete the tracked status message if one exists.
@@ -222,7 +266,13 @@ class StatusUpdateMiddleware(AgentMiddleware):
             subagent_id: Unique identifier for the sub-agent request.
             label: Display name shown in the status header.
         """
-        if not self._config.enabled or not self._config.subagent_status:
+        if not self._config.enabled:
+            return
+        await self._emit(
+            StatusEventKind.SUBAGENT_DISPATCHED,
+            {"subagent_id": subagent_id, "label": label},
+        )
+        if not self._config.subagent_status:
             return
         channel = self._channel
         session_key = self._session_key
@@ -247,7 +297,13 @@ class StatusUpdateMiddleware(AgentMiddleware):
             status: Status text to display below the header line.
             emoji: Optional emoji prefix for the status line.
         """
-        if not self._config.enabled or not self._config.subagent_status:
+        if not self._config.enabled:
+            return
+        await self._emit(
+            StatusEventKind.SUBAGENT_TOOL,
+            {"subagent_id": subagent_id, "status": status},
+        )
+        if not self._config.subagent_status:
             return
         entry = self._subagent_status_ids.get(subagent_id)
         if not entry:
@@ -270,7 +326,13 @@ class StatusUpdateMiddleware(AgentMiddleware):
             subagent_id: Unique identifier for the sub-agent request.
             outcome: One of "completed", "failed", or "cancelled".
         """
-        if not self._config.enabled or not self._config.subagent_status:
+        if not self._config.enabled:
+            return
+        await self._emit(
+            StatusEventKind.SUBAGENT_COMPLETED,
+            {"subagent_id": subagent_id, "outcome": outcome},
+        )
+        if not self._config.subagent_status:
             return
         entry = self._subagent_status_ids.pop(subagent_id, None)
         if not entry:
@@ -311,7 +373,18 @@ class StatusUpdateMiddleware(AgentMiddleware):
         Returns:
             None (no state modifications).
         """
-        if not self._config.enabled or not self._config.agent_start:
+        if not self._config.enabled:
+            return None
+
+        await self._emit(
+            StatusEventKind.RUN_STARTED,
+            {
+                "run_count": getattr(self, "_run_count", 1),
+                "is_system_batch": getattr(self, "_is_system_batch", False),
+            },
+        )
+
+        if not self._config.agent_start:
             return None
 
         if getattr(self, "_is_system_batch", False):
@@ -341,7 +414,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         Returns:
             None (no state modifications).
         """
-        if not self._config.enabled or not self._config.tool_calls_detected:
+        if not self._config.enabled:
             return None
 
         messages = state.get("messages", [])
@@ -358,6 +431,13 @@ class StatusUpdateMiddleware(AgentMiddleware):
 
         tool_names = [tc.get("name", "") for tc in tool_calls if tc.get("name")]
         if not tool_names:
+            return None
+
+        await self._emit(
+            StatusEventKind.TOOL_SELECTED, {"tools": list(tool_names)}
+        )
+
+        if not self._config.tool_calls_detected:
             return None
 
         current_tools = frozenset(tool_names)
@@ -412,6 +492,11 @@ class StatusUpdateMiddleware(AgentMiddleware):
             tool_detail,
         )
 
+        await self._emit(
+            StatusEventKind.TOOL_STARTED,
+            {"tool": tool_name, "detail": tool_detail},
+        )
+
         # Report sub-agent dispatch
         if tool_name == "spawn_agent" and self._config.subagent_spawned:
             label = tool_args.get("label", "sub-agent")
@@ -433,11 +518,17 @@ class StatusUpdateMiddleware(AgentMiddleware):
         try:
             result = await handler(request)
         except InterruptSignalError:
+            await self._emit(StatusEventKind.RUN_INTERRUPTED, {"tool": tool_name})
             if self._config.run_interrupted:
                 await self._send_status(
                     INTERRUPT_USER_NOTIFICATION, force=True
                 )
             raise
+
+        await self._emit(
+            StatusEventKind.TOOL_COMPLETED,
+            {"tool": tool_name, "detail": tool_detail},
+        )
 
         # Tool complete notification
         if self._config.tool_complete:
@@ -454,6 +545,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
             and result.content == STEER_SKIP_MESSAGE
             and not self._steer_notified
         ):
+            await self._emit(StatusEventKind.RUN_STEERED, {"tool": tool_name})
             await self._send_status(STEER_USER_NOTIFICATION, force=True)
             self._steer_notified = True
 
