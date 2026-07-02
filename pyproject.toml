@@ -163,3 +163,9 @@ testpaths = ["tests"]
 markers = [
     "integration: marks tests as integration tests (run against real subprocesses/servers)",
 ]
+filterwarnings = [
+    # langgraph's checkpoint serde emits an upstream deprecation about the default
+    # `allowed_objects` value. The CLI filters it in openpaw/__init__.py, but the
+    # test harness imports langgraph directly, so silence it here too (issue #181).
+    "ignore:The default value of `allowed_objects` will change:",
+]
