@@ -36,9 +36,9 @@ Four queue modes handle the reality that users send follow-up messages while age
 
 Agents ship with web search (Brave), browser automation (Playwright), sandboxed file operations, sub-agent spawning, task tracking, self-scheduling, and PDF generation from markdown. Incoming messages are automatically processed — files are saved, voice messages transcribed, and documents converted to markdown.
 
-### Stdio Channel
+### Stdio Channel (testing only)
 
-Test and develop agents locally without any bot tokens or platform setup. The `stdio` channel reads from stdin and prints responses to stdout, with full support for file attachments, approval gates, and message splitting.
+A zero-config local channel for quickly smoke-testing agents from the terminal — no bot tokens or platform setup. It's a **work in progress**: log output interleaves with the chat, so it's fine for a quick check but not for actually operating a bot. Use Telegram or Discord for real use.
 
 ### Scheduling & Heartbeats
 

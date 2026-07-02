@@ -136,7 +136,11 @@ def load_config(path: Path | str) -> Config:
     """
     config_path = Path(path)
     if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
+        raise FileNotFoundError(
+            f"Config file not found: {config_path}. "
+            "Run 'openpaw init <name>' to scaffold a workspace and a starter "
+            "config.yaml, or see https://johnsosoka.github.io/OpenPaw/getting-started/"
+        )
 
     with config_path.open() as f:
         data: dict[str, Any] = yaml.safe_load(f) or {}

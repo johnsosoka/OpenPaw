@@ -125,7 +125,9 @@ To get your Telegram user ID:
 - Message [@userinfobot](https://t.me/userinfobot)
 - It will reply with your user ID
 
-Only listed users can DM the bot. Messages from other users are silently ignored.
+Only listed users can DM the bot. A non-allowlisted user is not silently ignored — the bot replies with an access-denied message (`⛔ Access denied. Your user ID: <id>`) that includes their user ID and the exact YAML to add themselves to `config/agent.yaml` → `channel.allowed_users`, and logs a `Blocked user <id>` warning. On startup with an empty allowlist, the framework also logs `Empty allowlist - all requests will be denied`.
+
+> **Note:** A freshly scaffolded workspace has an empty allowlist and denies everyone by default. Message the bot once to receive your user ID, add it to `allowed_users`, then restart.
 
 #### Group Allowlist
 
@@ -357,6 +359,8 @@ Discord free-tier bots have a 25 MB file size limit. Files exceeding this limit 
 
 ## Stdio Channel
 
+> **Work in progress.** The stdio channel is handy for quick local testing, but it is **not** recommended for actually operating your bots — log output interleaves with the agent's input and output in the same terminal. Use Telegram or Discord for real use.
+
 The `stdio` channel is a zero-config local interface for testing and development. It reads from stdin and prints agent responses to stdout — no bot tokens, API keys, or external platform setup required.
 
 ### Setup
@@ -375,7 +379,7 @@ Or run with the default when no channel is configured. The `stdio` channel is th
 Start the workspace and type messages directly in your terminal:
 
 ```bash
-poetry run openpaw -c config.yaml -w my-agent
+poetry run openpaw -c config.yaml -w my_agent
 ```
 
 ```

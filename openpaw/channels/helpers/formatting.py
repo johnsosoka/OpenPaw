@@ -52,7 +52,7 @@ def format_unauthorized_response(
         text += f"Group ID: `{group_id}`\n"
     text += (
         f"\nTo gain access, add your ID to the allowlist:\n"
-        f"`agent_workspaces/{workspace_name}/agent.yaml`\n\n"
+        f"`agent_workspaces/{workspace_name}/config/agent.yaml`\n\n"
         f"```yaml\n"
         f"channel:\n"
         f"  allowed_users:\n"
