@@ -225,7 +225,7 @@ Development follows a GitFlow branching model:
 - **`develop`** -- Integration branch. Feature and bugfix PRs target `develop`.
 - **Feature branches** -- Branch from `develop` as `feature/`, `bugfix/`, `docs/`, or `chore/`.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
+See the [Architecture overview](docs/architecture.md) for system design and conventions.
 
 ## Prerequisites
 
