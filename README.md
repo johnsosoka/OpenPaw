@@ -43,19 +43,6 @@ Each teammate gets its own model, tool loadout, skill set, and lifecycle budget.
 
 Both your primary agent **and every sub-agent** maintain a single status message that edits in place as work progresses. No chat flood, no scroll-back -- just a live, current view of who's doing what right now. Get actionable insight into your agent teams at a glance. Agents can also call `report_progress` to announce structured milestones with their own emoji.
 
-```
-🚀 Starting work...
-🔎 Running tool: brave_search (langgraph release notes)...
-🤖 Dispatched sub-agent: researcher
-
-🤖 Sub-agent: researcher
-🔎 Running tool: brave_search (recent papers)...
-📝 Running tool: write_file (notes.md)...
-✅ Completed
-```
-
-<!-- TODO: replace this block with a demo GIF -->
-
 ### Mid-run responsiveness
 
 Send a follow-up while the agent is mid-task and it sees it. Steer the run ("🔄 Redirecting..."), interrupt completely ("🛑 Stopping..."), or let messages batch quietly ("📨 New messages received..."). One-line emoji notifications keep you in the loop without breaking the agent's flow.
@@ -101,7 +88,7 @@ Anthropic, OpenAI, AWS Bedrock, xAI, Fireworks, and any OpenAI-compatible endpoi
 
 ## Quick Start
 
-> **Fastest first run:** scaffold with `--channel stdio` to chat with your agent right in the terminal — no Telegram or Discord token required (you still need one LLM provider API key). Swap in `--channel telegram` or `--channel discord` when you're ready to go live.
+> **Recommended:** run your agent on **Telegram** — you get a real chat UI, in-place status updates, and access from your phone. Grab a bot token from [@BotFather](https://core.telegram.org/bots#botfather) (takes a minute); Discord works the same way.
 
 ### Install from PyPI
 
@@ -109,11 +96,11 @@ The quickest path — no clone required:
 
 ```bash
 pip install openpaw-ai
-openpaw init my_agent --model anthropic:claude-sonnet-4-20250514 --channel stdio
+openpaw init my_agent --model anthropic:claude-sonnet-4-20250514 --channel telegram
 openpaw -c config.yaml -w my_agent
 ```
 
-`openpaw init` scaffolds the workspace **and** a starter `config.yaml`, so `run` works right away. Add your LLM provider key to `agent_workspaces/my_agent/config/.env` (e.g. `ANTHROPIC_API_KEY=...`) before running.
+`openpaw init` scaffolds the workspace **and** a starter `config.yaml`, so `run` works right away. Add your LLM provider key and Telegram bot token to `agent_workspaces/my_agent/config/.env` (e.g. `ANTHROPIC_API_KEY=...` and `TELEGRAM_BOT_TOKEN=...`) before running.
 
 Optional capabilities install as extras: `pip install 'openpaw-ai[documents]'` (Docling OCR/PDF), plus `[voice]`, `[web]`, `[memory]`, `[email]`, `[mcp]`, or `[all-builtins]`.
 
@@ -160,8 +147,7 @@ poetry run openpaw -c config.yaml -w my_agent
 |---------|-------------|
 | `openpaw init <name>` | Scaffold a new agent workspace |
 | `openpaw init <name> --model <provider:model>` | Scaffold with a pre-configured model |
-| `openpaw init <name> --channel stdio` | Scaffold with the local terminal channel (no channel token needed) |
-| `openpaw init <name> --channel telegram` | Scaffold with channel pre-configured (`stdio`, `telegram`, or `discord`) |
+| `openpaw init <name> --channel telegram` | Scaffold with a channel pre-configured (`telegram` or `discord`) |
 | `openpaw list` | List available workspaces |
 | `openpaw -c config.yaml -w <name>` | Run a single workspace |
 | `openpaw -c config.yaml -w name1,name2` | Run multiple workspaces |
@@ -176,30 +162,30 @@ Each workspace lives under `agent_workspaces/<name>/` and is organized into five
 
 ```
 agent_workspaces/my_agent/
-├── agent/              # Identity and extensions
-│   ├── AGENT.md        # Capabilities and behavior guidelines
-│   ├── USER.md         # User context and preferences
-│   ├── SOUL.md         # Core personality and values
-│   ├── HEARTBEAT.md    # Session state scratchpad (agent-writable)
-│   ├── tools/          # Custom LangChain @tool functions
-│   ├── team/           # Sub-agent profiles (YAML)
-│   └── skills/         # Skill directories
-├── config/             # Configuration (write-protected)
-│   ├── agent.yaml      # Per-workspace settings (model, channel, queue)
-│   ├── .env            # API keys and secrets
-│   └── crons/          # Scheduled task definitions
+├── agent/              # Identity files, custom tools, team profiles, and skills
+│   ├── AGENT.md
+│   ├── USER.md
+│   ├── SOUL.md
+│   ├── HEARTBEAT.md
+│   ├── tools/
+│   ├── team/
+│   └── skills/
+├── config/             # Configuration and secrets (write-protected)
+│   ├── agent.yaml
+│   ├── .env
+│   └── crons/
 ├── data/               # Framework-managed state (write-protected)
-│   ├── TASKS.yaml      # Persistent task tracking
-│   ├── uploads/        # User-uploaded files
-│   └── ...             # Conversations DB, session state, token logs
+│   ├── TASKS.yaml
+│   ├── uploads/
+│   └── ...
 ├── memory/             # Archived conversations and session logs
-│   ├── conversations/  # Conversation exports (markdown + JSON)
-│   └── logs/           # Session logs and channel history
-│       ├── channel/    # Persistent channel message logs (JSONL)
-│       └── sessions/   # Heartbeat, cron, and sub-agent session logs
+│   ├── conversations/
+│   └── logs/
+│       ├── channel/
+│       └── sessions/
 └── workspace/          # Agent work area (default write target)
-    ├── downloads/      # Browser-downloaded files
-    └── screenshots/    # Browser screenshots
+    ├── downloads/
+    └── screenshots/
 ```
 
 The `openpaw init` command scaffolds this structure with starter templates. Customize the identity files in `agent/` to shape your agent's personality and purpose. Configure model, channel, and queue behavior in `config/agent.yaml`.
