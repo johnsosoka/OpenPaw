@@ -31,6 +31,19 @@ class InvocationMetrics:
     is_partial: bool = False
 
 
+@dataclass(frozen=True)
+class NodeUsage:
+    """Token/latency attribution for one harness node invocation (H6.3).
+
+    ``metrics.model`` carries the node's resolved model id; ``metrics``
+    aggregates every LLM call made within the node's scope (including the
+    module-selector call, which is folded into its parent node's numbers).
+    """
+
+    node: str
+    metrics: InvocationMetrics
+
+
 def extract_metrics_from_callback(
     callback_handler: Any,
     duration_ms: float,
@@ -116,18 +129,25 @@ class TokenUsageLogger:
         workspace: str,
         invocation_type: str,
         session_key: str | None = None,
+        node: str | None = None,
+        harness: str | None = None,
     ) -> None:
         """Append a token usage entry to the JSONL log.
 
         Args:
             metrics: Token usage metrics from the invocation.
             workspace: Workspace name.
-            invocation_type: Type of invocation ("user", "cron", "heartbeat").
+            invocation_type: Type of invocation ("user", "cron", "heartbeat",
+                "node" for per-node harness breakdown rows).
             session_key: Session key for user invocations (optional).
+            node: Harness node name for per-node breakdown rows (H6.3).
+                Node rows are ADDITIONAL to the run-level row — their tokens
+                are already counted there, so aggregation skips them.
+            harness: Harness kind ("planner") for per-node rows.
         """
         try:
             # Build log entry outside lock
-            entry = {
+            entry: dict[str, Any] = {
                 "timestamp": datetime.now(UTC).isoformat(),
                 "workspace": workspace,
                 "invocation_type": invocation_type,
@@ -139,6 +159,10 @@ class TokenUsageLogger:
                 "duration_ms": metrics.duration_ms,
                 "model": metrics.model,
             }
+            if node is not None:
+                entry["node"] = node
+            if harness is not None:
+                entry["harness"] = harness
             line = json.dumps(entry) + "\n"
 
             with self._lock:
@@ -187,6 +211,10 @@ class TokenUsageReader:
                         continue
                     try:
                         entry = json.loads(line)
+                        # Per-node breakdown rows duplicate the run-level row's
+                        # tokens (H6.3) — summing both would double-count.
+                        if entry.get("node"):
+                            continue
                         # Parse timestamp and check if it's today in workspace timezone
                         timestamp = datetime.fromisoformat(entry["timestamp"])
                         # Convert to workspace timezone before comparing dates
@@ -231,6 +259,10 @@ class TokenUsageReader:
                         continue
                     try:
                         entry = json.loads(line)
+                        # Per-node breakdown rows duplicate the run-level row's
+                        # tokens (H6.3) — summing both would double-count.
+                        if entry.get("node"):
+                            continue
                         # Parse timestamp and check if it's today in workspace timezone
                         timestamp = datetime.fromisoformat(entry["timestamp"])
                         # Convert to workspace timezone before comparing dates

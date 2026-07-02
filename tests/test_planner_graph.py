@@ -283,7 +283,7 @@ async def test_two_step_plan_executes_and_synthesizes() -> None:
     assert final_plan.steps[0].result_summary == "did step one"
 
     # Event sequence for the happy path (H7.2 vocabulary).
-    plan_kinds = [k for k in emitter.kinds() if k not in ("module.selected",)]
+    plan_kinds = [k for k in emitter.kinds() if k not in ("module.selected", "node.completed")]
     assert plan_kinds == [
         "node.entered",  # triage
         "node.entered",  # plan

@@ -54,6 +54,15 @@ class StatusEventKind(StrEnum):
 
     Harness (ADR-101/ADR-102; emitted by 0.5.0 harness nodes):
         node.entered        — {node: str}
+        node.completed      — {node: str, model: str, input_tokens: int,
+                              output_tokens: int, total_tokens: int,
+                              duration_ms: float} (per-node token/latency
+                              attribution, H6.3/ADR-103 §5; the module-selector
+                              call is folded into its parent node's numbers).
+                              The execute node instead carries {node, model,
+                              step_id: str, duration_ms} — token keys are
+                              omitted because the inner run's tokens are
+                              attributed at run level (no double-count).
         module.selected     — {kind: str, module: str, reason: str}
         plan.created        — {plan: dict} (full serialized Plan: objective,
                               revision, steps[{id, description, status}])
@@ -95,6 +104,7 @@ class StatusEventKind(StrEnum):
 
     # -- Harness (new, ADR-101 / ADR-102) ----------------------------------------
     NODE_ENTERED = "node.entered"
+    NODE_COMPLETED = "node.completed"
     MODULE_SELECTED = "module.selected"
     PLAN_CREATED = "plan.created"
     PLAN_STEP_STARTED = "plan.step_started"
