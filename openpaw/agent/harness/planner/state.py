@@ -36,6 +36,12 @@ class PlannerState(AgentState[Any], total=False):
         resume_step_id: Approval-resume marker — set when an approval interrupt
             paused a plan step; triage jumps straight back to execute_step.
         abort_reason: Set by reflect on abort_to_user; routes to synthesize.
+        equipped_tools: Tool names selected by the equip node (ADR-104), or
+            None for the full toolset (equipping disabled, or equip fail-open).
+        requested_tools: Pending request_tools ask from the executor; routes
+            back to equip and is cleared there (H5.3).
+        reequipped_steps: Step ids that already got their one re-equip —
+            a second request on the same step proceeds normally (loop cap).
     """
 
     route: Route
@@ -46,6 +52,9 @@ class PlannerState(AgentState[Any], total=False):
     step_results: list[str]
     resume_step_id: str | None
     abort_reason: str | None
+    equipped_tools: list[str] | None
+    requested_tools: str | None
+    reequipped_steps: list[str]
 
 
 @dataclass

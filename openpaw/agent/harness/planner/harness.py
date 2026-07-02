@@ -21,6 +21,7 @@ import asyncio
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.callbacks import UsageMetadataCallbackHandler
@@ -32,13 +33,24 @@ from openpaw.agent.harness.modules.direct import DirectPlanner
 from openpaw.agent.harness.modules.ideonomy import IdeonomyModule
 from openpaw.agent.harness.modules.reflection import FullReflection, LightReflection
 from openpaw.agent.harness.modules.self_discover import SelfDiscoverPlanner, StructureCache
+from openpaw.agent.harness.planner.equipment import (
+    EquipmentContext,
+    build_tool_catalog,
+    create_request_tools_tool,
+    resolve_equip_floor,
+)
 from openpaw.agent.harness.planner.graph import PlannerNodeModels, build_planner_graph, extract_message_text
 from openpaw.agent.harness.planner.state import PlannerRunContext
-from openpaw.agent.metrics import InvocationMetrics, extract_metrics_from_callback
+from openpaw.agent.metrics import (
+    InvocationMetrics,
+    NodeUsage,
+    TokenUsageLogger,
+    extract_metrics_from_callback,
+)
 from openpaw.agent.middleware.approval import ApprovalRequiredError
 from openpaw.agent.middleware.queue_aware import InterruptSignalError
 from openpaw.agent.runner import AgentRunner
-from openpaw.core.config.models.harness import HarnessConfig
+from openpaw.core.config.models.harness import HarnessConfig, NodeModelConfig
 from openpaw.core.prompts.system_events import (
     TIMEOUT_NOTIFICATION_GENERIC,
     TIMEOUT_NOTIFICATION_TEMPLATE,
@@ -78,6 +90,7 @@ class PlannerHarness:
         node_resolver: "NodeModelResolver",
         emitter: StatusEmitter | None = None,
         module_candidates: dict[ModuleKind, dict[str, ReasoningModule]] | None = None,
+        step_agent_builder: Callable[[list[Any]], AgentRunner] | None = None,
     ) -> None:
         """Initialize the harness and compile the graph.
 
@@ -90,6 +103,12 @@ class PlannerHarness:
             emitter: Status event emitter; defaults to a no-op.
             module_candidates: Reasoning-module instances per kind. Defaults
                 to instantiating everything registered in MODULE_REGISTRY.
+            step_agent_builder: Builds an AgentRunner for a filtered
+                additional-tools list (tool equipping, ADR-104). Injected by
+                AgentFactory — the factory owns all construction params, so
+                step-scoped executors are built with the same workspace,
+                model, and middleware as the inner runner. None disables
+                subset executors (equipped runs fall back to the full set).
         """
         self.workspace = workspace
         self._inner = inner
@@ -97,11 +116,20 @@ class PlannerHarness:
         self._node_resolver = node_resolver
         self._emitter: StatusEmitter = emitter if emitter is not None else _NullEmitter()
         self._candidates = module_candidates or self._build_module_candidates()
+        self._step_agent_builder = step_agent_builder
+        # Step executors per equipped-set, valid until the next recompile.
+        self._executor_cache: dict[frozenset[str], Any] = {}
 
         self.timeout_seconds: float = inner.timeout_seconds
         self._run_context = PlannerRunContext()
         self._last_metrics: InvocationMetrics | None = None
         self._last_tools_used: list[str] = []
+        # Per-node telemetry (H6.3): graph nodes append NodeUsage entries to
+        # this sink; run() flushes them to the JSONL log as breakdown rows.
+        # ponytail: own TokenUsageLogger instance (same append-only file)
+        # rather than threading the initializer's through the constructor.
+        self._node_usage: list[NodeUsage] = []
+        self._token_logger = TokenUsageLogger(workspace.path)
         self._node_models = self._build_node_models()
         self._graph = self._compile()
 
@@ -149,6 +177,11 @@ class PlannerHarness:
         """The compiled outer planner graph (tests and diagnostics)."""
         return self._graph
 
+    @property
+    def node_resolver(self) -> "NodeModelResolver":
+        """Per-node model resolver, exposed for /harness introspection (C9)."""
+        return self._node_resolver
+
     # ------------------------------------------------------------------
     # Build / rebuild
     # ------------------------------------------------------------------
@@ -181,6 +214,68 @@ class PlannerHarness:
             synthesize=r.create_node_model(self._config.synthesize),
         )
 
+    def _node_model_ids(self) -> dict[str, str]:
+        """Resolved model id per graph node, for telemetry attribution (H6.3)."""
+        r = self._node_resolver
+        ids = {
+            "triage": r.resolve_node(self._config.triage).display_str,
+            "ideate": r.resolve_node(self._config.creative).display_str,
+            "plan": r.resolve_node(self._config.planning).display_str,
+            "reflect": r.resolve_node(self._config.reflection).display_str,
+            "synthesize": r.resolve_node(self._config.synthesize).display_str,
+            "execute": self._inner.model_id,
+        }
+        if self._config.tool_equipping.enabled:
+            ids["equip"] = r.resolve_node(self._equip_node_config()).display_str
+        return ids
+
+    def _equip_node_config(self) -> NodeModelConfig:
+        """The equip node's model pointer (inherits workspace when unset)."""
+        return NodeModelConfig(model=self._config.tool_equipping.model)
+
+    def _build_equipment(self) -> EquipmentContext | None:
+        """Assemble the ADR-104 equip context, or None when disabled."""
+        cfg = self._config.tool_equipping
+        if not cfg.enabled:
+            return None
+        tools = list(self._inner.additional_tools)
+        return EquipmentContext(
+            catalog=build_tool_catalog(tools),
+            floor=frozenset(resolve_equip_floor(cfg.always_equip, tools)),
+            model=self._node_resolver.create_node_model(self._equip_node_config()),
+            max_tools=cfg.max_tools,
+        )
+
+    def _step_executor_factory(self, tool_names: list[str] | None) -> Any:
+        """Compiled executor for one plan step (ADR-104, repo landmine 5).
+
+        None means the full toolset — the shared inner graph, byte-for-byte
+        today's path (equipping off, or equip fail-open). A name list builds
+        a step-scoped agent whose additional tools are filtered to the
+        subset plus the request_tools escape hatch; filesystem tools are
+        always present because AgentRunner adds them internally (the floor's
+        group:filesystem is structural). Executors are cached per equipped
+        set until the next recompile.
+        """
+        if tool_names is None:
+            return self._inner.agent_graph
+        key = frozenset(tool_names)
+        cached = self._executor_cache.get(key)
+        if cached is not None:
+            return cached
+        if self._step_agent_builder is None:
+            logger.warning("Tool equipping selected a subset but no step-agent builder is wired; using full toolset")
+            return self._inner.agent_graph
+        subset = [
+            tool
+            for tool in self._inner.additional_tools
+            if str(getattr(tool, "name", tool)) in key
+        ]
+        subset.append(create_request_tools_tool())
+        graph = self._step_agent_builder(subset).agent_graph
+        self._executor_cache[key] = graph
+        return graph
+
     def _tools_summary(self) -> list[ToolSummary]:
         """Name + first description line per tool, for planner awareness."""
         summary = [
@@ -197,6 +292,7 @@ class PlannerHarness:
 
     def _compile(self) -> Any:
         """Compile the outer graph around the inner runner's compiled agent."""
+        self._executor_cache.clear()  # tools/model/checkpointer may have changed
         config = self.workspace.config
         workspace_info = WorkspaceInfo(
             name=self.workspace.name,
@@ -214,6 +310,10 @@ class PlannerHarness:
             run_context=self._run_context,
             checkpointer=self._inner.checkpointer,
             inner_recursion_limit=self._inner.max_turns * 2,
+            node_model_ids=self._node_model_ids(),
+            node_usage_sink=self._node_usage,
+            equipment=self._build_equipment(),
+            step_executor_factory=self._step_executor_factory,
         )
 
     def rebuild_agent(self) -> None:
@@ -293,6 +393,7 @@ class PlannerHarness:
         """
         self._last_metrics = None
         self._last_tools_used = []
+        self._node_usage.clear()
         self._run_context.reset(
             run_id=uuid.uuid4().hex[:12],
             session_key=self._session_key_from(thread_id, session_id),
@@ -338,11 +439,46 @@ class PlannerHarness:
                     tool_name=self._run_context.current_tool_name,
                 )
             return TIMEOUT_NOTIFICATION_GENERIC.format(timeout=int(self.timeout_seconds))
+        finally:
+            # Flush per-node telemetry on every exit path — partial runs
+            # (timeout, approval, interrupt) still burned those tokens.
+            self._flush_node_usage()
 
         duration_ms = (time.monotonic() - start_time) * 1000
         self._last_metrics = extract_metrics_from_callback(usage_callback, duration_ms, self.model_id)
         self._last_tools_used.extend(self._run_context.tools_used)
         return final_text
+
+    def _flush_node_usage(self) -> None:
+        """Write per-node JSONL breakdown rows (H6.3), one per node name.
+
+        These rows are ADDITIONAL to the run-level row MessageProcessor logs
+        (same tokens, sliced by node) — TokenUsageReader skips rows with a
+        ``node`` field so totals are not double-counted. The execute node
+        never appears here: its inner-run tokens belong to the run-level
+        record alone.
+        """
+        if not self._node_usage:
+            return
+        aggregated: dict[str, InvocationMetrics] = {}
+        for entry in self._node_usage:
+            agg = aggregated.setdefault(entry.node, InvocationMetrics(model=entry.metrics.model))
+            agg.input_tokens += entry.metrics.input_tokens
+            agg.output_tokens += entry.metrics.output_tokens
+            agg.total_tokens += entry.metrics.total_tokens
+            agg.llm_calls += entry.metrics.llm_calls
+            agg.duration_ms += entry.metrics.duration_ms
+            agg.is_partial = agg.is_partial or entry.metrics.is_partial
+        for node, metrics in aggregated.items():
+            self._token_logger.log(
+                metrics,
+                workspace=self.workspace.name,
+                invocation_type="node",
+                session_key=self._run_context.session_key,
+                node=node,
+                harness=self.kind.value,
+            )
+        self._node_usage.clear()
 
     async def _record_resume_marker(self, config: dict[str, Any]) -> None:
         """Approval contract: remember which plan step was paused.
@@ -374,6 +510,9 @@ class PlannerHarness:
                     "resume_step_id": None,
                     "abort_reason": None,
                     "step_results": [],
+                    "equipped_tools": None,
+                    "requested_tools": None,
+                    "reequipped_steps": [],
                 },
                 as_node="plan",
             )

@@ -185,18 +185,33 @@ class AgentFactory:
             harness_config=harness_config,
             node_resolver=node_resolver,
             emitter=self._status_emitter,
+            # Tool equipping (ADR-104): step-scoped executors are built here,
+            # in the factory, because it owns every construction param — the
+            # subset agent matches the inner runner's workspace, model
+            # resolution, and middleware, just with fewer tools and no
+            # checkpointer (step runs are unpersisted by design).
+            step_agent_builder=lambda tools: self.create_agent(checkpointer=None, tools_override=tools),
         )
 
-    def create_agent(self, checkpointer: Any | None = None) -> AgentRunner:
+    def create_agent(
+        self, checkpointer: Any | None = None, tools_override: list[Any] | None = None
+    ) -> AgentRunner:
         """Create a configured AgentRunner instance.
 
         Args:
             checkpointer: Optional checkpointer for conversation state.
+            tools_override: Replace the additional-tools set (builtin +
+                workspace + MCP) with an explicit list. Used by tool
+                equipping to build step-scoped executors over a subset.
 
         Returns:
             Configured AgentRunner instance.
         """
-        all_tools = list(self._builtin_tools) + list(self._workspace_tools) + list(self._mcp_tools)
+        all_tools = (
+            list(tools_override)
+            if tools_override is not None
+            else list(self._builtin_tools) + list(self._workspace_tools) + list(self._mcp_tools)
+        )
 
         raw_model = (
             self._runtime_override.model
