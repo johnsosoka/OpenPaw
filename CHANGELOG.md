@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The 0.5.0 theme: agents that **plan visibly and learn durably**. A pluggable agent harness adds a planner type (triage → plan → execute → reflect) with per-node models and live plan checklists, while a three-phase learning loop lets agents create and update their own skills behind validation gates. The existing react agent is untouched and remains the default — a 45-scenario feature-parity matrix pins every existing behavior across both harness types.
+
+### Added
+
+- **Planner agent harness** (`harness.type: planner`): a triage node routes each message to the plain react loop (simple turns), a planning path (multi-step work), or an ideation path (open-ended asks). Plans are first-class state — checkpointed, revisable (step insertion "2A", remaining-plan rewrites), resumable across restarts, and rendered as a live edited-in-place checklist in-channel. Execution embeds the existing react loop per step, so middleware, approval gates, steer/interrupt, and status updates apply to every planned step by construction. Triage and every module call fail open to the react path — the planner is never less reliable than the current loop.
+- **Pluggable reasoning modules** (`harness.planning.module`, `creative`, `reflection`): one interface, three kinds. Ships `direct` (single-call planning baseline), `self_discover` (SELECT/ADAPT/IMPLEMENT over the 39 Self-Discover seed modules with a per-task-type structure cache; Zhou et al. 2024), `ideonomy` (creative ideation through 28 curated ideonomic lenses with deterministic selection; after Gunkel/ideonomy.mit.edu and the MIT-licensed Morpheis/ideonomy-engine), and `light`/`full` reflection (per-step outcome verdicts; `full` may rewrite the remaining plan). `module: auto` inserts a selector that picks per task over module taglines, short-circuiting without an LLM call when only one candidate exists.
+- **Per-node models** (ADR-103): each harness node (triage, planning, creative, reflection, selector, synthesize) can point at a provider-catalog entry (`triage: {model: fast}`) — credentials stay in the catalog, provider quirks stay in `create_chat_model()`, and a bare `harness: {type: planner}` runs with every node inheriting the workspace model. `/harness` prints the resolved node→model table.
+- **Per-node telemetry**: every node emits `node.completed` events with token counts and latency; per-node rows land in `token_usage.jsonl` alongside the unchanged run-level records.
+- **Tool equipping** (`harness.tool_equipping.enabled`, off by default): an equip step selects a task-relevant tool subset before planning, with a never-filtered floor (`always_equip`), a `request_tools` recovery loop for mis-equips, and `tools.equipped` events. React-path workspaces can instead opt into the stock `LLMToolSelectorMiddleware` (`react_selector: true`).
+- **Learning loop Phase 1** (`learning.enabled`): agents watch for repeated procedures, corrected mistakes, tool recipes, and stated preferences, and codify them via the new `manage_skill` tool. Every programmatic skill write flows through a validated `SkillStore`: frontmatter schema, per-skill token budget, per-workspace skill cap, content lint (credential- and injection-shaped content rejected), and per-workspace approval policy (`immediate` or `staged`). Skills hot-equip via the new reload mechanism; a framework `skill-authoring` guide teaches the format.
+- **Learning loop Phase 2** (`learning.phase2.enabled`, off by default): every N main-lane runs, a background evaluation proposes a skill to create or update; a low-temperature `skill-builder` sub-agent drafts it and the result lands **staged** for human approval via `/skills approve`. Budget-capped by `learning.budget.daily_tokens`, debounced to one in-flight evaluation, and never user-facing on failure.
+- **Skills hot-reload**: `WorkspaceRunner.reload_skills()` and the `/reload` command — skills added or edited on disk take effect without a restart.
+- **`/skills` command**: list skills with provenance (version, author, status) and approve/reject staged skills. Skill frontmatter gains `version`, `created_by`, `source`, `updated_at`, `status` — all backward compatible.
+- **Unified status event backbone** (ADR-106): every observable happening (runs, tools, sub-agents, plan lifecycle, skill lifecycle, learning evaluations) is now a machine-readable `StatusEvent` fanned out through a per-workspace `StatusBus` to pluggable sinks — channel rendering, a JSONL event log, and (future) a web portal. Channel rendering behavior is unchanged; events flow alongside it.
+- **Provider catalog `model:` field**: catalog entries can now carry a default model id, so workspaces (and harness nodes) reference `model: fast` without repeating credentials or model ids.
+- **AgentHarness seam** (ADR-101): `MessageProcessor`/`WorkspaceRunner`/commands now program against a topology-agnostic protocol; all `create_agent` internals live behind it.
+
+### Changed
+
+- `docs/configuration.md` gains a resolution-precedence reference (model/credentials, builtins, approval gates, tool timeouts, queue) and a catalog-first model configuration guide; `config.example.yaml` rewritten catalog-first.
+- New 0.5.0 config groups (`harness:`, `learning:`) use `extra="forbid"` — typos fail at startup instead of being silently swallowed.
+- `docs/architecture.md` updated for the `create_agent` v2 API and direct provider instantiation (stale `create_react_agent`/`init_chat_model` references removed).
+
+### Deprecated
+
+- Inline workspace model credentials (`model.api_key`/`base_url`/`region`) when a provider catalog exists, and global `agent.api_key` — one-time startup warnings point at the catalog-first form; removal targeted for 0.6.
+
+### Fixed
+
+- Dead `AgentBuilder` class removed (never instantiated; superseded by the harness seam).
+
 ## [0.4.4] - 2026-07-02
 
 A first-run onboarding polish release, plus a Fireworks reasoning fix. Found during an install-and-run evaluation of 0.4.3 across both `poetry` and `pip`, these fixes unblock pip users, trim the default install, and correct docs and CLI output. It also resolves a `thinking` validation error that broke Fireworks reasoning models and hardens the `thinking` field so it can never leak into an unsupported provider's request.
