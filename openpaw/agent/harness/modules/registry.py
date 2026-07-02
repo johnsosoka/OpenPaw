@@ -6,15 +6,16 @@ config enum value and docs). Nothing else in this package needs touching.
 
 from openpaw.agent.harness.modules.base import ModuleKind, ReasoningModule
 from openpaw.agent.harness.modules.direct import DirectPlanner
+from openpaw.agent.harness.modules.ideonomy import IdeonomyModule
 from openpaw.agent.harness.modules.reflection import FullReflection, LightReflection
+from openpaw.agent.harness.modules.self_discover import SelfDiscoverPlanner
 
 MODULE_REGISTRY: dict[str, type[ReasoningModule]] = {
     "direct": DirectPlanner,  # PLANNING — single-call baseline
+    "self_discover": SelfDiscoverPlanner,  # PLANNING — SELECT/ADAPT/IMPLEMENT + structure cache
+    "ideonomy": IdeonomyModule,  # CREATIVE — ideonomic lens ideation
     "light": LightReflection,  # REFLECTION — single outcome check
     "full": FullReflection,  # REFLECTION — may rewrite remaining plan
-    # Phase 3 (ADR-102 §3) adds:
-    # "self_discover": SelfDiscoverPlanner,  # PLANNING — SELECT/ADAPT/IMPLEMENT + structure cache
-    # "ideonomy": IdeonomyModule,            # CREATIVE — ideonomic lens ideation
 }
 
 # Fail-open defaults per kind (selector path 3 falls back here).

@@ -196,9 +196,15 @@ def test_registry_contents():
 
 
 def test_candidates_for_kind():
-    assert candidates_for(ModuleKind.PLANNING) == {"direct": DirectPlanner}
+    from openpaw.agent.harness.modules.ideonomy import IdeonomyModule
+    from openpaw.agent.harness.modules.self_discover import SelfDiscoverPlanner
+
+    assert candidates_for(ModuleKind.PLANNING) == {
+        "direct": DirectPlanner,
+        "self_discover": SelfDiscoverPlanner,
+    }
     assert candidates_for(ModuleKind.REFLECTION) == {"light": LightReflection, "full": FullReflection}
-    assert candidates_for(ModuleKind.CREATIVE) == {}  # ideonomy lands in Phase 3
+    assert candidates_for(ModuleKind.CREATIVE) == {"ideonomy": IdeonomyModule}
 
 
 def test_kind_defaults():
