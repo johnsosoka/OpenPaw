@@ -2,7 +2,7 @@
 
 Thank you for your interest in contributing. OpenPaw is built with a strong emphasis on clean, readable, and maintainable code. Contributions that share that philosophy are welcome.
 
-Before diving in, read through this guide, the [Architecture overview](docs/architecture.md), and [AGENTS.md](AGENTS.md) — the canonical agent and developer guide covering release process, changelog standards, and coding conventions.
+Before diving in, read through this guide and the [Architecture overview](docs/architecture.md) — together they cover the development setup, coding conventions, and PR workflow.
 
 ---
 
@@ -140,7 +140,7 @@ poetry run pytest -k "test_approval"
 
 PRs that introduce unnecessary complexity, skip tests, or deviate from the architectural conventions described above will be asked to revise before merge.
 
-For release procedures, see the release checklist in [AGENTS.md](AGENTS.md).
+Releases are tag-triggered and handled by the maintainers; changelog entries follow the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format used in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
