@@ -3,6 +3,7 @@
 import logging
 from typing import Any, cast
 
+from openpaw.agent.harness import AgentHarness
 from openpaw.agent.metrics import TokenUsageLogger
 from openpaw.agent.middleware import (
     ApprovalToolMiddleware,
@@ -11,7 +12,6 @@ from openpaw.agent.middleware import (
     ToolTimeoutMiddleware,
 )
 from openpaw.agent.middleware.status_reminder import StatusReminderMiddleware
-from openpaw.agent.runner import AgentRunner
 from openpaw.builtins.base import BaseBuiltinProcessor
 from openpaw.builtins.loader import BuiltinLoader
 from openpaw.core.config import Config, merge_configs
@@ -19,6 +19,7 @@ from openpaw.core.config.models import ApprovalGatesConfig, StatusUpdatesConfig,
 from openpaw.runtime.approval import ApprovalGateManager
 from openpaw.runtime.session.archiver import ConversationArchiver
 from openpaw.runtime.session.manager import SessionManager
+from openpaw.runtime.status_bus import SessionLogSink, StatusBus
 from openpaw.stores.subagent import SubAgentStore
 from openpaw.stores.task import TaskStore
 from openpaw.workspace.agent_factory import AgentFactory, filter_workspace_tools
@@ -199,7 +200,7 @@ class WorkspaceInitializer:
         ApprovalToolMiddleware,
         ApprovalGateManager | None,
         AgentFactory,
-        AgentRunner,
+        AgentHarness,
         MessageProcessor,
         ToolTimeoutMiddleware,
         StatusReminderMiddleware | None,
@@ -283,7 +284,15 @@ class WorkspaceInitializer:
         )
         status_update_middleware: StatusUpdateMiddleware | None = None
         if status_update_config.enabled:
-            status_update_middleware = StatusUpdateMiddleware(status_update_config)
+            # ADR-106 Phase A: status events flow to a per-workspace bus
+            # alongside unchanged channel rendering.
+            status_bus = StatusBus(self._workspace.name)
+            status_bus.add_sink(SessionLogSink(self._workspace.path))
+            status_update_middleware = StatusUpdateMiddleware(
+                status_update_config,
+                emitter=status_bus,
+                workspace=self._workspace.name,
+            )
             middlewares.insert(0, status_update_middleware)
             self._logger.info("Status update middleware enabled")
 
@@ -333,7 +342,7 @@ class WorkspaceInitializer:
             provider_catalog=self._config.providers,
             channel_logging_enabled=channel_logging_enabled,
         )
-        agent_runner = agent_factory.create_agent(checkpointer=None)
+        agent_runner = agent_factory.create_harness(checkpointer=None)
 
         # Create message processor
         message_processor = MessageProcessor(
@@ -385,6 +394,15 @@ class WorkspaceInitializer:
         """Merge workspace config over global config."""
         if not workspace.config:
             return {}
+
+        # One-time deprecation warnings for inline model credentials (S-A2).
+        # This is the single point where global and workspace config meet,
+        # once per workspace at startup.
+        from openpaw.core.config.deprecations import warn_deprecated_workspace_model_keys
+
+        warn_deprecated_workspace_model_keys(
+            global_config, workspace.config.model, workspace.name
+        )
 
         global_dict: dict[str, Any] = {
             "model": {

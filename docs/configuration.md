@@ -374,6 +374,25 @@ timezone: America/Denver  # IANA timezone identifier
 
 #### Model Configuration
 
+Catalog-first (recommended): define credentials once in the global
+`providers:` catalog and reference the entry from the workspace.
+
+```yaml
+# Global config.yaml
+providers:
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+    model: claude-sonnet-4-20250514   # optional default model id
+
+# Workspace agent.yaml
+model: anthropic                       # bare catalog name — uses the catalog's model id
+# or, to pick a different model on the same provider entry:
+model: anthropic:claude-haiku-4-20250514
+```
+
+Inline form (legacy — still supported, but inline `api_key`/`base_url`/`region`
+log a deprecation warning when a `providers:` catalog exists):
+
 ```yaml
 model:
   provider: anthropic
@@ -385,9 +404,9 @@ model:
 
 **provider** — Model provider: `anthropic`, `openai`, `xai`, `fireworks`, `bedrock_converse`, or any OpenAI-compatible API via `openai` with `base_url`.
 
-**model** — Model identifier (provider-specific).
+**model** — Model identifier (provider-specific), or a catalog reference (`name` / `name:model_id`).
 
-**api_key** — API key for the model provider. Use `${VAR}` syntax for environment variables.
+**api_key** — API key for the model provider. Use `${VAR}` syntax for environment variables. Prefer the catalog.
 
 **temperature** — Model temperature (0.0-1.0).
 
@@ -625,6 +644,32 @@ model:
   temperature: 0.5                      # From workspace
   max_turns: 50                         # From global
 ```
+
+---
+
+### Resolution Precedence
+
+The general rule is **defaults < global < workspace < node/profile**, but the
+exact mechanics differ per key family. This table documents actual current
+behavior (0.5.0).
+
+| Key family | Resolution (lowest → highest precedence) |
+|---|---|
+| Model id | `agent.model` default < global `agent.model` < workspace `model.provider`/`model.model` (deep merge, only set keys override). A bare catalog name (`model: fast`) takes the model id from `providers.fast.model`; an explicit id (`model: fast:some-model`) wins over the catalog's `model:`. Runtime `/model` override beats everything, for the interactive agent only. |
+| API key | Provider env var (`ANTHROPIC_API_KEY`, …; consulted only when the target provider differs from the configured one, e.g. after `/model`) < global `agent.api_key` (deprecated) < workspace `model.api_key` (deprecated when a catalog exists) < `providers.<name>.api_key`. When the model references a catalog entry that defines `api_key`, the catalog value **always wins**. |
+| Region / base_url / extra model kwargs | Workspace `model.region`: used only when the catalog entry defines none (catalog `region` wins). `base_url` and unknown model keys flow through as extra kwargs: catalog extras < workspace extras (workspace wins). |
+| Builtins allow/deny | Global and workspace lists are **concatenated** (not overridden). Deny always wins over allow. Empty combined allow list = allow all available. |
+| Builtins `enabled` | Default `true` < global setting < workspace setting (first explicit value found, workspace checked first). |
+| Builtins per-builtin config | Injected context (workspace_path, timezone, channel routing) < global typed fields < workspace typed fields < global `config:` dict < workspace `config:` dict. |
+| approval_gates | **No merge.** The workspace block is used wholesale if it has `enabled: true`; otherwise the global block if it has `enabled: true`; otherwise disabled. A workspace cannot disable globally-enabled gates with `enabled: false` — the lookup falls through to global. |
+| tool_timeouts | **No merge.** If the workspace has an `agent.yaml` at all, its `tool_timeouts` (including defaults) is used and the global block is ignored. Global `tool_timeouts` applies only to workspaces without `agent.yaml`. |
+| queue | Global `queue.mode`/`queue.debounce_ms` < workspace overrides (deep merge). `cap`, `drop_policy`, and `lanes` are global-only. |
+
+**Catalog-first credentials (0.5.0+):** the `providers:` catalog is the
+recommended single home for credentials. Inline workspace `model.api_key`,
+`model.base_url`, and `model.region` (when a catalog exists) and global
+`agent.api_key` log deprecation warnings at startup; removal is targeted
+for 0.6.
 
 ---
 

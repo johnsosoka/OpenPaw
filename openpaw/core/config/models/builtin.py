@@ -161,6 +161,39 @@ class FilePersistenceBuiltinConfig(BuiltinItemConfig):
     clear_data_after_save: bool = Field(default=False, description="Free memory after saving")
 
 
+# Single source of truth for the typed per-builtin fields that BuiltinLoader
+# extracts into each builtin's config dict (PRD-003 S-A3). Kept as an explicit
+# map — NOT derived from model introspection — because introspection would
+# change behavior: spawn's `default_progress_interval` model default (0)
+# differs from the tool's config-dict fallback (5), and cron's typed fields
+# are deliberately not extracted (CronTool reads them from its `config:`
+# sub-dict). tests/test_builtin_config_consistency.py enforces that this map
+# and the two config classes below stay in sync.
+BUILTIN_CONFIG_FIELDS: dict[str, tuple[str, ...]] = {
+    "send_file": ("max_file_size",),
+    "docling": (
+        "max_file_size", "ocr_backend", "ocr_languages",
+        "force_full_page_ocr", "document_timeout", "do_ocr", "do_table_structure",
+    ),
+    "browser": (
+        "headless", "allowed_domains", "blocked_domains",
+        "timeout_seconds", "persist_cookies", "downloads_dir", "screenshots_dir",
+    ),
+    "spawn": ("max_concurrent",),
+    "file_persistence": ("max_file_size", "clear_data_after_save"),
+    "channel_history": ("max_messages_per_request", "content_truncation"),
+    "md2pdf": ("theme", "max_diagram_width", "self_heal", "self_heal_model", "max_heal_iterations"),
+    "gpt_researcher": (
+        "endpoint", "upload_endpoint", "timeout_seconds",
+        "default_report_type", "default_report_source", "default_tone",
+    ),
+    "email": (
+        "provider", "service_account_file", "delegated_user",
+        "allowed_recipients", "max_recipients",
+    ),
+}
+
+
 class BuiltinsConfig(BaseModel):
     """Global builtins configuration.
 

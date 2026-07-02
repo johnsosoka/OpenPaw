@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from openpaw.builtins.base import BaseBuiltinProcessor
 from openpaw.builtins.registry import BuiltinRegistry
+from openpaw.core.config.models.builtin import BUILTIN_CONFIG_FIELDS
 
 if TYPE_CHECKING:
     from openpaw.core.config import BuiltinsConfig, WorkspaceBuiltinsConfig
@@ -25,30 +26,8 @@ class BuiltinLoader:
     """
 
     # Typed fields that need explicit extraction from builtin config models.
-    # Maps builtin name → list of field names to extract.
-    _CONFIG_FIELDS: dict[str, list[str]] = {
-        "send_file": ["max_file_size"],
-        "docling": [
-            "max_file_size", "ocr_backend", "ocr_languages",
-            "force_full_page_ocr", "document_timeout", "do_ocr", "do_table_structure",
-        ],
-        "browser": [
-            "headless", "allowed_domains", "blocked_domains",
-            "timeout_seconds", "persist_cookies", "downloads_dir", "screenshots_dir",
-        ],
-        "spawn": ["max_concurrent"],
-        "file_persistence": ["max_file_size", "clear_data_after_save"],
-        "channel_history": ["max_messages_per_request", "content_truncation"],
-        "md2pdf": ["theme", "max_diagram_width", "self_heal", "self_heal_model", "max_heal_iterations"],
-        "gpt_researcher": [
-            "endpoint", "upload_endpoint", "timeout_seconds",
-            "default_report_type", "default_report_source", "default_tone",
-        ],
-        "email": [
-            "provider", "service_account_file", "delegated_user",
-            "allowed_recipients", "max_recipients",
-        ],
-    }
+    # Single-sourced from the config models module (PRD-003 S-A3).
+    _CONFIG_FIELDS: dict[str, tuple[str, ...]] = BUILTIN_CONFIG_FIELDS
 
     def __init__(
         self,

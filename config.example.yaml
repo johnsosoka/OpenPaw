@@ -57,13 +57,20 @@ agent:
 #                         # Bedrock is excluded — boto3 manages its own retry strategy.
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Provider catalog — define provider connection details once, reference by name.
-# Workspaces use shorthand: model: "provider_name:model_id"
+# Provider catalog — the recommended single home for credentials (catalog-first).
+# Define connection details once, reference by name from workspaces:
+#   model: "provider_name:model_id"   # explicit model id (wins over catalog model:)
+#   model: "provider_name"            # bare name — uses the entry's model: field
 # The /model command can switch between any configured provider.
+#
+# Inline workspace model.api_key/base_url/region are deprecated when a catalog
+# exists (removal targeted for 0.6) — move credentials here instead.
 # ──────────────────────────────────────────────────────────────────────────────
 # providers:
 #   anthropic:
 #     api_key: ${ANTHROPIC_API_KEY}
+#     model: claude-sonnet-4-20250514 # Optional default model id — lets workspaces
+#                                     # reference this entry as just `model: anthropic`
 #   openai:
 #     api_key: ${OPENAI_API_KEY}
 #   moonshot:                         # Native Kimi via ChatMoonshot
@@ -77,6 +84,11 @@ agent:
 #   bedrock:
 #     type: bedrock_converse
 #     region: us-east-1
+#   fast:                             # Alias entries need an explicit type
+#     type: openai                    # (LangChain provider the entry maps to)
+#     base_url: https://api.inceptionlabs.ai/v1
+#     api_key: ${MERCURY_API_KEY}
+#     model: mercury-2                # Workspaces can then use: model: fast
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Builtins — tools and processors conditionally loaded based on API key
@@ -265,7 +277,13 @@ builtins:
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Per-workspace model config (typically in agent.yaml, not here)
-# Two equivalent formats:
+#
+# Catalog-first (recommended — credentials live in the providers: catalog):
+#   model: anthropic                                # bare catalog name (entry defines model:)
+#   model: "anthropic:claude-sonnet-4-20250514"     # catalog name + explicit model id
+#
+# Inline formats (still supported; inline api_key/base_url/region are
+# deprecated when a providers: catalog exists — removal targeted for 0.6):
 #   Combined:  model: "anthropic:claude-sonnet-4-20250514"
 #   Explicit:
 #     model:

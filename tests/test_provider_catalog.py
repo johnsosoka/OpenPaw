@@ -494,3 +494,96 @@ class TestAgentFactoryProviderCatalog:
         _, kwargs = mock_init.call_args
         assert kwargs["region"] == "us-east-1"
         assert kwargs["model"] == "bedrock_converse:claude-haiku"
+
+
+# ---------------------------------------------------------------------------
+# Catalog `model:` field (PRD-003 S-A1 / ADR-103 §3)
+# ---------------------------------------------------------------------------
+
+
+class TestCatalogModelField:
+    """Catalog entries with a `model:` field resolve bare-name references."""
+
+    def test_bare_name_resolves_entry_model(self):
+        """`model: fast` fully resolves when the entry carries a model id."""
+        catalog = _make_catalog(
+            fast={
+                "type": "openai",
+                "api_key": "fast-key",
+                "base_url": "https://api.example.com/v1",
+                "model": "mercury-2",
+            }
+        )
+        result = resolve_provider("fast", catalog)
+
+        assert result.model_str == "openai:mercury-2"
+        assert result.display_str == "fast"
+        assert result.api_key == "fast-key"
+        assert result.extra_kwargs == {"base_url": "https://api.example.com/v1"}
+
+    def test_bare_name_type_defaults_to_catalog_key(self):
+        """Without `type`, the catalog key is the LangChain provider."""
+        catalog = _make_catalog(
+            anthropic={"api_key": "ant-key", "model": "claude-test"}
+        )
+        result = resolve_provider("anthropic", catalog)
+
+        assert result.model_str == "anthropic:claude-test"
+        assert result.api_key == "ant-key"
+
+    def test_bare_name_without_entry_model_passes_through(self):
+        """Entries without `model` behave exactly as before: pass-through."""
+        catalog = _make_catalog(fast={"type": "openai", "api_key": "k"})
+        result = resolve_provider("fast", catalog)
+
+        assert result.model_str == "fast"
+        assert result.display_str == "fast"
+        assert result.api_key is None
+        assert result.extra_kwargs == {}
+
+    def test_bare_name_not_in_catalog_passes_through(self):
+        """Unknown bare names pass through unchanged."""
+        catalog = _make_catalog(fast={"type": "openai", "model": "mercury-2"})
+        result = resolve_provider("gpt-4o", catalog)
+
+        assert result.model_str == "gpt-4o"
+        assert result.api_key is None
+
+    def test_explicit_model_id_wins_over_catalog_model(self):
+        """Workspace-specified model id takes precedence over entry.model."""
+        catalog = _make_catalog(
+            fast={"type": "openai", "api_key": "k", "model": "mercury-2"}
+        )
+        result = resolve_provider("fast:mercury-3", catalog)
+
+        assert result.model_str == "openai:mercury-3"
+        assert result.display_str == "fast:mercury-3"
+        assert result.api_key == "k"
+
+    def test_model_field_excluded_from_extra_kwargs(self):
+        """The `model` field never leaks into extra_kwargs."""
+        catalog = _make_catalog(
+            fast={"type": "openai", "api_key": "k", "model": "mercury-2"}
+        )
+        for reference in ("fast", "fast:other-model"):
+            result = resolve_provider(reference, catalog)
+            assert "model" not in result.extra_kwargs
+
+    def test_factory_resolves_bare_catalog_name(self):
+        """AgentFactory configured with a bare catalog name builds the right runner."""
+        catalog = _make_catalog(
+            fast={
+                "type": "openai",
+                "api_key": "fast-key",
+                "model": "mercury-2",
+            }
+        )
+        factory = _make_factory(model="fast", api_key=None, catalog=catalog)
+
+        with patch.object(AgentRunner, "__init__", return_value=None) as mock_init:
+            factory.create_agent()
+
+        _, kwargs = mock_init.call_args
+        assert kwargs["model"] == "openai:mercury-2"
+        assert kwargs["api_key"] == "fast-key"
+        assert factory.configured_model == "fast"
