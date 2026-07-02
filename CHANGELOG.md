@@ -7,17 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
+## [0.4.4] - 2026-07-02
 
-- **Fireworks reasoning models no longer fail with a `thinking` validation error.** The top-level `thinking: bool` config field was forwarded to the Fireworks API as a raw boolean, which the API rejects (`InvalidRequestError` on `thinking.ThinkingConfigEnabled/Disabled/Adaptive`). It is now coerced into the object form Fireworks expects — `{"type": "enabled", "budget_tokens": ...}` or `{"type": "disabled"}` — with the reasoning budget capped below `max_output_tokens`.
-
-### Changed
-
-- **`thinking` is now consumed or explicitly ignored by every provider.** Previously it was only handled for `moonshot` and `fireworks`; on other providers it silently leaked into the request body as a raw boolean (the same failure class as the Fireworks bug above). It is now popped centrally and, on providers that don't support it, ignored with a warning.
-
-## [0.4.4] - 2026-07-01
-
-A first-run onboarding polish release. Found during an install-and-run evaluation of 0.4.3 across both `poetry` and `pip`, these fixes unblock pip users, trim the default install, and correct docs and CLI output.
+A first-run onboarding polish release, plus a Fireworks reasoning fix. Found during an install-and-run evaluation of 0.4.3 across both `poetry` and `pip`, these fixes unblock pip users, trim the default install, and correct docs and CLI output. It also resolves a `thinking` validation error that broke Fireworks reasoning models and hardens the `thinking` field so it can never leak into an unsupported provider's request.
 
 ### Added
 
@@ -32,9 +24,11 @@ A first-run onboarding polish release. Found during an install-and-run evaluatio
 - **`init` "Next steps" show the correct invocation per install mode** — both the `poetry run openpaw …` and bare `openpaw …` forms — instead of a single bare command that failed under Poetry with `command not found`. Telegram/Discord scaffolds also warn that the bot denies all users by default until you add your ID to the allowlist. (#176, #179)
 - **Pinned `fireworks-ai` to the tested line (`>=0.16.4,<0.17.0`).** A bare pip install drifted to 0.19.x, which leaks aiohttp client sessions and prints `Unclosed client session` ERRORs during model init; the pin keeps pip close to `poetry.lock`. (#180)
 - Advertised the token-free `stdio` channel as the fastest first-run path (README Quick Start, CLI `--channel` help) and reworded "no tokens needed" to "no channel token needed (still requires an LLM API key)". (#178)
+- **`thinking` is now consumed or explicitly ignored by every provider.** Previously it was only handled for `moonshot` and `fireworks`; on other providers it silently leaked into the request body as a raw boolean (the same failure class as the Fireworks fix below). It is now popped centrally and, on providers that don't support it, ignored with a warning. (#190)
 
 ### Fixed
 
+- **Fireworks reasoning models no longer fail with a `thinking` validation error.** The top-level `thinking: bool` config field was forwarded to the Fireworks API as a raw boolean, which the API rejects (`InvalidRequestError` on `thinking.ThinkingConfigEnabled/Disabled/Adaptive`). It is now coerced into the object form Fireworks expects — `{"type": "enabled", "budget_tokens": ...}` or `{"type": "disabled"}` — with the reasoning budget capped below `max_output_tokens`. (#190)
 - **Access-denied reply pointed to the wrong config path.** The Telegram/Discord unauthorized message told users to edit `agent_workspaces/<ws>/agent.yaml`, which does not exist — the file lives under `config/`. (#175)
 - **Suppressed the `langgraph` `allowed_objects` `LangChainPendingDeprecationWarning`** that printed to stderr on every CLI invocation (including `--help`). It is an upstream default we cannot pass through, so it is filtered at the package root. (#181)
 - The `Config file not found` error is now actionable, pointing users to `openpaw init` and the getting-started docs. (#171)
