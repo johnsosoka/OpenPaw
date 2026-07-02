@@ -29,7 +29,9 @@ from openpaw.runtime.mcp.manager import MCPManager
 from openpaw.runtime.queue.lane import LaneQueue, QueueItem, QueueMode
 from openpaw.runtime.queue.manager import QueueManager
 from openpaw.runtime.session.manager import SessionManager
+from openpaw.runtime.status_bus import NullStatusEmitter
 from openpaw.runtime.subagent import SubAgentRunner
+from openpaw.stores.skill import SkillLimits, SkillStore
 from openpaw.workspace.connector import BuiltinToolConnector
 from openpaw.workspace.initializer import WorkspaceInitializer
 from openpaw.workspace.lifecycle import LifecycleManager
@@ -176,6 +178,15 @@ class WorkspaceRunner:
             builtin_loader=builtin_loader,
         )
 
+        # Learning loop gating (PRD-001 F1.3): manage_skill only equips when
+        # learning.enabled — filter before the agent is built.
+        if not self._workspace.learning_enabled:
+            self._builtin_tools = [
+                t for t in self._builtin_tools if getattr(t, "name", "") != "manage_skill"
+            ]
+            if "manage_skill" in self._enabled_builtin_names:
+                self._enabled_builtin_names.remove("manage_skill")
+
         # Middleware, agent factory, agent runner, and message processor
         (
             self._queue_middleware,
@@ -199,6 +210,9 @@ class WorkspaceRunner:
             queue_manager=self._queue_manager,
             channel_logging_enabled=self._channel_logging_enabled,
         )
+
+        # Learning loop wiring (PRD-001 F1.3): SkillStore + manage_skill
+        self._skill_store = self._init_skill_store()
 
         # Tool connector (channels updated in start())
         self._tool_connector = BuiltinToolConnector(
@@ -302,7 +316,43 @@ class WorkspaceRunner:
             agent_factory=self._agent_factory,
             channels=self._channels,
             skill_reloader=self.reload_skills,
+            skill_store=self._skill_store,
         )
+
+    def _init_skill_store(self) -> "SkillStore | None":
+        """Build the SkillStore and wire it into manage_skill when learning is on.
+
+        The store is the single validated write path for skills (ADR-105 §2):
+        gates + atomic writes + lifecycle events + hot-reload trigger.
+        Returns None when learning.enabled is false.
+        """
+        if not self._workspace.learning_enabled or self._workspace.config is None:
+            return None
+
+        learning = self._workspace.config.learning
+        emitter = self._agent_factory.status_emitter or NullStatusEmitter()
+
+        async def _reload() -> None:
+            await asyncio.to_thread(self.reload_skills)
+
+        store = SkillStore(
+            workspace_path=self._workspace.path,
+            workspace=self.workspace_name,
+            limits=SkillLimits(
+                max_skill_tokens=learning.limits.max_skill_tokens,
+                max_skills=learning.limits.max_skills,
+            ),
+            emitter=emitter,
+            reload_trigger=_reload,
+        )
+
+        tool = self._builtin_loader.get_tool_instance("manage_skill")
+        if tool is not None:
+            tool.set_skill_store(store, approval=learning.approval)
+            self.logger.info(
+                "Learning loop enabled: manage_skill wired (approval=%s)", learning.approval
+            )
+        return store
 
     def reload_skills(self) -> tuple[int, int, list[str]]:
         """Re-scan skills from disk and rebuild the agent with the new set.

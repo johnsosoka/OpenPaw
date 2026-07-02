@@ -136,6 +136,11 @@ class AgentFactory:
         """
         self._mcp_tools = list(tools)
 
+    @property
+    def status_emitter(self) -> StatusEmitter | None:
+        """The wired status event emitter, if any (used by SkillStore wiring)."""
+        return self._status_emitter
+
     def set_status_emitter(self, emitter: StatusEmitter) -> None:
         """Wire the status event emitter used by harness nodes (ADR-106).
 
