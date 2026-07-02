@@ -37,7 +37,7 @@ def _make_mock_runner_for_history(
 
     runner._channels = channels if channels is not None else {}
     runner._agent_factory = MagicMock()
-    runner._agent_factory.create_agent.return_value = MagicMock()
+    runner._agent_factory.create_harness.return_value = MagicMock()
     runner._agent_runner = MagicMock()
     runner._message_processor = MagicMock()
     runner._checkpointer = MagicMock()
@@ -67,7 +67,7 @@ class TestConnectChannelHistoryTool:
         runner._agent_factory.remove_enabled_builtin.assert_called_once_with(
             "channel_history"
         )
-        runner._agent_factory.create_agent.assert_called_once_with(
+        runner._agent_factory.create_harness.assert_called_once_with(
             checkpointer=runner._checkpointer
         )
         runner._message_processor.update_agent_runner.assert_called_once()
@@ -88,4 +88,4 @@ class TestConnectChannelHistoryTool:
 
         history_tool.set_channels.assert_called_once_with({"discord": discord_ch})
         runner._agent_factory.remove_builtin_tools.assert_not_called()
-        runner._agent_factory.create_agent.assert_not_called()
+        runner._agent_factory.create_harness.assert_not_called()

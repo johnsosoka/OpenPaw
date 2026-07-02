@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from openpaw.agent import AgentRunner
+from openpaw.agent.harness import AgentHarness
 from openpaw.core.config.models import ProviderDefinition
 from openpaw.model.spawn_profile import SpawnProfile
 from openpaw.workspace.model_resolver import ModelResolver
@@ -130,6 +131,22 @@ class AgentFactory:
         silently drop the MCP tools previously injected via update_tools().
         """
         self._mcp_tools = list(tools)
+
+    def create_harness(self, checkpointer: Any | None = None) -> AgentHarness:
+        """Create the interactive agent harness for this workspace.
+
+        The seam callers (WorkspaceRunner/MessageProcessor/connector) hold —
+        they never depend on the underlying graph topology (ADR-101 §2).
+        Dispatches on the workspace harness type; today the only interactive
+        harness is react (the planner harness lands with the 0.5.0 graph).
+
+        Args:
+            checkpointer: Optional checkpointer for conversation state.
+
+        Returns:
+            The configured AgentHarness.
+        """
+        return self.create_agent(checkpointer=checkpointer)
 
     def create_agent(self, checkpointer: Any | None = None) -> AgentRunner:
         """Create a configured AgentRunner instance.

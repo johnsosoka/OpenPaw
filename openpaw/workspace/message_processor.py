@@ -4,7 +4,7 @@ import logging
 import time
 from typing import Any
 
-from openpaw.agent import AgentRunner
+from openpaw.agent.harness import AgentHarness
 from openpaw.agent.middleware import (
     ApprovalRequiredError,
     InterruptSignalError,
@@ -31,7 +31,7 @@ class MessageProcessor:
 
     def __init__(
         self,
-        agent_runner: AgentRunner,
+        agent_runner: AgentHarness,
         session_manager: SessionManager,
         queue_manager: QueueManager,
         builtin_loader: BuiltinLoader,
@@ -92,13 +92,13 @@ class MessageProcessor:
         self._status_reminder_middleware = status_reminder_middleware
         self._status_update_middleware = status_update_middleware
 
-    def update_agent_runner(self, runner: "AgentRunner") -> None:
-        """Update the agent runner instance.
+    def update_agent_runner(self, runner: "AgentHarness") -> None:
+        """Update the agent harness instance.
 
         Used when the agent is rebuilt (e.g., after removing broken tools).
 
         Args:
-            runner: The new AgentRunner instance.
+            runner: The new AgentHarness instance.
         """
         self._agent_runner = runner
 

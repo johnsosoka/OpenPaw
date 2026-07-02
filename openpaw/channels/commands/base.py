@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from openpaw.agent import AgentRunner
+    from openpaw.agent.harness import AgentHarness
     from openpaw.channels.base import ChannelAdapter, Message
     from openpaw.runtime.queue.manager import QueueManager
     from openpaw.runtime.session.manager import SessionManager
@@ -40,7 +40,7 @@ class CommandContext:
     channel: "ChannelAdapter"
     session_manager: "SessionManager"
     checkpointer: Any  # AsyncSqliteSaver
-    agent_runner: "AgentRunner"
+    agent_runner: "AgentHarness"
     workspace_name: str
     workspace_path: Path
     queue_manager: "QueueManager"

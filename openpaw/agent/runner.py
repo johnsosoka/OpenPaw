@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain.agents import create_agent
 from langchain_core.callbacks import UsageMetadataCallbackHandler
@@ -27,6 +27,9 @@ from openpaw.core.prompts.system_events import (
 )
 from openpaw.core.timezone import workspace_now
 from openpaw.core.workspace import AgentWorkspace
+
+if TYPE_CHECKING:
+    from openpaw.agent.harness.base import HarnessKind
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +165,13 @@ class AgentRunner:
             self.strip_thinking = True
 
         self._agent = self._build_agent()
+
+    @property
+    def kind(self) -> "HarnessKind":
+        """Which harness topology this runner implements (always react)."""
+        from openpaw.agent.harness.base import HarnessKind
+
+        return HarnessKind.REACT
 
     @property
     def max_output_tokens(self) -> int | None:
