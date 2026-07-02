@@ -72,6 +72,14 @@ uploads/
 # LLM memory/context (session-specific)
 llm_memory/
 
+# Local agent-instruction and personal files (not version-controlled)
+CLAUDE.md
+AGENTS.md
+SECURITY.md
+
+# Example workspaces (kept locally, not shipped in the repo)
+example_agent_workspaces/
+
 # Zip archives
 *.zip
 *.sh

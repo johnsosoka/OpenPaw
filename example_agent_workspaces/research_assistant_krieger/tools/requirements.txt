@@ -1,1 +1,0 @@
-gpt-researcher>=0.14.6
