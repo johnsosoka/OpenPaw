@@ -23,6 +23,7 @@ from openpaw.core.logging import setup_workspace_logger
 from openpaw.core.paths import CONVERSATIONS_DB, DOT_ENV, TEAM_DIR
 from openpaw.core.utils import resolve_user_name
 from openpaw.model.message import Message, MessageDirection
+from openpaw.model.skill import SkillInfo
 from openpaw.model.spawn_profile import SpawnProfile
 from openpaw.runtime.mcp.manager import MCPManager
 from openpaw.runtime.queue.lane import LaneQueue, QueueItem, QueueMode
@@ -37,6 +38,11 @@ from openpaw.workspace.loader import WorkspaceLoader
 from openpaw.workspace.profile_loader import load_spawn_profiles
 from openpaw.workspace.profile_resolver import SpawnProfileResolver
 from openpaw.workspace.roster import TeamRosterBuilder
+from openpaw.workspace.skill_loader import (
+    load_framework_skills,
+    load_workspace_skills,
+    materialize_framework_skills,
+)
 from openpaw.workspace.task_service import TaskMaintenanceService
 from openpaw.workspace.tool_loader import load_workspace_tools  # noqa: F401
 
@@ -295,7 +301,58 @@ class WorkspaceRunner:
             subagent_store=self._subagent_store,
             agent_factory=self._agent_factory,
             channels=self._channels,
+            skill_reloader=self.reload_skills,
         )
+
+    def reload_skills(self) -> tuple[int, int, list[str]]:
+        """Re-scan skills from disk and rebuild the agent with the new set.
+
+        Workspace skills override framework skills by name (same merge logic
+        as WorkspaceLoader.load). The skills list is replaced atomically —
+        never mutated in place — so concurrent readers (sub-agents, stateless
+        cron/heartbeat agents) see either the old or the new list, never a
+        partial state.
+
+        Returns:
+            Tuple of (workspace_count, framework_count, errors) where errors
+            are per-skill load failure messages for broken skills that were
+            skipped.
+        """
+        errors: list[str] = []
+        workspace_skills = load_workspace_skills(
+            self._workspace.skills_path, errors=errors
+        )
+        framework_skills = load_framework_skills()
+
+        # Merge: workspace skills override framework skills by name
+        skills_by_name: dict[str, SkillInfo] = {}
+        for skill in framework_skills:
+            skills_by_name[skill.name] = skill
+        for skill in workspace_skills:
+            if skill.name in skills_by_name:
+                self.logger.info(
+                    "Workspace skill '%s' overrides framework skill with same name",
+                    skill.name,
+                )
+            skills_by_name[skill.name] = skill
+        merged = list(skills_by_name.values())
+
+        materialize_framework_skills(self._workspace.path, merged)
+
+        # Atomic list replace (thread-safe via GIL) — do not mutate in place
+        self._workspace.skills = merged
+
+        self._agent_runner.rebuild_agent()
+
+        workspace_count = sum(1 for s in merged if s.source == "workspace")
+        framework_count = sum(1 for s in merged if s.source == "framework")
+        self.logger.info(
+            "Reloaded skills: %d workspace, %d framework, %d error(s)",
+            workspace_count,
+            framework_count,
+            len(errors),
+        )
+        return workspace_count, framework_count, errors
 
     async def _handle_inbound_message(self, message: Message) -> None:
         """Handle an inbound message from any channel."""

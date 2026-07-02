@@ -1,6 +1,7 @@
 """Base abstractions for the command system."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -51,6 +52,9 @@ class CommandContext:
     subagent_store: Any = None  # SubAgentStore, for /status subagent info
     agent_factory: Any = None  # AgentFactory, for /model command
     channels: dict[str, Any] | None = None  # dict[str, ChannelAdapter], for /status channel info
+    # Reloads workspace skills and rebuilds the agent, for /reload.
+    # Returns (workspace_count, framework_count, errors).
+    skill_reloader: Callable[[], tuple[int, int, list[str]]] | None = None
 
 
 @dataclass

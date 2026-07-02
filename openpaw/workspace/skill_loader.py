@@ -15,7 +15,10 @@ _MAX_DESCRIPTION_LENGTH = 1024
 _SKILL_FILENAME = "SKILL.md"
 
 
-def load_workspace_skills(skills_path: Path) -> list[SkillInfo]:
+def load_workspace_skills(
+    skills_path: Path,
+    errors: list[str] | None = None,
+) -> list[SkillInfo]:
     """Load all skills from a workspace's agent/skills/ directory.
 
     Scans for SKILL.md files in immediate subdirectories of skills_path.
@@ -33,6 +36,9 @@ def load_workspace_skills(skills_path: Path) -> list[SkillInfo]:
 
     Args:
         skills_path: Absolute path to the workspace's agent/skills/ directory.
+        errors: Optional list that per-skill load error messages are appended
+            to, so callers can surface failures (broken skills are skipped
+            regardless).
 
     Returns:
         List of SkillInfo instances, sorted by directory name.
@@ -66,6 +72,8 @@ def load_workspace_skills(skills_path: Path) -> list[SkillInfo]:
             skills.append(skill)
         except Exception as e:
             logger.error(f"Failed to load skill from {skill_dir.name}: {e}")
+            if errors is not None:
+                errors.append(f"Failed to load skill '{skill_dir.name}': {e}")
             continue
 
     if skills:
