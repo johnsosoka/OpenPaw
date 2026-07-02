@@ -20,6 +20,7 @@ from openpaw.core.prompts.framework import (
     SECTION_FILE_SHARING,
     SECTION_FILE_UPLOADS,
     SECTION_HEARTBEAT,
+    SECTION_LEARNING,
     SECTION_MEMORY_SEARCH,
     SECTION_PLANNING,
     SECTION_PROGRESS_UPDATES,
@@ -65,6 +66,11 @@ class AgentWorkspace:
     crons: "list[CronDefinition]" = field(default_factory=list)
     skills: list[SkillInfo] = field(default_factory=list)
     team_roster: str = ""
+
+    @property
+    def learning_enabled(self) -> bool:
+        """Whether the learning loop (PRD-001 Phase 1) is on for this workspace."""
+        return bool(self.config and self.config.learning.enabled)
 
     def reload_files(self) -> None:
         """Re-read workspace markdown files from disk.
@@ -135,7 +141,13 @@ class AgentWorkspace:
 
         # Skills — injected before workspace context so agents know what's available.
         # Staged skills (awaiting /skills approve) are excluded from the prompt.
-        injectable_skills = [s for s in self.skills if s.status is not SkillStatus.STAGED]
+        # The skill-authoring guide only injects when the learning loop is on.
+        injectable_skills = [
+            s
+            for s in self.skills
+            if s.status is not SkillStatus.STAGED
+            and not (s.name == "skill-authoring" and not self.learning_enabled)
+        ]
         if injectable_skills:
             skills_section = self._build_skills_section(injectable_skills)
             sections.append(f"<skills>\n{skills_section}\n</skills>")
@@ -316,6 +328,10 @@ class AgentWorkspace:
         # Planning guidance - include when plan tool is enabled
         if enabled_builtins is None or "plan" in enabled_builtins:
             sections.append(SECTION_PLANNING)
+
+        # Learning loop - include when learning.enabled (PRD-001 F1.1)
+        if self.learning_enabled:
+            sections.append(SECTION_LEARNING)
 
         # Autonomous Planning - include when multiple capabilities are available
         # This teaches capability composition for complex requests
