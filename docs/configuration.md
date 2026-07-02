@@ -802,6 +802,13 @@ value or remove the override.
 will refuse to load that shape at workspace-load time and point you at this
 native configuration.
 
+**`thinking` on other providers:** the top-level `thinking` toggle is also
+honored for `fireworks` (it becomes the API's `thinking` object —
+`{ type: enabled, budget_tokens: ... }` or `{ type: disabled }`). On providers
+that don't support it, `thinking` is ignored and a warning is logged, so it can
+never leak into the request as a raw boolean. Anthropic's extended-thinking
+budgets use `extra_body.thinking` natively and are unaffected.
+
 ---
 
 ### Ollama (local models)

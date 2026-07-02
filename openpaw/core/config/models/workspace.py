@@ -34,9 +34,12 @@ class WorkspaceModelConfig(BaseModel):
     thinking: bool | None = Field(
         default=None,
         description=(
-            "Enable native reasoning mode on supported providers. "
+            "Enable native reasoning mode on supported providers (moonshot, fireworks). "
             "Moonshot: maps to ChatMoonshot(thinking=...) — temperature is auto-set "
-            "to 1.0 (thinking=True) or 0.6 (thinking=False) when left at the framework default."
+            "to 1.0 (thinking=True) or 0.6 (thinking=False) when left at the framework default. "
+            "Fireworks: maps to the API's thinking object "
+            "({'type': 'enabled', 'budget_tokens': ...} or {'type': 'disabled'}). "
+            "Ignored (with a warning) on providers that don't support it."
         ),
     )
     max_output_tokens: int | None = Field(

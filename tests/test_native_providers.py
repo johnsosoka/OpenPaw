@@ -7,6 +7,7 @@ the ollama equivalent) inside ``create_chat_model`` succeeds with the mock
 regardless of whether the real package is present.
 """
 
+import logging
 import sys
 from unittest.mock import MagicMock, Mock, patch
 
@@ -260,6 +261,89 @@ class TestProviderCatalogIntegration:
         assert mock_cls.call_args[1]["base_url"] == "http://localhost:11434"
 
 
+class TestFireworksThinkingCoercion:
+    """Fireworks `thinking` bool is coerced into the object form the API expects.
+
+    The Fireworks API rejects a raw boolean ``thinking: true``; it requires a
+    discriminated union like ``{"type": "enabled", "budget_tokens": N}`` or
+    ``{"type": "disabled"}``.  These tests verify that ``create_chat_model``
+    performs the coercion before the value reaches ``ChatFireworks``.
+
+    ``max_retries=0`` is passed so the retry-patching block (which monkey-patches
+    ``model._agenerate``) is skipped — the mock instance doesn't need it and
+    skipping it avoids touching live SDK internals.
+    """
+
+    def test_thinking_true_produces_enabled_object(self) -> None:
+        """`thinking=True` → {"type": "enabled", "budget_tokens": 4096}."""
+        module, mock_cls = _mock_module("ChatFireworks")
+        with patch.dict(sys.modules, {"langchain_fireworks": module}):
+            create_chat_model(
+                model_str="fireworks:accounts/fireworks/models/kimi-k2p6",
+                api_key="test-key",
+                temperature=0.6,
+                extra_kwargs={"thinking": True, "max_retries": 0},
+            )
+
+        mock_cls.assert_called_once()
+        assert mock_cls.call_args[1]["model_kwargs"]["thinking"] == {
+            "type": "enabled",
+            "budget_tokens": 4096,
+        }
+
+    def test_thinking_false_produces_disabled_object(self) -> None:
+        """`thinking=False` → {"type": "disabled"}."""
+        module, mock_cls = _mock_module("ChatFireworks")
+        with patch.dict(sys.modules, {"langchain_fireworks": module}):
+            create_chat_model(
+                model_str="fireworks:accounts/fireworks/models/kimi-k2p6",
+                api_key="test-key",
+                temperature=0.6,
+                extra_kwargs={"thinking": False, "max_retries": 0},
+            )
+
+        assert mock_cls.call_args[1]["model_kwargs"]["thinking"] == {"type": "disabled"}
+
+    def test_thinking_budget_capped_when_max_tokens_equals_budget(self) -> None:
+        """`max_tokens=4096` with `thinking=True` → budget capped to 2048.
+
+        The budget must not exceed max_tokens — that would leave no tokens for
+        the visible answer.  When ``budget >= max_tokens`` the cap formula is
+        ``max(1024, max_tokens // 2)``.
+        """
+        module, mock_cls = _mock_module("ChatFireworks")
+        with patch.dict(sys.modules, {"langchain_fireworks": module}):
+            create_chat_model(
+                model_str="fireworks:accounts/fireworks/models/kimi-k2p6",
+                api_key="test-key",
+                temperature=0.6,
+                extra_kwargs={"thinking": True, "max_tokens": 4096, "max_retries": 0},
+            )
+
+        thinking_obj = mock_cls.call_args[1]["model_kwargs"]["thinking"]
+        assert thinking_obj["type"] == "enabled"
+        assert thinking_obj["budget_tokens"] == 2048
+
+    def test_thinking_absent_leaves_no_thinking_in_model_kwargs(self) -> None:
+        """When `thinking` is not provided, no thinking key appears in model_kwargs.
+
+        Regression guard: other providers (openai, anthropic, xai) must not
+        accidentally receive a ``model_kwargs["thinking"]`` entry.
+        """
+        module, mock_cls = _mock_module("ChatFireworks")
+        with patch.dict(sys.modules, {"langchain_fireworks": module}):
+            create_chat_model(
+                model_str="fireworks:accounts/fireworks/models/kimi-k2p6",
+                api_key="test-key",
+                temperature=0.6,
+                extra_kwargs={"max_retries": 0},
+            )
+
+        call_kwargs = mock_cls.call_args[1]
+        model_kwargs = call_kwargs.get("model_kwargs", {})
+        assert "thinking" not in model_kwargs
+
+
 class TestAnthropicExtendedThinkingNotRejected:
     """Regression guard: the legacy validator must not block Anthropic's extra_body.thinking."""
 
@@ -275,3 +359,98 @@ class TestAnthropicExtendedThinkingNotRejected:
             extra_body={"thinking": {"type": "enabled", "budget_tokens": 5000}},
         )
         assert config.provider == "anthropic"
+
+
+class TestThinkingLeakGuard:
+    """`thinking` must never leak into an unsupported provider's constructor.
+
+    When ``thinking`` is passed as a top-level extra_kwarg to a provider that
+    doesn't consume it (i.e., NOT moonshot or fireworks), the central pop in
+    ``create_chat_model`` must:
+
+    1. Remove it from the kwargs before the constructor is called.
+    2. Emit a WARNING containing "not supported for provider".
+
+    Existing moonshot + fireworks tests are unaffected: those providers are in
+    ``THINKING_SUPPORTED_PROVIDERS`` so no warning is emitted and the value is
+    forwarded to the provider branch for proper coercion.
+    """
+
+    @pytest.mark.parametrize(
+        "model_str, module_name, cls_name, region, extra_kwargs",
+        [
+            pytest.param(
+                "openai:gpt-4o",
+                "langchain_openai",
+                "ChatOpenAI",
+                None,
+                {"thinking": True, "max_retries": 0},
+                id="openai",
+            ),
+            pytest.param(
+                "anthropic:claude-sonnet-4-20250514",
+                "langchain_anthropic",
+                "ChatAnthropic",
+                None,
+                {"thinking": True, "max_retries": 0},
+                id="anthropic",
+            ),
+            pytest.param(
+                "xai:grok-3",
+                "langchain_xai",
+                "ChatXAI",
+                None,
+                {"thinking": True, "max_retries": 0},
+                id="xai",
+            ),
+            pytest.param(
+                "bedrock_converse:anthropic.claude-3-5-sonnet-20241022-v2:0",
+                "langchain_aws",
+                "ChatBedrockConverse",
+                "us-east-1",
+                {"thinking": True, "max_retries": 0},
+                id="bedrock_converse",
+            ),
+            pytest.param(
+                "ollama:llama3.1",
+                "langchain_ollama",
+                "ChatOllama",
+                None,
+                {"thinking": True, "max_retries": 0, "base_url": "http://localhost:11434"},
+                id="ollama",
+            ),
+        ],
+    )
+    def test_thinking_never_leaks_to_constructor(
+        self,
+        model_str: str,
+        module_name: str,
+        cls_name: str,
+        region: str | None,
+        extra_kwargs: dict,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """``thinking=True`` is stripped before any unsupported provider constructor is called."""
+        module, mock_cls = _mock_module(cls_name)
+        with caplog.at_level(logging.WARNING, logger="openpaw.agent.model_factory"):
+            with patch.dict(sys.modules, {module_name: module}):
+                create_chat_model(
+                    model_str=model_str,
+                    api_key="test-key",
+                    temperature=0.6,
+                    region=region,
+                    extra_kwargs=extra_kwargs,
+                )
+
+        mock_cls.assert_called_once()
+        constructor_kwargs = mock_cls.call_args[1]
+        assert "thinking" not in constructor_kwargs, (
+            f"'thinking' leaked into {cls_name} constructor kwargs: {constructor_kwargs}"
+        )
+        assert "thinking" not in constructor_kwargs.get("model_kwargs", {}), (
+            f"'thinking' leaked into {cls_name} model_kwargs: {constructor_kwargs.get('model_kwargs')}"
+        )
+        assert any("not supported for provider" in msg for msg in caplog.messages), (
+            f"Expected warning about unsupported 'thinking' for {model_str!r}. "
+            f"Got log messages: {caplog.messages}"
+        )

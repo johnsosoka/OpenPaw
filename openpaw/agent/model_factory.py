@@ -33,6 +33,15 @@ THINKING_MODELS = [
 BEDROCK_TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 MAX_TOOL_NAME_LENGTH = 64
 
+# Fireworks expects `thinking` as an object, not a bool. Enabled requires
+# budget_tokens >= 1024; the docs example uses 4096.
+FIREWORKS_DEFAULT_THINKING_BUDGET = 4096
+
+# Providers whose branch actually consumes the top-level `thinking` toggle.
+# For any other provider, `thinking` is popped and ignored with a warning so
+# it can never leak into the request body as a raw bool.
+THINKING_SUPPORTED_PROVIDERS = {"moonshot", "fireworks"}
+
 
 def create_chat_model(
     model_str: str,
@@ -91,6 +100,18 @@ def create_chat_model(
     if nested_model_kwargs and isinstance(nested_model_kwargs, dict):
         kwargs.update(nested_model_kwargs)
 
+    # Pop `thinking` centrally so it can NEVER leak into a provider constructor as a
+    # raw bool (some SDKs forward unknown kwargs straight into the request body, which
+    # the API rejects — see the Fireworks fix above). Only THINKING_SUPPORTED_PROVIDERS
+    # consume it; everyone else is warned that it's a no-op.
+    thinking = kwargs.pop("thinking", None)
+    if thinking is not None and provider not in THINKING_SUPPORTED_PROVIDERS:
+        logger.warning(
+            f"'thinking' is not supported for provider '{provider}' and will be ignored. "
+            f"Supported: {sorted(THINKING_SUPPORTED_PROVIDERS)}. "
+            f"(Anthropic uses extra_body.thinking for extended-thinking budgets instead.)"
+        )
+
     if provider == "openai":
         from langchain_openai import ChatOpenAI
 
@@ -142,7 +163,7 @@ def create_chat_model(
 
         # ChatMoonshot expects bool — coerce None (the WorkspaceModelConfig default)
         # to False so we don't trip its pydantic validation.
-        thinking = bool(kwargs.get("thinking") or False)
+        thinking = bool(thinking or False)
         kwargs["thinking"] = thinking
 
         # Auto-correct temperature when the caller passed the framework default
@@ -241,6 +262,17 @@ def create_chat_model(
 
         if api_key:
             kwargs["fireworks_api_key"] = api_key
+        if thinking is not None:
+            model_kwargs = kwargs.setdefault("model_kwargs", {})
+            if thinking:
+                budget = FIREWORKS_DEFAULT_THINKING_BUDGET
+                max_tokens = kwargs.get("max_tokens")
+                # budget must leave room for the visible answer; stay above Fireworks' 1024 floor
+                if isinstance(max_tokens, int) and budget >= max_tokens:
+                    budget = max(1024, max_tokens // 2)
+                model_kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+            else:
+                model_kwargs["thinking"] = {"type": "disabled"}
         logger.info(f"Creating ChatFireworks: model={model_name}")
         model = ChatFireworks(**kwargs)
 

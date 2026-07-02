@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Fireworks reasoning models no longer fail with a `thinking` validation error.** The top-level `thinking: bool` config field was forwarded to the Fireworks API as a raw boolean, which the API rejects (`InvalidRequestError` on `thinking.ThinkingConfigEnabled/Disabled/Adaptive`). It is now coerced into the object form Fireworks expects — `{"type": "enabled", "budget_tokens": ...}` or `{"type": "disabled"}` — with the reasoning budget capped below `max_output_tokens`.
+
+### Changed
+
+- **`thinking` is now consumed or explicitly ignored by every provider.** Previously it was only handled for `moonshot` and `fireworks`; on other providers it silently leaked into the request body as a raw boolean (the same failure class as the Fireworks bug above). It is now popped centrally and, on providers that don't support it, ignored with a warning.
+
 ## [0.4.4] - 2026-07-01
 
 A first-run onboarding polish release. Found during an install-and-run evaluation of 0.4.3 across both `poetry` and `pip`, these fixes unblock pip users, trim the default install, and correct docs and CLI output.
