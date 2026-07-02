@@ -22,6 +22,7 @@ from uuid import uuid4
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import AIMessage, ToolMessage
 
+from openpaw.agent.middleware.plan_status import PlanStatusRenderer
 from openpaw.agent.middleware.queue_aware import InterruptSignalError
 from openpaw.builtins.tools._channel_context import get_channel_context
 from openpaw.core.config.models.status_updates import StatusUpdatesConfig
@@ -126,6 +127,18 @@ def _extract_tool_detail(tool_name: str, args: dict[str, Any]) -> str | None:
     return None
 
 
+# One-line renderings for skill lifecycle events (PRD-001 F4.1, ADR-106 §3).
+_SKILL_STATUS_VERBS: dict[StatusEventKind, str] = {
+    StatusEventKind.SKILL_CREATED: "Skill created",
+    StatusEventKind.SKILL_UPDATED: "Skill updated",
+    StatusEventKind.SKILL_STAGED: "Skill staged for approval",
+    StatusEventKind.SKILL_APPROVED: "Skill approved",
+    StatusEventKind.SKILL_EQUIPPED: "Skill equipped",
+    StatusEventKind.SKILL_DEPRECATED: "Skill deprecated",
+    StatusEventKind.SKILL_REJECTED: "Skill rejected",
+}
+
+
 class StatusUpdateMiddleware(AgentMiddleware):
     """Middleware that emits automatic status updates to the user channel.
 
@@ -171,6 +184,9 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._last_reported_tools: frozenset[str] = frozenset()
         self._status_message_id: str | None = None
         self._steer_notified: bool = False
+        # Plan checklist rendering (PRD-002 H3.3): its own edited-in-place
+        # message, distinct from the tool-status line above.
+        self._plan_renderer = PlanStatusRenderer(use_emojis=config.use_emojis)
         # Per-sub-agent status tracking: subagent_id -> (msg_id, label, channel, session_key).
         # Not cleared on reset() — sub-agents may outlive the main agent run.
         self._subagent_status_ids: dict[str, tuple[str, str, Any, str]] = {}
@@ -204,6 +220,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._last_reported_tools = frozenset()
         self._status_message_id = None
         self._steer_notified = False
+        self._plan_renderer.reset()
 
     def reset(self) -> None:
         """Reset per-invocation state. Called by MessageProcessor after each run."""
@@ -215,6 +232,9 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._last_reported_tools = frozenset()
         self._status_message_id = None
         self._steer_notified = False
+        # Dropping renderer state stops further edits; the plan message
+        # itself stays in the channel as the record of what was done.
+        self._plan_renderer.reset()
         # _run_id intentionally NOT cleared: late sub-agent events after
         # reset() still correlate with the run that dispatched them.
 
@@ -258,6 +278,71 @@ class StatusUpdateMiddleware(AgentMiddleware):
             self._status_message_id = None
         except Exception as e:
             logger.debug("Failed to delete status message: %s", e)
+
+    async def handle_plan_event(self, event: StatusEvent) -> None:
+        """Render planner-harness plan/node events (PRD-002 H3.3, H7.2).
+
+        Called by PlanChannelSink during a graph run — the armed per-run
+        context (set_context) is valid because events arrive on the same
+        asyncio task chain as the run. Maintains ONE plan checklist message
+        per run (created on plan.created, edited in place on step/revision
+        events; never deleted at completion) and pushes short node-phase
+        lines through the existing tool-status machinery.
+
+        Events for other sessions (mismatched session_key vs the armed
+        context) are ignored. All failures are swallowed at debug level —
+        plan rendering must never break a run.
+        """
+        if not self._config.enabled:
+            return
+        channel = self._channel
+        session_key = self._session_key
+        if not channel or not session_key:
+            logger.debug("Plan event %s ignored: no armed channel context", event.kind)
+            return
+        if event.session_key != session_key:
+            logger.debug(
+                "Plan event %s ignored: session %s does not match armed %s",
+                event.kind,
+                event.session_key,
+                session_key,
+            )
+            return
+        try:
+            phase_line = await self._plan_renderer.handle(event, channel, session_key)
+            if phase_line:
+                emoji = "📋" if self._config.use_emojis else None
+                await self._send_status(phase_line, emoji=emoji)
+        except Exception:
+            logger.debug("Plan event rendering failed for %s", event.kind, exc_info=True)
+
+    async def send_skill_status(self, event: StatusEvent) -> None:
+        """Render a skill lifecycle event as a forced one-line status (F4.1).
+
+        Called by SkillChannelSink. Skill events carry ``session_key=None``
+        when they originate from background paths (learning loop, dream);
+        those render to the armed context's channel when one exists. Events
+        stamped with a session that does not match the armed context are
+        skipped — same gate as :meth:`handle_plan_event`.
+        """
+        if not self._config.enabled:
+            return
+        if not self._channel or not self._session_key:
+            return  # no armed context (background path) — skip silently
+        if event.session_key is not None and event.session_key != self._session_key:
+            return
+        verb = _SKILL_STATUS_VERBS.get(event.kind)
+        if verb is None:
+            return
+        name = event.payload.get("name", "?")
+        created_by = event.payload.get("created_by")
+        line = f"{verb}: {name}"
+        if created_by:
+            line += f" (by {created_by})"
+        emoji = "🧠" if self._config.use_emojis else None
+        if emoji:
+            line = f"{emoji} {line}"
+        await self._send_status(line, force=True)
 
     async def create_subagent_status(self, subagent_id: str, label: str) -> None:
         """Send a new status message for a sub-agent and store its message ID.

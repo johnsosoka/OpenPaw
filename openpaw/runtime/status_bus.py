@@ -12,9 +12,13 @@ import json
 import logging
 import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from openpaw.core.paths import MEMORY_LOGS_DIR
-from openpaw.model.status_event import StatusEvent, StatusSink
+from openpaw.model.status_event import StatusEvent, StatusEventKind, StatusSink
+
+if TYPE_CHECKING:
+    from openpaw.agent.middleware.status_update import StatusUpdateMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +64,83 @@ class StatusBus:
                     self._workspace,
                     exc_info=True,
                 )
+
+
+#: Kinds the plan renderer cares about (PRD-002 H3.3/H7.2).
+_PLAN_EVENT_KINDS: frozenset[StatusEventKind] = frozenset(
+    {
+        StatusEventKind.PLAN_CREATED,
+        StatusEventKind.PLAN_STEP_STARTED,
+        StatusEventKind.PLAN_STEP_COMPLETED,
+        StatusEventKind.PLAN_REVISED,
+        StatusEventKind.NODE_ENTERED,
+        StatusEventKind.REFLECTION_VERDICT,
+        StatusEventKind.MODULE_SELECTED,
+    }
+)
+
+
+class PlanChannelSink:
+    """Forwards harness plan/node events to the channel plan renderer.
+
+    Lives here (sibling of the bus, wired by the workspace initializer) so
+    the middleware stays the only channel-touching component. Session
+    matching happens inside ``handle_plan_event`` — the middleware owns the
+    armed per-run context; this sink is a pure kind filter.
+    """
+
+    def __init__(self, middleware: StatusUpdateMiddleware) -> None:
+        """Initialize the sink.
+
+        Args:
+            middleware: The workspace's StatusUpdateMiddleware.
+        """
+        self._middleware = middleware
+
+    async def handle(self, event: StatusEvent) -> None:
+        """Forward plan-relevant events; drop everything else."""
+        if event.kind not in _PLAN_EVENT_KINDS:
+            return
+        await self._middleware.handle_plan_event(event)
+
+
+#: Skill lifecycle kinds rendered in-channel (PRD-001 F4.1, ADR-106 §3).
+_SKILL_EVENT_KINDS: frozenset[StatusEventKind] = frozenset(
+    {
+        StatusEventKind.SKILL_CREATED,
+        StatusEventKind.SKILL_UPDATED,
+        StatusEventKind.SKILL_STAGED,
+        StatusEventKind.SKILL_APPROVED,
+        StatusEventKind.SKILL_EQUIPPED,
+        StatusEventKind.SKILL_DEPRECATED,
+        StatusEventKind.SKILL_REJECTED,
+    }
+)
+
+
+class SkillChannelSink:
+    """Forwards skill lifecycle events to the channel status renderer.
+
+    Same shape as :class:`PlanChannelSink`: a pure kind filter; the
+    middleware owns the armed per-run context and does the rendering.
+    Skill events from background paths (learning loop, dream) carry
+    ``session_key=None`` — the middleware renders them to the armed
+    context's channel when one exists, else skips silently.
+    """
+
+    def __init__(self, middleware: StatusUpdateMiddleware) -> None:
+        """Initialize the sink.
+
+        Args:
+            middleware: The workspace's StatusUpdateMiddleware.
+        """
+        self._middleware = middleware
+
+    async def handle(self, event: StatusEvent) -> None:
+        """Forward skill lifecycle events; drop everything else."""
+        if event.kind not in _SKILL_EVENT_KINDS:
+            return
+        await self._middleware.send_skill_status(event)
 
 
 class SessionLogSink:

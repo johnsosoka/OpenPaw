@@ -2,6 +2,7 @@
 
 from openpaw.channels.commands.base import CommandHandler
 from openpaw.channels.commands.handlers.compact import CompactCommand
+from openpaw.channels.commands.handlers.harness import HarnessCommand
 from openpaw.channels.commands.handlers.help import HelpCommand
 from openpaw.channels.commands.handlers.model import ModelCommand
 from openpaw.channels.commands.handlers.new import NewCommand
@@ -28,12 +29,14 @@ def get_framework_commands() -> list[CommandHandler]:
         ModelCommand(),
         ReloadCommand(),
         SkillsCommand(),
+        HarnessCommand(),
     ]
 
 
 __all__ = [
     "CompactCommand",
     "get_framework_commands",
+    "HarnessCommand",
     "HelpCommand",
     "ModelCommand",
     "NewCommand",

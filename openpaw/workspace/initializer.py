@@ -19,7 +19,12 @@ from openpaw.core.config.models import ApprovalGatesConfig, StatusUpdatesConfig,
 from openpaw.runtime.approval import ApprovalGateManager
 from openpaw.runtime.session.archiver import ConversationArchiver
 from openpaw.runtime.session.manager import SessionManager
-from openpaw.runtime.status_bus import SessionLogSink, StatusBus
+from openpaw.runtime.status_bus import (
+    PlanChannelSink,
+    SessionLogSink,
+    SkillChannelSink,
+    StatusBus,
+)
 from openpaw.stores.subagent import SubAgentStore
 from openpaw.stores.task import TaskStore
 from openpaw.workspace.agent_factory import AgentFactory, filter_workspace_tools
@@ -295,6 +300,11 @@ class WorkspaceInitializer:
                 emitter=status_bus,
                 workspace=self._workspace.name,
             )
+            # Plan/node events (planner harness) render through the same
+            # middleware via its armed per-run context (T2.7).
+            status_bus.add_sink(PlanChannelSink(status_update_middleware))
+            # Skill lifecycle one-liners (PRD-001 F4.1) render the same way.
+            status_bus.add_sink(SkillChannelSink(status_update_middleware))
             middlewares.insert(0, status_update_middleware)
             self._logger.info("Status update middleware enabled")
 

@@ -1,0 +1,350 @@
+"""Tests for plan checklist rendering (T2.7): PlanStatusRenderer,
+StatusUpdateMiddleware.handle_plan_event, and PlanChannelSink."""
+
+from typing import Any
+
+import pytest
+
+from openpaw.agent.middleware.status_update import StatusUpdateMiddleware
+from openpaw.core.config.models import StatusUpdatesConfig
+from openpaw.model.status_event import StatusEvent, StatusEventKind
+from openpaw.runtime.status_bus import PlanChannelSink, StatusBus
+
+SESSION = "telegram:123456"
+
+
+class MockMessage:
+    """Mock message returned by send_message."""
+
+    def __init__(self, id: str, session_key: str, content: str):
+        self.id = id
+        self.session_key = session_key
+        self.content = content
+
+
+class MockChannel:
+    """Mock channel adapter (mirrors test_status_update_middleware)."""
+
+    def __init__(self) -> None:
+        self.sent_messages: list[tuple[str, str]] = []
+        self.edited_messages: list[tuple[str, str, str]] = []
+        self.deleted_messages: list[tuple[str, str]] = []
+        self._message_counter: int = 0
+
+    async def send_message(self, session_key: str, content: str) -> Any:
+        self._message_counter += 1
+        self.sent_messages.append((session_key, content))
+        return MockMessage(str(self._message_counter), session_key, content)
+
+    async def edit_message(self, session_key: str, message_id: str, content: str) -> bool:
+        self.edited_messages.append((session_key, message_id, content))
+        return True
+
+    async def delete_message(self, session_key: str, message_id: str) -> bool:
+        self.deleted_messages.append((session_key, message_id))
+        return True
+
+
+def _make_config(enabled: bool = True) -> StatusUpdatesConfig:
+    return StatusUpdatesConfig(
+        enabled=enabled,
+        agent_start=False,
+        min_interval_seconds=0,
+        use_emojis=False,
+        typing_indicator=False,
+    )
+
+
+def _make_middleware(
+    channel: MockChannel | None = None,
+    config: StatusUpdatesConfig | None = None,
+) -> StatusUpdateMiddleware:
+    mw = StatusUpdateMiddleware(config or _make_config())
+    if channel is not None:
+        mw.set_context(channel, SESSION)
+    return mw
+
+
+def _event(
+    kind: StatusEventKind,
+    payload: dict[str, Any] | None = None,
+    session_key: str | None = SESSION,
+    node: str | None = None,
+) -> StatusEvent:
+    return StatusEvent(
+        kind=kind,
+        workspace="ws",
+        session_key=session_key,
+        run_id="run-1",
+        node=node,
+        payload=payload or {},
+    )
+
+
+def _plan_payload(revision: int = 0, second_status: str = "pending") -> dict[str, Any]:
+    return {
+        "plan": {
+            "objective": "Do the thing",
+            "revision": revision,
+            "steps": [
+                {"id": "1", "description": "First step", "status": "pending"},
+                {"id": "2", "description": "Second step", "status": second_status},
+            ],
+        }
+    }
+
+
+# ---------------------------------------------------------------------------
+# Plan message flow
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_plan_created_sends_checklist_message():
+    channel = MockChannel()
+    mw = _make_middleware(channel)
+
+    await mw.handle_plan_event(_event(StatusEventKind.PLAN_CREATED, _plan_payload()))
+
+    assert len(channel.sent_messages) == 1
+    session_key, text = channel.sent_messages[0]
+    assert session_key == SESSION
+    assert "Plan: Do the thing" in text
+    assert "[ ] 1. First step" in text
+    assert "[ ] 2. Second step" in text
+    assert "(rev" not in text  # revision 0 has no suffix
+
+
+@pytest.mark.asyncio
+async def test_step_started_edits_plan_message_and_sends_phase_line():
+    channel = MockChannel()
+    mw = _make_middleware(channel)
+    await mw.handle_plan_event(_event(StatusEventKind.PLAN_CREATED, _plan_payload()))
+    plan_msg_id = "1"
+
+    await mw.handle_plan_event(
+        _event(
+            StatusEventKind.PLAN_STEP_STARTED,
+            {"step_id": "1", "description": "First step"},
+        )
+    )
+
+    # Checklist edited in place on the SAME message
+    assert len(channel.edited_messages) == 1
+    _, edited_id, text = channel.edited_messages[0]
+    assert edited_id == plan_msg_id
+    assert "[~] 1. First step" in text
+    # Phase line goes to a DISTINCT tool-status message
+    assert len(channel.sent_messages) == 2
+    assert channel.sent_messages[1][1] == "Step 1/2: First step..."
+
+
+@pytest.mark.asyncio
+async def test_step_completed_marks_step_done():
+    channel = MockChannel()
+    mw = _make_middleware(channel)
+    await mw.handle_plan_event(_event(StatusEventKind.PLAN_CREATED, _plan_payload()))
+
+    await mw.handle_plan_event(
+        _event(StatusEventKind.PLAN_STEP_COMPLETED, {"step_id": "1", "description": "First step"})
+    )
+
+    _, _, text = channel.edited_messages[-1]
+    assert "[x] 1. First step" in text
+    assert "[ ] 2. Second step" in text
+
+
+@pytest.mark.asyncio
+async def test_plan_revised_rerenders_with_rev_suffix():
+    channel = MockChannel()
+    mw = _make_middleware(channel)
+    await mw.handle_plan_event(_event(StatusEventKind.PLAN_CREATED, _plan_payload()))
+    await mw.handle_plan_event(
+        _event(StatusEventKind.PLAN_STEP_STARTED, {"step_id": "1", "description": "First step"})
+    )
+
+    await mw.handle_plan_event(
+        _event(StatusEventKind.PLAN_REVISED, _plan_payload(revision=2, second_status="failed"))
+    )
+
+    _, edited_id, text = channel.edited_messages[-1]
+    assert edited_id == "1"  # still the same plan message
+    assert "(rev 2)" in text
+    # Full payload is authoritative: overlay cleared, statuses from payload
+    assert "[ ] 1. First step" in text
+    assert "[!] 2. Second step" in text
+
+
+@pytest.mark.asyncio
+async def test_plan_message_survives_run_completion():
+    channel = MockChannel()
+    mw = _make_middleware(channel)
+    await mw.handle_plan_event(_event(StatusEventKind.PLAN_CREATED, _plan_payload()))
+    # Give the run a tool-status message too
+    await mw.send_forced_status("Running tool: shell...")
+    status_msg_id = "2"
+
+    await mw.delete_status()
+    mw.reset()
+
+    # Only the tool-status line is deleted; the plan checklist stays
+    assert channel.deleted_messages == [(SESSION, status_msg_id)]
+    # After reset, further plan events no longer edit the old message
+    await mw.handle_plan_event(
+        _event(StatusEventKind.PLAN_STEP_COMPLETED, {"step_id": "1", "description": "First step"})
+    )
+    assert len(channel.edited_messages) == 0
+
+
+# ---------------------------------------------------------------------------
+# React route and node phases
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_react_route_produces_zero_messages():
+    channel = MockChannel()
+    mw = _make_middleware(channel)
+
+    await mw.handle_plan_event(
+        _event(
+            StatusEventKind.NODE_ENTERED,
+            {"route": "react", "reason": "simple"},
+            node="triage",
+        )
+    )
+
+    assert channel.sent_messages == []
+    assert channel.edited_messages == []
+
+
+@pytest.mark.asyncio
+async def test_node_entered_renders_phase_lines():
+    channel = MockChannel()
+    mw = _make_middleware(channel)
+
+    await mw.handle_plan_event(_event(StatusEventKind.NODE_ENTERED, {}, node="plan"))
+    await mw.handle_plan_event(_event(StatusEventKind.NODE_ENTERED, {}, node="synthesize"))
+
+    # First phase line sends the status message; second edits it in place
+    assert channel.sent_messages[0][1] == "Planning..."
+    assert channel.edited_messages[-1][2] == "Synthesizing..."
+
+
+@pytest.mark.asyncio
+async def test_reflection_verdict_and_module_selected_render_nothing():
+    channel = MockChannel()
+    mw = _make_middleware(channel)
+
+    await mw.handle_plan_event(
+        _event(StatusEventKind.REFLECTION_VERDICT, {"verdict": "advance", "reason": "ok"})
+    )
+    await mw.handle_plan_event(
+        _event(StatusEventKind.MODULE_SELECTED, {"kind": "planning", "module": "direct", "reason": ""})
+    )
+
+    assert channel.sent_messages == []
+    assert channel.edited_messages == []
+
+
+# ---------------------------------------------------------------------------
+# Guards: session mismatch, disabled, no context
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_session_mismatch_is_ignored():
+    channel = MockChannel()
+    mw = _make_middleware(channel)
+
+    await mw.handle_plan_event(
+        _event(StatusEventKind.PLAN_CREATED, _plan_payload(), session_key="telegram:999")
+    )
+
+    assert channel.sent_messages == []
+
+
+@pytest.mark.asyncio
+async def test_disabled_config_renders_nothing():
+    channel = MockChannel()
+    mw = _make_middleware(channel, config=_make_config(enabled=False))
+
+    await mw.handle_plan_event(_event(StatusEventKind.PLAN_CREATED, _plan_payload()))
+
+    assert channel.sent_messages == []
+
+
+@pytest.mark.asyncio
+async def test_no_armed_context_is_ignored():
+    mw = _make_middleware(channel=None)
+
+    # Must not raise without a channel/session
+    await mw.handle_plan_event(_event(StatusEventKind.PLAN_CREATED, _plan_payload()))
+
+
+@pytest.mark.asyncio
+async def test_channel_failures_are_swallowed():
+    class ExplodingChannel(MockChannel):
+        async def send_message(self, session_key: str, content: str) -> Any:
+            raise RuntimeError("boom")
+
+    mw = _make_middleware(ExplodingChannel())
+
+    # Never breaks the run
+    await mw.handle_plan_event(_event(StatusEventKind.PLAN_CREATED, _plan_payload()))
+
+
+# ---------------------------------------------------------------------------
+# PlanChannelSink
+# ---------------------------------------------------------------------------
+
+
+class RecordingMiddleware:
+    """Fake middleware capturing forwarded events."""
+
+    def __init__(self) -> None:
+        self.events: list[StatusEvent] = []
+
+    async def handle_plan_event(self, event: StatusEvent) -> None:
+        self.events.append(event)
+
+
+@pytest.mark.asyncio
+async def test_sink_forwards_plan_kinds_and_filters_the_rest():
+    mw = RecordingMiddleware()
+    sink = PlanChannelSink(mw)  # type: ignore[arg-type]
+
+    await sink.handle(_event(StatusEventKind.PLAN_CREATED, _plan_payload()))
+    await sink.handle(_event(StatusEventKind.NODE_ENTERED, {}, node="plan"))
+    await sink.handle(_event(StatusEventKind.TOOL_STARTED, {"tool": "shell"}))
+    await sink.handle(_event(StatusEventKind.RUN_STARTED))
+
+    assert [e.kind for e in mw.events] == [
+        StatusEventKind.PLAN_CREATED,
+        StatusEventKind.NODE_ENTERED,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_events_during_graph_run_use_armed_context():
+    """Events emitted mid-run (same asyncio task chain) hit the armed context.
+
+    Simulates the planner graph emitting through the bus while
+    MessageProcessor's set_context is in effect for the run.
+    """
+    channel = MockChannel()
+    mw = _make_middleware(channel)
+    bus = StatusBus("ws")
+    bus.add_sink(PlanChannelSink(mw))
+
+    async def fake_plan_node() -> None:
+        await bus.emit(_event(StatusEventKind.PLAN_CREATED, _plan_payload()))
+
+    async def fake_graph_run() -> None:
+        await fake_plan_node()
+
+    await fake_graph_run()
+
+    assert len(channel.sent_messages) == 1
+    assert channel.sent_messages[0][0] == SESSION
+    assert "Plan: Do the thing" in channel.sent_messages[0][1]
