@@ -275,6 +275,46 @@ builtins:
 #     model: text-embedding-3-small
 #     api_key: ${OPENAI_API_KEY}
 
+# Agent harness — topology and per-node models (workspace-level only, in agent.yaml —
+# not read from this file).
+# A bare `harness: {type: planner}` is complete — every node inherits the
+# workspace model. Node model: entries are provider-catalog names or
+# provider:model strings (credentials stay in the providers: catalog).
+# Unknown keys are a startup error (extra="forbid").
+# /harness prints the resolved node→model table.
+# harness:
+#   type: planner               # react (default) | planner
+#   triage:     {model: fast}   # optional per-node pointers: model, temperature, max_tokens
+#   planning:   {module: auto, model: strong}   # direct (default) | self_discover | auto
+#   creative:   {module: ideonomy}              # ideonomy (default) | auto
+#   reflection: {module: auto, allowed: [light, full]}  # off | light (default) | full | auto
+#   selector:   {model: fast}   # model for module-selection calls (auto paths)
+#   tool_equipping:
+#     enabled: false            # Equip a task-relevant tool subset before planning
+#     always_equip: [group:filesystem, send_message]  # Never-filtered floor
+#     max_tools: 25
+#     react_selector: false     # React-path alternative: stock LLMToolSelectorMiddleware
+#   execution:
+#     max_steps: 12             # Step budget per plan (1-100)
+
+# Learning loop — agent-authored skills (workspace-level only, in agent.yaml —
+# not read from this file).
+# Enables the manage_skill tool and the skill-authoring framework skill.
+# Unknown keys are a startup error (extra="forbid").
+# learning:
+#   enabled: false
+#   approval: immediate         # immediate (active + hot-reload) | staged (/skills approve)
+#   phase2:
+#     enabled: false            # Background skill evaluation every N main-lane runs
+#     every_n_runs: 25
+#     approval: staged
+#   budget:
+#     daily_tokens: 200000      # Daily workspace token budget gating phase 2
+#   limits:
+#     max_skills: 30            # Max active skills per workspace
+#     max_skill_tokens: 1200    # Max tokens per skill body
+#   # dream: reserved for 0.5.1 — validates but has no effect in 0.5.0
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Per-workspace model config (typically in agent.yaml, not here)
 #

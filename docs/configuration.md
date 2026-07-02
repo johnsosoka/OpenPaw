@@ -610,6 +610,159 @@ status_updates:
 
 Status updates are sent directly to the user channel and do not create extra checkpoint entries or consume additional API calls. Agent-driven `report_progress` tool calls bypass all throttling.
 
+#### Agent Harness
+
+```yaml
+harness:
+  type: planner              # react (default) | planner
+  triage:     {model: fast}
+  planning:   {module: auto, model: strong}
+  creative:   {module: ideonomy}
+  reflection: {module: auto, allowed: [light, full]}
+  selector:   {model: fast}
+  synthesize: {}
+  tool_equipping:
+    enabled: false
+    always_equip: [group:filesystem, send_message]
+    max_tools: 25
+    react_selector: false
+    model: null
+  execution:
+    max_steps: 12
+```
+
+Selects the agent topology. `react` (the default) is the existing ReAct loop, unchanged. `planner` adds a triage step that routes each message to the plain react loop (simple turns), a planning path (multi-step work), or an ideation path (open-ended asks), then executes the plan step by step with optional reflection and a final synthesis.
+
+**Zero-config:** a bare `harness: {type: planner}` is a complete, valid configuration — every node inherits the workspace model. Everything below is optional tuning.
+
+**Typos fail fast:** unlike the legacy config groups, `harness:` uses `extra="forbid"` — an unrecognized key is a startup error, not a silently ignored field.
+
+**type** — `react` (default) or `planner`.
+
+##### Per-Node Models
+
+Each node — `triage`, `planning`, `creative`, `reflection`, `selector`, `synthesize`, and `execution` — accepts the same model-pointer fields:
+
+**model** — A provider-catalog name (e.g. `fast`, `strong`) or a `provider:model` string. Unset = inherit the workspace model. Credentials (`api_key`, `base_url`, `region`) are **never** set here — they stay in the global `providers:` catalog.
+
+**temperature** — Sampling temperature for this node. Range: 0.0–2.0.
+
+**max_tokens** — Output token cap for this node. Minimum: 1.
+
+The `/harness` command prints the resolved node→model table. The runtime `/model` command overrides the **execution** node only — all other nodes keep their configured models.
+
+##### Reasoning Modules
+
+The `planning`, `creative`, and `reflection` nodes each select a reasoning module via `module`:
+
+**planning.module** — `direct` (default; single-call planning), `self_discover` (SELECT/ADAPT/IMPLEMENT over the 39 Self-Discover seed modules, with a per-task-type structure cache), or `auto`.
+
+**creative.module** — `ideonomy` (default; ideation through curated ideonomic lenses) or `auto`.
+
+**reflection.module** — `light` (default; a single structured check per step), `full` (may rewrite the remaining plan), `off` (the reflect node is omitted from the graph entirely), or `auto`.
+
+**allowed** — Restricts the candidate pool when `module: auto`. Only valid with `auto` — setting it on a pinned module is a config error. Example: `reflection: {module: auto, allowed: [light, full]}`.
+
+With `module: auto`, a selector step picks the module per task over module taglines. When only one candidate exists it binds directly without an LLM call; when the selection call fails, it falls back to the kind's default module. The `selector:` node config points the selection call at a model (a fast model is the natural fit; unset inherits the workspace model). Pinned modules never materialize a selector.
+
+##### Tool Equipping
+
+Off by default. When enabled on the planner path, an equip step selects a task-relevant tool subset before planning, and a `request_tools` recovery loop lets the executor re-equip (at most once per step) if a needed tool was filtered out.
+
+**tool_equipping.enabled** — Enable the equip phase. Default: `false`.
+
+**tool_equipping.always_equip** — Floor of tools that can never be filtered out. Supports `group:` prefixes like the builtin allow/deny lists. Default: `[group:filesystem, send_message]`.
+
+**tool_equipping.max_tools** — Maximum tools equipped per task. Default: `25`. Minimum: 1.
+
+**tool_equipping.react_selector** — React-path alternative: enable the stock LangChain `LLMToolSelectorMiddleware` instead of the planner equip node. Default: `false`. Independent of `enabled`.
+
+**tool_equipping.model** — Model pointer (catalog name) for the selection call. Unset = inherit.
+
+##### Execution
+
+**execution.max_steps** — Step budget for a single plan. Default: `12`. Range: 1–100. Also accepts the per-node model fields above.
+
+##### Examples
+
+Zero-config planner (every node inherits the workspace model):
+
+```yaml
+harness:
+  type: planner
+```
+
+Per-node models from the provider catalog (cheap model for routing, strong model for planning):
+
+```yaml
+# Global config.yaml
+providers:
+  fast:
+    type: openai
+    api_key: ${FAST_API_KEY}
+    base_url: https://api.example.com/v1
+    model: small-model
+  strong:
+    api_key: ${ANTHROPIC_API_KEY}
+    model: claude-sonnet-4-20250514
+
+# Workspace agent.yaml
+harness:
+  type: planner
+  triage:     {model: fast}
+  planning:   {model: strong}
+  selector:   {model: fast}
+  synthesize: {model: strong, temperature: 0.3}
+```
+
+Automatic module selection with a restricted pool:
+
+```yaml
+harness:
+  type: planner
+  planning:   {module: auto}                       # direct vs self_discover, per task
+  reflection: {module: auto, allowed: [light, full]}
+```
+
+---
+
+#### Learning Loop
+
+```yaml
+learning:
+  enabled: false             # Default: false
+  approval: immediate        # immediate | staged
+  phase2:
+    enabled: false           # Default: false
+    every_n_runs: 25
+    approval: staged         # immediate | staged
+  budget:
+    daily_tokens: 200000
+  limits:
+    max_skills: 30
+    max_skill_tokens: 1200
+```
+
+Lets the agent codify learned procedures, preferences, and tool recipes as workspace skills (see [Workspaces](workspaces.md) for the skills format). Like `harness:`, this group uses `extra="forbid"` — typos fail at startup.
+
+**enabled** — Master switch (Phase 1). Gates the learning section of the framework prompt, the `skill-authoring` framework skill, and the `manage_skill` tool. Default: `false`.
+
+**approval** — What happens when the agent writes a skill: `immediate` (default) makes it active and hot-reloads the prompt; `staged` holds it for human approval via `/skills approve <name>`.
+
+**phase2.enabled** — Background skill evaluation. Every N completed main-lane runs, a single evaluation call reviews a rolling activity digest; when it proposes a skill, a constrained `skill-builder` sub-agent drafts it. Requires `learning.enabled`. Default: `false`.
+
+**phase2.every_n_runs** — Runs between evaluations. Default: `25`. Minimum: 1.
+
+**phase2.approval** — Approval mode for Phase 2 skill writes. Default: `staged` (drafted skills await `/skills approve`).
+
+**budget.daily_tokens** — Daily token budget gating Phase 2. The check is coarse: it compares the **whole workspace's** token usage for the current UTC day against the budget, and quietly skips evaluations until the next day when exceeded. Default: `200000`.
+
+**limits.max_skills** — Maximum active skills per workspace, enforced on create by the SkillStore. Default: `30`.
+
+**limits.max_skill_tokens** — Maximum tokens per skill body, enforced on every write. Default: `1200`.
+
+**Reserved for 0.5.1:** the config model also accepts a `dream:` block (`enabled`, `schedule`, `approval`) for the Phase 3 dream sequence. It validates but has no execution code in 0.5.0 — setting `dream.enabled: true` does nothing yet.
+
 ---
 
 ### Merging Behavior

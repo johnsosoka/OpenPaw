@@ -210,6 +210,42 @@ The `delivery` field controls output routing: `channel` sends directly to the co
 
 ---
 
+## Agent Harness
+
+`openpaw/agent/harness/` introduces a topology seam: `MessageProcessor`, `WorkspaceRunner`, and commands program against an `AgentHarness` protocol rather than a concrete agent graph. All `create_agent` internals live behind it, so agent topologies can vary per workspace without touching the layers above.
+
+Two harness types ship in 0.5.0, selected by `harness.type` in the workspace config:
+
+- **`react`** (default) — the existing compiled `create_agent` ReAct loop, wrapped unchanged. Workspaces that don't set `harness:` behave exactly as before.
+- **`planner`** — a LangGraph `StateGraph` around the react loop:
+
+```
+START → triage ──→ react ──────────────────→ END       (simple turns)
+              ├──→ [ideate →] plan → execute_step      (multi-step / open-ended)
+                              execute_step ⇄ reflect
+                                    └──→ synthesize → END
+```
+
+A triage node routes each message: simple turns go straight to the plain react loop, multi-step work goes to planning, open-ended asks go through an ideation step first. Plans are first-class state — checkpointed, revisable, and rendered as a live edited-in-place checklist in the channel. Each `execute_step` invokes the **same compiled react graph** as an embedded subgraph, so middleware — steer/interrupt, approval gates, tool timeouts, status updates — applies to every planned step by construction. Triage and module calls fail open to the react path: a routing or module failure degrades to the current loop, never to an error.
+
+**Reasoning modules** (`agent/harness/modules/`) make the planning, creative, and reflection nodes pluggable behind one `ReasoningModule` interface with a registry. Shipped modules: `direct` (single-call planning), `self_discover` (SELECT/ADAPT/IMPLEMENT over the Self-Discover seed modules with a per-task-type cache), `ideonomy` (creative ideation through curated lenses), and `light`/`full` reflection. `module: auto` inserts a selector that picks per task over module taglines, short-circuiting without an LLM call when only one candidate exists.
+
+**Per-node models** — each node (triage, planning, creative, reflection, selector, synthesize, execution) can point at a provider-catalog entry; credentials stay in the catalog and resolution flows through the same `create_chat_model()` path. A bare `harness: {type: planner}` runs with every node inheriting the workspace model. `/harness` prints the resolved node→model table; the runtime `/model` override applies to the execution node only.
+
+**Status event backbone** (`model/status_event.py`, `runtime/status_bus.py`) — every observable happening (runs, tools, sub-agents, plan lifecycle, skill lifecycle, learning evaluations) is a machine-readable `StatusEvent` fanned out through a per-workspace `StatusBus` to pluggable sinks: channel rendering (the live plan checklist), a JSONL event log, and future consumers such as a web portal. Emission is best-effort and never blocks or fails an agent run.
+
+**Per-node telemetry** — harness nodes emit `node.completed` events with token counts and latency; per-node rows land in `token_usage.jsonl` alongside the unchanged run-level records.
+
+See [Configuration](configuration.md) for the full `harness:` field reference.
+
+### Learning Loop
+
+When `learning.enabled` is set, agents can codify learned procedures as workspace skills. Every programmatic skill write flows through the `SkillStore` (`stores/skill.py`) validation gates — name schema, per-skill token budget, per-workspace skill cap, and a content lint that rejects credential- and injection-shaped content — then writes atomically and triggers `WorkspaceRunner.reload_skills()`, hot-swapping the skill into the system prompt without a restart. The `/skills` command lists skills with provenance and approves or rejects staged ones; `/reload` re-reads skills from disk.
+
+Phase 2 (`learning.phase2.enabled`, off by default) adds background evaluation: every N main-lane runs, `LearningEvaluator` (`runtime/learning/`) reviews a rolling activity digest with a single LLM call; proposals are drafted by a constrained `skill-builder` sub-agent and land **staged** for human approval by default. Evaluations are debounced to one in flight, capped by a daily token budget, and never user-facing on failure.
+
+---
+
 ## Configuration Resolution
 
 Global defaults merge with workspace overrides, environment variables expand, and provider catalog entries resolve connection details before any workspace starts.
