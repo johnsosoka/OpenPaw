@@ -45,6 +45,27 @@ def warn_deprecated_global_keys(config: "Config") -> None:
         )
 
 
+# Workspace-only config groups that the global Config silently swallows
+# (extra="allow") — placing them in config.yaml does nothing.
+_WORKSPACE_ONLY_KEYS = ("harness", "learning")
+
+
+def warn_misplaced_workspace_keys(raw_config: dict[str, object]) -> None:
+    """Warn when workspace-only groups appear in the global config.
+
+    ``harness:`` and ``learning:`` are workspace ``agent.yaml`` groups; the
+    root Config model would swallow them silently (extra="allow"), defeating
+    the fail-fast intent of their extra="forbid" schemas.
+    """
+    for key in _WORKSPACE_ONLY_KEYS:
+        if key in raw_config:
+            _warn_once(
+                f"Config key '{key}:' in the global config.yaml has no effect — "
+                f"it is a workspace-level setting; move it to the workspace's "
+                f"config/agent.yaml."
+            )
+
+
 def warn_deprecated_workspace_model_keys(
     config: "Config",
     model_config: "WorkspaceModelConfig | None",

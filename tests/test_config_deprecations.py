@@ -113,3 +113,43 @@ class TestWorkspaceInlineCredentialWarnings:
                 _catalog_config(), model, "dinesh"
             )
         assert len(caplog.records) == 2
+
+
+class TestMisplacedWorkspaceKeys:
+    """harness:/learning: in global config.yaml are silently swallowed —
+    warn so the extra=forbid fail-fast intent isn't defeated (T5 finding)."""
+
+    def test_warns_on_global_harness_key(self, caplog):
+        from openpaw.core.config.deprecations import (
+            reset_warnings,
+            warn_misplaced_workspace_keys,
+        )
+
+        reset_warnings()
+        with caplog.at_level(logging.WARNING):
+            warn_misplaced_workspace_keys({"harness": {"type": "planner"}})
+        assert "harness" in caplog.text
+        assert "no effect" in caplog.text
+
+    def test_warns_on_global_learning_key_once(self, caplog):
+        from openpaw.core.config.deprecations import (
+            reset_warnings,
+            warn_misplaced_workspace_keys,
+        )
+
+        reset_warnings()
+        with caplog.at_level(logging.WARNING):
+            warn_misplaced_workspace_keys({"learning": {"enabled": True}})
+            warn_misplaced_workspace_keys({"learning": {"enabled": True}})
+        assert caplog.text.count("'learning:'") == 1
+
+    def test_silent_without_misplaced_keys(self, caplog):
+        from openpaw.core.config.deprecations import (
+            reset_warnings,
+            warn_misplaced_workspace_keys,
+        )
+
+        reset_warnings()
+        with caplog.at_level(logging.WARNING):
+            warn_misplaced_workspace_keys({"agent": {}, "providers": {}})
+        assert "no effect" not in caplog.text
