@@ -359,6 +359,8 @@ Discord free-tier bots have a 25 MB file size limit. Files exceeding this limit 
 
 ## Stdio Channel
 
+> **Work in progress.** The stdio channel is handy for quick local testing, but it is **not** recommended for actually operating your bots — log output interleaves with the agent's input and output in the same terminal. Use Telegram or Discord for real use.
+
 The `stdio` channel is a zero-config local interface for testing and development. It reads from stdin and prints agent responses to stdout — no bot tokens, API keys, or external platform setup required.
 
 ### Setup
@@ -377,7 +379,7 @@ Or run with the default when no channel is configured. The `stdio` channel is th
 Start the workspace and type messages directly in your terminal:
 
 ```bash
-poetry run openpaw -c config.yaml -w my-agent
+poetry run openpaw -c config.yaml -w my_agent
 ```
 
 ```

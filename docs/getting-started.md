@@ -11,7 +11,7 @@ This guide walks through installing OpenPaw, creating your first agent workspace
 - **Python 3.11+**
 - **Poetry 2.0+** for dependency management ([installation guide](https://python-poetry.org/docs/#installation))
 - **A channel (choose one):**
-  - **Stdio** — Zero-config terminal channel, no *channel* token needed — you still need an LLM provider key (great for testing)
+  - **Stdio** *(work in progress)* — Zero-config terminal channel for quick local testing; not recommended for actually operating a bot (log output interleaves with the chat)
   - **Telegram** — Bot token from [@BotFather](https://core.telegram.org/bots#botfather)
   - **Discord** — Bot token from [Developer Portal](https://discord.com/developers/applications)
 - **At least one model provider credential:**
@@ -278,33 +278,19 @@ See [scheduling.md](scheduling.md) for detailed configuration.
 
 ## Running Your Agent
 
-### 1. Quick Start with Stdio (No Channel Token Required)
-
-The fastest way to test OpenPaw without setting up Telegram or Discord. No *channel* token is required — you still need one LLM provider key (e.g. `ANTHROPIC_API_KEY`) for the agent to respond:
+### 1. Single Workspace (Telegram / Discord)
 
 ```bash
-# Scaffold a workspace with stdio channel
-poetry run openpaw init my_agent --model anthropic:claude-sonnet-4-20250514 --channel stdio
-
-# Run it
 poetry run openpaw -c config.yaml -w my_agent
 ```
 
-Type messages directly in your terminal. The agent responds to stdout. Press `Ctrl+D` or send an empty line to stop.
-
-### 2. Single Workspace (Telegram / Discord)
-
-```bash
-poetry run openpaw -c config.yaml -w my-agent
-```
-
-### 3. Multiple Workspaces
+### 2. Multiple Workspaces
 
 ```bash
 poetry run openpaw -c config.yaml -w agent1,agent2
 ```
 
-### 4. All Workspaces
+### 3. All Workspaces
 
 ```bash
 # Either syntax works
@@ -312,11 +298,22 @@ poetry run openpaw -c config.yaml --all
 poetry run openpaw -c config.yaml -w "*"
 ```
 
-### 5. Verbose Logging
+### 4. Verbose Logging
 
 ```bash
-poetry run openpaw -c config.yaml -w my-agent -v
+poetry run openpaw -c config.yaml -w my_agent -v
 ```
+
+### Local Testing with Stdio
+
+> **Work in progress.** The `stdio` channel lets you chat from the terminal without a bot token (`--channel stdio`), which is convenient for a quick smoke test. It is **not** recommended for actually operating a bot — log output interleaves with the chat. Use Telegram or Discord for real use.
+
+```bash
+poetry run openpaw init test_agent --model anthropic:claude-sonnet-4-20250514 --channel stdio
+poetry run openpaw -c config.yaml -w test_agent
+```
+
+Type messages directly in your terminal; the agent responds to stdout. Press `Ctrl+D` or send an empty line to stop.
 
 ## Testing Your Agent
 
