@@ -122,7 +122,7 @@ class AgentRunner:
             strip_thinking: Whether to strip <think>...</think> tokens from responses.
             timeout_seconds: Wall-clock timeout for agent invocations (default 5 minutes).
             enabled_builtins: List of enabled builtin tool names for conditional prompt sections.
-            extra_model_kwargs: Additional kwargs to pass to init_chat_model
+            extra_model_kwargs: Additional kwargs to pass to create_chat_model
                 (e.g., base_url for OpenAI-compatible APIs).
             middleware: Optional list of middleware functions for tool execution
                 (e.g., queue-aware middleware for steer/interrupt modes).

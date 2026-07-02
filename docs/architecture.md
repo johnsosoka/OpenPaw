@@ -1,6 +1,6 @@
 # Architecture
 
-OpenPaw is a multi-workspace AI agent framework built on [LangGraph](https://langchain-ai.github.io/langgraph/) (`create_react_agent`) and [LangChain](https://www.langchain.com/). This page covers system design, data flows, and architectural decisions for developers who want to understand, contribute to, or extend the framework.
+OpenPaw is a multi-workspace AI agent framework built on [LangGraph](https://langchain-ai.github.io/langgraph/) (`create_agent`) and [LangChain](https://www.langchain.com/). This page covers system design, data flows, and architectural decisions for developers who want to understand, contribute to, or extend the framework.
 
 <div align="center">
   <img src="../assets/images/openpaw-multi-agent.png" alt="OpenPaw Architecture Overview" width="650">
@@ -73,7 +73,7 @@ Cross-cutting infrastructure used by all higher layers. Nothing in `core/` impor
 
 ### `openpaw/agent/`
 
-The LangGraph execution layer. `AgentRunner` wraps `create_react_agent()`, composes the middleware stack, and manages model instantiation via `init_chat_model()`.
+The LangGraph execution layer. `AgentRunner` wraps `create_agent()` (from `langchain.agents`), composes the middleware stack, and manages model instantiation via `create_chat_model()` in `agent/model_factory.py`.
 
 **Key responsibilities:**
 
@@ -226,9 +226,9 @@ See [Configuration](configuration.md) for the full field reference and provider 
 
 ## Design Decisions
 
-### Why LangGraph `create_react_agent`?
+### Why LangGraph `create_agent`?
 
-LangGraph provides a proven ReAct loop with native tool calling, conversation checkpointing via `AsyncSqliteSaver`, and first-class middleware support for tool interception. Building equivalent infrastructure from scratch would duplicate significant work with fewer correctness guarantees. LangChain's `init_chat_model()` handles multi-provider model instantiation behind a single interface, removing the need for per-provider adapter code and making runtime model switching straightforward to implement.
+LangGraph provides a proven ReAct loop with native tool calling, conversation checkpointing via `AsyncSqliteSaver`, and first-class middleware support for tool interception. Building equivalent infrastructure from scratch would duplicate significant work with fewer correctness guarantees. Multi-provider model instantiation is handled by `create_chat_model()` (`agent/model_factory.py`), which instantiates providers directly (`ChatOpenAI`, `ChatAnthropic`, `ChatBedrockConverse`, `ChatXAI`, `ChatMoonshot`, and others) behind a single interface — direct instantiation gives per-provider control over kwargs (e.g., Moonshot thinking config) that generic factories silently drop.
 
 ### Why workspace isolation?
 
@@ -322,7 +322,7 @@ Secrets never appear in config files directly. The `${VAR}` expansion system rea
 
 ## Testing
 
-The test suite (1,100+ tests as of the current release) covers three levels:
+The test suite (3,200+ tests) covers three levels:
 
 **Unit tests** target individual components in isolation: config parsing and deep-merge logic, queue mode behaviors and lane concurrency, channel message format conversion, builtin registration and conditional loading, timezone utilities, filename sanitization, and sandbox path validation. Mock-heavy by design — no external services required.
 
