@@ -181,6 +181,13 @@ class BuiltinRegistry:
         except ImportError as e:
             logger.debug(f"Email tool not available: {e}")
 
+        try:
+            from openpaw.builtins.tools.manage_skill import ManageSkillTool
+
+            self.register_tool(ManageSkillTool)
+        except ImportError as e:
+            logger.debug(f"Manage skill tool not available: {e}")
+
         # Processors (sorted by metadata.priority in BuiltinLoader.load_processors)
         try:
             from openpaw.builtins.processors.file_persistence import FilePersistenceProcessor

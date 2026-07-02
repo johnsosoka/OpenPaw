@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 
 # Import SkillInfo at runtime (not TYPE_CHECKING) — it's a pure dataclass with
 # no framework dependencies, so it's safe to import in core/.
-from openpaw.model.skill import SkillInfo
+from openpaw.model.skill import SkillInfo, SkillStatus
 
 logger = logging.getLogger(__name__)
 
@@ -133,9 +133,11 @@ class AgentWorkspace:
         if self.team_roster:
             sections.append(f"<team>\n{self.team_roster}\n</team>")
 
-        # Skills — injected before workspace context so agents know what's available
-        if self.skills:
-            skills_section = self._build_skills_section()
+        # Skills — injected before workspace context so agents know what's available.
+        # Staged skills (awaiting /skills approve) are excluded from the prompt.
+        injectable_skills = [s for s in self.skills if s.status is not SkillStatus.STAGED]
+        if injectable_skills:
+            skills_section = self._build_skills_section(injectable_skills)
             sections.append(f"<skills>\n{skills_section}\n</skills>")
 
         # Workspace context — tells the agent its workspace name and top-level contents
@@ -178,12 +180,16 @@ class AgentWorkspace:
 
         return "\n".join(lines)
 
-    def _build_skills_section(self) -> str:
+    def _build_skills_section(self, skills: list[SkillInfo]) -> str:
         """Build the skills section of the system prompt.
 
         Renders each skill according to its inject mode:
         - FULL: name, description, separator, and complete content (legacy behavior).
         - SUMMARY: name, description, and a read_file() pointer for on-demand access.
+
+        Args:
+            skills: Skills to render (caller has already filtered out
+                staged skills).
 
         Returns:
             Formatted skills section string, ready to wrap in ``<skills>`` tags.
@@ -195,7 +201,7 @@ class AgentWorkspace:
         # Check if any skills use summary mode — add preamble if so
         has_summary = any(
             skill.inject == SkillInjectMode.SUMMARY and skill.read_path
-            for skill in self.skills
+            for skill in skills
         )
         if has_summary:
             lines.append("")
@@ -204,7 +210,7 @@ class AgentWorkspace:
                 "content. Use read_file() to load the full skill when you need it."
             )
 
-        for skill in self.skills:
+        for skill in skills:
             lines.append("")
             lines.append(f"### {skill.name}")
 

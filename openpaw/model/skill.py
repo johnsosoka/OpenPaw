@@ -1,8 +1,34 @@
 """Domain models for agent skills."""
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
+
+
+class SkillStatus(StrEnum):
+    """Skill lifecycle status (ADR-105).
+
+    Attributes:
+        ACTIVE: Loaded and injected into the system prompt.
+        STAGED: Loaded into the skills list but NOT injected into the prompt;
+            awaits ``/skills approve``.
+        DEPRECATED: Skipped by the loader (like the ``_`` prefix) but kept
+            on disk.
+    """
+
+    ACTIVE = "active"
+    STAGED = "staged"
+    DEPRECATED = "deprecated"
+
+
+class SkillCreatedBy(StrEnum):
+    """Provenance of a skill write (PRD-001 F4.2)."""
+
+    HUMAN = "human"
+    AGENT = "agent"
+    MIDDLEWARE = "middleware"
+    DREAM = "dream"
 
 
 class SkillInjectMode(StrEnum):
@@ -41,6 +67,17 @@ class SkillInfo:
             (e.g., "agent/skills/my-skill/SKILL.md"). Computed by the loader.
         source: Origin of this skill — "workspace" for user-defined skills,
             "framework" for framework-bundled skills.
+        version: Monotonic per-skill counter, bumped on every SkillStore
+            update. Frontmatter key: ``version``.
+        created_by: Provenance of the original write. Frontmatter key:
+            ``created_by``.
+        source_ref: Provenance reference (e.g. a session/conversation key).
+            Frontmatter key: ``source`` — named ``source_ref`` here because
+            ``source`` is already taken by the workspace/framework origin.
+        updated_at: UTC timestamp of the last write, or None if the file has
+            never been stamped. Frontmatter key: ``updated_at``.
+        status: Lifecycle status (active | staged | deprecated). Frontmatter
+            key: ``status``.
     """
 
     name: str
@@ -50,3 +87,8 @@ class SkillInfo:
     inject: SkillInjectMode = SkillInjectMode.SUMMARY
     read_path: str = ""
     source: str = "workspace"
+    version: int = 1
+    created_by: SkillCreatedBy = SkillCreatedBy.HUMAN
+    source_ref: str = ""
+    updated_at: datetime | None = None
+    status: SkillStatus = SkillStatus.ACTIVE

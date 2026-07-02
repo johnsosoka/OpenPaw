@@ -7,6 +7,7 @@ from openpaw.channels.commands.handlers.model import ModelCommand
 from openpaw.channels.commands.handlers.new import NewCommand
 from openpaw.channels.commands.handlers.queue_mode import QueueModeCommand
 from openpaw.channels.commands.handlers.reload import ReloadCommand
+from openpaw.channels.commands.handlers.skills import SkillsCommand
 from openpaw.channels.commands.handlers.start import StartCommand
 from openpaw.channels.commands.handlers.status import StatusCommand
 
@@ -26,6 +27,7 @@ def get_framework_commands() -> list[CommandHandler]:
         StatusCommand(),
         ModelCommand(),
         ReloadCommand(),
+        SkillsCommand(),
     ]
 
 
@@ -37,6 +39,7 @@ __all__ = [
     "NewCommand",
     "QueueModeCommand",
     "ReloadCommand",
+    "SkillsCommand",
     "StartCommand",
     "StatusCommand",
 ]
