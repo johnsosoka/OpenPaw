@@ -174,6 +174,11 @@ class AgentRunner:
         return HarnessKind.REACT
 
     @property
+    def agent_graph(self) -> Any:
+        """The compiled create_agent graph (embedded as a node by PlannerHarness)."""
+        return self._agent
+
+    @property
     def max_output_tokens(self) -> int | None:
         """Get the configured output token cap for this runner.
 

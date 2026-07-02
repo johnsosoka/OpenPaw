@@ -6,10 +6,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from openpaw.agent import AgentRunner
-from openpaw.agent.harness import AgentHarness
-from openpaw.core.config.models import ProviderDefinition
+from openpaw.agent.harness import AgentHarness, HarnessKind
+from openpaw.agent.harness.planner import PlannerHarness
+from openpaw.core.config.models import HarnessConfig, ProviderDefinition
 from openpaw.model.spawn_profile import SpawnProfile
+from openpaw.model.status_event import StatusEmitter
 from openpaw.workspace.model_resolver import ModelResolver
+from openpaw.workspace.node_model_resolver import NodeModelResolver
 from openpaw.workspace.tool_filter import filter_workspace_tools
 
 __all__ = ["AgentFactory", "RuntimeModelOverride", "filter_workspace_tools"]
@@ -86,6 +89,7 @@ class AgentFactory:
             extra_model_kwargs=extra_model_kwargs,
         )
         self._runtime_override: RuntimeModelOverride | None = None
+        self._status_emitter: StatusEmitter | None = None
 
     # ------------------------------------------------------------------
     # Public properties
@@ -132,13 +136,21 @@ class AgentFactory:
         """
         self._mcp_tools = list(tools)
 
+    def set_status_emitter(self, emitter: StatusEmitter) -> None:
+        """Wire the status event emitter used by harness nodes (ADR-106).
+
+        Call before create_harness(); defaults to a no-op emitter when unset.
+        """
+        self._status_emitter = emitter
+
     def create_harness(self, checkpointer: Any | None = None) -> AgentHarness:
         """Create the interactive agent harness for this workspace.
 
         The seam callers (WorkspaceRunner/MessageProcessor/connector) hold —
         they never depend on the underlying graph topology (ADR-101 §2).
-        Dispatches on the workspace harness type; today the only interactive
-        harness is react (the planner harness lands with the 0.5.0 graph).
+        Dispatches on ``workspace.config.harness.type``: react (default) is
+        the exact current AgentRunner path; planner wraps that runner as the
+        execution engine inside the ADR-101 graph.
 
         Args:
             checkpointer: Optional checkpointer for conversation state.
@@ -146,7 +158,29 @@ class AgentFactory:
         Returns:
             The configured AgentHarness.
         """
-        return self.create_agent(checkpointer=checkpointer)
+        harness_config: HarnessConfig | None = (
+            self._workspace.config.harness if getattr(self._workspace, "config", None) else None
+        )
+        if harness_config is None or harness_config.type != HarnessKind.PLANNER.value:
+            return self.create_agent(checkpointer=checkpointer)
+
+        inner = self.create_agent(checkpointer=checkpointer)
+        node_resolver = NodeModelResolver(
+            resolver=self._resolver,
+            workspace_model=self._configured_model,
+            workspace_api_key=self._resolver.resolve_api_key(self._configured_model),
+            workspace_temperature=self._temperature,
+            workspace_region=self._resolver._region,
+            workspace_extra_kwargs=self._resolver._extra_model_kwargs,
+        )
+        self._logger.info("Creating planner harness for workspace: %s", self._workspace.name)
+        return PlannerHarness(
+            workspace=self._workspace,
+            inner=inner,
+            harness_config=harness_config,
+            node_resolver=node_resolver,
+            emitter=self._status_emitter,
+        )
 
     def create_agent(self, checkpointer: Any | None = None) -> AgentRunner:
         """Create a configured AgentRunner instance.

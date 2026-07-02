@@ -283,9 +283,11 @@ class WorkspaceInitializer:
             else StatusUpdatesConfig()
         )
         status_update_middleware: StatusUpdateMiddleware | None = None
+        status_bus: StatusBus | None = None
         if status_update_config.enabled:
             # ADR-106 Phase A: status events flow to a per-workspace bus
-            # alongside unchanged channel rendering.
+            # alongside unchanged channel rendering. The same bus feeds the
+            # harness nodes via AgentFactory.set_status_emitter below.
             status_bus = StatusBus(self._workspace.name)
             status_bus.add_sink(SessionLogSink(self._workspace.path))
             status_update_middleware = StatusUpdateMiddleware(
@@ -342,6 +344,8 @@ class WorkspaceInitializer:
             provider_catalog=self._config.providers,
             channel_logging_enabled=channel_logging_enabled,
         )
+        if status_bus is not None:
+            agent_factory.set_status_emitter(status_bus)
         agent_runner = agent_factory.create_harness(checkpointer=None)
 
         # Create message processor
