@@ -157,6 +157,7 @@ class TestSubAgentRunnerShutdown:
         mock_subagent_runner = AsyncMock()
         mock_subagent_runner.shutdown = AsyncMock()
         runner._subagent_runner = mock_subagent_runner
+        runner._learning_evaluator = None  # Phase 2 learning loop disabled
         runner._running = True
         runner._queue_processor_task = None
         runner._cleanup_task = None  # Added for periodic cleanup task

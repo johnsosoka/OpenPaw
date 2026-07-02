@@ -2,6 +2,7 @@
 
 import logging
 import time
+from collections.abc import Callable
 from typing import Any
 
 from openpaw.agent.harness import AgentHarness
@@ -48,6 +49,7 @@ class MessageProcessor:
         lifecycle_config: Any = None,
         status_reminder_middleware: Any = None,
         status_update_middleware: Any = None,
+        learning_recorder: Callable[[str, str], None] | None = None,
     ):
         """Initialize message processor.
 
@@ -73,6 +75,9 @@ class MessageProcessor:
             status_update_middleware: Optional StatusUpdateMiddleware instance.
                 When provided, its set_context() is called before agent runs and
                 reset() is called in the finally block.
+            learning_recorder: Optional fire-and-forget callable invoked with
+                (user_content, response) after each successful non-system
+                agent run (PRD-001 F2.1). Must never raise.
         """
         self._agent_runner = agent_runner
         self._session_manager = session_manager
@@ -91,6 +96,18 @@ class MessageProcessor:
         self._lifecycle_config = lifecycle_config
         self._status_reminder_middleware = status_reminder_middleware
         self._status_update_middleware = status_update_middleware
+        self._learning_recorder = learning_recorder
+
+    def set_learning_recorder(
+        self, recorder: Callable[[str, str], None] | None
+    ) -> None:
+        """Wire the learning-loop run recorder (set post-construction).
+
+        Args:
+            recorder: Callable invoked with (user_content, response) after
+                each successful non-system agent run, or None to disable.
+        """
+        self._learning_recorder = recorder
 
     def update_agent_runner(self, runner: "AgentHarness") -> None:
         """Update the agent harness instance.
@@ -467,6 +484,12 @@ class MessageProcessor:
                         )
                         fallback = "I processed your message but my response was empty. Please try again."
                         await channel.send_message(session_key, fallback)
+
+                # Learning loop hook (PRD-001 F2.1): count successful
+                # non-system agent invocations. Fire-and-forget — the
+                # recorder owns its own error containment.
+                if self._learning_recorder and not is_system_batch:
+                    self._learning_recorder(combined_content, response or "")
 
             except ApprovalRequiredError as e:
                 # Log partial metrics if available
