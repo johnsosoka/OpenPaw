@@ -3,9 +3,15 @@
 A seatbelt, not a guarantee — the pattern list will have false negatives;
 staged mode is the real defense for programmatic write paths. Kept in a
 dedicated module so the list is unit-testable in isolation.
+
+Content is NFKC-normalized before matching so full-width and other
+compatibility variants of ASCII don't slip past the patterns. Cross-script
+homoglyphs (e.g. Cyrillic а for Latin a) remain a known gap — another reason
+staged mode is the real defense.
 """
 
 import re
+import unicodedata
 
 # (pattern, human-readable reason) pairs, checked against the skill body.
 DENY_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -50,4 +56,5 @@ def lint_skill_content(content: str) -> list[str]:
         List of human-readable reasons for every matching pattern.
         Empty list means the content passed the lint.
     """
-    return [reason for pattern, reason in DENY_PATTERNS if pattern.search(content)]
+    normalized = unicodedata.normalize("NFKC", content)
+    return [reason for pattern, reason in DENY_PATTERNS if pattern.search(normalized)]

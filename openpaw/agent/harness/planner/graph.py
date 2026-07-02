@@ -1,5 +1,11 @@
 """Planner harness StateGraph assembly (ADR-101 §1).
 
+ponytail: this module is over the 700-line smell threshold by design — the
+node functions are closures over shared build-time state (emitter, config,
+run context, node models); splitting them into free functions would mean
+threading that state through every signature. Split only if a node grows
+beyond a screen or gains an independent reason to change.
+
 Topology::
 
     START -> triage --Command(goto)--> react | ideate | plan | execute_step

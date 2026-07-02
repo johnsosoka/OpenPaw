@@ -25,6 +25,9 @@ from langchain_core.messages import HumanMessage
 from langchain_core.messages.utils import count_tokens_approximately
 
 from openpaw.core.paths import SKILLS_DIR
+from openpaw.core.skill_file import (
+    MAX_DESCRIPTION_LENGTH as _MAX_DESCRIPTION_LENGTH,
+)
 from openpaw.core.skill_file import SKILL_FILENAME, load_skill_file
 from openpaw.model.skill import SkillCreatedBy, SkillInfo, SkillStatus
 from openpaw.model.status_event import StatusEmitter, StatusEvent, StatusEventKind
@@ -298,11 +301,16 @@ class SkillStore:
     def _validate_and_write_sync(self, skill: SkillInfo, is_new: bool) -> None:
         """Run all gates, then write — one thread hop for the blocking work.
 
+        Gates and write happen under one lock so the invariants the gates
+        enforce (name collision, max_skills budget) hold atomically against
+        concurrent writers (manage_skill tool vs background learning loop).
+
         Raises:
             SkillRejectedError: One or more gates failed; nothing written.
         """
-        self._run_gates(skill, is_new)
-        self._write_skill_sync(skill)
+        with self._lock:
+            self._run_gates(skill, is_new)
+            self._write_skill_locked(skill)
 
     def _run_gates(self, skill: SkillInfo, is_new: bool) -> None:
         """Apply the gates in order; collect all failures; reject atomically."""
@@ -346,10 +354,24 @@ class SkillStore:
                 )
             )
 
-        # Gate 3 — content lint
+        # Gate 1b — description cap (mirrors the loader's read-time cap; the
+        # description is prompt-injected for SUMMARY skills, so it is bounded
+        # and linted like content).
+        if len(skill.description) > _MAX_DESCRIPTION_LENGTH:
+            errors.append(
+                SkillValidationError(
+                    "schema",
+                    f"description exceeds {_MAX_DESCRIPTION_LENGTH} characters",
+                )
+            )
+
+        # Gate 3 — content lint. The description is linted too: for SUMMARY
+        # skills (the default inject mode) the description is the ONLY text
+        # that reaches the system prompt, so it is exactly as
+        # injection-sensitive as the body.
         errors.extend(
             SkillValidationError("content", reason)
-            for reason in lint_skill_content(skill.content)
+            for reason in lint_skill_content(f"{skill.description}\n{skill.content}")
         )
 
         # Gate 4 — policy is not a rejection gate: the approval mode already
@@ -370,12 +392,16 @@ class SkillStore:
     def _write_skill_sync(self, skill: SkillInfo) -> None:
         """Atomic write: render SKILL.md, tmp + rename under the lock."""
         with self._lock:
-            skill_dir = self._skills_dir / skill.name
-            skill_dir.mkdir(parents=True, exist_ok=True)
-            target = skill_dir / SKILL_FILENAME
-            tmp = target.with_suffix(".tmp")
-            tmp.write_text(self._render(skill), encoding="utf-8")
-            tmp.replace(target)  # POSIX-atomic rename
+            self._write_skill_locked(skill)
+
+    def _write_skill_locked(self, skill: SkillInfo) -> None:
+        """Write body — caller holds self._lock."""
+        skill_dir = self._skills_dir / skill.name
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        target = skill_dir / SKILL_FILENAME
+        tmp = target.with_suffix(".tmp")
+        tmp.write_text(self._render(skill), encoding="utf-8")
+        tmp.replace(target)  # POSIX-atomic rename
         logger.info(
             f"Skill written: {skill.name} v{skill.version} ({skill.status.value})"
         )

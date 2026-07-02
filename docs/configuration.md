@@ -753,7 +753,7 @@ Lets the agent codify learned procedures, preferences, and tool recipes as works
 
 **phase2.every_n_runs** — Runs between evaluations. Default: `25`. Minimum: 1.
 
-**phase2.approval** — Approval mode for Phase 2 skill writes. Default: `staged` (drafted skills await `/skills approve`).
+**phase2.approval** — Approval mode for Phase 2 skill writes. Default: `staged` (drafted skills await `/skills approve`). **Warning:** setting this to `immediate` removes the human gate on middleware-authored skills — background-drafted content would enter the agent's prompt with only the content lint as defense. Keep `staged` unless you have a specific reason not to.
 
 **budget.daily_tokens** — Daily token budget gating Phase 2. The check is coarse: it compares the **whole workspace's** token usage for the current UTC day against the budget, and quietly skips evaluations until the next day when exceeded. Default: `200000`.
 

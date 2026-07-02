@@ -21,6 +21,10 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
+# Deliberate upward reach (agent -> builtins) for group-name resolution,
+# mirroring the existing status_update -> builtins._channel_context precedent.
+# No import cycle: builtins.registry does not import agent/. Callers can
+# inject group_resolver to avoid the reach entirely (tests do).
 from openpaw.builtins.registry import BuiltinRegistry
 
 logger = logging.getLogger(__name__)
