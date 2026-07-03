@@ -107,9 +107,18 @@ class _ImplementSchema(BaseModel):
 
 
 class SelfDiscoverState(TypedDict, total=False):
-    """Subgraph state — JSON-safe values only (serializer rule, ADR-109 §1)."""
+    """Subgraph state — JSON-safe values only (serializer rule, ADR-109 §1).
+
+    Run-varying inputs (``task``, ``context_brief``, ``conversation_digest``,
+    ``tool_lines``) are seeded from the ReasoningContext by ``run()``: the
+    module instance is shared across concurrent sessions, so per-run data
+    must travel in state, never on the instance (see ReasoningModule).
+    """
 
     task: str
+    context_brief: str
+    conversation_digest: str
+    tool_lines: str
     cache_hit: bool
     selected_modules: list[str]
     adapted_modules: list[str]
@@ -160,11 +169,15 @@ class SelfDiscoverPlanner(ReasoningModule):
                 fallback handling, same as DirectPlanner.
         """
         self._ctx = ctx
+        initial = SelfDiscoverState(
+            task=ctx.task,
+            context_brief=ctx.context_brief,
+            conversation_digest=ctx.conversation_digest,
+            tool_lines="\n".join(f"- {t.name}: {t.description}" for t in ctx.tools_summary),
+        )
         result = cast(
             SelfDiscoverState,
-            await self._graph.ainvoke(
-                SelfDiscoverState(task=ctx.task), config=unpersisted_nested_config()
-            ),
+            await self._graph.ainvoke(initial, config=unpersisted_nested_config()),
         )
         structure = result["structure"]
         plan = Plan(
@@ -211,7 +224,13 @@ class SelfDiscoverPlanner(ReasoningModule):
         return builder.compile(name="self_discover")
 
     def _require_ctx(self) -> ReasoningContext:
-        """The per-run context bound by ``run()`` — nodes never run without it."""
+        """The context bound by ``run()`` — workspace-constant reads ONLY.
+
+        The instance is shared across concurrent sessions, so a mid-run
+        rebind by another session is expected; nodes may read only
+        workspace-constant fields through it (``model``, ``workspace`` for
+        event identity). Run-varying data lives in graph state.
+        """
         if self._ctx is None:
             raise RuntimeError("SelfDiscoverPlanner node executed outside run()")
         return self._ctx
@@ -277,16 +296,17 @@ class SelfDiscoverPlanner(ReasoningModule):
         structure = state["structure"]
         self._emit_structure_insight(ctx, structure)
         self._emit(ctx, StatusEventKind.MODULE_PHASE, {"phase": "solving"})
-        tool_lines = "\n".join(f"- {t.name}: {t.description}" for t in ctx.tools_summary)
         # Session context on solve only — discovery stays task-only so cached
         # structures remain transferable (module docstring, ADR-108 §4).
+        # All run-varying inputs come from state, never self._ctx: the
+        # instance is shared across concurrent sessions.
         prompt = (
             f"{_SOLVE_INSTRUCTION}\n\n"
             f"Reasoning structure:\n{json.dumps(structure, indent=2)}\n\n"
-            f"Task: {ctx.task}\n\n"
-            f"{render_context_block(ctx.context_brief)}"
-            f"Recent context:\n{ctx.conversation_digest}\n\n"
-            f"Available tools:\n{tool_lines}\n\n"
+            f"Task: {state['task']}\n\n"
+            f"{render_context_block(state['context_brief'])}"
+            f"Recent context:\n{state['conversation_digest']}\n\n"
+            f"Available tools:\n{state['tool_lines']}\n\n"
             "Then produce a short, concrete, ordered plan. Each step must be "
             "independently executable and verifiable."
         )

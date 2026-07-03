@@ -1,5 +1,6 @@
 """Tests for SelfDiscoverPlanner and StructureCache (ADR-102 §3, ADR-109 §2)."""
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -7,11 +8,17 @@ from typing import TypedDict, cast
 
 import pytest
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import BaseMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 import openpaw.agent.harness.modules.self_discover.cache as cache_mod
-from openpaw.agent.harness.modules.base import ModuleKind, ReasoningContext, WorkspaceInfo
+from openpaw.agent.harness.modules.base import (
+    ModuleKind,
+    ReasoningContext,
+    ToolSummary,
+    WorkspaceInfo,
+)
 from openpaw.agent.harness.modules.direct import _PlanSchema
 from openpaw.agent.harness.modules.self_discover import SelfDiscoverPlanner, StructureCache
 from openpaw.agent.harness.modules.self_discover.planner import (
@@ -271,6 +278,93 @@ async def test_legacy_text_structure_emits_no_insight(tmp_path: Path):
 
     insights = [e for e in events if str(e.kind) == "module.insight"]
     assert insights == []  # structure_text-only fallback has no useful labels
+
+
+# ---------------------------------------------------------------------------
+# Concurrency: module instances are shared across sessions (the harness
+# builds them once; main_concurrency defaults to 4). Run-varying data must
+# come from graph state — never from self._ctx, which a second run rebinds
+# mid-flight (ReasoningModule invariant).
+# ---------------------------------------------------------------------------
+
+
+class _GatedSharedModel:
+    """One model instance for two overlapping runs (workspace-constant, as in
+    production). Dispatches on schema; the SELECT call blocks until released
+    so the test can interleave a complete second run mid-discovery."""
+
+    def __init__(self) -> None:
+        self.solve_prompts: list[str] = []
+        self.in_select = asyncio.Event()
+        self.release_select = asyncio.Event()
+
+    def with_structured_output(self, schema: type) -> "_BoundSchema":
+        return _BoundSchema(self, schema)
+
+
+class _BoundSchema:
+    """Per-call schema binding — safe under concurrent with_structured_output."""
+
+    def __init__(self, model: _GatedSharedModel, schema: type) -> None:
+        self._model = model
+        self._schema = schema
+
+    async def ainvoke(self, messages: list[BaseMessage]) -> object:
+        prompt = str(messages[0].content)
+        if self._schema is _SelectSchema:
+            self._model.in_select.set()
+            await self._model.release_select.wait()
+            return _SelectSchema(selected_indices=[1])
+        if self._schema is _AdaptSchema:
+            return _AdaptSchema(adapted_modules=["adapted for the task"])
+        if self._schema is _ImplementSchema:
+            return _ImplementSchema(
+                steps=[_StructureStep(name="discovered_step", instruction="do the work")]
+            )
+        self._model.solve_prompts.append(prompt)
+        return _PlanSchema(steps=["one step"])
+
+
+async def test_concurrent_runs_on_one_instance_do_not_cross_contaminate(tmp_path: Path):
+    """Run B rebinding self._ctx mid-run-A must not leak B's task, brief,
+    digest, or tools into A's solve prompt (they travel in graph state)."""
+    planner, cache = make_planner(tmp_path)
+    model = _GatedSharedModel()
+    task_a, task_b = "alpha: audit the logs", "beta: build the report"
+    # B is a cache hit (single solve); A does full discovery and is held at
+    # SELECT so B's entire run — including the self._ctx rebind — happens
+    # mid-run-A. Deterministic: pure event gating, no sleeps.
+    cache.put(cache.key_for(task_b), {"beta_cached_step": "beta instruction"})
+
+    def ctx_for(task: str, tag: str) -> ReasoningContext:
+        return make_ctx(
+            cast(BaseChatModel, model),
+            task=task,
+            context_brief=f"{tag} brief",
+            conversation_digest=f"{tag} digest",
+            tools_summary=[ToolSummary(name=f"{tag}_tool", description=f"{tag} tool")],
+            workspace=WorkspaceInfo(name="testws", timezone="UTC", workspace_path=tmp_path),
+        )
+
+    run_a = asyncio.create_task(planner.run(ctx_for(task_a, "alpha")))
+    await model.in_select.wait()  # A is mid-discovery with ctx_A bound
+
+    artifact_b = await planner.run(ctx_for(task_b, "beta"))  # rebinds self._ctx
+
+    model.release_select.set()  # A resumes AFTER the rebind
+    artifact_a = await run_a
+
+    solve_b, solve_a = model.solve_prompts  # B solved while A was held
+    assert task_b in solve_b and "beta_cached_step" in solve_b
+    assert "beta brief" in solve_b and "beta digest" in solve_b and "beta_tool" in solve_b
+    assert "alpha" not in solve_b
+
+    assert task_a in solve_a and "discovered_step" in solve_a
+    assert "alpha brief" in solve_a and "alpha digest" in solve_a and "alpha_tool" in solve_a
+    assert "beta" not in solve_a  # the cross-session leak the state seeding prevents
+
+    assert artifact_a.plan is not None and artifact_a.plan.objective == task_a
+    assert artifact_b.plan is not None and artifact_b.plan.objective == task_b
 
 
 # ---------------------------------------------------------------------------

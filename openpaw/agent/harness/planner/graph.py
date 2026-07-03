@@ -119,9 +119,6 @@ from openpaw.model.status_event import JsonValue, StatusEmitter, StatusEvent, St
 
 logger = logging.getLogger(__name__)
 
-# Shared with module subgraphs (ADR-109) — single source in modules/base.py.
-_CONFIG_KEY_CHECKPOINTER = CONFIG_KEY_CHECKPOINTER
-
 # Digest of recent conversation handed to triage/planning prompts (ADR-108
 # §6): at most 12 dialogue messages within ~1k approximate tokens (~4k chars),
 # each individually truncated.
@@ -363,10 +360,13 @@ def build_planner_graph(
         # batches before the graph, but the harness cannot rely on callers.
         if last_text.lstrip().startswith("[SYSTEM]"):
             await _emit(StatusEventKind.NODE_ENTERED, "triage", {"route": "react", "reason": "system batch"})
-            system_update: dict[str, Any] = {"route": "react", "objective": last_text[:200]}
-            if briefing:
-                system_update["context_brief"] = None
-            return Command(update=system_update, goto="react")
+            # context_brief nulled unconditionally: any route that skips the
+            # brief node must drop a stale brief left on the thread (possibly
+            # from when briefing WAS enabled).
+            return Command(
+                update={"route": "react", "objective": last_text[:200], "context_brief": None},
+                goto="react",
+            )
 
         # Entry event (no "route" key) — renders the "Thinking..." status
         # while the triage model decides; the post-decision event below
@@ -411,14 +411,15 @@ def build_planner_graph(
                 # Ideate route plans with the full catalog (no equip node in
                 # the path); drop any stale selection from a prior plan run.
                 update["equipped_tools"] = None
-        if briefing:
-            if decision.route in ("plan", "ideate"):
-                # ADR-108: brief precedes equip/ideate/plan; its Command
-                # routes onward (the brief node overwrites context_brief).
-                goto = "brief"
-            else:
-                # React runs never brief; drop any stale brief on the thread.
-                update["context_brief"] = None
+        if briefing and decision.route in ("plan", "ideate"):
+            # ADR-108: brief precedes equip/ideate/plan; its Command
+            # routes onward (the brief node overwrites context_brief).
+            goto = "brief"
+        else:
+            # Every route that skips the brief node drops any stale brief on
+            # the thread — including plan/ideate with briefing disabled (a
+            # brief persisted while briefing WAS on must not leak forward).
+            update["context_brief"] = None
         return Command(update=update, goto=goto)
 
     # --- brief (ADR-108; node only added when briefing is on) -----------------
@@ -648,7 +649,7 @@ def build_planner_graph(
         )
         step_config: dict[str, Any] = {
             "recursion_limit": inner_recursion_limit,
-            "configurable": {_CONFIG_KEY_CHECKPOINTER: None},
+            "configurable": {CONFIG_KEY_CHECKPOINTER: None},
         }
         # Equipped runs get a step-scoped executor built for the subset;
         # None (equipping off, or equip fail-open) is the shared react graph.

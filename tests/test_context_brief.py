@@ -14,6 +14,7 @@ import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.messages.utils import count_tokens_approximately
+from langgraph.checkpoint.memory import MemorySaver
 from pydantic import ValidationError
 
 from openpaw.agent.harness.modules.base import (
@@ -398,6 +399,29 @@ async def test_brief_disabled_by_config_omits_the_node() -> None:
         harness_config=config,
     )
     assert "brief" not in graph.nodes
+
+
+async def test_disabled_briefing_clears_stale_brief_left_on_the_thread() -> None:
+    """A brief persisted while briefing WAS enabled must not leak into runs
+    after briefing is disabled: triage nulls context_brief on every route
+    that skips the brief node, unconditionally."""
+    calls: list[str] = []
+    graph = build(  # brief=None: node absent, briefing disabled
+        triage=[plan_decision()],
+        planning=[_PlanSchema(steps=["one"])],
+        reflection=[advance()],
+        react=make_fake_react(["did it"], calls),
+        checkpointer=MemorySaver(),
+    )
+    config = {"configurable": {"thread_id": "t-stale-brief"}}
+    await graph.aupdate_state(config, {"context_brief": "Leftover brief."}, as_node="plan")
+
+    result = await graph.ainvoke({"messages": [HumanMessage("do it")]}, config=config)
+
+    assert len(calls) == 1
+    assert "Session context:" not in calls[0]  # step prompt carries no stale block
+    assert "Leftover brief." not in calls[0]
+    assert result.get("context_brief") is None
 
 
 async def test_brief_absent_without_model_keeps_todays_topology() -> None:

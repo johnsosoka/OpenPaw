@@ -409,6 +409,11 @@ class PlannerHarness:
     async def run(self, message: str, session_id: str | None = None, thread_id: str | None = None) -> str:
         """Execute one turn through the planner graph.
 
+        Stream-forwarded module events are not strictly FIFO-ordered relative
+        to outer-node events emitted directly to the bus; payloads are
+        self-describing and renderers are additive/last-write, so ordering is
+        not load-bearing.
+
         Raises:
             ApprovalRequiredError: A gated tool needs approval; a resume
                 marker is recorded first when a plan step was executing.

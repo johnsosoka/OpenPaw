@@ -1,7 +1,8 @@
 """ReasoningModule contract — pluggable planning/creative/reflection strategies.
 
-One interface, three module kinds (ADR-102). Modules are prompt pipelines
-(1–4 sequential LLM calls) behind an async ``run()``; the planner graph — not
+One interface, three module kinds (ADR-102). Modules are prompt pipelines or
+compiled LangGraph subgraphs (ADR-109) behind an async ``run()`` — ideonomy
+fans its lens calls out in parallel via ``Send``; the planner graph — not
 the modules — owns composition (ideate may feed plan; modules never call each
 other). Modules depend only on ``core/`` and ``model/`` (stability contract):
 the resolved per-node model (ADR-103) arrives via :class:`ReasoningContext`
@@ -202,6 +203,11 @@ class ReasoningModule(ABC):
     nothing else in the framework needs touching. Modules whose constructor
     takes dependencies override ``build()`` to assemble them from the
     workspace context; the harness only ever calls ``build()``.
+
+    Concurrency invariant: instances are built once per workspace and shared
+    across concurrent sessions — any instance state bound in ``run()`` must
+    be workspace-constant (model, workspace identity), never run-specific.
+    Run-varying data (task, brief, digest) belongs in subgraph state.
 
     Attributes:
         name: Config key (e.g. ``harness.planning.module: <name>``).

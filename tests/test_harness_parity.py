@@ -40,6 +40,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, StateGraph
 
 from openpaw.agent.harness import AgentHarness, HarnessKind
@@ -56,6 +57,7 @@ from openpaw.core.prompts.system_events import (
     TIMEOUT_NOTIFICATION_TEMPLATE,
 )
 from openpaw.model.message import Message
+from openpaw.model.status_event import StatusEvent
 from openpaw.runtime.queue.lane import QueueMode
 from openpaw.workspace.message_processor import MessageProcessor
 from tests.test_planner_graph import (
@@ -659,6 +661,51 @@ async def test_module_events_reach_bus_with_run_identity(tmp_path: Path) -> None
         assert event.run_id == harness._run_context.run_id
         assert event.session_key == "telegram:1"
         assert event.workspace == "testws"
+
+
+async def test_emitter_failure_never_breaks_the_run(tmp_path: Path) -> None:
+    """A broken emitter (emit raises) must not affect run(): both the graph's
+    _emit closure and the custom-stream forwarding path swallow emitter errors."""
+
+    class _RaisingEmitter:
+        async def emit(self, event: StatusEvent) -> None:
+            raise RuntimeError("emitter down")
+
+    one = make_case(HarnessKind.PLANNER, tmp_path)
+    one.harness._emitter = _RaisingEmitter()  # forwarding path (ADR-110)
+    one.harness._graph = build(
+        triage=[plan_decision()],
+        planning=[_PlanSchema(steps=["one"])],
+        reflection=[advance()],
+        react=make_fake_react(["step done"], []),
+        run_context=one.harness._run_context,
+        emitter=_RaisingEmitter(),  # outer-node _emit closures hit it too
+    )
+
+    assert await one.harness.run("do it", thread_id=THREAD_ID) == "final answer"
+
+
+async def test_non_status_custom_chunks_are_not_forwarded(tmp_path: Path) -> None:
+    """A rogue node writing a non-StatusEvent to the custom stream is ignored
+    by the forwarding path — nothing reaches the emitter, run unharmed."""
+    one = make_case(HarnessKind.PLANNER, tmp_path)
+    emitter = CaptureEmitter()
+    one.harness._emitter = emitter
+
+    def rogue_node(state: dict[str, Any]) -> dict[str, Any]:
+        get_stream_writer()(42)  # not a StatusEvent
+        return {"messages": [AIMessage(content="unharmed")]}
+
+    one.harness._graph = build(
+        triage=[TriageDecision(route="react", objective="simple", reason="parity")],
+        react=_make_react_graph_from(rogue_node),
+        run_context=one.harness._run_context,
+        emitter=emitter,
+    )
+
+    assert await one.harness.run("go", thread_id=THREAD_ID) == "unharmed"
+    assert 42 not in emitter.events  # never forwarded
+    assert all(isinstance(e, StatusEvent) for e in emitter.events)
 
 
 async def test_final_text_ignores_inner_namespace_updates(tmp_path: Path) -> None:
