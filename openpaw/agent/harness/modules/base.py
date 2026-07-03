@@ -24,6 +24,12 @@ from openpaw.model.status_event import JsonValue, StatusEvent, StatusEventKind
 
 logger = logging.getLogger(__name__)
 
+# Runtime checkpointer-disable for nested (module-subgraph / step-scoped)
+# invocations. LangGraph offers no public per-invoke knob; this private config
+# key is how it disables checkpointing for nested runs internally. Covered by
+# test_execute_step_inner_run_is_unpersisted so an upgrade break fails loudly.
+CONFIG_KEY_CHECKPOINTER = "__pregel_checkpointer"
+
 
 def emit_status(
     kind: StatusEventKind,

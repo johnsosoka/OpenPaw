@@ -59,6 +59,7 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 
 from openpaw.agent.harness.modules.base import (
+    CONFIG_KEY_CHECKPOINTER,
     ModuleKind,
     ReasoningContext,
     ReasoningModule,
@@ -101,11 +102,8 @@ from openpaw.model.status_event import JsonValue, StatusEmitter, StatusEvent, St
 
 logger = logging.getLogger(__name__)
 
-# Runtime checkpointer-disable for the step-scoped inner invocation. LangGraph
-# offers no public per-invoke knob; this private config key is how it disables
-# checkpointing for nested runs internally. Covered by
-# test_execute_step_inner_run_is_unpersisted so an upgrade break fails loudly.
-_CONFIG_KEY_CHECKPOINTER = "__pregel_checkpointer"
+# Shared with module subgraphs (ADR-109) — single source in modules/base.py.
+_CONFIG_KEY_CHECKPOINTER = CONFIG_KEY_CHECKPOINTER
 
 # Digest of recent conversation handed to triage/planning prompts.
 _DIGEST_MESSAGES = 6
