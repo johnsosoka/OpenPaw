@@ -5,8 +5,8 @@ Hooks into LangGraph's AgentMiddleware protocol to emit status messages:
 - aafter_model: Detect tool_calls in AIMessage, report "Using tools: X, Y..."
 - awrap_tool_call: Report "Running tool: X..." / "Completed: X" and sub-agent dispatch
 
-Throttling prevents spam during rapid tool-call sequences. Agent-driven
-report_progress tool calls bypass throttling.
+Throttling prevents spam during rapid tool-call sequences. Harness plan/
+phase events bypass throttling (they are LLM-call-paced and user-meaningful).
 
 Edit-in-place pattern (default):
 - Sends one initial status message
@@ -45,7 +45,6 @@ _EMOJI_MAP: dict[str, str] = {
     "memory_search": "🔍",
     "send_message": "📤",
     "send_file": "📎",
-    "report_progress": "📊",
     "shell": "💻",
     "browser": "🌐",
     "read_file": "📖",
@@ -151,7 +150,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
     Throttling:
     - Time-based: min_interval_seconds between auto-detected updates.
     - Deduplication: if the same set of tools is detected twice, only report once.
-    - Agent-driven report_progress bypasses all throttling.
+    - Harness plan/phase events bypass all throttling.
 
     Edit-in-place pattern:
     - When edit_in_place is True (default), a single status message is maintained

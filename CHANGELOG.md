@@ -32,6 +32,10 @@ The 0.5.0 theme: agents that **plan visibly and learn durably**. A pluggable age
 - New 0.5.0 config groups (`harness:`, `learning:`) use `extra="forbid"` — typos fail at startup instead of being silently swallowed.
 - `docs/architecture.md` updated for the `create_agent` v2 API and direct provider instantiation (stale `create_react_agent`/`init_chat_model` references removed).
 
+### Removed
+
+- **`report_progress` builtin tool.** The framework's automatic status updates — tool-call lines, sub-agent lifecycle, and the new planner-harness phase/ideonomy-lens narration — now cover progress reporting comprehensively, making an agent-invoked progress tool redundant (and a wasted tool call). Its framework-prompt guidance is gone too. `send_message` remains for genuine user-facing messages mid-run, and the `status_reminder` middleware still nudges `send_message` during long silent runs.
+
 ### Deprecated
 
 - Inline workspace model credentials (`model.api_key`/`base_url`/`region`) when a provider catalog exists, and global `agent.api_key` — one-time startup warnings point at the catalog-first form; removal targeted for 0.6.

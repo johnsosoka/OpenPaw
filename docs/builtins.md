@@ -26,7 +26,6 @@ BuiltinRegistry
 │  ├─ acknowledge      Optional audit note for system events
 │  ├─ task_tracker     Persistent task management
 │  ├─ send_message     Mid-execution messaging
-│  ├─ report_progress  Structured progress reporting
 │  ├─ send_file        Send workspace files to users
 │  ├─ followup         Self-continuation
 │  ├─ plan             Session-scoped planning
@@ -383,46 +382,6 @@ Agent: [Finishes and responds with full results]
 
 ---
 
-### report_progress
-
-**Group:** `communication`
-**Type:** Tool
-**Prerequisites:** None (always available)
-
-Structured progress reporting for long operations. Unlike `send_message`, this tool provides a dedicated schema with status label, optional detail, and optional percentage. Use it when you want to give the user more structured progress information than a plain text message.
-
-**Configuration:**
-
-```yaml
-builtins:
-  report_progress:
-    enabled: true
-```
-
-**Usage Example:**
-
-```
-User: "Process this large dataset"
-Agent: [Calls report_progress("Analyzing data", detail="Processing batch 1 of 10", percent=10)]
-Agent: [Continues processing]
-Agent: [Calls report_progress("Analyzing data", detail="Processing batch 5 of 10", percent=50, emoji="📊")]
-Agent: [Finishes and responds with full results]
-```
-
-**Optional Emoji Parameter:**
-
-Pass an `emoji` to prefix the status message with a custom emoji. If omitted, the framework uses a default emoji based on the status label.
-
-```
-Agent: [Calls report_progress("Deploying", detail="Pushing to staging", percent=30, emoji="🚀")]
-User sees: "🚀 Deploying — Pushing to staging (30%)"
-```
-
-**Implementation:**
-
-Uses shared `_channel_context` for session-safe state access to the active channel. Formats messages as: `Status — Detail (Percent%)` with an optional emoji prefix.
-
----
 
 ### send_file
 
@@ -897,7 +856,7 @@ status_updates:
 - **System events skip**: Cron, heartbeat, and sub-agent completion events do not trigger status updates to avoid mid-task confusion.
 - Time-based throttle: `min_interval_seconds` between auto-detected status messages
 - Deduplication: if the same tool set is detected twice, only report once
-- Agent-driven `report_progress` tool calls bypass all throttling
+- Harness plan/phase events bypass all throttling
 - Resets between agent runs (each user message starts a fresh count)
 - Disabled entirely with `enabled: false`
 

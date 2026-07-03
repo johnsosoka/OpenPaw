@@ -608,7 +608,7 @@ status_updates:
 
 **use_emojis** — When `true` (default), status messages are prefixed with relevant emoji for visual clarity (e.g., `⚙️` for tool calls, `🚀` for starting work, `🤖` for sub-agent dispatch). Set to `false` for plain text status messages.
 
-Status updates are sent directly to the user channel and do not create extra checkpoint entries or consume additional API calls. Agent-driven `report_progress` tool calls bypass all throttling.
+Status updates are sent directly to the user channel and do not create extra checkpoint entries or consume additional API calls. Harness plan/phase events bypass all throttling.
 
 #### Agent Harness
 

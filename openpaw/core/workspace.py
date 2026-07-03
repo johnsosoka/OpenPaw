@@ -24,7 +24,6 @@ from openpaw.core.prompts.framework import (
     SECTION_MEMORY_SEARCH,
     SECTION_PLANNING,
     SECTION_PROGRESS_UPDATES,
-    SECTION_REPORT_PROGRESS,
     SECTION_SELF_CONTINUATION,
     SECTION_SELF_SCHEDULING,
     SECTION_SHELL_HYGIENE,
@@ -295,10 +294,6 @@ class AgentWorkspace:
         # Progress updates - include if send_message is enabled
         if enabled_builtins is None or "send_message" in enabled_builtins:
             sections.append(SECTION_PROGRESS_UPDATES)
-
-        # Report progress tool - include if report_progress is enabled
-        if enabled_builtins is None or "report_progress" in enabled_builtins:
-            sections.append(SECTION_REPORT_PROGRESS)
 
         # File sharing - include if send_file is enabled
         if enabled_builtins is None or "send_file" in enabled_builtins:
