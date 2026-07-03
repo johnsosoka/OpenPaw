@@ -28,11 +28,7 @@ from openpaw.agent.harness.modules.direct import _PlanSchema
 from openpaw.agent.harness.modules.self_discover.cache import StructureCache
 from openpaw.agent.harness.modules.self_discover.seed_modules import SEED_REASONING_MODULES
 from openpaw.model.plan import Plan, PlanStep
-from openpaw.model.status_event import (
-    JsonValue,
-    StatusEvent,
-    StatusEventKind,
-)
+from openpaw.model.status_event import StatusEventKind
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +105,8 @@ class SelfDiscoverPlanner(ReasoningModule):
 
         Emits ``module.phase``/``module.insight`` events so the user sees the
         cache-hit-vs-discover decision, the SELECT/ADAPT/IMPLEMENT stages, and
-        a snapshot of the reasoning structure being followed (ADR-106).
+        a snapshot of the reasoning structure being followed (ADR-106,
+        transported via the custom stream per ADR-110).
 
         Raises:
             ValueError: If the solve call returns no structured output or an
@@ -119,14 +116,14 @@ class SelfDiscoverPlanner(ReasoningModule):
         key = self._cache.key_for(ctx.task)
         structure = self._cache.get(key)
         if structure is None:
-            await self._emit(ctx, StatusEventKind.MODULE_PHASE, {"phase": "discovering"})
+            self._emit(ctx, StatusEventKind.MODULE_PHASE, {"phase": "discovering"})
             structure = await self._discover(ctx)
             self._cache.put(key, structure)
         else:
-            await self._emit(ctx, StatusEventKind.MODULE_PHASE, {"phase": "structure_reused"})
+            self._emit(ctx, StatusEventKind.MODULE_PHASE, {"phase": "structure_reused"})
 
-        await self._emit_structure_insight(ctx, structure)
-        await self._emit(ctx, StatusEventKind.MODULE_PHASE, {"phase": "solving"})
+        self._emit_structure_insight(ctx, structure)
+        self._emit(ctx, StatusEventKind.MODULE_PHASE, {"phase": "solving"})
         plan = await self._solve(ctx, structure)
         return ReasoningArtifact(
             kind=self.kind,
@@ -143,51 +140,30 @@ class SelfDiscoverPlanner(ReasoningModule):
     async def _discover(self, ctx: ReasoningContext) -> dict[str, object]:
         """Stage 1: SELECT -> ADAPT -> IMPLEMENT (3 sequential calls, task-only)."""
         modules_text = "\n".join(SEED_REASONING_MODULES)
-        await self._emit(ctx, StatusEventKind.MODULE_PHASE, {"phase": "select"})
+        self._emit(ctx, StatusEventKind.MODULE_PHASE, {"phase": "select"})
         selected = await ctx.model.ainvoke(
             [HumanMessage(_SELECT_PROMPT.format(task=ctx.task, modules=modules_text))]
         )
-        await self._emit(ctx, StatusEventKind.MODULE_PHASE, {"phase": "adapt"})
+        self._emit(ctx, StatusEventKind.MODULE_PHASE, {"phase": "adapt"})
         adapted = await ctx.model.ainvoke(
             [HumanMessage(_ADAPT_PROMPT.format(selected=_text(selected), task=ctx.task))]
         )
-        await self._emit(ctx, StatusEventKind.MODULE_PHASE, {"phase": "implement"})
+        self._emit(ctx, StatusEventKind.MODULE_PHASE, {"phase": "implement"})
         implemented = await ctx.model.ainvoke(
             [HumanMessage(_IMPLEMENT_PROMPT.format(adapted=_text(adapted), task=ctx.task))]
         )
         return _parse_structure(_text(implemented))
 
-    async def _emit_structure_insight(
-        self, ctx: ReasoningContext, structure: dict[str, object]
-    ) -> None:
+    def _emit_structure_insight(self, ctx: ReasoningContext, structure: dict[str, object]) -> None:
         """Snapshot the reasoning structure's step names (skip the text fallback)."""
         labels = [k for k in structure if k != "structure_text"]
         if not labels:
             return
-        await self._emit(
+        self._emit(
             ctx,
             StatusEventKind.MODULE_INSIGHT,
             {"label": "Reasoning structure", "headline": " · ".join(labels)},
         )
-
-    async def _emit(
-        self, ctx: ReasoningContext, kind: StatusEventKind, payload: dict[str, JsonValue]
-    ) -> None:
-        """Emit a module progress/insight event; best-effort, never raises."""
-        payload = {"kind": self.kind.value, "module": self.name, **payload}
-        try:
-            await ctx.emit.emit(
-                StatusEvent(
-                    kind=kind,
-                    workspace=ctx.workspace.name,
-                    session_key=ctx.session_key,
-                    run_id=ctx.run_id,
-                    node=self.kind.value,
-                    payload=payload,
-                )
-            )
-        except Exception:
-            logger.debug("SelfDiscover status emit failed for %s", kind, exc_info=True)
 
     async def _solve(self, ctx: ReasoningContext, structure: dict[str, object]) -> Plan:
         """Stage 2: one structured-output call following the structure."""

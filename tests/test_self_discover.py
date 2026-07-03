@@ -15,7 +15,8 @@ from openpaw.agent.harness.modules.direct import _PlanSchema
 from openpaw.agent.harness.modules.self_discover import SelfDiscoverPlanner, StructureCache
 from openpaw.agent.harness.modules.self_discover.planner import _parse_structure
 from openpaw.agent.harness.modules.self_discover.seed_modules import SEED_REASONING_MODULES
-from tests.test_reasoning_modules import FakeStructuredModel, fake_model, make_ctx
+from openpaw.model.status_event import StatusEvent
+from tests.test_reasoning_modules import FakeStructuredModel, fake_model, make_ctx, run_streamed
 
 TASK = "Ship the quarterly report"
 STRUCTURE_JSON = '{"identify_inputs": "List required data", "sequence_work": "Order the steps"}'
@@ -132,26 +133,23 @@ async def test_empty_plan_steps_raises(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# Status events (Tier 1 progress + Tier 2 structure snapshot, ADR-106)
+# Status events (Tier 1 progress + Tier 2 structure snapshot, ADR-106).
+# Events ride the custom stream (ADR-110), so the module runs inside a
+# minimal streamed parent graph here.
 # ---------------------------------------------------------------------------
 
 
-def _kinds_and_phases(ctx: ReasoningContext) -> list[tuple[str, str]]:
-    from tests.test_reasoning_modules import CaptureEmitter
-
-    events = cast(CaptureEmitter, ctx.emit).events
+def _kinds_and_phases(events: list[StatusEvent]) -> list[tuple[str, str]]:
     return [(str(e.kind), str(e.payload.get("phase", ""))) for e in events]
 
 
 async def test_cache_miss_emits_discovery_phases_and_structure_insight(tmp_path: Path):
-    from tests.test_reasoning_modules import CaptureEmitter
-
     planner, _ = make_planner(tmp_path)
     ctx = ws_ctx(fake_model(*discovery_outputs()), tmp_path)
 
-    await planner.run(ctx)
+    _, events = await run_streamed(lambda: planner.run(ctx))
 
-    assert _kinds_and_phases(ctx) == [
+    assert _kinds_and_phases(events) == [
         ("module.phase", "discovering"),
         ("module.phase", "select"),
         ("module.phase", "adapt"),
@@ -159,9 +157,7 @@ async def test_cache_miss_emits_discovery_phases_and_structure_insight(tmp_path:
         ("module.insight", ""),
         ("module.phase", "solving"),
     ]
-    insight = next(
-        e for e in cast(CaptureEmitter, ctx.emit).events if str(e.kind) == "module.insight"
-    )
+    insight = next(e for e in events if str(e.kind) == "module.insight")
     assert insight.payload["label"] == "Reasoning structure"
     # structure keys from STRUCTURE_JSON, joined
     assert insight.payload["headline"] == "identify_inputs · sequence_work"
@@ -174,9 +170,9 @@ async def test_cache_hit_emits_reuse_phase_and_insight(tmp_path: Path):
     cache.put(cache.key_for(TASK), {"reuse_me": "cached instruction"})
     ctx = ws_ctx(fake_model(_PlanSchema(steps=["Do it"])), tmp_path)
 
-    await planner.run(ctx)
+    _, events = await run_streamed(lambda: planner.run(ctx))
 
-    assert _kinds_and_phases(ctx) == [
+    assert _kinds_and_phases(events) == [
         ("module.phase", "structure_reused"),
         ("module.insight", ""),
         ("module.phase", "solving"),
@@ -184,18 +180,14 @@ async def test_cache_hit_emits_reuse_phase_and_insight(tmp_path: Path):
 
 
 async def test_text_fallback_structure_emits_no_insight(tmp_path: Path):
-    from tests.test_reasoning_modules import CaptureEmitter
-
     planner, _ = make_planner(tmp_path)
     outputs = discovery_outputs()
     outputs[2] = AIMessage("just think hard about it")  # non-JSON IMPLEMENT
     ctx = ws_ctx(fake_model(*outputs), tmp_path)
 
-    await planner.run(ctx)
+    _, events = await run_streamed(lambda: planner.run(ctx))
 
-    insights = [
-        e for e in cast(CaptureEmitter, ctx.emit).events if str(e.kind) == "module.insight"
-    ]
+    insights = [e for e in events if str(e.kind) == "module.insight"]
     assert insights == []  # structure_text-only fallback has no useful labels
 
 

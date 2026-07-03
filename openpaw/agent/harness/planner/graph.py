@@ -281,10 +281,7 @@ def build_planner_graph(
             conversation_digest=_conversation_digest(state.get("messages", [])),
             tools_summary=tools_summary,
             model=model,
-            emit=emitter,
             workspace=workspace_info,
-            run_id=run_context.run_id,
-            session_key=run_context.session_key,
             ideation=ideation_from_state(state),
         )
 
@@ -376,10 +373,7 @@ def build_planner_graph(
                     ModuleKind.CREATIVE,
                     objective,
                     node_models.selector,
-                    emitter,
                     workspace_info.name,
-                    run_context.run_id,
-                    run_context.session_key,
                 )
                 artifact = await module.run(_module_ctx(state, objective, node_models.creative))
                 return {"ideation": ideation_to_state(artifact.ideation)}
@@ -400,10 +394,7 @@ def build_planner_graph(
                 ModuleKind.PLANNING,
                 objective,
                 node_models.selector,
-                emitter,
                 workspace_info.name,
-                run_context.run_id,
-                run_context.session_key,
             )
             artifact = await module.run(ctx)
             if artifact.plan is not None and artifact.plan.steps:
@@ -633,10 +624,7 @@ def build_planner_graph(
                     ModuleKind.REFLECTION,
                     objective,
                     node_models.selector,
-                    emitter,
                     workspace_info.name,
-                    run_context.run_id,
-                    run_context.session_key,
                 )
                 ctx = _module_ctx(state, objective, node_models.reflection)
                 ctx.plan = live_plan

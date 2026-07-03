@@ -58,7 +58,14 @@ from openpaw.core.prompts.system_events import (
 from openpaw.model.message import Message
 from openpaw.runtime.queue.lane import QueueMode
 from openpaw.workspace.message_processor import MessageProcessor
-from tests.test_planner_graph import _ReactState, advance, build, make_fake_react, plan_decision
+from tests.test_planner_graph import (
+    CaptureEmitter,
+    _ReactState,
+    advance,
+    build,
+    make_fake_react,
+    plan_decision,
+)
 from tests.test_planner_harness import make_node_resolver, make_workspace
 
 THREAD_ID = "telegram:1:conv1"
@@ -72,12 +79,16 @@ class ScriptedStream:
     """Outer-graph stand-in: yields scripted updates, then optionally hangs or raises.
 
     Records astream invocations (input + config) and aupdate_state calls so
-    tests can assert the caller-side contract without any real model.
+    tests can assert the caller-side contract without any real model. Chunk
+    shape follows the caller's request like the real graph: with
+    ``subgraphs=True`` (the planner harness, ADR-110), plain updates are
+    wrapped as root-namespace 3-tuples; pre-shaped tuples pass through so
+    tests can script inner-namespace chunks.
     """
 
     def __init__(
         self,
-        updates: list[dict[str, Any]] | None = None,
+        updates: list[Any] | None = None,
         error: Exception | None = None,
         hang_seconds: float = 0.0,
     ) -> None:
@@ -87,12 +98,16 @@ class ScriptedStream:
         self.invocations: list[tuple[Any, dict[str, Any] | None]] = []
         self.state_updates: list[tuple[dict[str, Any], str | None]] = []
 
-    def astream(self, input: Any, config: dict[str, Any] | None = None, **_: Any) -> AsyncIterator[dict[str, Any]]:
+    def astream(self, input: Any, config: dict[str, Any] | None = None, **kwargs: Any) -> AsyncIterator[Any]:
         self.invocations.append((input, config))
+        wrap = bool(kwargs.get("subgraphs"))
 
-        async def gen() -> AsyncIterator[dict[str, Any]]:
+        async def gen() -> AsyncIterator[Any]:
             for update in self.updates:
-                yield update
+                if wrap and not isinstance(update, tuple):
+                    yield ((), "updates", update)
+                else:
+                    yield update
             if self.hang_seconds:
                 await asyncio.sleep(self.hang_seconds)
             if self.error is not None:
@@ -601,3 +616,62 @@ async def test_planner_approval_mid_plan_step_propagates_and_marks_resume(tmp_pa
     assert exc_info.value is error  # identical error contract to the react path
     state = await one.harness._graph.aget_state({"configurable": {"thread_id": THREAD_ID}})
     assert state.values.get("resume_step_id") == "1"  # approval resumes the STEP (H4.4)
+
+
+# ---------------------------------------------------------------------------
+# ADR-110: custom-stream event transport (planner-only — module events exist
+# only on the planner topology).
+# ---------------------------------------------------------------------------
+
+
+async def test_module_events_reach_bus_with_run_identity(tmp_path: Path) -> None:
+    """Events written via emit_status inside graph nodes surface through
+    run()'s custom stream and reach the injected emitter with session_key and
+    run_id stamped centrally at the forwarding point."""
+    workspace = make_workspace(tmp_path)
+    inner = AgentRunner(
+        workspace=workspace, model="openai:gpt-4o-mini", api_key="test", checkpointer=MemorySaver()
+    )
+    emitter = CaptureEmitter()
+    harness = PlannerHarness(
+        workspace=workspace,
+        inner=inner,
+        harness_config=HarnessConfig(type="planner"),
+        node_resolver=make_node_resolver(),
+        emitter=emitter,
+    )
+    # Real compiled planner graph: resolve_module emits module.selected via
+    # the custom stream from inside the plan and reflect nodes.
+    harness._graph = build(
+        triage=[plan_decision()],
+        planning=[_PlanSchema(steps=["one"])],
+        reflection=[advance()],
+        react=make_fake_react(["step done"], []),
+        run_context=harness._run_context,
+        emitter=emitter,
+    )
+
+    await harness.run("do it", thread_id=THREAD_ID)
+
+    selected = [e for e in emitter.events if str(e.kind) == "module.selected"]
+    assert [e.payload["module"] for e in selected] == ["direct", "light"]
+    for event in selected:
+        assert event.run_id == harness._run_context.run_id
+        assert event.session_key == "telegram:1"
+        assert event.workspace == "testws"
+
+
+async def test_final_text_ignores_inner_namespace_updates(tmp_path: Path) -> None:
+    """With subgraphs=True, message-shaped updates from nested runs (react
+    subgraph, step-scoped inner runs) arrive namespaced and must not become
+    final_text — even when they arrive after the root answer."""
+    one = make_case(HarnessKind.PLANNER, tmp_path)
+    root = ((), "updates", {"synthesize": {"messages": [AIMessage(content="real answer")]}})
+    inner_decoy = (
+        ("react:abc123",),
+        "updates",
+        {"model": {"messages": [AIMessage(content="inner decoy")]}},
+    )
+    one.harness._graph = ScriptedStream(updates=[root, inner_decoy])
+
+    assert await one.harness.run("go", thread_id=THREAD_ID) == "real answer"

@@ -85,15 +85,15 @@ class StubGraph:
         self.on_start = on_start
         self.state_updates: list[tuple[dict[str, Any], str | None]] = []
 
-    def astream(self, *_args: Any, **_kwargs: Any) -> AsyncIterator[dict[str, Any]]:
-        async def gen() -> AsyncIterator[dict[str, Any]]:
+    def astream(self, *_args: Any, **_kwargs: Any) -> AsyncIterator[Any]:
+        async def gen() -> AsyncIterator[Any]:
             if self.on_start:
                 self.on_start()
             if self.delay:
                 await asyncio.sleep(self.delay)
             if self.error:
                 raise self.error
-            yield {}
+            yield ((), "updates", {})  # root-namespace 3-tuple (subgraphs=True shape)
 
         return gen()
 

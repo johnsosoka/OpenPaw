@@ -1,11 +1,13 @@
 """Tests for the reasoning modules: DirectPlanner, LightReflection, FullReflection (ADR-102)."""
 
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import cast
+from typing import Any, TypedDict, cast
 
 import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage
+from langgraph.graph import END, START, StateGraph
 
 from openpaw.agent.harness.modules.base import (
     ModuleKind,
@@ -24,14 +26,41 @@ from openpaw.model.plan import IdeationResult, Plan, PlanStep, StepStatus
 from openpaw.model.status_event import StatusEvent
 
 
-class CaptureEmitter:
-    """In-memory StatusEmitter for assertions."""
+class _StreamState(TypedDict, total=False):
+    done: bool
 
-    def __init__(self) -> None:
-        self.events: list[StatusEvent] = []
 
-    async def emit(self, event: StatusEvent) -> None:
-        self.events.append(event)
+async def run_streamed(call: Callable[[], Awaitable[Any]]) -> tuple[Any, list[StatusEvent]]:
+    """Run an awaitable inside a one-node graph, capturing custom-stream events.
+
+    Module status events ride LangGraph's custom stream (ADR-110), which only
+    exists inside a streamed graph run — direct module calls drop them. Events
+    are appended as they arrive, so callers see events emitted before a raise
+    by passing their own list via :func:`run_streamed_into`.
+    """
+    events: list[StatusEvent] = []
+    result = await run_streamed_into(call, events)
+    return result, events
+
+
+async def run_streamed_into(call: Callable[[], Awaitable[Any]], events: list[StatusEvent]) -> Any:
+    """Like :func:`run_streamed`, but collects into a caller-owned list (raise-safe)."""
+    result: dict[str, Any] = {}
+
+    async def node(state: _StreamState) -> _StreamState:
+        result["value"] = await call()
+        return {"done": True}
+
+    builder: StateGraph[_StreamState, None, _StreamState, _StreamState] = StateGraph(_StreamState)
+    builder.add_node("mod", node)
+    builder.add_edge(START, "mod")
+    builder.add_edge("mod", END)
+    async for _ns, _mode, chunk in builder.compile().astream(
+        {}, stream_mode=["custom"], subgraphs=True
+    ):
+        if isinstance(chunk, StatusEvent):
+            events.append(chunk)
+    return result["value"]
 
 
 class FakeStructuredModel:
@@ -71,7 +100,6 @@ def make_ctx(model: BaseChatModel, **overrides: object) -> ReasoningContext:
         "conversation_digest": "User asked for the quarterly report by Friday.",
         "tools_summary": [ToolSummary(name="web_search", description="Search the web")],
         "model": model,
-        "emit": CaptureEmitter(),
         "workspace": WorkspaceInfo(name="testws", timezone="UTC", workspace_path=Path("/tmp/ws")),
     }
     defaults.update(overrides)

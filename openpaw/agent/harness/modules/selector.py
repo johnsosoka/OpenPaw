@@ -10,7 +10,8 @@ Three-path resolution, evaluated at graph-build time per kind:
    falls back to the kind's registry default (fail-open, mirroring triage).
 
 Every resolution path emits ``module.selected`` (ADR-106) so the assembled
-harness is always observable in the session log.
+harness is always observable in the session log. Emission rides the custom
+stream (ADR-110) — resolve_module always runs inside streamed graph nodes.
 """
 
 import logging
@@ -19,9 +20,9 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 
-from openpaw.agent.harness.modules.base import ModuleKind, ReasoningModule
+from openpaw.agent.harness.modules.base import ModuleKind, ReasoningModule, emit_status
 from openpaw.agent.harness.modules.registry import KIND_DEFAULTS
-from openpaw.model.status_event import StatusEmitter, StatusEvent, StatusEventKind
+from openpaw.model.status_event import StatusEventKind
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +41,7 @@ async def resolve_module(
     kind: ModuleKind,
     task: str,
     selector_model: BaseChatModel,
-    emit: StatusEmitter,
     workspace: str,
-    run_id: str = "",
-    session_key: str | None = None,
 ) -> ReasoningModule:
     """Resolve which module instance handles this kind.
 
@@ -54,10 +52,7 @@ async def resolve_module(
         kind: The module kind being resolved.
         task: Task objective, presented to the selector model.
         selector_model: Per-node model for path 3 (a fast class fits, ADR-103).
-        emit: Status emitter; every path emits ``module.selected``.
-        workspace: Owning workspace name for the event.
-        run_id: Run correlation id for the event.
-        session_key: Session key for the event, if any.
+        workspace: Owning workspace name for the ``module.selected`` event.
 
     Raises:
         ValueError: If a pinned name is unknown, or ``allowed`` filters out
@@ -82,15 +77,11 @@ async def resolve_module(
         else:
             chosen, reason = await _select_with_model(pool, candidates, kind, task, selector_model)
 
-    await emit.emit(
-        StatusEvent(
-            kind=StatusEventKind.MODULE_SELECTED,
-            workspace=workspace,
-            session_key=session_key,
-            run_id=run_id,
-            node=kind.value,
-            payload={"kind": kind.value, "module": chosen.name, "reason": reason},
-        )
+    emit_status(
+        StatusEventKind.MODULE_SELECTED,
+        {"kind": kind.value, "module": chosen.name, "reason": reason},
+        workspace=workspace,
+        node=kind.value,
     )
     return chosen
 

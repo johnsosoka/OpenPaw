@@ -17,22 +17,13 @@ from openpaw.agent.harness.modules.ideonomy import IdeonomyModule, select_lenses
 from openpaw.agent.harness.modules.ideonomy.divisions import DIVISIONS, Division
 from openpaw.agent.harness.modules.ideonomy.module import _LensSchema, _SynthesisSchema
 from openpaw.agent.harness.modules.ideonomy.selector import score_division
-from openpaw.model.status_event import StatusEvent, StatusEventKind
+from openpaw.model.status_event import StatusEventKind
+from tests.test_reasoning_modules import run_streamed
 
 NAMING_TASK = (
     "What should we name this concept? Find a metaphor or analogy "
     "that captures its meaning and essence."
 )
-
-
-class CaptureEmitter:
-    """In-memory StatusEmitter for assertions."""
-
-    def __init__(self) -> None:
-        self.events: list[StatusEvent] = []
-
-    async def emit(self, event: StatusEvent) -> None:
-        self.events.append(event)
 
 
 def lens(headline: str, exploration: str) -> _LensSchema:
@@ -77,7 +68,6 @@ def make_ctx(model: BaseChatModel, task: str = NAMING_TASK) -> ReasoningContext:
         conversation_digest="User asked for naming help.",
         tools_summary=[ToolSummary(name="web_search", description="Search the web")],
         model=model,
-        emit=CaptureEmitter(),
         workspace=WorkspaceInfo(name="testws", timezone="UTC", workspace_path=Path("/tmp/ws")),
     )
 
@@ -226,7 +216,9 @@ async def test_module_unstructured_synthesis_raises():
 
 
 # ---------------------------------------------------------------------------
-# Status events (Tier 1 progress + Tier 2 insight snapshots, ADR-106)
+# Status events (Tier 1 progress + Tier 2 insight snapshots, ADR-106).
+# Events ride the custom stream (ADR-110), so the module runs inside a
+# minimal streamed parent graph here.
 # ---------------------------------------------------------------------------
 
 
@@ -239,9 +231,8 @@ async def test_module_emits_phase_and_insight_events():
     )
     ctx = make_ctx(model)
 
-    await IdeonomyModule().run(ctx)
+    _, events = await run_streamed(lambda: IdeonomyModule().run(ctx))
 
-    events = cast(CaptureEmitter, ctx.emit).events
     kinds = [str(e.kind) for e in events]
     # lenses_selected, then per lens: phase(lens) + insight, then synthesis.
     assert kinds == [
@@ -286,17 +277,14 @@ async def test_module_no_insight_for_failed_lens():
     )
     ctx = make_ctx(model)
 
-    await IdeonomyModule().run(ctx)
+    _, events = await run_streamed(lambda: IdeonomyModule().run(ctx))
 
-    insights = [
-        e for e in cast(CaptureEmitter, ctx.emit).events
-        if e.kind is StatusEventKind.MODULE_INSIGHT
-    ]
+    insights = [e for e in events if e.kind is StatusEventKind.MODULE_INSIGHT]
     # 3 lens phases attempted, but the failed one emits no insight
     assert [e.payload["headline"] for e in insights] == ["One", "Three"]
     # synthesis phase reports the count of SUCCESSFUL lenses
     synth = [
-        e for e in cast(CaptureEmitter, ctx.emit).events
+        e for e in events
         if e.kind is StatusEventKind.MODULE_PHASE and e.payload["phase"] == "synthesis"
     ]
     assert synth[0].payload["total"] == 2

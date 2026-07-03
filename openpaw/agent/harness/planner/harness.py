@@ -3,8 +3,11 @@
 Wraps the existing ``AgentRunner`` (the react execution engine) inside the
 ADR-101 planner StateGraph. All parity-critical contracts mirror the runner:
 
-- run(): astream(stream_mode="updates"), asyncio.timeout, usage-callback
-  metrics, TIMEOUT_NOTIFICATION templates.
+- run(): astream(stream_mode=["updates", "custom"], subgraphs=True),
+  asyncio.timeout, usage-callback metrics, TIMEOUT_NOTIFICATION templates.
+  Custom-stream chunks are module StatusEvents (ADR-110), stamped with run
+  identity and forwarded to the bus; updates are ingested from the root
+  namespace only.
 - Approval: ApprovalRequiredError re-raises after recording a
   ``resume_step_id`` marker so the approval re-run jumps straight back to
   the paused plan step (the approval middleware's check_recent_approval
@@ -22,6 +25,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.callbacks import UsageMetadataCallbackHandler
@@ -363,6 +367,23 @@ class PlannerHarness:
                 config["configurable"]["session_id"] = session_id
         return config
 
+    async def _forward_status(self, event: StatusEvent) -> None:
+        """Stamp run identity onto a custom-stream module event and emit it.
+
+        Defensive like the graph's ``_emit`` closure: the bus contains sink
+        errors already, but a broken emitter must never break the run.
+        """
+        try:
+            await self._emitter.emit(
+                replace(
+                    event,
+                    session_key=self._run_context.session_key,
+                    run_id=self._run_context.run_id,
+                )
+            )
+        except Exception:
+            logger.debug("Status forward failed for %s", event.kind, exc_info=True)
+
     def _ingest_update(self, update: dict[str, Any], final_text: str) -> str:
         """Track tool calls and the latest AI response from one stream update."""
         for node_update in update.values():
@@ -412,12 +433,23 @@ class PlannerHarness:
         final_text = ""
         try:
             async with asyncio.timeout(self.timeout_seconds):
-                async for update in self._graph.astream(
+                # Module status events are transported via the custom stream
+                # (ADR-110); any future non-streaming invocation of this graph
+                # would silently drop them. subgraphs=True makes chunks
+                # 3-tuples and is required for events from nested runs.
+                async for namespace, mode, chunk in self._graph.astream(
                     {"messages": [{"role": "user", "content": message}]},
                     config=config,
-                    stream_mode="updates",
+                    stream_mode=["updates", "custom"],
+                    subgraphs=True,
                 ):
-                    final_text = self._ingest_update(update, final_text)
+                    if mode == "custom" and isinstance(chunk, StatusEvent):
+                        await self._forward_status(chunk)
+                    elif mode == "updates" and namespace == ():
+                        # Root-namespace updates only: inner-namespace updates
+                        # (react subgraph, step-scoped inner runs) must not
+                        # pollute final-text extraction or tool tracking.
+                        final_text = self._ingest_update(chunk, final_text)
         except InterruptSignalError:
             await self._clear_plan_state(config)
             raise

@@ -307,7 +307,10 @@ async def test_two_step_plan_executes_and_synthesizes() -> None:
     # Verdict payload carries step_succeeded for the failed-advance narration.
     verdicts = [e for e in emitter.events if str(e.kind) == "reflection.verdict"]
     assert all(e.payload["step_succeeded"] is True for e in verdicts)
-    assert "module.selected" in emitter.kinds()  # pinned resolutions still emit
+    # module.selected rides the custom stream (ADR-110) and never reaches the
+    # injected emitter under ainvoke — end-to-end coverage lives in
+    # tests/test_harness_parity.py and tests/test_module_selector.py.
+    assert "module.selected" not in emitter.kinds()
 
 
 async def test_reflection_insert_step_executes_inserted_step() -> None:

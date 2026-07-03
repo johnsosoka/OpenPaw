@@ -22,16 +22,7 @@ from openpaw.agent.harness.modules.registry import (
 )
 from openpaw.agent.harness.modules.selector import _ModuleChoice, resolve_module
 from openpaw.model.status_event import StatusEvent, StatusEventKind
-
-
-class CaptureEmitter:
-    """In-memory StatusEmitter for assertions."""
-
-    def __init__(self) -> None:
-        self.events: list[StatusEvent] = []
-
-    async def emit(self, event: StatusEvent) -> None:
-        self.events.append(event)
+from tests.test_reasoning_modules import run_streamed_into
 
 
 class FakeStructuredModel:
@@ -82,33 +73,38 @@ async def resolve(
     allowed: list[str] | None = None,
     candidates: dict[str, ReasoningModule] | None = None,
     model: FakeStructuredModel | None = None,
-    emitter: CaptureEmitter | None = None,
-) -> tuple[ReasoningModule, CaptureEmitter, FakeStructuredModel]:
-    emitter = emitter or CaptureEmitter()
+    events: list[StatusEvent] | None = None,
+) -> tuple[ReasoningModule, list[StatusEvent], FakeStructuredModel]:
+    """Run resolve_module inside a streamed parent graph (events ride the
+    custom stream, ADR-110). ``events`` is caller-owned so raise-path tests
+    can still assert nothing was emitted."""
     model = model or FakeStructuredModel()
-    chosen = await resolve_module(
-        configured=configured,
-        allowed=allowed,
-        candidates=candidates if candidates is not None else reflection_candidates(),
-        kind=ModuleKind.REFLECTION,
-        task="Refactor the billing module",
-        selector_model=cast(BaseChatModel, model),
-        emit=emitter,
-        workspace="testws",
-        run_id="run-1",
-        session_key="telegram:123",
+    events = events if events is not None else []
+    chosen = await run_streamed_into(
+        lambda: resolve_module(
+            configured=configured,
+            allowed=allowed,
+            candidates=candidates if candidates is not None else reflection_candidates(),
+            kind=ModuleKind.REFLECTION,
+            task="Refactor the billing module",
+            selector_model=cast(BaseChatModel, model),
+            workspace="testws",
+        ),
+        events,
     )
-    return chosen, emitter, model
+    return chosen, events, model
 
 
-def assert_selected_event(emitter: CaptureEmitter, module: str, reason: str) -> None:
-    assert len(emitter.events) == 1
-    event = emitter.events[0]
+def assert_selected_event(events: list[StatusEvent], module: str, reason: str) -> None:
+    assert len(events) == 1
+    event = events[0]
     assert event.kind == StatusEventKind.MODULE_SELECTED
     assert event.node == "reflection"
     assert event.workspace == "testws"
-    assert event.run_id == "run-1"
-    assert event.session_key == "telegram:123"
+    # Run identity is stamped by the harness at the forwarding point
+    # (ADR-110), not by the producer.
+    assert event.run_id == ""
+    assert event.session_key is None
     assert event.payload == {"kind": "reflection", "module": module, "reason": reason}
 
 
@@ -118,35 +114,35 @@ def assert_selected_event(emitter: CaptureEmitter, module: str, reason: str) -> 
 
 
 async def test_pinned_binds_without_model_call():
-    chosen, emitter, model = await resolve("full")
+    chosen, events, model = await resolve("full")
 
     assert chosen.name == "full"
     assert model.call_count == 0
-    assert_selected_event(emitter, "full", "pinned")
+    assert_selected_event(events, "full", "pinned")
 
 
 async def test_pinned_unknown_name_raises():
-    emitter = CaptureEmitter()
+    events: list[StatusEvent] = []
     with pytest.raises(ValueError, match="not available"):
-        await resolve("nonexistent", emitter=emitter)
-    assert emitter.events == []
+        await resolve("nonexistent", events=events)
+    assert events == []
 
 
 async def test_auto_single_candidate_short_circuits():
-    chosen, emitter, model = await resolve("auto", allowed=["full"])
+    chosen, events, model = await resolve("auto", allowed=["full"])
 
     assert chosen.name == "full"
     assert model.call_count == 0  # no LLM call on the short-circuit path
-    assert_selected_event(emitter, "full", "only candidate")
+    assert_selected_event(events, "full", "only candidate")
 
 
 async def test_auto_multiple_candidates_uses_selector_model():
     model = FakeStructuredModel(_ModuleChoice(module="full", reason="long fragile plan"))
-    chosen, emitter, model = await resolve("auto", model=model)
+    chosen, events, model = await resolve("auto", model=model)
 
     assert chosen.name == "full"
     assert model.call_count == 1
-    assert_selected_event(emitter, "full", "long fragile plan")
+    assert_selected_event(events, "full", "long fragile plan")
 
     prompt = model.prompts[0]
     assert "Refactor the billing module" in prompt
@@ -165,18 +161,18 @@ async def test_auto_allowed_filters_catalog():
 
 async def test_auto_selector_exception_falls_back_to_kind_default():
     model = FakeStructuredModel(RuntimeError("model exploded"))
-    chosen, emitter, _ = await resolve("auto", model=model)
+    chosen, events, _ = await resolve("auto", model=model)
 
     assert chosen.name == "light"  # KIND_DEFAULTS[REFLECTION]
-    assert_selected_event(emitter, "light", "selector failed; kind default")
+    assert_selected_event(events, "light", "selector failed; kind default")
 
 
 async def test_auto_selector_unknown_module_falls_back_to_kind_default():
     model = FakeStructuredModel(_ModuleChoice(module="made_up", reason="hallucinated"))
-    chosen, emitter, _ = await resolve("auto", model=model)
+    chosen, events, _ = await resolve("auto", model=model)
 
     assert chosen.name == "light"
-    assert_selected_event(emitter, "light", "selector failed; kind default")
+    assert_selected_event(events, "light", "selector failed; kind default")
 
 
 async def test_auto_empty_pool_after_allowed_filter_raises():

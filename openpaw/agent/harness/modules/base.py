@@ -4,10 +4,12 @@ One interface, three module kinds (ADR-102). Modules are prompt pipelines
 (1–4 sequential LLM calls) behind an async ``run()``; the planner graph — not
 the modules — owns composition (ideate may feed plan; modules never call each
 other). Modules depend only on ``core/`` and ``model/`` (stability contract):
-the resolved per-node model (ADR-103) and the status emitter (ADR-106) arrive
-via :class:`ReasoningContext` rather than imports.
+the resolved per-node model (ADR-103) arrives via :class:`ReasoningContext`
+rather than imports. Progress visibility uses :func:`emit_status` — the
+native LangGraph custom stream (ADR-110), no emitter plumbing.
 """
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
@@ -15,9 +17,49 @@ from pathlib import Path
 from typing import Literal
 
 from langchain_core.language_models import BaseChatModel
+from langgraph.config import get_stream_writer
 
 from openpaw.model.plan import IdeationResult, Plan
-from openpaw.model.status_event import StatusEmitter
+from openpaw.model.status_event import JsonValue, StatusEvent, StatusEventKind
+
+logger = logging.getLogger(__name__)
+
+
+def emit_status(
+    kind: StatusEventKind,
+    payload: dict[str, JsonValue],
+    *,
+    workspace: str,
+    node: str | None = None,
+) -> None:
+    """Write a module status event to the LangGraph custom stream; never raises.
+
+    The in-graph transport leg of ADR-110: module code calls this from
+    anywhere inside a graph node's call stack and the event surfaces on the
+    harness's ``stream_mode="custom"`` channel, where run identity
+    (``session_key``/``run_id``) is stamped centrally before forwarding to
+    the status bus — which is why both are left at their defaults here.
+
+    Drop semantics (status is never load-bearing, same posture as StatusBus):
+
+    - Outside a runnable context (e.g. a direct unit-test call to a module),
+      ``get_stream_writer`` raises ``RuntimeError``; the event is debug-logged
+      and dropped — a no-op.
+    - Under a plain ``ainvoke`` (nobody streaming custom mode), the writer
+      accepts the event and LangGraph silently discards it.
+
+    Args:
+        kind: What happened (payload schema is keyed by this).
+        payload: Kind-specific data, byte-identical to the renderer contract.
+        workspace: Owning workspace name (the harness cannot stamp this).
+        node: Emitting node attribution — the module kind value.
+    """
+    try:
+        writer = get_stream_writer()
+    except RuntimeError:
+        logger.debug("emit_status(%s) outside runnable context; dropped", kind)
+        return
+    writer(StatusEvent(kind=kind, workspace=workspace, session_key=None, run_id="", node=node, payload=payload))
 
 
 class ModuleKind(StrEnum):
@@ -74,10 +116,7 @@ class ReasoningContext:
         conversation_digest: Recent history summary.
         tools_summary: Equipped tools (names + descriptions).
         model: Resolved per-node model (ADR-103).
-        emit: Status event emitter (ADR-106).
         workspace: Minimal workspace context.
-        run_id: Correlates events within one agent run.
-        session_key: Session key for event attribution, if any.
         ideation: Set when an ideate node preceded planning.
         plan: REFLECTION modules only — the live plan.
         current_step_id: REFLECTION modules only — the just-executed step.
@@ -88,10 +127,7 @@ class ReasoningContext:
     conversation_digest: str
     tools_summary: list[ToolSummary]
     model: BaseChatModel
-    emit: StatusEmitter
     workspace: WorkspaceInfo
-    run_id: str = ""
-    session_key: str | None = None
     ideation: IdeationResult | None = None
     plan: Plan | None = None
     current_step_id: str | None = None
@@ -155,6 +191,22 @@ class ReasoningModule(ABC):
             A ready-to-run module instance.
         """
         return cls()
+
+    def _emit(
+        self, ctx: ReasoningContext, kind: StatusEventKind, payload: dict[str, JsonValue]
+    ) -> None:
+        """Stamp module identity onto ``payload`` and write it via :func:`emit_status`.
+
+        Convenience over the ADR-110 transport: every module event carries
+        ``{"kind": <module kind>, "module": <name>}`` (renderer contract).
+        Tolerant like ``emit_status`` — never raises.
+        """
+        emit_status(
+            kind,
+            {"kind": self.kind.value, "module": self.name, **payload},
+            workspace=ctx.workspace.name,
+            node=self.kind.value,
+        )
 
     @abstractmethod
     async def run(self, ctx: ReasoningContext) -> ReasoningArtifact:
