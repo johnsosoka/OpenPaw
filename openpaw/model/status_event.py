@@ -69,6 +69,15 @@ class StatusEventKind(StrEnum):
                               omitted because the inner run's tokens are
                               attributed at run level (no double-count).
         module.selected     — {kind: str, module: str, reason: str}
+        module.phase        — {kind: str, module: str, phase: str,
+                              index: int | None, total: int | None,
+                              detail: str | None}. A progress transition
+                              inside a module run (e.g. ideonomy lens
+                              exploration). Renders a status line; the
+                              renderer owns wording, keyed by ``phase``.
+        module.insight      — {kind: str, module: str, label: str,
+                              headline: str}. A one-line snapshot of what a
+                              module sub-step surfaced (💡 in-channel).
         plan.created        — {plan: dict} (full serialized Plan: objective,
                               revision, steps[{id, description, status}])
         plan.step_started   — {step_id: str, description: str}
@@ -112,6 +121,8 @@ class StatusEventKind(StrEnum):
     NODE_ENTERED = "node.entered"
     NODE_COMPLETED = "node.completed"
     MODULE_SELECTED = "module.selected"
+    MODULE_PHASE = "module.phase"
+    MODULE_INSIGHT = "module.insight"
     PLAN_CREATED = "plan.created"
     PLAN_STEP_STARTED = "plan.step_started"
     PLAN_STEP_COMPLETED = "plan.step_completed"

@@ -331,6 +331,84 @@ async def test_reflection_verdict_narrates_deviations_only():
 
 
 @pytest.mark.asyncio
+async def test_module_phase_lines_render():
+    channel = MockChannel()
+    mw = _make_middleware(channel)
+
+    await mw.handle_plan_event(
+        _event(
+            StatusEventKind.MODULE_PHASE,
+            {"phase": "lenses_selected", "total": 3, "detail": "Causation · Function · Form"},
+        )
+    )
+    await mw.handle_plan_event(
+        _event(
+            StatusEventKind.MODULE_PHASE,
+            {"phase": "lens", "index": 2, "total": 3, "detail": "Function"},
+        )
+    )
+    await mw.handle_plan_event(
+        _event(StatusEventKind.MODULE_PHASE, {"phase": "synthesis", "total": 3})
+    )
+
+    lines = [channel.sent_messages[0][1]] + [e[2] for e in channel.edited_messages]
+    assert lines == [
+        "Exploring through 3 lenses: Causation · Function · Form",
+        "Lens 2/3: Function...",
+        "Weaving 3 explorations together...",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_module_insight_line_renders_label_and_headline():
+    channel = MockChannel()
+    mw = _make_middleware(channel)
+
+    await mw.handle_plan_event(
+        _event(
+            StatusEventKind.MODULE_INSIGHT,
+            {"label": "Function", "headline": "reframe it as a nervous system, not a controller"},
+        )
+    )
+
+    assert channel.sent_messages[0][1] == (
+        "Function — reframe it as a nervous system, not a controller"
+    )
+
+
+@pytest.mark.asyncio
+async def test_module_insight_uses_bulb_emoji_when_enabled():
+    channel = MockChannel()
+    config = StatusUpdatesConfig(
+        enabled=True, agent_start=False, min_interval_seconds=0,
+        use_emojis=True, typing_indicator=False,
+    )
+    mw = _make_middleware(channel, config=config)
+
+    await mw.handle_plan_event(
+        _event(StatusEventKind.MODULE_INSIGHT, {"label": "Form", "headline": "echo the shape"})
+    )
+    await mw.handle_plan_event(
+        _event(StatusEventKind.MODULE_PHASE, {"phase": "synthesis", "total": 2})
+    )
+
+    assert channel.sent_messages[0][1].startswith("💡 ")
+    assert channel.edited_messages[-1][2].startswith("📋 ")
+
+
+@pytest.mark.asyncio
+async def test_module_insight_empty_headline_renders_nothing():
+    channel = MockChannel()
+    mw = _make_middleware(channel)
+
+    await mw.handle_plan_event(
+        _event(StatusEventKind.MODULE_INSIGHT, {"label": "Function", "headline": "  "})
+    )
+
+    assert channel.sent_messages == []
+
+
+@pytest.mark.asyncio
 async def test_harness_narration_suppresses_starting_work():
     """Once a harness event has rendered, the inner react run's generic
     'Starting work...' must not stomp the phase narration."""

@@ -60,6 +60,7 @@ _VERDICT_LINES: dict[str, str] = {
 _FAILED_ADVANCE_LINE = "That step didn't go as planned — pressing on..."
 
 _MAX_STEP_PHASE_LEN = 80
+_MAX_INSIGHT_LEN = 140
 
 
 class PlanStatusRenderer:
@@ -155,6 +156,12 @@ class PlanStatusRenderer:
                 return _FAILED_ADVANCE_LINE
             return _VERDICT_LINES.get(verdict)
 
+        if kind is StatusEventKind.MODULE_PHASE:
+            return _module_phase_line(payload)
+
+        if kind is StatusEventKind.MODULE_INSIGHT:
+            return _module_insight_line(payload)
+
         return None
 
     def _load_plan(self, plan: Any) -> None:
@@ -212,3 +219,34 @@ class PlanStatusRenderer:
         sent = await channel.send_message(session_key, text)
         if sent is not None and hasattr(sent, "id"):
             self._message_id = str(sent.id)
+
+
+def _module_phase_line(payload: dict[str, Any]) -> str | None:
+    """Render a module.phase event (renderer owns wording, keyed by phase).
+
+    Phases (ideonomy; the vocabulary generalizes to other modules):
+        lenses_selected — {total, detail: " · "-joined lens themes}
+        lens            — {index, total, detail: lens theme}
+        synthesis       — {total}
+    """
+    phase = str(payload.get("phase", ""))
+    total = payload.get("total")
+    detail = payload.get("detail")
+    if phase == "lenses_selected":
+        return f"Exploring through {total} lenses: {detail}"
+    if phase == "lens":
+        return f"Lens {payload.get('index')}/{total}: {detail}..."
+    if phase == "synthesis":
+        return f"Weaving {total} explorations together..."
+    return None
+
+
+def _module_insight_line(payload: dict[str, Any]) -> str | None:
+    """Render a module.insight snapshot: 'Label — headline'."""
+    headline = str(payload.get("headline", "")).strip()
+    if not headline:
+        return None
+    if len(headline) > _MAX_INSIGHT_LEN:
+        headline = headline[: _MAX_INSIGHT_LEN - 1] + "…"
+    label = str(payload.get("label", "")).strip()
+    return f"{label} — {headline}" if label else headline

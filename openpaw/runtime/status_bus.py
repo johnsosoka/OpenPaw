@@ -76,6 +76,8 @@ _PLAN_EVENT_KINDS: frozenset[StatusEventKind] = frozenset(
         StatusEventKind.NODE_ENTERED,
         StatusEventKind.REFLECTION_VERDICT,
         StatusEventKind.MODULE_SELECTED,
+        StatusEventKind.MODULE_PHASE,
+        StatusEventKind.MODULE_INSIGHT,
     }
 )
 

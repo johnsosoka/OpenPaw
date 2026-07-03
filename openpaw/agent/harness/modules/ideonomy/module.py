@@ -22,8 +22,22 @@ from openpaw.agent.harness.modules.base import (
 from openpaw.agent.harness.modules.ideonomy.divisions import Division
 from openpaw.agent.harness.modules.ideonomy.selector import select_lenses
 from openpaw.model.plan import IdeationResult
+from openpaw.model.status_event import (
+    JsonValue,
+    StatusEvent,
+    StatusEventKind,
+)
 
 logger = logging.getLogger(__name__)
+
+
+class _LensSchema(BaseModel):
+    """Structured output for one lens exploration (headline drives the snapshot)."""
+
+    headline: str = Field(description="One-sentence takeaway this lens surfaces about the task")
+    exploration: str = Field(
+        description="Answers to the guiding questions and the concrete ideas this lens surfaces"
+    )
 
 
 class _SynthesisSchema(BaseModel):
@@ -47,6 +61,8 @@ class IdeonomyModule(ReasoningModule):
     async def run(self, ctx: ReasoningContext) -> ReasoningArtifact:
         """Think through the task lens by lens, then synthesize an IdeationResult.
 
+        Emits ``module.phase``/``module.insight`` events so the user sees the
+        lens-by-lens progress and a one-line snapshot from each lens (ADR-106).
         Failed lens calls are skipped with a warning; the module proceeds as
         long as at least one lens succeeds.
 
@@ -56,16 +72,45 @@ class IdeonomyModule(ReasoningModule):
                 owns fallback handling.
         """
         lenses = select_lenses(ctx.task, self._lens_count)
+        total = len(lenses)
+        await self._emit(
+            ctx,
+            StatusEventKind.MODULE_PHASE,
+            {
+                "phase": "lenses_selected",
+                "total": total,
+                "detail": " · ".join(lens.theme for lens in lenses),
+            },
+        )
+
         lens_outputs: list[tuple[str, str]] = []
-        for lens in lenses:
+        for index, lens in enumerate(lenses, start=1):
+            await self._emit(
+                ctx,
+                StatusEventKind.MODULE_PHASE,
+                {"phase": "lens", "index": index, "total": total, "detail": lens.theme},
+            )
             try:
-                response = await ctx.model.ainvoke([HumanMessage(_lens_prompt(lens, ctx.task))])
-                lens_outputs.append((lens.theme, str(response.content)))
+                exploration = await ctx.model.with_structured_output(_LensSchema).ainvoke(
+                    [HumanMessage(_lens_prompt(lens, ctx.task))]
+                )
+                if not isinstance(exploration, _LensSchema):
+                    raise TypeError(f"lens returned {type(exploration).__name__}")
             except Exception:
                 logger.warning("Ideonomy lens %s failed; skipping", lens.theme, exc_info=True)
+                continue
+            lens_outputs.append((lens.theme, exploration.exploration))
+            await self._emit(
+                ctx,
+                StatusEventKind.MODULE_INSIGHT,
+                {"label": lens.theme, "headline": exploration.headline},
+            )
         if not lens_outputs:
             raise ValueError("IdeonomyModule: all lens calls failed")
 
+        await self._emit(
+            ctx, StatusEventKind.MODULE_PHASE, {"phase": "synthesis", "total": len(lens_outputs)}
+        )
         blocks = "\n\n".join(f"## {theme}\n{output}" for theme, output in lens_outputs)
         prompt = (
             f"Task: {ctx.task}\n\n"
@@ -87,6 +132,29 @@ class IdeonomyModule(ReasoningModule):
         raw = json.dumps({"lenses": dict(lens_outputs), "synthesis": result.model_dump()})
         return ReasoningArtifact(kind=self.kind, ideation=ideation, raw=raw)
 
+    async def _emit(
+        self, ctx: ReasoningContext, kind: StatusEventKind, payload: dict[str, JsonValue]
+    ) -> None:
+        """Emit a module progress/insight event; best-effort, never raises.
+
+        The injected emitter contains its own failures, but the module must
+        also survive a null/degenerate emitter — status is never load-bearing.
+        """
+        payload = {"kind": self.kind.value, "module": self.name, **payload}
+        try:
+            await ctx.emit.emit(
+                StatusEvent(
+                    kind=kind,
+                    workspace=ctx.workspace.name,
+                    session_key=ctx.session_key,
+                    run_id=ctx.run_id,
+                    node=self.kind.value,
+                    payload=payload,
+                )
+            )
+        except Exception:
+            logger.debug("Ideonomy status emit failed for %s", kind, exc_info=True)
+
 
 def _lens_prompt(lens: Division, task: str) -> str:
     """Build the per-lens exploration prompt."""
@@ -96,6 +164,7 @@ def _lens_prompt(lens: Division, task: str) -> str:
         f"Core question: {lens.core_question}\n\n"
         f"Guiding questions:\n{questions}\n\n"
         f"Task: {task}\n\n"
-        "Answer the guiding questions against the task, then note the most "
-        "promising ideas this lens surfaces."
+        "Answer the guiding questions against the task and note the most "
+        "promising ideas this lens surfaces (the exploration), and distill a "
+        "single-sentence takeaway (the headline)."
     )

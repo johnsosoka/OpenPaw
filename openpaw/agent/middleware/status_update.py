@@ -318,7 +318,13 @@ class StatusUpdateMiddleware(AgentMiddleware):
         try:
             phase_line = await self._plan_renderer.handle(event, channel, session_key)
             if phase_line:
-                emoji = "📋" if self._config.use_emojis else None
+                emoji = None
+                if self._config.use_emojis:
+                    emoji = (
+                        "💡"
+                        if event.kind is StatusEventKind.MODULE_INSIGHT
+                        else "📋"
+                    )
                 # Forced: phase transitions are LLM-call-paced (bounded rate)
                 # and each one is user-meaningful — throttling here is what
                 # made module/routing lines vanish in round-1 testing.
