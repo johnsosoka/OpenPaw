@@ -36,6 +36,7 @@ The 0.5.0 theme: agents that **plan visibly and learn durably**. A pluggable age
 
 ### Fixed
 
+- **Outbound channel deliveries now retry transient network failures.** A dropped connection or timeout talking to Telegram/Discord (e.g. an httpx `ConnectError` mid-send) previously discarded a user-facing agent response with no retry. Channels now classify their transient transport errors and route content-bearing sends through a shared bounded exponential-backoff retry (honoring server `retry_after` hints); permanent errors (Telegram `BadRequest`, Discord 4xx) still surface immediately. The retry lives on the `ChannelAdapter` interface, so stdio and future channels inherit it (inert by default).
 - Dead `AgentBuilder` class removed (never instantiated; superseded by the harness seam).
 
 ## [0.4.4] - 2026-07-02
