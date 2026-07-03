@@ -1,27 +1,48 @@
 """Discord outbound message and file delivery."""
 
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from io import BytesIO
-from typing import Any
+from typing import Any, TypeVar
 
 import discord
 
 from openpaw.channels.discord.approval_view import DiscordApprovalView
 from openpaw.channels.discord.constants import MAX_FILE_SIZE, MAX_MESSAGE_LENGTH
 from openpaw.channels.helpers import check_file_size, format_approval_message, split_message
+from openpaw.channels.retry import RetryRunner
 from openpaw.model.message import Message, MessageDirection
 
 logger = logging.getLogger(__name__)
 
+_T = TypeVar("_T")
+
+
+async def _run_once(describe: str, operation: Callable[[], Awaitable[_T]]) -> _T:
+    """Default runner when no retry is wired: run the operation once."""
+    return await operation()
+
 
 class DiscordOutboundSender:
-    """Send messages, files, and approval requests to Discord channels."""
+    """Send messages, files, and approval requests to Discord channels.
 
-    def __init__(self, client: Any, channel_name: str, bot_id: int) -> None:
+    Content-bearing sends route through the injected ``retry`` runner so
+    transient Discord/aiohttp failures are retried with backoff (channel
+    retry interface); when unset, each call runs once.
+    """
+
+    def __init__(
+        self,
+        client: Any,
+        channel_name: str,
+        bot_id: int,
+        retry: "RetryRunner | None" = None,
+    ) -> None:
         self._client = client
         self._channel_name = channel_name
         self._bot_id = bot_id
+        self._retry: RetryRunner = retry or _run_once
 
     async def send_message(self, session_key: str, content: str, **kwargs: Any) -> Message:
         """Send a message to a Discord channel.
@@ -34,7 +55,9 @@ class DiscordOutboundSender:
         chunks = self._split_message(content)
         sent: discord.Message | None = None
         for chunk in chunks:
-            sent = await channel.send(chunk, **kwargs)
+            sent = await self._retry(
+                "send_message", lambda: channel.send(chunk, **kwargs)
+            )
 
         if sent is None:
             raise RuntimeError("Failed to send message: no chunks were sent")
@@ -115,7 +138,7 @@ class DiscordOutboundSender:
         try:
             channel = await self._resolve_channel(channel_id)
             message = await channel.fetch_message(int(message_id))
-            await message.edit(content=content)
+            await self._retry("edit_message", lambda: message.edit(content=content))
             logger.debug("Edited Discord message %s in channel %s", message_id, channel_id)
             return True
         except Exception as e:

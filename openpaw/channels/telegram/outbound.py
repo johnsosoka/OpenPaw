@@ -1,23 +1,46 @@
 """Telegram outbound message and file delivery."""
 
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypeVar
 
 from openpaw.channels.helpers import check_file_size, split_message
+from openpaw.channels.retry import RetryRunner
 from openpaw.channels.telegram.constants import MAX_FILE_SIZE, MAX_MESSAGE_LENGTH
 from openpaw.model.message import Message, MessageDirection
 
 logger = logging.getLogger(__name__)
 
+_T = TypeVar("_T")
+
+
+async def _run_once(describe: str, operation: Callable[[], Awaitable[_T]]) -> _T:
+    """Default runner when no retry is wired: run the operation once."""
+    return await operation()
+
 
 class TelegramOutboundSender:
-    """Send messages, audio, and files to Telegram chats."""
+    """Send messages, audio, and files to Telegram chats.
 
-    def __init__(self, app: Any, channel_name: str, bot_id: int) -> None:
+    Content-bearing API calls (send/edit/document/audio) route through the
+    injected ``retry`` runner so transient network failures are retried with
+    backoff; cosmetic calls (typing, reactions, delete) stay best-effort.
+    """
+
+    def __init__(
+        self,
+        app: Any,
+        channel_name: str,
+        bot_id: int,
+        retry: RetryRunner | None = None,
+    ) -> None:
         self._app = app
         self._channel_name = channel_name
         self._bot_id = bot_id
+        # Adapter-supplied retry runner (owns policy + error classification);
+        # falls back to a single-shot runner when unset (e.g. in unit tests).
+        self._retry: RetryRunner = retry or _run_once
 
     async def send_message(self, session_key: str, content: str, **kwargs: Any) -> Message:
         """Send a message to a Telegram chat.
@@ -38,7 +61,12 @@ class TelegramOutboundSender:
             chunks = self._split_message(content)
             sent = None
             for chunk in chunks:
-                sent = await self._app.bot.send_message(chat_id=chat_id, text=chunk, **kwargs)
+                sent = await self._retry(
+                    "send_message",
+                    lambda: self._app.bot.send_message(
+                        chat_id=chat_id, text=chunk, **kwargs
+                    ),
+                )
 
         if not sent:
             raise RuntimeError("Failed to send message: no chunks were sent")
@@ -72,23 +100,34 @@ class TelegramOutboundSender:
             logger.debug("HTML/plain chunk count mismatch, sending all as plain text")
             sent = None
             for chunk in plain_chunks:
-                sent = await self._app.bot.send_message(
-                    chat_id=chat_id, text=chunk, **kwargs
+                sent = await self._retry(
+                    "send_message",
+                    lambda: self._app.bot.send_message(
+                        chat_id=chat_id, text=chunk, **kwargs
+                    ),
                 )
             return sent
 
-        # Try HTML for each chunk, fall back to plain on parse error
+        # Try HTML for each chunk, fall back to plain on parse error.
+        # Retry wraps each individual call; BadRequest is not retryable, so
+        # the HTML->plain fallback below still fires immediately.
         sent = None
         for html_chunk, plain_chunk in zip(html_chunks, plain_chunks):
             try:
-                sent = await self._app.bot.send_message(
-                    chat_id=chat_id, text=html_chunk, parse_mode="HTML", **kwargs
+                sent = await self._retry(
+                    "send_message",
+                    lambda: self._app.bot.send_message(
+                        chat_id=chat_id, text=html_chunk, parse_mode="HTML", **kwargs
+                    ),
                 )
             except BadRequest as e:
                 if "can't parse" in str(e).lower():
                     logger.warning("HTML parse failed for chunk, using plain text: %s", e)
-                    sent = await self._app.bot.send_message(
-                        chat_id=chat_id, text=plain_chunk, **kwargs
+                    sent = await self._retry(
+                        "send_message",
+                        lambda: self._app.bot.send_message(
+                            chat_id=chat_id, text=plain_chunk, **kwargs
+                        ),
                     )
                 else:
                     raise
@@ -114,7 +153,10 @@ class TelegramOutboundSender:
         audio_file = BytesIO(audio_data)
         audio_file.name = filename
 
-        sent = await self._app.bot.send_audio(chat_id=chat_id, audio=audio_file, **kwargs)
+        sent = await self._retry(
+            "send_audio",
+            lambda: self._app.bot.send_audio(chat_id=chat_id, audio=audio_file, **kwargs),
+        )
 
         return Message(
             id=str(sent.message_id),
@@ -149,11 +191,14 @@ class TelegramOutboundSender:
         file_obj.name = filename
 
         try:
-            await self._app.bot.send_document(
-                chat_id=chat_id,
-                document=file_obj,
-                caption=caption,
-                filename=filename,
+            await self._retry(
+                "send_document",
+                lambda: self._app.bot.send_document(
+                    chat_id=chat_id,
+                    document=file_obj,
+                    caption=caption,
+                    filename=filename,
+                ),
             )
             logger.info("Sent file '%s' (%s bytes) to chat %s", filename, file_size, chat_id)
         except Exception as e:
@@ -186,19 +231,25 @@ class TelegramOutboundSender:
 
             html_content = markdown_to_telegram_html(content)
             try:
-                await self._app.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=int(message_id),
-                    text=html_content,
-                    parse_mode="HTML",
+                await self._retry(
+                    "edit_message",
+                    lambda: self._app.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=int(message_id),
+                        text=html_content,
+                        parse_mode="HTML",
+                    ),
                 )
             except BadRequest as e:
                 if "can't parse" in str(e).lower():
                     logger.warning("HTML parse failed on edit, using plain text: %s", e)
-                    await self._app.bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=int(message_id),
-                        text=content,
+                    await self._retry(
+                        "edit_message",
+                        lambda: self._app.bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=int(message_id),
+                            text=content,
+                        ),
                     )
                 else:
                     raise
