@@ -184,6 +184,10 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._last_reported_tools: frozenset[str] = frozenset()
         self._status_message_id: str | None = None
         self._steer_notified: bool = False
+        # True once a planner-harness event has rendered for this run: the
+        # harness narrates its own phases, so the generic "Starting work..."
+        # from inner react runs is suppressed (feedback round 1).
+        self._harness_narrating: bool = False
         # Plan checklist rendering (PRD-002 H3.3): its own edited-in-place
         # message, distinct from the tool-status line above.
         self._plan_renderer = PlanStatusRenderer(use_emojis=config.use_emojis)
@@ -220,6 +224,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._last_reported_tools = frozenset()
         self._status_message_id = None
         self._steer_notified = False
+        self._harness_narrating = False
         self._plan_renderer.reset()
 
     def reset(self) -> None:
@@ -232,6 +237,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._last_reported_tools = frozenset()
         self._status_message_id = None
         self._steer_notified = False
+        self._harness_narrating = False
         # Dropping renderer state stops further edits; the plan message
         # itself stays in the channel as the record of what was done.
         self._plan_renderer.reset()
@@ -308,11 +314,15 @@ class StatusUpdateMiddleware(AgentMiddleware):
                 session_key,
             )
             return
+        self._harness_narrating = True
         try:
             phase_line = await self._plan_renderer.handle(event, channel, session_key)
             if phase_line:
                 emoji = "📋" if self._config.use_emojis else None
-                await self._send_status(phase_line, emoji=emoji)
+                # Forced: phase transitions are LLM-call-paced (bounded rate)
+                # and each one is user-meaningful — throttling here is what
+                # made module/routing lines vanish in round-1 testing.
+                await self._send_status(phase_line, emoji=emoji, force=True)
         except Exception:
             logger.debug("Plan event rendering failed for %s", event.kind, exc_info=True)
 
@@ -473,6 +483,11 @@ class StatusUpdateMiddleware(AgentMiddleware):
             return None
 
         if getattr(self, "_is_system_batch", False):
+            return None
+
+        # Planner harness runs narrate their own phases (Thinking...,
+        # routing, steps); the generic label would stomp them.
+        if self._harness_narrating:
             return None
 
         label = (

@@ -53,7 +53,12 @@ class StatusEventKind(StrEnum):
                            during this tool)
 
     Harness (ADR-101/ADR-102; emitted by 0.5.0 harness nodes):
-        node.entered        — {node: str}
+        node.entered        — {node: str}. Triage emits twice: once on
+                              entry (empty payload — renders "Thinking...")
+                              and once post-decision with {route: str,
+                              reason: str} (renders the routing
+                              announcement; resume path adds
+                              resume_step_id: str).
         node.completed      — {node: str, model: str, input_tokens: int,
                               output_tokens: int, total_tokens: int,
                               duration_ms: float} (per-node token/latency
@@ -69,7 +74,8 @@ class StatusEventKind(StrEnum):
         plan.step_started   — {step_id: str, description: str}
         plan.step_completed — {step_id: str, description: str}
         plan.revised        — {plan: dict} (full serialized Plan)
-        reflection.verdict  — {verdict: str, reason: str}
+        reflection.verdict  — {verdict: str, reason: str,
+                              step_succeeded: bool}
         tools.equipped      — {tools: list[str]}
 
     Skills / learning (ADR-105/PRD-001; emitted by SkillStore + dream loop):

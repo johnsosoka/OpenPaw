@@ -317,6 +317,10 @@ def build_planner_graph(
             await _emit(StatusEventKind.NODE_ENTERED, "triage", {"route": "react", "reason": "system batch"})
             return Command(update={"route": "react", "objective": last_text[:200]}, goto="react")
 
+        # Entry event (no "route" key) — renders the "Thinking..." status
+        # while the triage model decides; the post-decision event below
+        # carries the chosen route (feedback round 1).
+        await _emit(StatusEventKind.NODE_ENTERED, "triage", {})
         async with _track_node("triage"):
             try:
                 decision = await node_models.triage.with_structured_output(TriageDecision).ainvoke(
@@ -615,6 +619,7 @@ def build_planner_graph(
         step_id = state.get("current_step_id")
         if state.get("abort_reason") or live_plan is None or step_id is None:
             return {"current_step_id": None}
+        await _emit(StatusEventKind.NODE_ENTERED, "reflect", {})
         step_results = state.get("step_results", [])
         last_result = step_results[-1] if step_results else ""
         objective = _objective(state)
@@ -675,7 +680,11 @@ def build_planner_graph(
         await _emit(
             StatusEventKind.REFLECTION_VERDICT,
             "reflect",
-            {"verdict": verdict.action, "reason": verdict.notes},
+            {
+                "verdict": verdict.action,
+                "reason": verdict.notes,
+                "step_succeeded": verdict.step_succeeded,
+            },
         )
         next_step = updated.next_pending() if abort_reason is None else None
         return {

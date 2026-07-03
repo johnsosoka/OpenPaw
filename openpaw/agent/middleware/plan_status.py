@@ -25,15 +25,39 @@ _MARKS: dict[str, str] = {
     "failed": "!",
 }
 
-# Node-phase vocabulary for the tool-status line (PRD-002 H7.2). Triage is
-# deliberately absent: the react route must look exactly like today, and a
-# non-react triage is immediately followed by one of these nodes anyway.
+# Node-phase vocabulary for the tool-status line (PRD-002 H7.2; wording per
+# feedback round 1 — first-person, self-narrating). Triage entry shows
+# "Thinking..." while the route is decided; the post-decision triage event
+# (payload carries "route") renders a routing announcement instead.
 _PHASE_LINES: dict[str, str] = {
+    "triage": "Thinking...",
     "ideate": "Brainstorming...",
     "plan": "Planning...",
-    "reflect": "Reflecting...",
-    "synthesize": "Synthesizing...",
+    "reflect": "Reflecting on that step...",
+    "synthesize": "Putting it all together...",
 }
+
+# Routing announcements after triage decides (react stays silent: the react
+# path narrates itself through tool statuses).
+_ROUTE_LINES: dict[str, str] = {
+    "plan": "I need to form a plan for this...",
+    "ideate": "I need to think about this creatively...",
+}
+
+# Module announcements, keyed by module kind. Reflection is deliberately
+# absent — it resolves once per step and would drown the status line.
+_MODULE_LINES: dict[str, str] = {
+    "creative": "Ideating with the {module} module...",
+    "planning": "Using the {module} module to shape the plan...",
+}
+
+# Reflection outcomes worth narrating. A clean advance stays silent — the
+# checklist tick already tells that story.
+_VERDICT_LINES: dict[str, str] = {
+    "insert_step": "Hit a snag — adding a recovery step...",
+    "revise_plan": "This isn't working — going back to the drawing board...",
+}
+_FAILED_ADVANCE_LINE = "That step didn't go as planned — pressing on..."
 
 _MAX_STEP_PHASE_LEN = 80
 
@@ -113,10 +137,24 @@ class PlanStatusRenderer:
             return None
 
         if kind is StatusEventKind.NODE_ENTERED:
+            if event.node == "triage" and "route" in payload:
+                if payload.get("resume_step_id"):
+                    return "Resuming the plan..."
+                return _ROUTE_LINES.get(str(payload.get("route")))
             return _PHASE_LINES.get(event.node or "")
 
-        # reflection.verdict / module.selected: forwarded for future
-        # rendering; the checklist edit already carries the outcome.
+        if kind is StatusEventKind.MODULE_SELECTED:
+            template = _MODULE_LINES.get(str(payload.get("kind")))
+            if template:
+                return template.format(module=payload.get("module"))
+            return None
+
+        if kind is StatusEventKind.REFLECTION_VERDICT:
+            verdict = str(payload.get("verdict"))
+            if verdict == "advance" and payload.get("step_succeeded") is False:
+                return _FAILED_ADVANCE_LINE
+            return _VERDICT_LINES.get(verdict)
+
         return None
 
     def _load_plan(self, plan: Any) -> None:

@@ -26,6 +26,7 @@ The 0.5.0 theme: agents that **plan visibly and learn durably**. A pluggable age
 
 ### Changed
 
+- **The planner harness narrates its phases in the status line** (round-1 testing feedback): "Thinking..." during triage, a first-person routing announcement after it ("I need to form a plan for this..." / "I need to think about this creatively..."), which planning/creative module was selected, per-step reflection outcomes ("going back to the drawing board..." on a plan rewrite), and "Putting it all together..." while synthesizing. Harness runs suppress the generic "Starting work..." label, and harness phase lines bypass the status throttle so transitions are never silently dropped. React-only workspaces are unchanged.
 - `docs/configuration.md` gains a resolution-precedence reference (model/credentials, builtins, approval gates, tool timeouts, queue) and a catalog-first model configuration guide; `config.example.yaml` rewritten catalog-first.
 - New 0.5.0 config groups (`harness:`, `learning:`) use `extra="forbid"` — typos fail at startup instead of being silently swallowed.
 - `docs/architecture.md` updated for the `create_agent` v2 API and direct provider instantiation (stale `create_react_agent`/`init_chat_model` references removed).

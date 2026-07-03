@@ -285,17 +285,28 @@ async def test_two_step_plan_executes_and_synthesizes() -> None:
     # Event sequence for the happy path (H7.2 vocabulary).
     plan_kinds = [k for k in emitter.kinds() if k not in ("module.selected", "node.completed")]
     assert plan_kinds == [
-        "node.entered",  # triage
+        "node.entered",  # triage entry ("Thinking...")
+        "node.entered",  # triage decision (route announcement)
         "node.entered",  # plan
         "plan.created",
         "plan.step_started",
         "plan.step_completed",
+        "node.entered",  # reflect
         "reflection.verdict",
         "plan.step_started",
         "plan.step_completed",
+        "node.entered",  # reflect
         "reflection.verdict",
         "node.entered",  # synthesize
     ]
+    # Triage entry has no route; the decision event carries it (renderer keys
+    # "Thinking..." vs the routing announcement off this distinction).
+    triage_events = [e for e in emitter.events if e.node == "triage"]
+    assert "route" not in triage_events[0].payload
+    assert triage_events[1].payload["route"] == "plan"
+    # Verdict payload carries step_succeeded for the failed-advance narration.
+    verdicts = [e for e in emitter.events if str(e.kind) == "reflection.verdict"]
+    assert all(e.payload["step_succeeded"] is True for e in verdicts)
     assert "module.selected" in emitter.kinds()  # pinned resolutions still emit
 
 

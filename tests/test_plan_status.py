@@ -228,23 +228,132 @@ async def test_node_entered_renders_phase_lines():
 
     # First phase line sends the status message; second edits it in place
     assert channel.sent_messages[0][1] == "Planning..."
-    assert channel.edited_messages[-1][2] == "Synthesizing..."
+    assert channel.edited_messages[-1][2] == "Putting it all together..."
 
 
 @pytest.mark.asyncio
-async def test_reflection_verdict_and_module_selected_render_nothing():
+async def test_triage_entry_renders_thinking():
+    channel = MockChannel()
+    mw = _make_middleware(channel)
+
+    await mw.handle_plan_event(_event(StatusEventKind.NODE_ENTERED, {}, node="triage"))
+
+    assert channel.sent_messages[0][1] == "Thinking..."
+
+
+@pytest.mark.asyncio
+async def test_triage_decision_announces_route():
     channel = MockChannel()
     mw = _make_middleware(channel)
 
     await mw.handle_plan_event(
-        _event(StatusEventKind.REFLECTION_VERDICT, {"verdict": "advance", "reason": "ok"})
+        _event(StatusEventKind.NODE_ENTERED, {"route": "plan", "reason": "multi-step"}, node="triage")
     )
     await mw.handle_plan_event(
-        _event(StatusEventKind.MODULE_SELECTED, {"kind": "planning", "module": "direct", "reason": ""})
+        _event(StatusEventKind.NODE_ENTERED, {"route": "ideate", "reason": "creative"}, node="triage")
+    )
+    await mw.handle_plan_event(
+        _event(
+            StatusEventKind.NODE_ENTERED,
+            {"route": "plan", "resume_step_id": "2"},
+            node="triage",
+        )
     )
 
+    assert channel.sent_messages[0][1] == "I need to form a plan for this..."
+    assert channel.edited_messages[0][2] == "I need to think about this creatively..."
+    assert channel.edited_messages[1][2] == "Resuming the plan..."
+
+
+@pytest.mark.asyncio
+async def test_module_selected_announces_creative_and_planning_only():
+    channel = MockChannel()
+    mw = _make_middleware(channel)
+
+    await mw.handle_plan_event(
+        _event(StatusEventKind.MODULE_SELECTED, {"kind": "creative", "module": "ideonomy", "reason": ""})
+    )
+    await mw.handle_plan_event(
+        _event(
+            StatusEventKind.MODULE_SELECTED,
+            {"kind": "planning", "module": "self_discover", "reason": ""},
+        )
+    )
+    # Reflection modules resolve every step — must stay silent
+    await mw.handle_plan_event(
+        _event(StatusEventKind.MODULE_SELECTED, {"kind": "reflection", "module": "light", "reason": ""})
+    )
+
+    assert channel.sent_messages[0][1] == "Ideating with the ideonomy module..."
+    assert channel.edited_messages[-1][2] == "Using the self_discover module to shape the plan..."
+    assert len(channel.edited_messages) == 1  # reflection rendered nothing
+
+
+@pytest.mark.asyncio
+async def test_reflection_verdict_narrates_deviations_only():
+    channel = MockChannel()
+    mw = _make_middleware(channel)
+
+    # Clean advance: silent (the checklist tick tells the story)
+    await mw.handle_plan_event(
+        _event(
+            StatusEventKind.REFLECTION_VERDICT,
+            {"verdict": "advance", "reason": "ok", "step_succeeded": True},
+        )
+    )
     assert channel.sent_messages == []
-    assert channel.edited_messages == []
+
+    await mw.handle_plan_event(
+        _event(
+            StatusEventKind.REFLECTION_VERDICT,
+            {"verdict": "advance", "reason": "flaky", "step_succeeded": False},
+        )
+    )
+    await mw.handle_plan_event(
+        _event(
+            StatusEventKind.REFLECTION_VERDICT,
+            {"verdict": "insert_step", "reason": "missing dep", "step_succeeded": False},
+        )
+    )
+    await mw.handle_plan_event(
+        _event(
+            StatusEventKind.REFLECTION_VERDICT,
+            {"verdict": "revise_plan", "reason": "wrong approach", "step_succeeded": False},
+        )
+    )
+
+    assert channel.sent_messages[0][1] == "That step didn't go as planned — pressing on..."
+    assert channel.edited_messages[0][2] == "Hit a snag — adding a recovery step..."
+    assert (
+        channel.edited_messages[1][2]
+        == "This isn't working — going back to the drawing board..."
+    )
+
+
+@pytest.mark.asyncio
+async def test_harness_narration_suppresses_starting_work():
+    """Once a harness event has rendered, the inner react run's generic
+    'Starting work...' must not stomp the phase narration."""
+    channel = MockChannel()
+    config = StatusUpdatesConfig(
+        enabled=True,
+        agent_start=True,
+        min_interval_seconds=0,
+        use_emojis=False,
+        typing_indicator=False,
+    )
+    mw = _make_middleware(channel, config=config)
+
+    await mw.handle_plan_event(_event(StatusEventKind.NODE_ENTERED, {}, node="triage"))
+    await mw.abefore_agent({}, None)
+
+    texts = [t for _, t in channel.sent_messages] + [t for _, _, t in channel.edited_messages]
+    assert texts == ["Thinking..."]
+
+    # A fresh run (set_context) re-enables the generic label for react paths
+    mw.set_context(channel, SESSION)
+    await mw.abefore_agent({}, None)
+    assert channel.sent_messages[-1][1] == "Starting work..."
 
 
 # ---------------------------------------------------------------------------
