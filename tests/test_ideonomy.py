@@ -1,11 +1,14 @@
-"""Tests for the IdeonomyModule creative reasoning module (ADR-102 §3)."""
+"""Tests for the IdeonomyModule creative reasoning module (ADR-102 §3, ADR-109 §3)."""
 
+import asyncio
 from pathlib import Path
-from typing import cast
+from typing import TypedDict, cast
 
 import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
 
 from openpaw.agent.harness.modules.base import (
     ModuleKind,
@@ -213,6 +216,89 @@ async def test_module_unstructured_synthesis_raises():
     )
     with pytest.raises(ValueError, match="structured synthesis output"):
         await IdeonomyModule().run(make_ctx(model))
+
+
+# ---------------------------------------------------------------------------
+# Subgraph fan-out (ADR-109 §3)
+# ---------------------------------------------------------------------------
+
+
+async def test_fan_out_delivers_every_lens_output_to_synthesis():
+    model = fake_model(
+        *(lens(f"Headline {i}", f"exploration {i}") for i in range(1, 6)),
+        synthesis(),
+    )
+
+    artifact = await IdeonomyModule(lens_count=5).run(make_ctx(model))
+
+    fake = cast(FakeModel, model)
+    assert fake.call_count == 6  # 5 explore_lens Sends + 1 synthesis
+    assert fake.schemas == [_LensSchema] * 5 + [_SynthesisSchema]
+    synthesis_prompt = fake.prompts[-1]
+    for i in range(1, 6):
+        assert f"exploration {i}" in synthesis_prompt
+    assert artifact.ideation is not None
+
+
+class OverlapProbe(FakeModel):
+    """FakeModel that yields once per call and records peak in-flight calls.
+
+    The single ``sleep(0)`` lets sibling Send tasks enter before this call
+    finishes — a sequential for-loop can never overlap, so ``peak >= 2`` is
+    concurrency evidence without timing flakiness.
+    """
+
+    def __init__(self, *outputs: object) -> None:
+        super().__init__(*outputs)
+        self.in_flight = 0
+        self.peak = 0
+
+    async def ainvoke(self, messages: list[BaseMessage]) -> object:
+        self.in_flight += 1
+        self.peak = max(self.peak, self.in_flight)
+        await asyncio.sleep(0)
+        try:
+            return await super().ainvoke(messages)
+        finally:
+            self.in_flight -= 1
+
+
+async def test_lens_calls_run_concurrently():
+    probe = OverlapProbe(lens("a", "t1"), lens("b", "t2"), lens("c", "t3"), synthesis())
+
+    artifact = await IdeonomyModule().run(make_ctx(cast(BaseChatModel, probe)))
+
+    assert probe.peak >= 2
+    assert artifact.ideation is not None
+    # All three explorations survive the parallel reduce into synthesis.
+    synthesis_prompt = probe.prompts[-1]
+    assert all(f"t{i}" in synthesis_prompt for i in (1, 2, 3))
+
+
+async def test_module_subgraph_run_is_unpersisted():
+    """The nested module run must not checkpoint under a parent's saver (ADR-109 §1)."""
+    saver = MemorySaver()
+    model = fake_model(lens("a", "t1"), lens("b", "t2"), lens("c", "t3"), synthesis())
+    ctx = make_ctx(model)
+
+    class _S(TypedDict, total=False):
+        done: bool
+
+    async def node(state: _S) -> _S:
+        await IdeonomyModule().run(ctx)
+        return {"done": True}
+
+    builder: StateGraph[_S, None, _S, _S] = StateGraph(_S)
+    builder.add_node("mod", node)
+    builder.add_edge(START, "mod")
+    builder.add_edge("mod", END)
+    graph = builder.compile(checkpointer=saver)
+    await graph.ainvoke({}, config={"configurable": {"thread_id": "t"}})
+
+    checkpoints = list(saver.list(None))
+    assert checkpoints  # the parent run itself checkpoints...
+    # ...but nothing under a namespaced checkpoint_ns (the module subgraph).
+    assert all(c.config["configurable"]["checkpoint_ns"] == "" for c in checkpoints)
 
 
 # ---------------------------------------------------------------------------

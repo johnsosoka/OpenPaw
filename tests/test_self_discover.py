@@ -1,25 +1,32 @@
-"""Tests for SelfDiscoverPlanner and StructureCache (ADR-102 §3)."""
+"""Tests for SelfDiscoverPlanner and StructureCache (ADR-102 §3, ADR-109 §2)."""
 
 import json
 import logging
 from pathlib import Path
-from typing import cast
+from typing import TypedDict, cast
 
 import pytest
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
 
 import openpaw.agent.harness.modules.self_discover.cache as cache_mod
 from openpaw.agent.harness.modules.base import ModuleKind, ReasoningContext, WorkspaceInfo
 from openpaw.agent.harness.modules.direct import _PlanSchema
 from openpaw.agent.harness.modules.self_discover import SelfDiscoverPlanner, StructureCache
-from openpaw.agent.harness.modules.self_discover.planner import _parse_structure
+from openpaw.agent.harness.modules.self_discover.planner import (
+    _DEFAULT_SELECTED_INDICES,
+    _AdaptSchema,
+    _ImplementSchema,
+    _SelectSchema,
+    _StructureStep,
+)
 from openpaw.agent.harness.modules.self_discover.seed_modules import SEED_REASONING_MODULES
 from openpaw.model.status_event import StatusEvent
 from tests.test_reasoning_modules import FakeStructuredModel, fake_model, make_ctx, run_streamed
 
 TASK = "Ship the quarterly report"
-STRUCTURE_JSON = '{"identify_inputs": "List required data", "sequence_work": "Order the steps"}'
+STRUCTURE = {"identify_inputs": "List required data", "sequence_work": "Order the steps"}
 
 
 def make_planner(tmp_path: Path) -> tuple[SelfDiscoverPlanner, StructureCache]:
@@ -28,11 +35,16 @@ def make_planner(tmp_path: Path) -> tuple[SelfDiscoverPlanner, StructureCache]:
 
 
 def discovery_outputs() -> list[object]:
-    """SELECT, ADAPT, IMPLEMENT responses followed by the structured plan."""
+    """SELECT, ADAPT, IMPLEMENT structured outputs followed by the structured plan."""
     return [
-        AIMessage("Modules 9, 16, 39 are relevant."),
-        AIMessage("Adapted: break the report into data-gathering and writing."),
-        AIMessage(STRUCTURE_JSON),
+        _SelectSchema(selected_indices=[9, 16, 39]),
+        _AdaptSchema(adapted_modules=["Break the report into data-gathering and writing."]),
+        _ImplementSchema(
+            steps=[
+                _StructureStep(name="identify_inputs", instruction="List required data"),
+                _StructureStep(name="sequence_work", instruction="Order the steps"),
+            ]
+        ),
         _PlanSchema(steps=["Gather data", "Write report"]),
     ]
 
@@ -58,15 +70,18 @@ async def test_cache_miss_runs_three_discovery_calls_plus_solve(tmp_path: Path):
 
     fake = cast(FakeStructuredModel, model)
     assert fake.call_count == 4  # SELECT, ADAPT, IMPLEMENT, solve
-    assert fake.schemas == [_PlanSchema]  # only the solve call is structured
+    assert fake.schemas == [_SelectSchema, _AdaptSchema, _ImplementSchema, _PlanSchema]
 
-    # SELECT: verbatim meta-prompt over all 39 seed modules.
+    # SELECT: verbatim meta-prompt over all 39 numbered seed modules.
     assert "which of the following reasoning modules are relevant" in fake.prompts[0]
     assert all(module in fake.prompts[0] for module in SEED_REASONING_MODULES)
     assert TASK in fake.prompts[0]
-    # ADAPT and IMPLEMENT chain the previous call's output.
-    assert "Modules 9, 16, 39 are relevant." in fake.prompts[1]
-    assert "break the report into data-gathering" in fake.prompts[2]
+    # ADAPT gets the texts of the selected modules (indices 9, 16, 39).
+    assert SEED_REASONING_MODULES[8] in fake.prompts[1]
+    assert SEED_REASONING_MODULES[15] in fake.prompts[1]
+    assert SEED_REASONING_MODULES[38] in fake.prompts[1]
+    # IMPLEMENT chains the adapted modules.
+    assert "Break the report into data-gathering" in fake.prompts[2]
     # Solve follows the structure and gets the tools context.
     assert "Follow the step-by-step reasoning plan in JSON" in fake.prompts[3]
     assert "identify_inputs" in fake.prompts[3]
@@ -76,12 +91,14 @@ async def test_cache_miss_runs_three_discovery_calls_plus_solve(tmp_path: Path):
     assert artifact.plan is not None
     assert [s.id for s in artifact.plan.steps] == ["1", "2"]
     assert [s.description for s in artifact.plan.steps] == ["Gather data", "Write report"]
-    assert artifact.reasoning_structure == json.loads(STRUCTURE_JSON)
+    assert artifact.reasoning_structure == STRUCTURE
+    # Step order preserved: the structure dict is insertion-ordered.
+    assert list(artifact.reasoning_structure) == ["identify_inputs", "sequence_work"]
     assert "identify_inputs" in artifact.raw and "Gather data" in artifact.raw
     assert artifact.ideation is None and artifact.verdict is None
 
     # Discovery persisted the structure for the next run.
-    assert cache.get(cache.key_for(TASK)) == json.loads(STRUCTURE_JSON)
+    assert cache.get(cache.key_for(TASK)) == STRUCTURE
 
 
 async def test_cache_hit_is_single_solve_call(tmp_path: Path):
@@ -93,9 +110,25 @@ async def test_cache_hit_is_single_solve_call(tmp_path: Path):
     artifact = await planner.run(ws_ctx(model, tmp_path))
 
     fake = cast(FakeStructuredModel, model)
-    assert fake.call_count == 1
+    assert fake.call_count == 1  # discovery nodes skipped entirely
+    assert fake.schemas == [_PlanSchema]
     assert "reuse_me" in fake.prompts[0]
     assert artifact.reasoning_structure == cached
+
+
+async def test_old_shape_cache_entry_still_solves(tmp_path: Path):
+    """Pre-structured-output cache entries (text fallback shape) stay valid."""
+    planner, cache = make_planner(tmp_path)
+    legacy = {"structure_text": "First think about inputs, then order the work."}
+    cache.put(cache.key_for(TASK), legacy)
+    model = fake_model(_PlanSchema(steps=["Do it"]))
+
+    artifact = await planner.run(ws_ctx(model, tmp_path))
+
+    assert artifact.plan is not None
+    assert [s.description for s in artifact.plan.steps] == ["Do it"]
+    assert artifact.reasoning_structure == legacy
+    assert "First think about inputs" in cast(FakeStructuredModel, model).prompts[0]
 
 
 async def test_discovery_prompts_are_task_only(tmp_path: Path):
@@ -110,18 +143,6 @@ async def test_discovery_prompts_are_task_only(tmp_path: Path):
     assert "web_search" in prompts[3]
 
 
-async def test_non_json_implement_output_stored_as_text(tmp_path: Path):
-    planner, _ = make_planner(tmp_path)
-    prose = "First think about inputs, then order the work."
-    outputs = discovery_outputs()
-    outputs[2] = AIMessage(prose)
-    model = fake_model(*outputs)
-
-    artifact = await planner.run(ws_ctx(model, tmp_path))
-
-    assert artifact.reasoning_structure == {"structure_text": prose}
-
-
 async def test_empty_plan_steps_raises(tmp_path: Path):
     planner, _ = make_planner(tmp_path)
     outputs = discovery_outputs()
@@ -130,6 +151,69 @@ async def test_empty_plan_steps_raises(tmp_path: Path):
 
     with pytest.raises(ValueError, match="empty plan"):
         await planner.run(ws_ctx(model, tmp_path))
+
+
+async def test_empty_implement_steps_raises(tmp_path: Path):
+    planner, cache = make_planner(tmp_path)
+    outputs = discovery_outputs()
+    outputs[2] = _ImplementSchema(steps=[])
+    model = fake_model(*outputs)
+
+    with pytest.raises(ValueError, match="no reasoning steps"):
+        await planner.run(ws_ctx(model, tmp_path))
+    assert cache.get(cache.key_for(TASK)) is None  # nothing cached on failure
+
+
+# ---------------------------------------------------------------------------
+# SELECT index validation (ADR-109 §2)
+# ---------------------------------------------------------------------------
+
+
+async def test_select_drops_out_of_range_indices(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    planner, _ = make_planner(tmp_path)
+    outputs = discovery_outputs()
+    outputs[0] = _SelectSchema(selected_indices=[2, 0, 99])
+    model = fake_model(*outputs)
+
+    with caplog.at_level(logging.WARNING):
+        await planner.run(ws_ctx(model, tmp_path))
+
+    assert "out-of-range" in caplog.text
+    adapt_prompt = cast(FakeStructuredModel, model).prompts[1]
+    assert SEED_REASONING_MODULES[1] in adapt_prompt  # index 2 survives
+    assert SEED_REASONING_MODULES[0] not in adapt_prompt  # 0 and 99 dropped
+
+
+async def test_select_empty_selection_falls_back_to_default_set(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    planner, _ = make_planner(tmp_path)
+    outputs = discovery_outputs()
+    outputs[0] = _SelectSchema(selected_indices=[])
+    model = fake_model(*outputs)
+
+    with caplog.at_level(logging.WARNING):
+        await planner.run(ws_ctx(model, tmp_path))
+
+    assert "no valid module indices" in caplog.text
+    adapt_prompt = cast(FakeStructuredModel, model).prompts[1]
+    for index in _DEFAULT_SELECTED_INDICES:
+        assert SEED_REASONING_MODULES[index - 1] in adapt_prompt
+
+
+async def test_select_all_invalid_indices_falls_back_to_default_set(tmp_path: Path):
+    planner, _ = make_planner(tmp_path)
+    outputs = discovery_outputs()
+    outputs[0] = _SelectSchema(selected_indices=[0, 40, -3])
+    model = fake_model(*outputs)
+
+    await planner.run(ws_ctx(model, tmp_path))
+
+    adapt_prompt = cast(FakeStructuredModel, model).prompts[1]
+    for index in _DEFAULT_SELECTED_INDICES:
+        assert SEED_REASONING_MODULES[index - 1] in adapt_prompt
 
 
 # ---------------------------------------------------------------------------
@@ -159,13 +243,12 @@ async def test_cache_miss_emits_discovery_phases_and_structure_insight(tmp_path:
     ]
     insight = next(e for e in events if str(e.kind) == "module.insight")
     assert insight.payload["label"] == "Reasoning structure"
-    # structure keys from STRUCTURE_JSON, joined
     assert insight.payload["headline"] == "identify_inputs · sequence_work"
     assert insight.node == "planning"
     assert insight.payload["module"] == "self_discover"
 
 
-async def test_cache_hit_emits_reuse_phase_and_insight(tmp_path: Path):
+async def test_cache_hit_emits_reuse_phase_and_skips_discovery_phases(tmp_path: Path):
     planner, cache = make_planner(tmp_path)
     cache.put(cache.key_for(TASK), {"reuse_me": "cached instruction"})
     ctx = ws_ctx(fake_model(_PlanSchema(steps=["Do it"])), tmp_path)
@@ -179,11 +262,10 @@ async def test_cache_hit_emits_reuse_phase_and_insight(tmp_path: Path):
     ]
 
 
-async def test_text_fallback_structure_emits_no_insight(tmp_path: Path):
-    planner, _ = make_planner(tmp_path)
-    outputs = discovery_outputs()
-    outputs[2] = AIMessage("just think hard about it")  # non-JSON IMPLEMENT
-    ctx = ws_ctx(fake_model(*outputs), tmp_path)
+async def test_legacy_text_structure_emits_no_insight(tmp_path: Path):
+    planner, cache = make_planner(tmp_path)
+    cache.put(cache.key_for(TASK), {"structure_text": "just think hard about it"})
+    ctx = ws_ctx(fake_model(_PlanSchema(steps=["Do it"])), tmp_path)
 
     _, events = await run_streamed(lambda: planner.run(ctx))
 
@@ -192,24 +274,38 @@ async def test_text_fallback_structure_emits_no_insight(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# Structure parsing
+# Subgraph runs are unpersisted (ADR-109 §1 canary, mirrors
+# test_execute_step_inner_run_is_unpersisted)
 # ---------------------------------------------------------------------------
 
 
-def test_parse_structure_plain_json():
-    assert _parse_structure('{"a": "b"}') == {"a": "b"}
+async def test_module_subgraph_run_is_unpersisted(tmp_path: Path):
+    """run() disables checkpointing even under a checkpointed parent graph."""
+    planner, _ = make_planner(tmp_path)
+    ctx = ws_ctx(fake_model(*discovery_outputs()), tmp_path)
+    saver = MemorySaver()
 
+    class _State(TypedDict, total=False):
+        done: bool
 
-def test_parse_structure_fenced_json():
-    assert _parse_structure('```json\n{"a": "b"}\n```') == {"a": "b"}
+    async def node(state: _State) -> _State:
+        await planner.run(ctx)
+        return {"done": True}
 
+    builder: StateGraph[_State, None, _State, _State] = StateGraph(_State)
+    builder.add_node("mod", node)
+    builder.add_edge(START, "mod")
+    builder.add_edge("mod", END)
+    graph = builder.compile(checkpointer=saver)
 
-def test_parse_structure_non_dict_json_falls_back():
-    assert _parse_structure('["a", "b"]') == {"structure_text": '["a", "b"]'}
+    await graph.ainvoke({}, config={"configurable": {"thread_id": "t1"}})
 
-
-def test_parse_structure_prose_falls_back():
-    assert _parse_structure("just think hard") == {"structure_text": "just think hard"}
+    # Only root-namespace (parent) checkpoints exist — the module subgraph
+    # would otherwise inherit the parent checkpointer under a nested ns.
+    namespaces = {
+        c.config["configurable"].get("checkpoint_ns", "") for c in saver.list(None)
+    }
+    assert namespaces == {""}
 
 
 # ---------------------------------------------------------------------------

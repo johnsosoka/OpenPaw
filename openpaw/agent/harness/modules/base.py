@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Literal
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.runnables import RunnableConfig
+from langchain_core.runnables.config import ensure_config, merge_configs
 from langgraph.config import get_stream_writer
 
 from openpaw.model.plan import IdeationResult, Plan
@@ -29,6 +31,18 @@ logger = logging.getLogger(__name__)
 # key is how it disables checkpointing for nested runs internally. Covered by
 # test_execute_step_inner_run_is_unpersisted so an upgrade break fails loudly.
 CONFIG_KEY_CHECKPOINTER = "__pregel_checkpointer"
+
+
+def unpersisted_nested_config() -> RunnableConfig:
+    """Invocation config for running a module subgraph unpersisted (ADR-109).
+
+    merge_configs over the ambient config: a bare ``configurable`` dict would
+    REPLACE the contextvar-inherited one (ensure_config semantics), silently
+    severing the parent's custom-stream writer (ADR-110) along with the
+    checkpointer. Merging adds the checkpointer-disable key while everything
+    else — including the stream writer — keeps flowing to the nested run.
+    """
+    return merge_configs(ensure_config(), {"configurable": {CONFIG_KEY_CHECKPOINTER: None}})
 
 
 def emit_status(
