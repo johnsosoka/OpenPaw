@@ -221,15 +221,31 @@ class PlanStatusRenderer:
             self._message_id = str(sent.id)
 
 
+# Static module phases (self_discover): no payload data, fixed wording. The
+# renderer owns the phrasing so modules stay channel-agnostic.
+_STATIC_MODULE_PHASES: dict[str, str] = {
+    # self_discover (SELECT/ADAPT/IMPLEMENT + cache decision + solve)
+    "discovering": "New kind of task — working out how to reason about it...",
+    "structure_reused": "Reusing a proven reasoning approach for this kind of task...",
+    "select": "Selecting reasoning modules...",
+    "adapt": "Adapting them to the task...",
+    "implement": "Composing a reasoning structure...",
+    "solving": "Building the plan from the structure...",
+}
+
+
 def _module_phase_line(payload: dict[str, Any]) -> str | None:
     """Render a module.phase event (renderer owns wording, keyed by phase).
 
-    Phases (ideonomy; the vocabulary generalizes to other modules):
-        lenses_selected — {total, detail: " · "-joined lens themes}
-        lens            — {index, total, detail: lens theme}
-        synthesis       — {total}
+    Phases:
+        ideonomy — lenses_selected {total, detail}, lens {index, total,
+            detail}, synthesis {total} (dynamic, data-driven wording).
+        self_discover — discovering / structure_reused / select / adapt /
+            implement / solving (static wording, see _STATIC_MODULE_PHASES).
     """
     phase = str(payload.get("phase", ""))
+    if phase in _STATIC_MODULE_PHASES:
+        return _STATIC_MODULE_PHASES[phase]
     total = payload.get("total")
     detail = payload.get("detail")
     if phase == "lenses_selected":

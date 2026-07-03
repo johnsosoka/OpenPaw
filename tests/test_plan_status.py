@@ -360,6 +360,26 @@ async def test_module_phase_lines_render():
 
 
 @pytest.mark.asyncio
+async def test_self_discover_phase_lines_render():
+    channel = MockChannel()
+    mw = _make_middleware(channel)
+
+    for phase in ("discovering", "select", "adapt", "implement", "solving"):
+        await mw.handle_plan_event(
+            _event(StatusEventKind.MODULE_PHASE, {"phase": phase})
+        )
+
+    lines = [channel.sent_messages[0][1]] + [e[2] for e in channel.edited_messages]
+    assert lines == [
+        "New kind of task — working out how to reason about it...",
+        "Selecting reasoning modules...",
+        "Adapting them to the task...",
+        "Composing a reasoning structure...",
+        "Building the plan from the structure...",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_module_insight_line_renders_label_and_headline():
     channel = MockChannel()
     mw = _make_middleware(channel)
