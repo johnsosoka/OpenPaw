@@ -32,6 +32,9 @@ class PlannerState(AgentState[Any], total=False):
         plan: Serialized live plan (see :func:`plan_to_state`), or None.
         current_step_id: The step the execute/reflect loop is working on.
         ideation: Serialized creative-module output, or None.
+        context_brief: Rendered session brief from the brief node (ADR-108),
+            or None when briefing is disabled, failed, or the run routed
+            react — consumers fall back to the conversation digest.
         step_results: Full executor output per executed step, in order.
         resume_step_id: Approval-resume marker — set when an approval interrupt
             paused a plan step; triage jumps straight back to execute_step.
@@ -49,6 +52,7 @@ class PlannerState(AgentState[Any], total=False):
     plan: dict[str, Any] | None
     current_step_id: str | None
     ideation: dict[str, Any] | None
+    context_brief: str | None
     step_results: list[str]
     resume_step_id: str | None
     abort_reason: str | None

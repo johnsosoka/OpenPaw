@@ -82,6 +82,20 @@ def emit_status(
     writer(StatusEvent(kind=kind, workspace=workspace, session_key=None, run_id="", node=node, payload=payload))
 
 
+def render_context_block(context_brief: str) -> str:
+    """Optional "Session context:" prompt block for the ADR-108 brief.
+
+    The single rendering point for every brief consumer (modules, step
+    execution, synthesis, equip). Renders to nothing when there is no brief,
+    so prompts stay byte-identical to their brief-less form. Non-empty output
+    carries a trailing blank line — call sites place the block directly
+    before their next prompt section.
+    """
+    if not context_brief.strip():
+        return ""
+    return f"Session context:\n{context_brief.strip()}\n\n"
+
+
 class ModuleKind(StrEnum):
     """What a reasoning module produces."""
 
@@ -137,6 +151,9 @@ class ReasoningContext:
         tools_summary: Equipped tools (names + descriptions).
         model: Resolved per-node model (ADR-103).
         workspace: Minimal workspace context.
+        context_brief: Rendered session brief (ADR-108), or "" when the brief
+            node is disabled, failed, or was skipped (react route) — modules
+            fall back to ``conversation_digest``.
         ideation: Set when an ideate node preceded planning.
         plan: REFLECTION modules only — the live plan.
         current_step_id: REFLECTION modules only — the just-executed step.
@@ -148,6 +165,7 @@ class ReasoningContext:
     tools_summary: list[ToolSummary]
     model: BaseChatModel
     workspace: WorkspaceInfo
+    context_brief: str = ""
     ideation: IdeationResult | None = None
     plan: Plan | None = None
     current_step_id: str | None = None

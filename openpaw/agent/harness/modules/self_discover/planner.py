@@ -37,6 +37,7 @@ from openpaw.agent.harness.modules.base import (
     ReasoningContext,
     ReasoningModule,
     WorkspaceInfo,
+    render_context_block,
     unpersisted_nested_config,
 )
 from openpaw.agent.harness.modules.direct import _PlanSchema
@@ -277,10 +278,13 @@ class SelfDiscoverPlanner(ReasoningModule):
         self._emit_structure_insight(ctx, structure)
         self._emit(ctx, StatusEventKind.MODULE_PHASE, {"phase": "solving"})
         tool_lines = "\n".join(f"- {t.name}: {t.description}" for t in ctx.tools_summary)
+        # Session context on solve only — discovery stays task-only so cached
+        # structures remain transferable (module docstring, ADR-108 §4).
         prompt = (
             f"{_SOLVE_INSTRUCTION}\n\n"
             f"Reasoning structure:\n{json.dumps(structure, indent=2)}\n\n"
             f"Task: {ctx.task}\n\n"
+            f"{render_context_block(ctx.context_brief)}"
             f"Recent context:\n{ctx.conversation_digest}\n\n"
             f"Available tools:\n{tool_lines}\n\n"
             "Then produce a short, concrete, ordered plan. Each step must be "

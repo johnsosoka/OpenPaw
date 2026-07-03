@@ -17,10 +17,12 @@ improve the result (brainstorming, naming, design concepts).
 
 Also restate the task as a one-sentence objective."""
 
+# {context_block} is the optional "Session context:" block (ADR-108) —
+# render_context_block() yields "" (byte-identical prompt) when no brief.
 STEP_EXECUTION_TEMPLATE = """\
 Objective: {objective}
 
-Plan so far:
+{context_block}Plan so far:
 {checklist}
 
 Execute step {step_id}: {description}
@@ -30,7 +32,7 @@ Focus only on this step. Report what you did and the outcome."""
 SYNTHESIZE_TEMPLATE = """\
 Objective: {objective}
 
-Executed plan:
+{context_block}Executed plan:
 {checklist}
 
 Step results:

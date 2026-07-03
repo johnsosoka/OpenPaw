@@ -39,6 +39,7 @@ from openpaw.core.config.models.cron import (
     HeartbeatConfig,
 )
 from openpaw.core.config.models.harness import (
+    BriefNodeConfig,
     CreativeNodeConfig,
     ExecutionConfig,
     HarnessConfig,
@@ -84,6 +85,7 @@ __all__ = [
     "ApprovalGatesConfig",
     "AcknowledgeBuiltinConfig",
     "AutoCompactConfig",
+    "BriefNodeConfig",
     "BrowserBuiltinConfig",
     "BuiltinItemConfig",
     "BuiltinsConfig",

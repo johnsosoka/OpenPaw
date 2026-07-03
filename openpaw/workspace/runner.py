@@ -367,6 +367,10 @@ class WorkspaceRunner:
         lines = [
             "Harness: planner",
             f"triage: {row(harness_config.triage)}",
+        ]
+        if harness_config.brief.enabled:
+            lines.append(f"brief: {row(harness_config.brief)}")
+        lines += [
             f"planning: {row(harness_config.planning, harness_config.planning.module)}",
             f"creative: {row(harness_config.creative, harness_config.creative.module)}",
             f"reflection: {row(harness_config.reflection, harness_config.reflection.module)}",

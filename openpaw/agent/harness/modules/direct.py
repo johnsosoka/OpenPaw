@@ -14,6 +14,7 @@ from openpaw.agent.harness.modules.base import (
     ReasoningArtifact,
     ReasoningContext,
     ReasoningModule,
+    render_context_block,
 )
 from openpaw.model.plan import Plan, PlanStep
 
@@ -45,6 +46,7 @@ class DirectPlanner(ReasoningModule):
             ideation_block = f"\n\nCreative directions to consider:\n{directions}"
         prompt = (
             f"Task: {ctx.task}\n\n"
+            f"{render_context_block(ctx.context_brief)}"
             f"Recent context:\n{ctx.conversation_digest}\n\n"
             f"Available tools:\n{tool_lines}"
             f"{ideation_block}\n\n"

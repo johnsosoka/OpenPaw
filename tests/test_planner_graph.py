@@ -130,6 +130,7 @@ def build(
     planning: list[object] | None = None,
     reflection: list[object] | None = None,
     synthesize: list[object] | None = None,
+    brief: BaseChatModel | None = None,
     react: Any = None,
     harness_config: HarnessConfig | None = None,
     candidates: dict[ModuleKind, dict[str, ReasoningModule]] | None = None,
@@ -137,7 +138,12 @@ def build(
     checkpointer: Any | None = None,
     run_context: PlannerRunContext | None = None,
 ) -> Any:
-    """Assemble a planner graph with fake models everywhere."""
+    """Assemble a planner graph with fake models everywhere.
+
+    ``brief`` is a MODEL (not an outputs list) so brief tests can inspect
+    prompts on the instance; None keeps the brief node out of the graph —
+    today's exact topology (ADR-108).
+    """
     node_models = PlannerNodeModels(
         triage=fake(*(triage or [])),
         planning=fake(*(planning or [])),
@@ -145,6 +151,7 @@ def build(
         reflection=fake(*(reflection or [])),
         selector=fake(),
         synthesize=fake(*(synthesize or [AIMessage(content="final answer")])),
+        brief=brief,
     )
     return build_planner_graph(
         react_graph=react if react is not None else make_fake_react(["react reply"], []),

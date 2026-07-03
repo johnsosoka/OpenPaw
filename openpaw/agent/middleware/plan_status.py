@@ -31,6 +31,7 @@ _MARKS: dict[str, str] = {
 # (payload carries "route") renders a routing announcement instead.
 _PHASE_LINES: dict[str, str] = {
     "triage": "Thinking...",
+    "brief": "Reviewing our conversation so far...",
     "ideate": "Brainstorming...",
     "plan": "Planning...",
     "reflect": "Reflecting on that step...",

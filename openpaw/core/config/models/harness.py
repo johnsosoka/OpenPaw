@@ -97,6 +97,20 @@ class SelectorNodeConfig(NodeModelConfig):
     """
 
 
+class BriefNodeConfig(NodeModelConfig):
+    """Brief node (ADR-108): session distillation on the plan/ideate paths.
+
+    Enabled by default — zero-config planner workspaces get session-aware
+    planning; react routes never pay for it. ``max_input_tokens`` is an
+    optional cost ceiling on the transcript window; unset uses the brief
+    model's context window minus headroom. A fast large-context model is the
+    natural fit for the model pointer.
+    """
+
+    enabled: bool = True
+    max_input_tokens: int | None = Field(default=None, ge=1024)
+
+
 class ToolEquippingConfig(BaseModel):
     """Optional equip phase (PRD-002 H5, ADR-104). Off by default."""
 
@@ -140,6 +154,7 @@ class HarnessConfig(BaseModel):
           creative: {module: ideonomy}                   # pinned — no selector
           reflection: {module: auto, allowed: [light, full]}
           selector: {model: fast}
+          brief: {enabled: true, model: fast}             # session brief (ADR-108)
           tool_equipping:
             enabled: false
             always_equip: [group:filesystem, send_message]
@@ -154,6 +169,7 @@ class HarnessConfig(BaseModel):
     creative: CreativeNodeConfig = Field(default_factory=CreativeNodeConfig)
     reflection: ReflectionNodeConfig = Field(default_factory=ReflectionNodeConfig)
     selector: SelectorNodeConfig = Field(default_factory=SelectorNodeConfig)
+    brief: BriefNodeConfig = Field(default_factory=BriefNodeConfig)
     synthesize: NodeModelConfig = Field(default_factory=NodeModelConfig)
     tool_equipping: ToolEquippingConfig = Field(default_factory=ToolEquippingConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)

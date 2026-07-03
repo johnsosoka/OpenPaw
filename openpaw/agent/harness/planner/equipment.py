@@ -40,10 +40,12 @@ Given the task objective and a catalog of available tools, return the tool \
 names to equip (at most {max_tools}) and a one-line reason. Only use names \
 from the catalog. Prefer fewer, clearly relevant tools."""
 
+# {context_block} is the optional "Session context:" block (ADR-108 — stated
+# constraints can steer selection); renders as "" when there is no brief.
 EQUIP_TASK_TEMPLATE = """\
 Task objective: {objective}
 
-Tool catalog:
+{context_block}Tool catalog:
 {catalog}"""
 
 EQUIP_REQUEST_BLOCK = """

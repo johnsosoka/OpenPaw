@@ -215,6 +215,8 @@ class PlannerHarness:
             reflection=r.create_node_model(self._config.reflection),
             selector=r.create_node_model(self._config.selector),
             synthesize=r.create_node_model(self._config.synthesize),
+            # None omits the brief node from the graph entirely (ADR-108).
+            brief=r.create_node_model(self._config.brief) if self._config.brief.enabled else None,
         )
 
     def _node_model_ids(self) -> dict[str, str]:
@@ -230,6 +232,8 @@ class PlannerHarness:
         }
         if self._config.tool_equipping.enabled:
             ids["equip"] = r.resolve_node(self._equip_node_config()).display_str
+        if self._config.brief.enabled:
+            ids["brief"] = r.resolve_node(self._config.brief).display_str
         return ids
 
     def _equip_node_config(self) -> NodeModelConfig:
@@ -541,6 +545,7 @@ class PlannerHarness:
                     "resume_step_id": None,
                     "abort_reason": None,
                     "step_results": [],
+                    "context_brief": None,
                     "equipped_tools": None,
                     "requested_tools": None,
                     "reequipped_steps": [],

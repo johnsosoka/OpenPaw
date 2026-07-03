@@ -26,6 +26,7 @@ from openpaw.agent.harness.modules.base import (
     ReasoningArtifact,
     ReasoningContext,
     ReasoningModule,
+    render_context_block,
     unpersisted_nested_config,
 )
 from openpaw.agent.harness.modules.ideonomy.divisions import Division
@@ -62,6 +63,7 @@ class IdeonomyState(TypedDict, total=False):
     """
 
     task: str
+    context_brief: str
     lenses: list[dict[str, object]]
     lens_outputs: Annotated[list[dict[str, str]], operator.add]
     ideas: list[str]
@@ -78,6 +80,7 @@ class _LensPayload(TypedDict):
     index: int
     total: int
     task: str
+    context_brief: str
 
 
 class IdeonomyModule(ReasoningModule):
@@ -113,7 +116,8 @@ class IdeonomyModule(ReasoningModule):
         result = cast(
             IdeonomyState,
             await self._graph.ainvoke(
-                IdeonomyState(task=ctx.task), config=unpersisted_nested_config()
+                IdeonomyState(task=ctx.task, context_brief=ctx.context_brief),
+                config=unpersisted_nested_config(),
             ),
         )
         synthesis = {
@@ -188,7 +192,13 @@ class IdeonomyModule(ReasoningModule):
             StatusEventKind.MODULE_PHASE,
             {"phase": "lens", "index": state["index"], "total": state["total"], "detail": theme},
         )
-        prompt = _lens_prompt(theme, state["core_question"], state["guiding_questions"], state["task"])
+        prompt = _lens_prompt(
+            theme,
+            state["core_question"],
+            state["guiding_questions"],
+            state["task"],
+            state["context_brief"],
+        )
         try:
             exploration = await ctx.model.with_structured_output(_LensSchema).ainvoke(
                 [HumanMessage(prompt)]
@@ -217,6 +227,7 @@ class IdeonomyModule(ReasoningModule):
         blocks = "\n\n".join(f"## {o['theme']}\n{o['exploration']}" for o in lens_outputs)
         prompt = (
             f"Task: {state['task']}\n\n"
+            f"{render_context_block(state.get('context_brief', ''))}"
             f"Lens explorations:\n\n{blocks}\n\n"
             "Synthesize these explorations: extract the concrete ideas, evaluate "
             "the leading ones, and recommend the most promising directions."
@@ -238,7 +249,16 @@ def _fan_out(state: IdeonomyState) -> list[Send]:
     lenses = state["lenses"]
     total = len(lenses)
     return [
-        Send("explore_lens", {**lens, "index": index, "total": total, "task": state["task"]})
+        Send(
+            "explore_lens",
+            {
+                **lens,
+                "index": index,
+                "total": total,
+                "task": state["task"],
+                "context_brief": state.get("context_brief", ""),
+            },
+        )
         for index, lens in enumerate(lenses, start=1)
     ]
 
@@ -252,7 +272,13 @@ def _lens_fields(lens: Division) -> dict[str, object]:
     }
 
 
-def _lens_prompt(theme: str, core_question: str, guiding_questions: Sequence[str], task: str) -> str:
+def _lens_prompt(
+    theme: str,
+    core_question: str,
+    guiding_questions: Sequence[str],
+    task: str,
+    context_brief: str,
+) -> str:
     """Build the per-lens exploration prompt."""
     questions = "\n".join(f"- {q}" for q in guiding_questions)
     return (
@@ -260,6 +286,7 @@ def _lens_prompt(theme: str, core_question: str, guiding_questions: Sequence[str
         f"Core question: {core_question}\n\n"
         f"Guiding questions:\n{questions}\n\n"
         f"Task: {task}\n\n"
+        f"{render_context_block(context_brief)}"
         "Answer the guiding questions against the task and note the most "
         "promising ideas this lens surfaces (the exploration), and distill a "
         "single-sentence takeaway (the headline)."

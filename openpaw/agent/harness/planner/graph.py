@@ -27,6 +27,13 @@ With tool equipping enabled (ADR-104; ``equipment`` passed)::
     execute_step --request_tools detected--> equip -> execute_step  (re-equip,
                                                     max once per step)
 
+With the context brief enabled (ADR-108; ``harness.brief.enabled`` and a
+brief model on ``node_models``) the brief node precedes the plan/ideate
+paths — react traffic never pays for it::
+
+    triage plan-route   -> brief -> [equip ->] plan
+    triage ideate-route -> brief -> ideate -> plan
+
 The react node is the *existing* compiled ``create_agent`` graph embedded
 directly (shared ``messages`` key — same middleware, same tools, byte-for-byte
 behavior). ``execute_step`` invokes the SAME compiled graph with a fresh,
@@ -49,6 +56,7 @@ from typing import Any, Literal, cast
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages.utils import count_tokens_approximately
 from langchain_core.runnables.config import (
     ensure_config,
     merge_configs,
@@ -66,9 +74,18 @@ from openpaw.agent.harness.modules.base import (
     ReflectionVerdict,
     ToolSummary,
     WorkspaceInfo,
+    render_context_block,
 )
 from openpaw.agent.harness.modules.direct import DirectPlanner
 from openpaw.agent.harness.modules.selector import resolve_module
+from openpaw.agent.harness.planner.brief import (
+    BRIEF_SYSTEM_PROMPT,
+    BRIEF_TASK_TEMPLATE,
+    ContextBrief,
+    render_brief,
+    resolve_brief_budget,
+    window_dialogue,
+)
 from openpaw.agent.harness.planner.equipment import (
     EQUIP_REQUEST_BLOCK,
     EQUIP_SYSTEM_PROMPT,
@@ -105,9 +122,12 @@ logger = logging.getLogger(__name__)
 # Shared with module subgraphs (ADR-109) — single source in modules/base.py.
 _CONFIG_KEY_CHECKPOINTER = CONFIG_KEY_CHECKPOINTER
 
-# Digest of recent conversation handed to triage/planning prompts.
-_DIGEST_MESSAGES = 6
-_DIGEST_MAX_CHARS = 1500
+# Digest of recent conversation handed to triage/planning prompts (ADR-108
+# §6): at most 12 dialogue messages within ~1k approximate tokens (~4k chars),
+# each individually truncated.
+_DIGEST_MESSAGES = 12
+_DIGEST_MAX_TOKENS = 1024
+_DIGEST_MESSAGE_CHARS = 500
 
 # Cap on the result digest stored inside the plan; full text goes to
 # state.step_results.
@@ -128,6 +148,8 @@ class PlannerNodeModels:
 
     The execution model lives inside the embedded react subgraph and is not
     listed here (runtime /model overrides apply to it alone, ADR-103 §4).
+    ``brief`` is None when ``harness.brief.enabled`` is false — the brief
+    node is then omitted from the graph entirely (ADR-108).
     """
 
     triage: BaseChatModel
@@ -136,6 +158,7 @@ class PlannerNodeModels:
     reflection: BaseChatModel
     selector: BaseChatModel
     synthesize: BaseChatModel
+    brief: BaseChatModel | None = None
 
 
 def extract_message_text(content: Any) -> str:
@@ -161,9 +184,34 @@ def _last_human_text(messages: list[Any]) -> str:
 
 
 def _conversation_digest(messages: list[Any]) -> str:
-    """Compact recent-history digest for triage and module prompts."""
-    parts = [extract_message_text(m.content) for m in messages[-_DIGEST_MESSAGES:] if hasattr(m, "content")]
-    return "\n".join(p for p in parts if p)[-_DIGEST_MAX_CHARS:]
+    """Role-labeled digest of recent dialogue for triage and module prompts.
+
+    Human/AI messages only — tool traces crowd out dialogue (ADR-108 §6).
+    Each message becomes one truncated ``user:``/``assistant:`` line; lines
+    are kept newest-first within the message and token budgets, then emitted
+    in original order. The newest message always survives.
+    """
+    lines: list[str] = []
+    total_tokens = 0
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage):
+            role = "user"
+        elif isinstance(msg, AIMessage):
+            role = "assistant"
+        else:
+            continue
+        text = extract_message_text(msg.content).strip()
+        if not text:
+            continue
+        if len(text) > _DIGEST_MESSAGE_CHARS:
+            text = text[:_DIGEST_MESSAGE_CHARS] + "…"
+        line = f"{role}: {text}"
+        line_tokens = count_tokens_approximately([HumanMessage(line)])
+        if lines and (len(lines) >= _DIGEST_MESSAGES or total_tokens + line_tokens > _DIGEST_MAX_TOKENS):
+            break
+        lines.append(line)
+        total_tokens += line_tokens
+    return "\n".join(reversed(lines))
 
 
 def build_planner_graph(
@@ -218,6 +266,10 @@ def build_planner_graph(
     model_ids = node_model_ids or {}
     usage_sink = node_usage_sink if node_usage_sink is not None else []
     equipping = equipment is not None
+    # ADR-108: both gates so a config-enabled brief without a resolved model
+    # (tests, react harness) still compiles to today's exact topology.
+    brief_model = node_models.brief
+    briefing = harness_config.brief.enabled and brief_model is not None
 
     async def _emit(kind: StatusEventKind, node: str, payload: dict[str, JsonValue]) -> None:
         """Best-effort event emission — never fails a run."""
@@ -280,6 +332,7 @@ def build_planner_graph(
             tools_summary=tools_summary,
             model=model,
             workspace=workspace_info,
+            context_brief=state.get("context_brief") or "",
             ideation=ideation_from_state(state),
         )
 
@@ -310,7 +363,10 @@ def build_planner_graph(
         # batches before the graph, but the harness cannot rely on callers.
         if last_text.lstrip().startswith("[SYSTEM]"):
             await _emit(StatusEventKind.NODE_ENTERED, "triage", {"route": "react", "reason": "system batch"})
-            return Command(update={"route": "react", "objective": last_text[:200]}, goto="react")
+            system_update: dict[str, Any] = {"route": "react", "objective": last_text[:200]}
+            if briefing:
+                system_update["context_brief"] = None
+            return Command(update=system_update, goto="react")
 
         # Entry event (no "route" key) — renders the "Thinking..." status
         # while the triage model decides; the post-decision event below
@@ -339,9 +395,10 @@ def build_planner_graph(
             )
         objective = decision.objective or last_text[:500]
         update: dict[str, Any] = {"route": decision.route, "objective": objective}
-        # goto is Any on purpose: "equip" is outside the declared Literal
-        # (annotating it would create a static edge that breaks compile when
-        # the node is absent); LangGraph resolves Command targets at runtime.
+        # goto is Any on purpose: "equip"/"brief" are outside the declared
+        # Literal (annotating them would create static edges that break
+        # compile when the nodes are absent); LangGraph resolves Command
+        # targets at runtime.
         goto: Any = decision.route
         if equipping:
             if decision.route == "plan":
@@ -354,7 +411,65 @@ def build_planner_graph(
                 # Ideate route plans with the full catalog (no equip node in
                 # the path); drop any stale selection from a prior plan run.
                 update["equipped_tools"] = None
+        if briefing:
+            if decision.route in ("plan", "ideate"):
+                # ADR-108: brief precedes equip/ideate/plan; its Command
+                # routes onward (the brief node overwrites context_brief).
+                goto = "brief"
+            else:
+                # React runs never brief; drop any stale brief on the thread.
+                update["context_brief"] = None
         return Command(update=update, goto=goto)
+
+    # --- brief (ADR-108; node only added when briefing is on) -----------------
+
+    async def brief(state: PlannerState) -> Command[Literal["ideate", "plan"]]:
+        """Distill the full session history into a context brief (ADR-108).
+
+        Entered from triage on the plan/ideate routes only — react traffic
+        never pays for it. The transcript is token-budgeted newest-first
+        against the brief model's window. Any failure fails open: the run
+        proceeds with ``context_brief=None`` and downstream consumers fall
+        back to the conversation digest.
+        """
+        assert brief_model is not None  # node exists only when briefing is on
+        # Successor depends on route + equipping — runtime goto, same
+        # conditional-topology rationale as triage.
+        goto: Any = "ideate" if state.get("route") == "ideate" else ("equip" if equipping else "plan")
+        await _emit(StatusEventKind.NODE_ENTERED, "brief", {})
+        rendered: str | None = None
+        async with _track_node("brief"):
+            try:
+                budget = resolve_brief_budget(brief_model, harness_config.brief.max_input_tokens)
+                window = window_dialogue(state.get("messages", []), budget)
+                transcript = "\n".join(
+                    f"{'user' if isinstance(msg, HumanMessage) else 'assistant'}: {text}"
+                    for msg in window
+                    if (text := extract_message_text(msg.content).strip())
+                )
+                result = await brief_model.with_structured_output(ContextBrief).ainvoke(
+                    [
+                        SystemMessage(BRIEF_SYSTEM_PROMPT),
+                        HumanMessage(
+                            BRIEF_TASK_TEMPLATE.format(objective=_objective(state), transcript=transcript)
+                        ),
+                    ]
+                )
+                if not isinstance(result, ContextBrief):
+                    raise TypeError(f"brief returned {type(result).__name__}")
+                rendered = render_brief(result)
+                if result.situation.strip():
+                    await _emit(
+                        StatusEventKind.MODULE_INSIGHT,
+                        "brief",
+                        {"label": "Session brief", "headline": result.situation},
+                    )
+            except Exception:
+                # Fail-open (ADR-108 §5): the brief must never make the
+                # planner less reliable than the digest-only keyhole.
+                logger.warning("Context brief failed; proceeding without it", exc_info=True)
+                rendered = None
+        return Command(update={"context_brief": rendered}, goto=goto)
 
     # --- ideate ---------------------------------------------------------------
 
@@ -454,7 +569,9 @@ def build_planner_graph(
         async with _track_node("equip"):
             try:
                 content = EQUIP_TASK_TEMPLATE.format(
-                    objective=_objective(state), catalog=render_catalog(equipment.catalog)
+                    objective=_objective(state),
+                    context_block=render_context_block(state.get("context_brief") or ""),
+                    catalog=render_catalog(equipment.catalog),
                 )
                 if requested:
                     content += EQUIP_REQUEST_BLOCK.format(requested=requested)
@@ -524,6 +641,7 @@ def build_planner_graph(
         working = live_plan.with_step_status(step_id, StepStatus.IN_PROGRESS)
         prompt = STEP_EXECUTION_TEMPLATE.format(
             objective=_objective(state) or working.objective,
+            context_block=render_context_block(state.get("context_brief") or ""),
             checklist=working.render_checklist(),
             step_id=step.id,
             description=step.description,
@@ -705,6 +823,7 @@ def build_planner_graph(
         abort_block = SYNTHESIZE_ABORT_BLOCK.format(reason=abort_reason) if abort_reason else ""
         prompt = SYNTHESIZE_TEMPLATE.format(
             objective=_objective(state),
+            context_block=render_context_block(state.get("context_brief") or ""),
             checklist=live_plan.render_checklist() if live_plan else "-",
             results="\n---\n".join(step_results) or "-",
             abort_block=abort_block,
@@ -739,6 +858,8 @@ def build_planner_graph(
     builder.add_node("synthesize", synthesize)
     if equipping:
         builder.add_node("equip", equip)  # entered via triage/execute_step routing
+    if briefing:
+        builder.add_node("brief", brief)  # entered via triage routing (ADR-108)
 
     builder.add_edge(START, "triage")
     builder.add_edge("ideate", "plan")

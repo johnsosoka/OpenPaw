@@ -289,6 +289,10 @@ builtins:
 #   creative:   {module: ideonomy}              # ideonomy (default) | auto
 #   reflection: {module: auto, allowed: [light, full]}  # off | light (default) | full | auto
 #   selector:   {model: fast}   # model for module-selection calls (auto paths)
+#   brief:                      # Session-context brief before plan/ideate (ADR-108)
+#     enabled: true             # On by default; react routes never pay for it
+#     model: fast               # Optional pointer; a fast large-context model fits
+#     max_input_tokens: null    # Optional transcript cost ceiling (>=1024); null = model window
 #   tool_equipping:
 #     enabled: false            # Equip a task-relevant tool subset before planning
 #     always_equip: [group:filesystem, send_message]  # Never-filtered floor
