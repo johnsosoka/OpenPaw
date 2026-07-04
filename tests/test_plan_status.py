@@ -555,3 +555,118 @@ async def test_events_during_graph_run_use_armed_context():
     assert len(channel.sent_messages) == 1
     assert channel.sent_messages[0][0] == SESSION
     assert "Plan: Do the thing" in channel.sent_messages[0][1]
+
+
+# ---------------------------------------------------------------------------
+# Duplicate-checklist regression (balanced harness: plan.created shows the
+# first step already in_progress, then a redundant step_started renders the
+# same text; a no-op edit must NOT spawn a second checklist message)
+# ---------------------------------------------------------------------------
+
+
+class NoOpEditChannel(MockChannel):
+    """MockChannel that mirrors Telegram: an edit to identical text fails.
+
+    Telegram raises BadRequest "message is not modified" on a no-op edit, and
+    the adapter returns False. This is what turned an identical re-render into
+    a duplicate message via the send-new fallback.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._by_id: dict[str, str] = {}
+
+    async def send_message(self, session_key: str, content: str):  # type: ignore[override]
+        msg = await super().send_message(session_key, content)
+        self._by_id[msg.id] = content
+        return msg
+
+    async def edit_message(self, session_key: str, message_id: str, content: str) -> bool:  # type: ignore[override]
+        if self._by_id.get(message_id) == content:
+            return False  # "message is not modified"
+        self._by_id[message_id] = content
+        self.edited_messages.append((session_key, message_id, content))
+        return True
+
+
+def _plan_step1_in_progress() -> dict[str, Any]:
+    """plan.created payload where step 1 is already in_progress (balanced)."""
+    return {
+        "plan": {
+            "objective": "",
+            "revision": 0,
+            "steps": [
+                {"id": "1", "description": "First step", "status": "in_progress"},
+                {"id": "2", "description": "Second step", "status": "pending"},
+            ],
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_redundant_step_started_does_not_duplicate_checklist():
+    """Root-cause pin: plan.created (step 1 in_progress) + step_started for the
+    same step is a byte-identical re-render; on a Telegram-like channel the
+    no-op edit must be skipped, never fall through to a second message."""
+    channel = NoOpEditChannel()
+    mw = _make_middleware(channel)
+
+    await mw.handle_plan_event(_event(StatusEventKind.PLAN_CREATED, _plan_step1_in_progress()))
+    await mw.handle_plan_event(
+        _event(StatusEventKind.PLAN_STEP_STARTED, {"step_id": "1", "description": "First step"})
+    )
+
+    checklists = [c for _, c in channel.sent_messages if "Plan" in c]
+    assert len(checklists) == 1  # exactly one checklist message, not two
+    # The identical render was skipped entirely (no channel edit attempted).
+    assert channel.edited_messages == []
+
+
+@pytest.mark.asyncio
+async def test_changed_render_still_edits_the_single_message():
+    """The skip only fires on identical text — a real status change still edits
+    the ONE checklist in place (no regression to live updates)."""
+    channel = NoOpEditChannel()
+    mw = _make_middleware(channel)
+
+    await mw.handle_plan_event(_event(StatusEventKind.PLAN_CREATED, _plan_step1_in_progress()))
+    await mw.handle_plan_event(
+        _event(StatusEventKind.PLAN_STEP_COMPLETED, {"step_id": "1", "description": "First step"})
+    )
+
+    checklists = [c for _, c in channel.sent_messages if "Plan" in c]
+    assert len(checklists) == 1
+    assert len(channel.edited_messages) == 1
+    assert "[x] 1. First step" in channel.edited_messages[-1][2]
+
+
+@pytest.mark.asyncio
+async def test_redelivered_plan_created_is_idempotent_same_run():
+    """Defense-in-depth: a re-delivered plan.created for the same run + same
+    plan must edit in place, never null message_id and spawn a second message."""
+    channel = NoOpEditChannel()
+    mw = _make_middleware(channel)
+
+    await mw.handle_plan_event(_event(StatusEventKind.PLAN_CREATED, _plan_step1_in_progress()))
+    # Same run_id ("run-1"), same plan payload — a duplicate delivery.
+    await mw.handle_plan_event(_event(StatusEventKind.PLAN_CREATED, _plan_step1_in_progress()))
+
+    checklists = [c for _, c in channel.sent_messages if "Plan" in c]
+    assert len(checklists) == 1  # not two
+
+
+@pytest.mark.asyncio
+async def test_new_run_plan_created_starts_fresh_message():
+    """Ultra parity: each run legitimately starts a NEW plan message. After a
+    reset (per-run set_context), a plan.created sends a fresh checklist."""
+    channel = NoOpEditChannel()
+    mw = _make_middleware(channel)
+
+    await mw.handle_plan_event(_event(StatusEventKind.PLAN_CREATED, _plan_step1_in_progress()))
+    mw.set_context(channel, SESSION)  # MessageProcessor re-arms per run (resets renderer)
+    await mw.handle_plan_event(
+        _event(StatusEventKind.PLAN_CREATED, _plan_step1_in_progress(), session_key=SESSION)
+    )
+
+    checklists = [c for _, c in channel.sent_messages if "Plan" in c]
+    assert len(checklists) == 2  # a fresh message per run, as ultra expects

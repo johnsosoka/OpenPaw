@@ -414,6 +414,107 @@ async def test_todos_checkpoint_per_thread_and_bridge_emits(tmp_path: Path) -> N
     assert all(e.workspace == "balanced-test" for e in emitter.events)
 
 
+class _NoOpEditChannel:
+    """Fake channel that mirrors Telegram: an edit to identical text fails.
+
+    Telegram raises BadRequest "message is not modified" on a no-op edit and
+    the adapter returns False — the condition that turned a redundant
+    identical checklist render into a duplicate message.
+    """
+
+    def __init__(self) -> None:
+        self.sends: list[str] = []
+        self.edits: list[str] = []
+        self._n = 0
+        self._by_id: dict[str, str] = {}
+
+    async def send_message(self, session_key: str, content: str) -> Any:
+        self._n += 1
+        self.sends.append(content)
+        self._by_id[str(self._n)] = content
+        return SimpleNamespace(id=str(self._n))
+
+    async def edit_message(self, session_key: str, message_id: str, content: str) -> bool:
+        if self._by_id.get(message_id) == content:
+            return False  # "message is not modified"
+        self._by_id[message_id] = content
+        self.edits.append(content)
+        return True
+
+    async def delete_message(self, session_key: str, message_id: str) -> bool:
+        return True
+
+    async def send_typing(self, session_key: str) -> None:
+        return None
+
+
+async def test_balanced_plan_checklist_renders_once_end_to_end(tmp_path: Path) -> None:
+    """Regression (duplicate checklist): a real balanced run whose first
+    write_todos marks step 1 in_progress emits plan.created + a redundant
+    step_started for that same step. Driven through the REAL bus -> real
+    PlanChannelSink -> real StatusUpdateMiddleware -> PlanStatusRenderer, with
+    a Telegram-like channel (no-op edit returns False), exactly ONE checklist
+    message must reach the channel — not two."""
+    from openpaw.agent.middleware.status_update import StatusUpdateMiddleware
+    from openpaw.core.config.models import StatusUpdatesConfig
+    from openpaw.runtime.status_bus import PlanChannelSink, StatusBus
+
+    todos: list[Todo] = [
+        {"content": "Create notes/ folder", "status": "in_progress"},
+        {"content": "Write a.md", "status": "pending"},
+        {"content": "Write b.md", "status": "pending"},
+    ]
+    model = ToolCallingFakeModel(
+        messages=iter(
+            [
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "write_todos", "args": {"todos": todos}, "id": "c1"}],
+                ),
+                AIMessage(content="done"),
+            ]
+        )
+    )
+
+    # Wire status plumbing exactly as init_agent does: one bus, one middleware,
+    # one PlanChannelSink.
+    bus = StatusBus("balanced-test")
+    mw = StatusUpdateMiddleware(
+        StatusUpdatesConfig(enabled=True, min_interval_seconds=0),
+        emitter=bus,
+        workspace="balanced-test",
+    )
+    bus.add_sink(PlanChannelSink(mw))
+
+    workspace = make_workspace(tmp_path, config=balanced_config())
+    factory = AgentFactory(
+        workspace=workspace,
+        model="openai:gpt-4o-mini",
+        api_key="test",
+        max_turns=10,
+        temperature=0.7,
+        region=None,
+        timeout_seconds=30.0,
+        builtin_tools=[],
+        workspace_tools=[],
+        enabled_builtin_names=[],
+        extra_model_kwargs={},
+        middleware=[mw],
+        logger=logging.getLogger("test"),
+    )
+    factory.set_status_emitter(bus)
+
+    channel = _NoOpEditChannel()
+    mw.set_context(channel, "telegram:1")
+
+    with patch.object(AgentRunner, "_create_model", return_value=model):
+        harness = factory.create_harness(checkpointer=MemorySaver())
+        await harness.run("plan and build", thread_id="telegram:1:conv1")
+
+    checklists = [s for s in channel.sends if "Plan" in s]
+    assert len(checklists) == 1, channel.sends
+
+
 # ---------------------------------------------------------------------------
 # Config validation
 # ---------------------------------------------------------------------------

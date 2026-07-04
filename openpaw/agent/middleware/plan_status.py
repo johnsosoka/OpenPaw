@@ -66,6 +66,32 @@ _MAX_STEP_PHASE_LEN = 80
 _MAX_INSIGHT_LEN = 140
 
 
+def _plan_signature(plan: Any) -> tuple[Any, ...]:
+    """Content signature of a serialized plan (objective + per-step id/desc/status).
+
+    Identity key for the plan.created idempotency guard: two payloads with the
+    same signature render to the same checklist, so a re-delivery must edit in
+    place rather than spawn a new message.
+    """
+    if not isinstance(plan, dict):
+        return ()
+    steps = plan.get("steps")
+    step_sig: tuple[Any, ...] = (
+        tuple(
+            (
+                str(s.get("id", "")),
+                str(s.get("description", "")),
+                str(s.get("status", "")),
+            )
+            for s in steps
+            if isinstance(s, dict)
+        )
+        if isinstance(steps, list)
+        else ()
+    )
+    return (str(plan.get("objective", "")), step_sig)
+
+
 class PlanStatusRenderer:
     """Maintains one plan checklist message per run, edited in place.
 
@@ -89,6 +115,17 @@ class PlanStatusRenderer:
         self._revision: int = 0
         self._steps: list[dict[str, Any]] = []
         self._overlay: dict[str, str] = {}
+        # Last text actually pushed to the channel — lets _send_or_edit skip a
+        # no-op re-render. Without it, a second identical render (balanced
+        # emits plan.created with step 1 already in_progress, then a redundant
+        # step_started for that same step) becomes a no-op edit, which some
+        # channels report as failure (Telegram raises "message is not
+        # modified") and the send-new fallback then spawns a duplicate message.
+        self._last_rendered: str | None = None
+        # (run_id, plan signature) currently on screen — the idempotency key
+        # for plan.created so a re-delivered/re-armed identical plan edits in
+        # place instead of spawning a second checklist message.
+        self._shown: tuple[str | None, tuple[Any, ...]] | None = None
 
     def reset(self) -> None:
         """Drop per-run state. The completed run's channel message survives."""
@@ -97,6 +134,8 @@ class PlanStatusRenderer:
         self._revision = 0
         self._steps = []
         self._overlay = {}
+        self._last_rendered = None
+        self._shown = None
 
     async def handle(
         self, event: StatusEvent, channel: Any, session_key: str
@@ -117,7 +156,17 @@ class PlanStatusRenderer:
         payload = event.payload
 
         if kind is StatusEventKind.PLAN_CREATED:
-            self._message_id = None  # always a fresh message per plan
+            # A fresh plan gets a fresh message — UNLESS this is the same plan
+            # for the same run already on screen (a re-delivered or re-armed
+            # plan.created from a harness rebuild). Nulling message_id there
+            # would blindly re-send and orphan the live checklist.
+            signature = _plan_signature(payload.get("plan"))
+            if not (
+                self._message_id is not None
+                and self._shown == (event.run_id, signature)
+            ):
+                self._message_id = None
+            self._shown = (event.run_id, signature)
             self._load_plan(payload.get("plan"))
             await self._send_or_edit(channel, session_key)
             return None
@@ -227,14 +276,23 @@ class PlanStatusRenderer:
         if not self._steps:
             return
         text = self._render()
+        # Nothing changed since the last push: skip the channel round-trip.
+        # This is the root guard against duplicate checklists — a no-op edit
+        # is pointless, and on channels that report it as failure (Telegram's
+        # "message is not modified") the send-new fallback below would spawn a
+        # second message.
+        if self._message_id is not None and text == self._last_rendered:
+            return
         if self._message_id:
             edited = await channel.edit_message(session_key, self._message_id, text)
             if edited:
+                self._last_rendered = text
                 return
             logger.debug("Plan message edit failed; sending a new message")
         sent = await channel.send_message(session_key, text)
         if sent is not None and hasattr(sent, "id"):
             self._message_id = str(sent.id)
+            self._last_rendered = text
 
 
 # Static module phases (self_discover): no payload data, fixed wording. The
