@@ -277,13 +277,13 @@ builtins:
 
 # Agent harness — topology and per-node models (workspace-level only, in agent.yaml —
 # not read from this file).
-# A bare `harness: {type: planner}` is complete — every node inherits the
+# A bare `harness: {type: ultra}` is complete — every node inherits the
 # workspace model. Node model: entries are provider-catalog names or
 # provider:model strings (credentials stay in the providers: catalog).
 # Unknown keys are a startup error (extra="forbid").
 # /harness prints the resolved node→model table.
 # harness:
-#   type: planner               # react (default) | planner
+#   type: ultra               # react (default) | ultra
 #   triage:     {model: fast}   # optional per-node pointers: model, temperature, max_tokens
 #   planning:   {module: auto, model: strong}   # direct (default) | self_discover | auto
 #   creative:   {module: ideonomy}              # ideonomy (default) | auto
@@ -300,7 +300,7 @@ builtins:
 #     react_selector: false     # React-path alternative: stock LLMToolSelectorMiddleware
 #   execution:
 #     max_steps: 12             # Step budget per plan (1-100)
-#     timeout_seconds: 900      # Wall-clock budget per planner run; unset inherits workspace timeout
+#     timeout_seconds: 900      # Wall-clock budget per ultra run; unset inherits workspace timeout
 
 # Learning loop — agent-authored skills (workspace-level only, in agent.yaml —
 # not read from this file).

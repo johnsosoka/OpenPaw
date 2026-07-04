@@ -7,7 +7,7 @@ Node model entries are POINTERS into the provider catalog (catalog name or
 ``provider:model`` string) plus sampling params only — never
 api_key/base_url/region. Credentials stay in the catalog (ADR-103 §1).
 
-Zero-config default: a bare ``harness: {type: planner}`` must validate and
+Zero-config default: a bare ``harness: {type: ultra}`` must validate and
 run — every node inherits the workspace model (PRD-002 H6.2).
 """
 
@@ -100,7 +100,7 @@ class SelectorNodeConfig(NodeModelConfig):
 class BriefNodeConfig(NodeModelConfig):
     """Brief node (ADR-108): session distillation on the plan/ideate paths.
 
-    Enabled by default — zero-config planner workspaces get session-aware
+    Enabled by default — zero-config ultra workspaces get session-aware
     planning; react routes never pay for it. ``max_input_tokens`` is an
     optional cost ceiling on the transcript window; unset uses the brief
     model's context window minus headroom. A fast large-context model is the
@@ -124,7 +124,7 @@ class ToolEquippingConfig(BaseModel):
     )
     max_tools: int = Field(default=25, ge=1)
     # React-path option: stock LLMToolSelectorMiddleware, config-gated
-    # (ADR-104 §5). Independent of the planner equip node.
+    # (ADR-104 §5). Independent of the ultra equip node.
     react_selector: bool = False
     model: str | None = None  # selection model pointer (catalog name)
 
@@ -144,7 +144,7 @@ class ExecutionConfig(NodeModelConfig):
     timeout_seconds: float | None = Field(
         default=None,
         ge=1,
-        description="Wall-clock budget for one planner run; None inherits the workspace timeout.",
+        description="Wall-clock budget for one ultra run; None inherits the workspace timeout.",
     )
 
 
@@ -153,7 +153,7 @@ class HarnessConfig(BaseModel):
 
     Example:
         harness:
-          type: planner
+          type: ultra
           triage:   {model: fast}
           planning: {module: auto, model: strong}        # selector over taglines
           creative: {module: ideonomy}                   # pinned — no selector
@@ -168,7 +168,7 @@ class HarnessConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["react", "planner"] = "react"
+    type: Literal["react", "ultra"] = "react"
     triage: NodeModelConfig = Field(default_factory=NodeModelConfig)
     planning: PlanningNodeConfig = Field(default_factory=PlanningNodeConfig)
     creative: CreativeNodeConfig = Field(default_factory=CreativeNodeConfig)

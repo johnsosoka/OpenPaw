@@ -19,12 +19,12 @@ class HarnessKind(StrEnum):
     Attributes:
         REACT: The existing single-loop create_agent path. Default;
             byte-for-byte current behavior.
-        PLANNER: Triage -> (react | plan | ideate) -> execute/reflect
+        ULTRA: Triage -> (react | plan | ideate) -> execute/reflect
             multi-node graph (ADR-101).
     """
 
     REACT = "react"
-    PLANNER = "planner"
+    ULTRA = "ultra"
 
 
 @runtime_checkable
@@ -32,7 +32,7 @@ class AgentHarness(Protocol):
     """Everything callers need from an agent execution engine.
 
     ``AgentRunner`` satisfies this protocol structurally (it is the react
-    harness); ``PlannerHarness`` implements it over a custom StateGraph.
+    harness); ``UltraHarness`` implements it over a custom StateGraph.
     Callers hold this type and never depend on graph internals.
 
     Notes on the mutable-attribute contract: ``timeout_seconds`` is a plain
@@ -49,7 +49,7 @@ class AgentHarness(Protocol):
 
     @property
     def model_id(self) -> str:
-        """The configured model identifier (execution model for planner)."""
+        """The configured model identifier (execution model for ultra)."""
         ...
 
     @property
@@ -113,7 +113,7 @@ class AgentHarness(Protocol):
     ) -> None:
         """Apply a runtime model override and rebuild.
 
-        On a planner harness the override applies to the execution node only
+        On an ultra harness the override applies to the execution node only
         (ADR-103 §4).
         """
         ...
@@ -137,7 +137,7 @@ class AgentHarness(Protocol):
         """Repair dangling tool calls after an approval interrupt.
 
         The react implementation injects synthetic ToolMessages via
-        ``aupdate_state(as_node="tools")``; the planner implementation targets
+        ``aupdate_state(as_node="tools")``; the ultra implementation targets
         the react subgraph's namespaced checkpoint and resumes the in-flight
         plan step.
         """

@@ -1,6 +1,6 @@
-"""Prompt text for the planner harness nodes (ADR-101).
+"""Prompt text for the ultra harness nodes (ADR-101).
 
-Kept planner-local: ``core/prompts`` is owned by a parallel workstream; these
+Kept ultra-local: ``core/prompts`` is owned by a parallel workstream; these
 constants are harness-internal and not user-visible configuration.
 """
 

@@ -5,7 +5,7 @@ satisfies its entire surface (the ``update["model"]`` stream parsing and
 ``as_node="tools"`` recovery knowledge live inside it). A pure-delegation
 wrapper would add fifteen forwarding members with no behavior, so the react
 harness IS ``AgentRunner`` — this module just pins the protocol conformance
-and the alias that gives the planner harness a symmetric import site.
+and the alias that gives the ultra harness a symmetric import site.
 
 Deviation from the ADR-101 sketch (which drew a wrapper class) is deliberate:
 the seam is the protocol, not a wrapper. See llm_memory/0-5-0-release/.

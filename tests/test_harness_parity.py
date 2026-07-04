@@ -4,7 +4,7 @@ Every caller-visible behavior of the harness surface is asserted under BOTH
 topologies via one parameterized fixture:
 
 - react   -> AgentRunner (the existing loop, unchanged)
-- planner -> PlannerHarness wrapping the same AgentRunner as its executor
+- ultra -> UltraHarness wrapping the same AgentRunner as its executor
 
 Callers under test: the run() contract MessageProcessor depends on
 (final text, timeout notification, ApprovalRequiredError/InterruptSignalError
@@ -12,20 +12,20 @@ propagation, last_metrics/last_tools_used), checkpoint maintenance
 (resolve_orphaned_tool_calls, get_context_info), the rebuild/update surface
 (commands, MCP post-start wiring), and the CommandContext type contract.
 
-Fixture strategy mirrors the existing planner tests (tests/test_planner_graph
+Fixture strategy mirrors the existing ultra tests (tests/test_ultra_graph
 fakes are reused, not reinvented): the outer graph of either harness is
 swapped for a scripted stand-in. For react that is ``runner._agent`` (the
 compiled create_agent graph — ``make_fake_react``'s node is named "model", so
-AgentRunner's update parsing sees the exact production shape); for planner it
+AgentRunner's update parsing sees the exact production shape); for ultra it
 is ``harness._graph`` built with fake node models.
 
 Intended (documented) differences — asserted around, not away:
-- kind: react vs planner (identity, not behavior).
-- run() recursion_limit VALUE differs (planner takes a max with the plan-step
+- kind: react vs ultra (identity, not behavior).
+- run() recursion_limit VALUE differs (ultra takes a max with the plan-step
   budget); parity is asserted on presence and configurable propagation.
-- planner emits status events and clears/records plan state on
+- ultra emits status events and clears/records plan state on
   interrupt/approval — extra behavior on top of the identical error contract,
-  already covered in tests/test_planner_harness.py.
+  already covered in tests/test_ultra_harness.py.
 """
 
 import asyncio
@@ -45,7 +45,7 @@ from langgraph.graph import END, START, StateGraph
 
 from openpaw.agent.harness import AgentHarness, HarnessKind
 from openpaw.agent.harness.modules.direct import _PlanSchema
-from openpaw.agent.harness.planner import PlannerHarness, TriageDecision
+from openpaw.agent.harness.ultra import UltraHarness, TriageDecision
 from openpaw.agent.middleware.approval import ApprovalRequiredError
 from openpaw.agent.middleware.queue_aware import InterruptSignalError
 from openpaw.agent.runner import AgentRunner
@@ -60,7 +60,7 @@ from openpaw.model.message import Message
 from openpaw.model.status_event import StatusEvent
 from openpaw.runtime.queue.lane import QueueMode
 from openpaw.workspace.message_processor import MessageProcessor
-from tests.test_planner_graph import (
+from tests.test_ultra_graph import (
     CaptureEmitter,
     _ReactState,
     advance,
@@ -68,7 +68,7 @@ from tests.test_planner_graph import (
     make_fake_react,
     plan_decision,
 )
-from tests.test_planner_harness import make_node_resolver, make_workspace
+from tests.test_ultra_harness import make_node_resolver, make_workspace
 
 THREAD_ID = "telegram:1:conv1"
 
@@ -83,7 +83,7 @@ class ScriptedStream:
     Records astream invocations (input + config) and aupdate_state calls so
     tests can assert the caller-side contract without any real model. Chunk
     shape follows the caller's request like the real graph: with
-    ``subgraphs=True`` (the planner harness, ADR-110), plain updates are
+    ``subgraphs=True`` (the ultra harness, ADR-110), plain updates are
     wrapped as root-namespace 3-tuples; pre-shaped tuples pass through so
     tests can script inner-namespace chunks.
     """
@@ -126,10 +126,10 @@ class ParityCase:
     """One harness kind plus the hooks the parity tests need to script it."""
 
     kind: HarnessKind
-    harness: Any  # AgentRunner | PlannerHarness — both satisfy AgentHarness
+    harness: Any  # AgentRunner | UltraHarness — both satisfy AgentHarness
 
     def install(self, graph: Any) -> None:
-        """Swap the outer graph (react: compiled create_agent; planner: StateGraph)."""
+        """Swap the outer graph (react: compiled create_agent; ultra: StateGraph)."""
         if self.kind is HarnessKind.REACT:
             self.harness._agent = graph
         else:
@@ -139,7 +139,7 @@ class ParityCase:
         """Install a working fake graph for a plain conversational turn.
 
         Returns the list that records the prompts the fake model receives.
-        On planner, triage is scripted to route "react" so a simple message
+        On ultra, triage is scripted to route "react" so a simple message
         follows the same path a react harness takes (PRD-002 H2.1 parity).
         """
         calls: list[str] = []
@@ -185,16 +185,16 @@ def make_case(
         return ParityCase(kind, inner)
     return ParityCase(
         kind,
-        PlannerHarness(
+        UltraHarness(
             workspace=workspace,
             inner=inner,
-            harness_config=HarnessConfig(type="planner"),
+            harness_config=HarnessConfig(type="ultra"),
             node_resolver=make_node_resolver(),
         ),
     )
 
 
-@pytest.fixture(params=[HarnessKind.REACT, HarnessKind.PLANNER], ids=["react", "planner"])
+@pytest.fixture(params=[HarnessKind.REACT, HarnessKind.ULTRA], ids=["react", "ultra"])
 def case(request: pytest.FixtureRequest, tmp_path: Path) -> ParityCase:
     return make_case(request.param, tmp_path)
 
@@ -233,7 +233,7 @@ async def test_run_passes_thread_session_and_recursion_config(case: ParityCase) 
     assert config is not None
     assert config["configurable"]["thread_id"] == THREAD_ID
     assert config["configurable"]["session_id"] == "sess-1"
-    # Values intentionally differ (planner budgets plan steps); presence is the contract.
+    # Values intentionally differ (ultra budgets plan steps); presence is the contract.
     assert config["recursion_limit"] > 0
     assert len(config["callbacks"]) == 1  # usage-metadata callback wired per run
 
@@ -275,8 +275,8 @@ async def test_timeout_with_tool_in_flight_names_the_tool(case: ParityCase) -> N
 # 3./4. Approval + interrupt error contracts — the exact exception object with
 # intact attributes must reach the caller (MessageProcessor's except clauses
 # read approval_id/tool_name/tool_args/tool_call_id and pending_messages).
-# Planner-side extras (resume marker, plan clearing) are pinned in
-# tests/test_planner_harness.py; identical error surface is pinned here.
+# Ultra-side extras (resume marker, plan clearing) are pinned in
+# tests/test_ultra_harness.py; identical error surface is pinned here.
 # ---------------------------------------------------------------------------
 
 
@@ -381,7 +381,7 @@ async def test_get_context_info_identical_across_kinds(tmp_path: Path) -> None:
     """Same model, same messages -> byte-identical report from both kinds."""
     messages = [HumanMessage("tell me about parity"), AIMessage(content="parity is preserved")]
     infos = {}
-    for kind in (HarnessKind.REACT, HarnessKind.PLANNER):
+    for kind in (HarnessKind.REACT, HarnessKind.ULTRA):
         subdir = tmp_path / kind.value
         subdir.mkdir()
         one = make_case(kind, subdir)
@@ -389,7 +389,7 @@ async def test_get_context_info_identical_across_kinds(tmp_path: Path) -> None:
         await one.graph.aupdate_state(config, {"messages": messages}, as_node=one.seed_as_node)
         infos[kind] = await one.harness.get_context_info(THREAD_ID)
 
-    assert infos[HarnessKind.REACT] == infos[HarnessKind.PLANNER]
+    assert infos[HarnessKind.REACT] == infos[HarnessKind.ULTRA]
 
 
 # ---------------------------------------------------------------------------
@@ -419,8 +419,8 @@ def test_update_tools_replaces_set_and_recompiles(case: ParityCase) -> None:
 
 
 def test_update_model_updates_model_id_and_recompiles(case: ParityCase) -> None:
-    # On planner this touches the execution engine only (node models pinned
-    # untouched in test_planner_harness); the caller-visible contract is the same.
+    # On ultra this touches the execution engine only (node models pinned
+    # untouched in test_ultra_harness); the caller-visible contract is the same.
     before = case.graph
 
     case.harness.update_model("openai:gpt-4.1", temperature=0.2)
@@ -457,7 +457,7 @@ def test_protocol_surface(case: ParityCase) -> None:
     assert harness.checkpointer is not None
 
 
-@pytest.mark.parametrize("kind", [HarnessKind.REACT, HarnessKind.PLANNER], ids=["react", "planner"])
+@pytest.mark.parametrize("kind", [HarnessKind.REACT, HarnessKind.ULTRA], ids=["react", "ultra"])
 def test_max_output_tokens_reflects_configured_cap(kind: HarnessKind, tmp_path: Path) -> None:
     capped = make_case(kind, tmp_path, extra_model_kwargs={"max_tokens": 512})
     assert capped.harness.max_output_tokens == 512
@@ -469,7 +469,7 @@ def test_max_output_tokens_reflects_configured_cap(kind: HarnessKind, tmp_path: 
 # Collaborators are mocked exactly as tests/workspace/test_message_processor_*
 # do; the harness and its graph path are real. The full steer/approval loops
 # are covered per-kind elsewhere (test_steer_interrupt, test_approval_gates,
-# test_planner_harness); this pins the happy-path seam: run -> metrics ->
+# test_ultra_harness); this pins the happy-path seam: run -> metrics ->
 # token log -> channel delivery.
 # ---------------------------------------------------------------------------
 
@@ -560,7 +560,7 @@ async def test_model_command_reports_current_model(case: ParityCase) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Plan-path variants (planner-only by design — react has no plan steps).
+# Plan-path variants (ultra-only by design — react has no plan steps).
 # These assert the react-visible contract holds when the failure happens
 # INSIDE a plan step rather than on the direct route.
 # ---------------------------------------------------------------------------
@@ -574,8 +574,8 @@ def _make_react_graph_from(node: Any) -> Any:
     return builder.compile()
 
 
-async def test_planner_timeout_mid_plan_step_returns_notification(tmp_path: Path) -> None:
-    one = make_case(HarnessKind.PLANNER, tmp_path)
+async def test_ultra_timeout_mid_plan_step_returns_notification(tmp_path: Path) -> None:
+    one = make_case(HarnessKind.ULTRA, tmp_path)
 
     async def hang(state: dict[str, Any]) -> dict[str, Any]:
         await asyncio.sleep(60)
@@ -596,8 +596,8 @@ async def test_planner_timeout_mid_plan_step_returns_notification(tmp_path: Path
     assert one.harness.last_metrics.is_partial is True
 
 
-async def test_planner_approval_mid_plan_step_propagates_and_marks_resume(tmp_path: Path) -> None:
-    one = make_case(HarnessKind.PLANNER, tmp_path)
+async def test_ultra_approval_mid_plan_step_propagates_and_marks_resume(tmp_path: Path) -> None:
+    one = make_case(HarnessKind.ULTRA, tmp_path)
     error = ApprovalRequiredError("appr-1", "shell", {"cmd": "ls"}, "tc-1")
 
     def raise_approval(state: dict[str, Any]) -> dict[str, Any]:
@@ -621,8 +621,8 @@ async def test_planner_approval_mid_plan_step_propagates_and_marks_resume(tmp_pa
 
 
 # ---------------------------------------------------------------------------
-# ADR-110: custom-stream event transport (planner-only — module events exist
-# only on the planner topology).
+# ADR-110: custom-stream event transport (ultra-only — module events exist
+# only on the ultra topology).
 # ---------------------------------------------------------------------------
 
 
@@ -635,14 +635,14 @@ async def test_module_events_reach_bus_with_run_identity(tmp_path: Path) -> None
         workspace=workspace, model="openai:gpt-4o-mini", api_key="test", checkpointer=MemorySaver()
     )
     emitter = CaptureEmitter()
-    harness = PlannerHarness(
+    harness = UltraHarness(
         workspace=workspace,
         inner=inner,
-        harness_config=HarnessConfig(type="planner"),
+        harness_config=HarnessConfig(type="ultra"),
         node_resolver=make_node_resolver(),
         emitter=emitter,
     )
-    # Real compiled planner graph: resolve_module emits module.selected via
+    # Real compiled ultra graph: resolve_module emits module.selected via
     # the custom stream from inside the plan and reflect nodes.
     harness._graph = build(
         triage=[plan_decision()],
@@ -671,7 +671,7 @@ async def test_emitter_failure_never_breaks_the_run(tmp_path: Path) -> None:
         async def emit(self, event: StatusEvent) -> None:
             raise RuntimeError("emitter down")
 
-    one = make_case(HarnessKind.PLANNER, tmp_path)
+    one = make_case(HarnessKind.ULTRA, tmp_path)
     one.harness._emitter = _RaisingEmitter()  # forwarding path (ADR-110)
     one.harness._graph = build(
         triage=[plan_decision()],
@@ -688,7 +688,7 @@ async def test_emitter_failure_never_breaks_the_run(tmp_path: Path) -> None:
 async def test_non_status_custom_chunks_are_not_forwarded(tmp_path: Path) -> None:
     """A rogue node writing a non-StatusEvent to the custom stream is ignored
     by the forwarding path — nothing reaches the emitter, run unharmed."""
-    one = make_case(HarnessKind.PLANNER, tmp_path)
+    one = make_case(HarnessKind.ULTRA, tmp_path)
     emitter = CaptureEmitter()
     one.harness._emitter = emitter
 
@@ -712,7 +712,7 @@ async def test_final_text_ignores_inner_namespace_updates(tmp_path: Path) -> Non
     """With subgraphs=True, message-shaped updates from nested runs (react
     subgraph, step-scoped inner runs) arrive namespaced and must not become
     final_text — even when they arrive after the root answer."""
-    one = make_case(HarnessKind.PLANNER, tmp_path)
+    one = make_case(HarnessKind.ULTRA, tmp_path)
     root = ((), "updates", {"synthesize": {"messages": [AIMessage(content="real answer")]}})
     inner_decoy = (
         ("react:abc123",),

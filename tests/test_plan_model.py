@@ -1,4 +1,4 @@
-"""Tests for the Plan model (planner harness state, ADR-101 §3)."""
+"""Tests for the Plan model (ultra harness state, ADR-101 §3)."""
 
 from openpaw.model.plan import IdeationResult, Plan, PlanStep, StepStatus
 

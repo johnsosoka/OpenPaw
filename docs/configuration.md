@@ -614,7 +614,7 @@ Status updates are sent directly to the user channel and do not create extra che
 
 ```yaml
 harness:
-  type: planner              # react (default) | planner
+  type: ultra              # react (default) | ultra
   triage:     {model: fast}
   planning:   {module: auto, model: strong}
   creative:   {module: ideonomy}
@@ -631,13 +631,13 @@ harness:
     max_steps: 12
 ```
 
-Selects the agent topology. `react` (the default) is the existing ReAct loop, unchanged. `planner` adds a triage step that routes each message to the plain react loop (simple turns), a planning path (multi-step work), or an ideation path (open-ended asks), then executes the plan step by step with optional reflection and a final synthesis.
+Selects the agent topology. `react` (the default) is the existing ReAct loop, unchanged. `ultra` adds a triage step that routes each message to the plain react loop (simple turns), a planning path (multi-step work), or an ideation path (open-ended asks), then executes the plan step by step with optional reflection and a final synthesis.
 
-**Zero-config:** a bare `harness: {type: planner}` is a complete, valid configuration — every node inherits the workspace model. Everything below is optional tuning.
+**Zero-config:** a bare `harness: {type: ultra}` is a complete, valid configuration — every node inherits the workspace model. Everything below is optional tuning.
 
 **Typos fail fast:** unlike the legacy config groups, `harness:` uses `extra="forbid"` — an unrecognized key is a startup error, not a silently ignored field.
 
-**type** — `react` (default) or `planner`.
+**type** — `react` (default) or `ultra`.
 
 ##### Per-Node Models
 
@@ -667,7 +667,7 @@ With `module: auto`, a selector step picks the module per task over module tagli
 
 ##### Tool Equipping
 
-Off by default. When enabled on the planner path, an equip step selects a task-relevant tool subset before planning, and a `request_tools` recovery loop lets the executor re-equip (at most once per step) if a needed tool was filtered out.
+Off by default. When enabled on the ultra planning path, an equip step selects a task-relevant tool subset before planning, and a `request_tools` recovery loop lets the executor re-equip (at most once per step) if a needed tool was filtered out.
 
 **tool_equipping.enabled** — Enable the equip phase. Default: `false`.
 
@@ -675,7 +675,7 @@ Off by default. When enabled on the planner path, an equip step selects a task-r
 
 **tool_equipping.max_tools** — Maximum tools equipped per task. Default: `25`. Minimum: 1.
 
-**tool_equipping.react_selector** — React-path alternative: enable the stock LangChain `LLMToolSelectorMiddleware` instead of the planner equip node. Default: `false`. Independent of `enabled`.
+**tool_equipping.react_selector** — React-path alternative: enable the stock LangChain `LLMToolSelectorMiddleware` instead of the ultra equip node. Default: `false`. Independent of `enabled`.
 
 **tool_equipping.model** — Model pointer (catalog name) for the selection call. Unset = inherit.
 
@@ -685,11 +685,11 @@ Off by default. When enabled on the planner path, an equip step selects a task-r
 
 ##### Examples
 
-Zero-config planner (every node inherits the workspace model):
+Zero-config ultra (every node inherits the workspace model):
 
 ```yaml
 harness:
-  type: planner
+  type: ultra
 ```
 
 Per-node models from the provider catalog (cheap model for routing, strong model for planning):
@@ -708,7 +708,7 @@ providers:
 
 # Workspace agent.yaml
 harness:
-  type: planner
+  type: ultra
   triage:     {model: fast}
   planning:   {model: strong}
   selector:   {model: fast}
@@ -719,7 +719,7 @@ Automatic module selection with a restricted pool:
 
 ```yaml
 harness:
-  type: planner
+  type: ultra
   planning:   {module: auto}                       # direct vs self_discover, per task
   reflection: {module: auto, allowed: [light, full]}
 ```

@@ -1,4 +1,4 @@
-"""Tests for PlannerHarness (protocol conformance, parity contracts) and
+"""Tests for UltraHarness (protocol conformance, parity contracts) and
 AgentFactory harness dispatch."""
 
 import asyncio
@@ -11,7 +11,7 @@ import pytest
 from langgraph.checkpoint.memory import MemorySaver
 
 from openpaw.agent.harness import AgentHarness, HarnessKind
-from openpaw.agent.harness.planner import PlannerHarness
+from openpaw.agent.harness.ultra import UltraHarness
 from openpaw.agent.middleware.approval import ApprovalRequiredError
 from openpaw.agent.middleware.queue_aware import InterruptSignalError
 from openpaw.agent.runner import AgentRunner
@@ -30,7 +30,7 @@ from openpaw.workspace.node_model_resolver import NodeModelResolver
 def make_workspace(tmp_path: Path, config: WorkspaceConfig | None = None) -> AgentWorkspace:
     (tmp_path / "AGENT.md").write_text("# Agent")
     return AgentWorkspace(
-        name="planner-test",
+        name="ultra-test",
         path=tmp_path,
         agent_md="# Agent",
         user_md="# User",
@@ -60,7 +60,7 @@ def make_node_resolver() -> NodeModelResolver:
 
 
 @pytest.fixture
-def harness(tmp_path: Path) -> PlannerHarness:
+def harness(tmp_path: Path) -> UltraHarness:
     workspace = make_workspace(tmp_path)
     inner = AgentRunner(
         workspace=workspace,
@@ -68,10 +68,10 @@ def harness(tmp_path: Path) -> PlannerHarness:
         api_key="test",
         checkpointer=MemorySaver(),
     )
-    return PlannerHarness(
+    return UltraHarness(
         workspace=workspace,
         inner=inner,
-        harness_config=HarnessConfig(type="planner"),
+        harness_config=HarnessConfig(type="ultra"),
         node_resolver=make_node_resolver(),
     )
 
@@ -106,39 +106,39 @@ class StubGraph:
 # ---------------------------------------------------------------------------
 
 
-def test_planner_harness_satisfies_protocol(harness: PlannerHarness) -> None:
+def test_ultra_harness_satisfies_protocol(harness: UltraHarness) -> None:
     assert isinstance(harness, AgentHarness)
-    assert harness.kind == HarnessKind.PLANNER
+    assert harness.kind == HarnessKind.ULTRA
     assert harness.model_id == "openai:gpt-4o-mini"
     assert harness.last_metrics is None
     assert harness.last_tools_used == []
     assert harness.checkpointer is not None  # shared with the inner runner
 
 
-def test_zero_config_planner_builds(tmp_path: Path) -> None:
-    """H6.2: bare harness: {type: planner} builds with all nodes inheriting."""
+def test_zero_config_ultra_builds(tmp_path: Path) -> None:
+    """H6.2: bare harness: {type: ultra} builds with all nodes inheriting."""
     workspace = make_workspace(tmp_path)
     inner = AgentRunner(workspace=workspace, model="openai:gpt-4o-mini", api_key="test")
-    harness = PlannerHarness(
+    harness = UltraHarness(
         workspace=workspace,
         inner=inner,
-        harness_config=HarnessConfig(type="planner"),
+        harness_config=HarnessConfig(type="ultra"),
         node_resolver=make_node_resolver(),
     )
     assert {"triage", "react", "plan", "execute_step", "reflect", "synthesize"} <= set(harness.agent_graph.nodes)
 
 
-def test_timeout_seconds_default_inherits_inner(harness: PlannerHarness) -> None:
+def test_timeout_seconds_default_inherits_inner(harness: UltraHarness) -> None:
     assert harness.timeout_seconds == harness._inner.timeout_seconds
 
 
 def test_timeout_seconds_override_takes_precedence(tmp_path: Path) -> None:
     workspace = make_workspace(tmp_path)
     inner = AgentRunner(workspace=workspace, model="openai:gpt-4o-mini", api_key="test")
-    harness = PlannerHarness(
+    harness = UltraHarness(
         workspace=workspace,
         inner=inner,
-        harness_config=HarnessConfig(type="planner", execution=ExecutionConfig(timeout_seconds=900)),
+        harness_config=HarnessConfig(type="ultra", execution=ExecutionConfig(timeout_seconds=900)),
         node_resolver=make_node_resolver(),
     )
     assert harness.timeout_seconds == 900
@@ -151,7 +151,7 @@ def test_execution_timeout_seconds_rejects_non_positive(bad_timeout: float) -> N
         ExecutionConfig(timeout_seconds=bad_timeout)
 
 
-def test_update_model_applies_to_execution_only(harness: PlannerHarness) -> None:
+def test_update_model_applies_to_execution_only(harness: UltraHarness) -> None:
     """ADR-103 §4: runtime /model override never touches node models."""
     node_models_before = harness._node_models
 
@@ -162,7 +162,7 @@ def test_update_model_applies_to_execution_only(harness: PlannerHarness) -> None
     assert harness._node_models is node_models_before  # untouched instances
 
 
-def test_update_checkpointer_recompiles_with_shared_instance(harness: PlannerHarness) -> None:
+def test_update_checkpointer_recompiles_with_shared_instance(harness: UltraHarness) -> None:
     graph_before = harness.agent_graph
     saver = MemorySaver()
 
@@ -173,7 +173,7 @@ def test_update_checkpointer_recompiles_with_shared_instance(harness: PlannerHar
     assert harness.agent_graph is not graph_before  # recompiled
 
 
-def test_update_tools_delegates_and_recompiles(harness: PlannerHarness) -> None:
+def test_update_tools_delegates_and_recompiles(harness: UltraHarness) -> None:
     from langchain_core.tools import tool
 
     @tool
@@ -193,7 +193,7 @@ def test_update_tools_delegates_and_recompiles(harness: PlannerHarness) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_approval_during_plan_step_records_resume_marker(harness: PlannerHarness) -> None:
+async def test_approval_during_plan_step_records_resume_marker(harness: UltraHarness) -> None:
     error = ApprovalRequiredError("appr-1", "shell", {"cmd": "ls"}, "tc-1")
     stub = StubGraph(error=error, on_start=lambda: setattr(harness._run_context, "executing_step_id", "2"))
     harness._graph = stub
@@ -204,7 +204,7 @@ async def test_approval_during_plan_step_records_resume_marker(harness: PlannerH
     assert stub.state_updates == [({"resume_step_id": "2"}, "plan")]
 
 
-async def test_approval_on_react_route_records_nothing(harness: PlannerHarness) -> None:
+async def test_approval_on_react_route_records_nothing(harness: UltraHarness) -> None:
     """No plan step executing -> no marker (react-route approvals resume as today)."""
     stub = StubGraph(error=ApprovalRequiredError("appr-1", "shell", {}, "tc-1"))
     harness._graph = stub
@@ -215,7 +215,7 @@ async def test_approval_on_react_route_records_nothing(harness: PlannerHarness) 
     assert stub.state_updates == []
 
 
-async def test_interrupt_clears_plan_state(harness: PlannerHarness) -> None:
+async def test_interrupt_clears_plan_state(harness: UltraHarness) -> None:
     stub = StubGraph(error=InterruptSignalError([("telegram", "stop!")]))
     harness._graph = stub
 
@@ -234,10 +234,10 @@ async def test_stateless_harness_skips_state_maintenance(tmp_path: Path) -> None
     """No checkpointer -> approval/interrupt contracts are no-ops, error still propagates."""
     workspace = make_workspace(tmp_path)
     inner = AgentRunner(workspace=workspace, model="openai:gpt-4o-mini", api_key="test", checkpointer=None)
-    harness = PlannerHarness(
+    harness = UltraHarness(
         workspace=workspace,
         inner=inner,
-        harness_config=HarnessConfig(type="planner"),
+        harness_config=HarnessConfig(type="ultra"),
         node_resolver=make_node_resolver(),
     )
     stub = StubGraph(error=InterruptSignalError([]))
@@ -249,7 +249,7 @@ async def test_stateless_harness_skips_state_maintenance(tmp_path: Path) -> None
     assert stub.state_updates == []
 
 
-async def test_timeout_returns_notification_with_partial_metrics(harness: PlannerHarness) -> None:
+async def test_timeout_returns_notification_with_partial_metrics(harness: UltraHarness) -> None:
     harness._graph = StubGraph(delay=5.0)
     harness.timeout_seconds = 0.05
 
@@ -261,15 +261,15 @@ async def test_timeout_returns_notification_with_partial_metrics(harness: Planne
 
 
 # ---------------------------------------------------------------------------
-# run() end-to-end over a fake planner graph (real astream/updates parsing)
+# run() end-to-end over a fake ultra graph (real astream/updates parsing)
 # ---------------------------------------------------------------------------
 
 
-async def test_run_plan_flow_returns_synthesis(harness: PlannerHarness) -> None:
+async def test_run_plan_flow_returns_synthesis(harness: UltraHarness) -> None:
     from langchain_core.messages import AIMessage
 
     from openpaw.agent.harness.modules.direct import _PlanSchema
-    from tests.test_planner_graph import advance, build, make_fake_react, plan_decision
+    from tests.test_ultra_graph import advance, build, make_fake_react, plan_decision
 
     calls: list[str] = []
     harness._graph = build(
@@ -288,9 +288,9 @@ async def test_run_plan_flow_returns_synthesis(harness: PlannerHarness) -> None:
     assert harness.last_metrics is not None  # metrics extracted (zero-usage fakes)
 
 
-async def test_run_react_flow_returns_react_reply(harness: PlannerHarness) -> None:
-    from openpaw.agent.harness.planner import TriageDecision
-    from tests.test_planner_graph import build, make_fake_react
+async def test_run_react_flow_returns_react_reply(harness: UltraHarness) -> None:
+    from openpaw.agent.harness.ultra import TriageDecision
+    from tests.test_ultra_graph import build, make_fake_react
 
     harness._graph = build(
         triage=[TriageDecision(route="react", objective="greet", reason="simple")],
@@ -308,7 +308,7 @@ async def test_run_react_flow_returns_react_reply(harness: PlannerHarness) -> No
 # ---------------------------------------------------------------------------
 
 
-async def test_resolve_orphaned_tool_calls_repairs_react_route(harness: PlannerHarness) -> None:
+async def test_resolve_orphaned_tool_calls_repairs_react_route(harness: UltraHarness) -> None:
     from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
     thread_id = "telegram:1:conv1"
@@ -332,7 +332,7 @@ async def test_resolve_orphaned_tool_calls_repairs_react_route(harness: PlannerH
     assert len([m for m in state.values["messages"] if isinstance(m, ToolMessage)]) == 1
 
 
-async def test_resolve_orphaned_tool_calls_noop_without_orphans(harness: PlannerHarness) -> None:
+async def test_resolve_orphaned_tool_calls_noop_without_orphans(harness: UltraHarness) -> None:
     """Typical execute_step approval case: inner run unpersisted -> no-op."""
     await harness.resolve_orphaned_tool_calls("telegram:1:conv1")  # empty thread, no error
 
@@ -342,7 +342,7 @@ async def test_resolve_orphaned_tool_calls_noop_without_orphans(harness: Planner
 # ---------------------------------------------------------------------------
 
 
-async def test_get_context_info_empty_thread(harness: PlannerHarness) -> None:
+async def test_get_context_info_empty_thread(harness: UltraHarness) -> None:
     info = await harness.get_context_info("telegram:1:conv-empty")
     assert info == {
         "max_input_tokens": 0,
@@ -388,13 +388,13 @@ def test_factory_dispatches_react_without_config(tmp_path: Path) -> None:
     assert isinstance(harness, AgentRunner)
 
 
-def test_factory_dispatches_planner(tmp_path: Path) -> None:
+def test_factory_dispatches_ultra(tmp_path: Path) -> None:
     workspace = make_workspace(
-        tmp_path, config=WorkspaceConfig.model_validate({"harness": {"type": "planner"}})
+        tmp_path, config=WorkspaceConfig.model_validate({"harness": {"type": "ultra"}})
     )
     saver = MemorySaver()
     harness = make_factory(workspace).create_harness(checkpointer=saver)
-    assert isinstance(harness, PlannerHarness)
-    assert harness.kind == HarnessKind.PLANNER
+    assert isinstance(harness, UltraHarness)
+    assert harness.kind == HarnessKind.ULTRA
     assert harness.checkpointer is saver  # outer and inner share the instance
     assert isinstance(harness, AgentHarness)

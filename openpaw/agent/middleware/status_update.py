@@ -183,7 +183,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._last_reported_tools: frozenset[str] = frozenset()
         self._status_message_id: str | None = None
         self._steer_notified: bool = False
-        # True once a planner-harness event has rendered for this run: the
+        # True once an ultra-harness event has rendered for this run: the
         # harness narrates its own phases, so the generic "Starting work..."
         # from inner react runs is suppressed (feedback round 1).
         self._harness_narrating: bool = False
@@ -285,7 +285,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
             logger.debug("Failed to delete status message: %s", e)
 
     async def handle_plan_event(self, event: StatusEvent) -> None:
-        """Render planner-harness plan/node events (PRD-002 H3.3, H7.2).
+        """Render ultra-harness plan/node events (PRD-002 H3.3, H7.2).
 
         Called by PlanChannelSink during a graph run — the armed per-run
         context (set_context) is valid because events arrive on the same
@@ -490,7 +490,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         if getattr(self, "_is_system_batch", False):
             return None
 
-        # Planner harness runs narrate their own phases (Thinking...,
+        # Ultra harness runs narrate their own phases (Thinking...,
         # routing, steps); the generic label would stomp them.
         if self._harness_narrating:
             return None

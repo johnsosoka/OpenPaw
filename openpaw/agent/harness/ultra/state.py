@@ -1,6 +1,6 @@
-"""Planner harness graph state (ADR-101 §3).
+"""Ultra harness graph state (ADR-101 §3).
 
-``PlannerState`` extends ``langchain.agents.AgentState`` so the embedded
+``UltraState`` extends ``langchain.agents.AgentState`` so the embedded
 react subgraph shares the ``messages`` key directly.
 
 Serialization choice: ``plan`` and ``ideation`` are stored in graph state as
@@ -23,8 +23,8 @@ from openpaw.model.plan import IdeationResult, Plan, PlanStep, StepStatus
 Route = Literal["react", "plan", "ideate"]
 
 
-class PlannerState(AgentState[Any], total=False):
-    """State schema for the planner harness graph.
+class UltraState(AgentState[Any], total=False):
+    """State schema for the ultra harness graph.
 
     Attributes (beyond AgentState's ``messages``):
         route: Triage classification for this run.
@@ -62,10 +62,10 @@ class PlannerState(AgentState[Any], total=False):
 
 
 @dataclass
-class PlannerRunContext:
+class UltraRunContext:
     """Per-run mutable context shared between the harness and graph nodes.
 
-    Node closures hold this object; ``PlannerHarness.run()`` re-arms it per
+    Node closures hold this object; ``UltraHarness.run()`` re-arms it per
     run — the same singleton-re-armed-per-run pattern as the workspace
     middleware (contextvars are invisible across LangGraph task boundaries).
 
@@ -116,7 +116,7 @@ def plan_to_state(plan: Plan) -> dict[str, Any]:
     }
 
 
-def plan_from_state(state: PlannerState) -> Plan | None:
+def plan_from_state(state: UltraState) -> Plan | None:
     """Rebuild the live Plan from graph state, or None when no plan exists."""
     payload = state.get("plan")
     if not isinstance(payload, dict):
@@ -148,7 +148,7 @@ def ideation_to_state(ideation: IdeationResult | None) -> dict[str, Any] | None:
     }
 
 
-def ideation_from_state(state: PlannerState) -> IdeationResult | None:
+def ideation_from_state(state: UltraState) -> IdeationResult | None:
     """Rebuild the IdeationResult from graph state, or None."""
     payload = state.get("ideation")
     if not isinstance(payload, dict):

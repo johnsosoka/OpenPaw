@@ -1,4 +1,4 @@
-"""Context brief support for the planner harness (ADR-108).
+"""Context brief support for the ultra harness (ADR-108).
 
 Schema, prompts, token windowing, and rendering for the ``brief`` graph node:
 one structured-output call on the plan/ideate paths that distills the full

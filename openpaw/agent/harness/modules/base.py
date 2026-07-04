@@ -2,7 +2,7 @@
 
 One interface, three module kinds (ADR-102). Modules are prompt pipelines or
 compiled LangGraph subgraphs (ADR-109) behind an async ``run()`` — ideonomy
-fans its lens calls out in parallel via ``Send``; the planner graph — not
+fans its lens calls out in parallel via ``Send``; the ultra graph — not
 the modules — owns composition (ideate may feed plan; modules never call each
 other). Modules depend only on ``core/`` and ``model/`` (stability contract):
 the resolved per-node model (ADR-103) arrives via :class:`ReasoningContext`
@@ -107,7 +107,7 @@ class ModuleKind(StrEnum):
 
 @dataclass(frozen=True)
 class ToolSummary:
-    """Name + first-line description of an equipped tool, for planner awareness."""
+    """Name + first-line description of an equipped tool, for ultra awareness."""
 
     name: str
     description: str
@@ -196,7 +196,7 @@ class ReasoningArtifact:
 
 
 class ReasoningModule(ABC):
-    """A pluggable reasoning strategy used by the planner harness.
+    """A pluggable reasoning strategy used by the ultra harness.
 
     The extension contract (ADR-102): subclass, set the three class
     attributes, implement ``run()``, and add one ``MODULE_REGISTRY`` entry —

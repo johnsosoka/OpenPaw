@@ -127,7 +127,7 @@ class TestMisplacedWorkspaceKeys:
 
         reset_warnings()
         with caplog.at_level(logging.WARNING):
-            warn_misplaced_workspace_keys({"harness": {"type": "planner"}})
+            warn_misplaced_workspace_keys({"harness": {"type": "ultra"}})
         assert "harness" in caplog.text
         assert "no effect" in caplog.text
 

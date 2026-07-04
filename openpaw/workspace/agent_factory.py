@@ -7,7 +7,7 @@ from typing import Any
 
 from openpaw.agent import AgentRunner
 from openpaw.agent.harness import AgentHarness, HarnessKind
-from openpaw.agent.harness.planner import PlannerHarness
+from openpaw.agent.harness.ultra import UltraHarness
 from openpaw.core.config.models import HarnessConfig, ProviderDefinition
 from openpaw.model.spawn_profile import SpawnProfile
 from openpaw.model.status_event import StatusEmitter
@@ -154,7 +154,7 @@ class AgentFactory:
         The seam callers (WorkspaceRunner/MessageProcessor/connector) hold —
         they never depend on the underlying graph topology (ADR-101 §2).
         Dispatches on ``workspace.config.harness.type``: react (default) is
-        the exact current AgentRunner path; planner wraps that runner as the
+        the exact current AgentRunner path; ultra wraps that runner as the
         execution engine inside the ADR-101 graph.
 
         Args:
@@ -166,7 +166,7 @@ class AgentFactory:
         harness_config: HarnessConfig | None = (
             self._workspace.config.harness if getattr(self._workspace, "config", None) else None
         )
-        if harness_config is None or harness_config.type != HarnessKind.PLANNER.value:
+        if harness_config is None or harness_config.type != HarnessKind.ULTRA.value:
             return self.create_agent(checkpointer=checkpointer)
 
         inner = self.create_agent(checkpointer=checkpointer)
@@ -178,8 +178,8 @@ class AgentFactory:
             workspace_region=self._resolver._region,
             workspace_extra_kwargs=self._resolver._extra_model_kwargs,
         )
-        self._logger.info("Creating planner harness for workspace: %s", self._workspace.name)
-        return PlannerHarness(
+        self._logger.info("Creating ultra harness for workspace: %s", self._workspace.name)
+        return UltraHarness(
             workspace=self._workspace,
             inner=inner,
             harness_config=harness_config,

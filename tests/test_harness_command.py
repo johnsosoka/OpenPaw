@@ -44,10 +44,10 @@ def _node_resolver() -> NodeModelResolver:
     )
 
 
-def _fake_runner(config: WorkspaceConfig | None, planner: bool = False) -> SimpleNamespace:
+def _fake_runner(config: WorkspaceConfig | None, ultra: bool = False) -> SimpleNamespace:
     """Duck-typed WorkspaceRunner for calling _harness_info directly."""
     agent_runner = SimpleNamespace()
-    if planner:
+    if ultra:
         agent_runner = SimpleNamespace(node_resolver=_node_resolver())
     return SimpleNamespace(
         _agent_factory=SimpleNamespace(
@@ -81,20 +81,20 @@ def test_harness_info_react_when_no_config():
     assert info.startswith("Harness: react")
 
 
-def test_harness_info_planner_table():
+def test_harness_info_ultra_table():
     config = WorkspaceConfig(
         harness={
-            "type": "planner",
+            "type": "ultra",
             "triage": {"model": "openai:gpt-4o-mini"},
             "planning": {"module": "auto"},
         }
     )
-    fake = _fake_runner(config, planner=True)
+    fake = _fake_runner(config, ultra=True)
 
     info = WorkspaceRunner._harness_info(fake)
     lines = info.splitlines()
 
-    assert lines[0] == "Harness: planner"
+    assert lines[0] == "Harness: ultra"
     # Pinned node: no inherited marker
     assert "triage: openai:gpt-4o-mini" in info
     assert "triage: openai:gpt-4o-mini (inherited)" not in info
@@ -108,9 +108,9 @@ def test_harness_info_planner_table():
     assert lines[-1] == f"execution: {WORKSPACE_MODEL}"
 
 
-def test_harness_info_planner_execution_shows_runtime_override():
-    config = WorkspaceConfig(harness={"type": "planner"})
-    fake = _fake_runner(config, planner=True)
+def test_harness_info_ultra_execution_shows_runtime_override():
+    config = WorkspaceConfig(harness={"type": "ultra"})
+    fake = _fake_runner(config, ultra=True)
     fake._agent_factory.active_model = "xai:grok-4"
 
     info = WorkspaceRunner._harness_info(fake)

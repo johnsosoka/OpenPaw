@@ -1,4 +1,4 @@
-"""Per-node model resolution for the planner harness (ADR-103).
+"""Per-node model resolution for the ultra harness (ADR-103).
 
 Node config entries are pointers into the provider catalog — never a fourth
 credential site. Resolution is a thin layer over the existing

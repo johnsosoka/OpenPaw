@@ -1,8 +1,8 @@
-"""Plan models for the planner harness — first-class, revisable, checkpointed.
+"""Plan models for the ultra harness — first-class, revisable, checkpointed.
 
 Pure dataclass layer (stability contract: no framework imports). The Plan is
 the object the status system renders as a live to-do list (ADR-106 plan.*
-payloads carry its serialized form) and the planner graph checkpoints in
+payloads carry its serialized form) and the ultra graph checkpoints in
 state (ADR-101 §3).
 """
 

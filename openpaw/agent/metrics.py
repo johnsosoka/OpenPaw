@@ -143,7 +143,7 @@ class TokenUsageLogger:
             node: Harness node name for per-node breakdown rows (H6.3).
                 Node rows are ADDITIONAL to the run-level row — their tokens
                 are already counted there, so aggregation skips them.
-            harness: Harness kind ("planner") for per-node rows.
+            harness: Harness kind ("ultra") for per-node rows.
         """
         try:
             # Build log entry outside lock

@@ -64,7 +64,7 @@ def ws_ctx(model: BaseChatModel, tmp_path: Path) -> ReasoningContext:
 
 
 # ---------------------------------------------------------------------------
-# Planner: discovery + solve flow
+# Ultra: discovery + solve flow
 # ---------------------------------------------------------------------------
 
 

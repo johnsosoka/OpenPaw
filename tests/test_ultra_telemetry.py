@@ -19,9 +19,9 @@ from langgraph.checkpoint.memory import MemorySaver
 from openpaw.agent.harness.modules.base import ModuleKind, WorkspaceInfo
 from openpaw.agent.harness.modules.direct import DirectPlanner, _PlanSchema
 from openpaw.agent.harness.modules.reflection import LightReflection, _VerdictSchema
-from openpaw.agent.harness.planner import PlannerHarness
-from openpaw.agent.harness.planner.graph import PlannerNodeModels, TriageDecision, build_planner_graph
-from openpaw.agent.harness.planner.state import PlannerRunContext
+from openpaw.agent.harness.ultra import UltraHarness
+from openpaw.agent.harness.ultra.graph import UltraNodeModels, TriageDecision, build_ultra_graph
+from openpaw.agent.harness.ultra.state import UltraRunContext
 from openpaw.agent.metrics import (
     InvocationMetrics,
     NodeUsage,
@@ -32,8 +32,8 @@ from openpaw.agent.runner import AgentRunner
 from openpaw.core.config.models import HarnessConfig
 from openpaw.core.paths import TOKEN_USAGE_JSONL
 from openpaw.model.status_event import StatusEventKind
-from tests.test_planner_graph import CaptureEmitter, fake, make_fake_react
-from tests.test_planner_harness import StubGraph, make_node_resolver, make_workspace
+from tests.test_ultra_graph import CaptureEmitter, fake, make_fake_react
+from tests.test_ultra_harness import StubGraph, make_node_resolver, make_workspace
 
 # ---------------------------------------------------------------------------
 # Usage-reporting fake model
@@ -77,9 +77,9 @@ def build_graph(
     sink: list[NodeUsage],
     react: Any = None,
 ) -> Any:
-    return build_planner_graph(
+    return build_ultra_graph(
         react_graph=react if react is not None else make_fake_react(["step done"], []),
-        node_models=PlannerNodeModels(
+        node_models=UltraNodeModels(
             triage=triage,
             planning=planning,
             creative=fake(),
@@ -87,7 +87,7 @@ def build_graph(
             selector=fake(),
             synthesize=synthesize,
         ),
-        harness_config=HarnessConfig(type="planner"),
+        harness_config=HarnessConfig(type="ultra"),
         candidates={
             ModuleKind.PLANNING: {"direct": DirectPlanner()},
             ModuleKind.CREATIVE: {},
@@ -96,7 +96,7 @@ def build_graph(
         emitter=emitter,
         workspace_info=WorkspaceInfo(name="testws", timezone="UTC", workspace_path=Path("/tmp/ws")),
         tools_summary=[],
-        run_context=PlannerRunContext(),
+        run_context=UltraRunContext(),
         checkpointer=None,
         inner_recursion_limit=20,
         node_model_ids={
@@ -224,12 +224,12 @@ def test_logger_writes_node_and_harness_fields(tmp_path: Path) -> None:
         invocation_type="node",
         session_key="telegram:1",
         node="triage",
-        harness="planner",
+        harness="ultra",
     )
 
     (row,) = read_rows(tmp_path)
     assert row["node"] == "triage"
-    assert row["harness"] == "planner"
+    assert row["harness"] == "ultra"
     assert row["invocation_type"] == "node"
     assert row["total_tokens"] == 15
 
@@ -260,7 +260,7 @@ def test_reader_skips_node_breakdown_rows(tmp_path: Path) -> None:
             invocation_type="node",
             session_key="telegram:1",
             node=node,
-            harness="planner",
+            harness="ultra",
         )
 
     reader = TokenUsageReader(tmp_path)
@@ -288,17 +288,17 @@ def test_reader_tolerates_unknown_extra_fields(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# PlannerHarness flush
+# UltraHarness flush
 # ---------------------------------------------------------------------------
 
 
-def make_harness(tmp_path: Path) -> PlannerHarness:
+def make_harness(tmp_path: Path) -> UltraHarness:
     workspace = make_workspace(tmp_path)
     inner = AgentRunner(workspace=workspace, model="openai:gpt-4o-mini", api_key="test", checkpointer=MemorySaver())
-    return PlannerHarness(
+    return UltraHarness(
         workspace=workspace,
         inner=inner,
-        harness_config=HarnessConfig(type="planner"),
+        harness_config=HarnessConfig(type="ultra"),
         node_resolver=make_node_resolver(),
     )
 
@@ -320,7 +320,7 @@ def test_flush_aggregates_per_node_and_writes_rows(tmp_path: Path) -> None:
     assert rows["reflect"]["total_tokens"] == 50  # aggregated across steps
     assert rows["reflect"]["llm_calls"] == 2
     assert rows["reflect"]["duration_ms"] == 17.0
-    assert rows["reflect"]["harness"] == "planner"
+    assert rows["reflect"]["harness"] == "ultra"
     assert rows["reflect"]["invocation_type"] == "node"
     assert harness._node_usage == []  # sink cleared after flush
 

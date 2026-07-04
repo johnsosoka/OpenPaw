@@ -217,7 +217,7 @@ The `delivery` field controls output routing: `channel` sends directly to the co
 Two harness types ship in 0.5.0, selected by `harness.type` in the workspace config:
 
 - **`react`** (default) — the existing compiled `create_agent` ReAct loop, wrapped unchanged. Workspaces that don't set `harness:` behave exactly as before.
-- **`planner`** — a LangGraph `StateGraph` around the react loop:
+- **`ultra`** — a LangGraph `StateGraph` around the react loop:
 
 ```
 START → triage ──→ react ──────────────────────────→ END       (simple turns)
@@ -232,9 +232,9 @@ A triage node routes each message: simple turns go straight to the plain react l
 
 **Module subgraphs** — `self_discover` and `ideonomy` are implemented internally as compiled LangGraph subgraphs behind the unchanged `ReasoningModule.run()` contract. They run unpersisted (no checkpointer), their stages appear as namespaced nodes in the outer stream for per-stage visibility, ideonomy's lens explorations fan out concurrently via `Send`, and every self-discover discovery stage (SELECT/ADAPT/IMPLEMENT) uses structured outputs. The registry, selector, and fallback machinery are untouched.
 
-**Per-node models** — each node (triage, planning, creative, reflection, selector, synthesize, execution) can point at a provider-catalog entry; credentials stay in the catalog and resolution flows through the same `create_chat_model()` path. A bare `harness: {type: planner}` runs with every node inheriting the workspace model. `/harness` prints the resolved node→model table; the runtime `/model` override applies to the execution node only.
+**Per-node models** — each node (triage, planning, creative, reflection, selector, synthesize, execution) can point at a provider-catalog entry; credentials stay in the catalog and resolution flows through the same `create_chat_model()` path. A bare `harness: {type: ultra}` runs with every node inheriting the workspace model. `/harness` prints the resolved node→model table; the runtime `/model` override applies to the execution node only.
 
-**Status event backbone** (`model/status_event.py`, `runtime/status_bus.py`) — every observable happening (runs, tools, sub-agents, plan lifecycle, skill lifecycle, learning evaluations) is a machine-readable `StatusEvent` fanned out through a per-workspace `StatusBus` to pluggable sinks: channel rendering (the live plan checklist), a JSONL event log, and future consumers such as a web portal. Emission is best-effort and never blocks or fails an agent run. Inside the planner graph, reasoning-module stages emit their events over LangGraph's custom stream; `PlannerHarness` forwards them to the bus, stamping run identity centrally. Out-of-graph producers (skill store, learning evaluator, middleware) keep the injected emitter — the `StatusEmitter`/`StatusBus` contract and event payloads are unchanged.
+**Status event backbone** (`model/status_event.py`, `runtime/status_bus.py`) — every observable happening (runs, tools, sub-agents, plan lifecycle, skill lifecycle, learning evaluations) is a machine-readable `StatusEvent` fanned out through a per-workspace `StatusBus` to pluggable sinks: channel rendering (the live plan checklist), a JSONL event log, and future consumers such as a web portal. Emission is best-effort and never blocks or fails an agent run. Inside the ultra graph, reasoning-module stages emit their events over LangGraph's custom stream; `UltraHarness` forwards them to the bus, stamping run identity centrally. Out-of-graph producers (skill store, learning evaluator, middleware) keep the injected emitter — the `StatusEmitter`/`StatusBus` contract and event payloads are unchanged.
 
 **Per-node telemetry** — harness nodes emit `node.completed` events with token counts and latency; per-node rows land in `token_usage.jsonl` alongside the unchanged run-level records.
 

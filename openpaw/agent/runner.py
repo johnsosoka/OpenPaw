@@ -175,7 +175,7 @@ class AgentRunner:
 
     @property
     def agent_graph(self) -> Any:
-        """The compiled create_agent graph (embedded as a node by PlannerHarness)."""
+        """The compiled create_agent graph (embedded as a node by UltraHarness)."""
         return self._agent
 
     @property

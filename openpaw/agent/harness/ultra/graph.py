@@ -1,4 +1,4 @@
-"""Planner harness StateGraph assembly (ADR-101 §1).
+"""Ultra harness StateGraph assembly (ADR-101 §1).
 
 ponytail: this module is over the 700-line smell threshold by design — the
 node functions are closures over shared build-time state (emitter, config,
@@ -78,7 +78,7 @@ from openpaw.agent.harness.modules.base import (
 )
 from openpaw.agent.harness.modules.direct import DirectPlanner
 from openpaw.agent.harness.modules.selector import resolve_module
-from openpaw.agent.harness.planner.brief import (
+from openpaw.agent.harness.ultra.brief import (
     BRIEF_SYSTEM_PROMPT,
     BRIEF_TASK_TEMPLATE,
     ContextBrief,
@@ -86,7 +86,7 @@ from openpaw.agent.harness.planner.brief import (
     resolve_brief_budget,
     window_dialogue,
 )
-from openpaw.agent.harness.planner.equipment import (
+from openpaw.agent.harness.ultra.equipment import (
     EQUIP_REQUEST_BLOCK,
     EQUIP_SYSTEM_PROMPT,
     EQUIP_TASK_TEMPLATE,
@@ -96,17 +96,17 @@ from openpaw.agent.harness.planner.equipment import (
     detect_tool_request,
     render_catalog,
 )
-from openpaw.agent.harness.planner.prompts import (
+from openpaw.agent.harness.ultra.prompts import (
     FALLBACK_STEP_DESCRIPTION,
     STEP_EXECUTION_TEMPLATE,
     SYNTHESIZE_ABORT_BLOCK,
     SYNTHESIZE_TEMPLATE,
     TRIAGE_SYSTEM_PROMPT,
 )
-from openpaw.agent.harness.planner.state import (
-    PlannerRunContext,
-    PlannerState,
+from openpaw.agent.harness.ultra.state import (
     Route,
+    UltraRunContext,
+    UltraState,
     ideation_from_state,
     ideation_to_state,
     plan_from_state,
@@ -140,7 +140,7 @@ class TriageDecision(BaseModel):
 
 
 @dataclass(frozen=True)
-class PlannerNodeModels:
+class UltraNodeModels:
     """Per-node models resolved by NodeModelResolver at harness build time.
 
     The execution model lives inside the embedded react subgraph and is not
@@ -211,16 +211,16 @@ def _conversation_digest(messages: list[Any]) -> str:
     return "\n".join(reversed(lines))
 
 
-def build_planner_graph(
+def build_ultra_graph(
     *,
     react_graph: Any,
-    node_models: PlannerNodeModels,
+    node_models: UltraNodeModels,
     harness_config: HarnessConfig,
     candidates: dict[ModuleKind, dict[str, ReasoningModule]],
     emitter: StatusEmitter,
     workspace_info: WorkspaceInfo,
     tools_summary: list[ToolSummary],
-    run_context: PlannerRunContext,
+    run_context: UltraRunContext,
     checkpointer: Any | None,
     inner_recursion_limit: int,
     node_model_ids: dict[str, str] | None = None,
@@ -228,7 +228,7 @@ def build_planner_graph(
     equipment: EquipmentContext | None = None,
     step_executor_factory: Callable[[list[str] | None], Any] | None = None,
 ) -> Any:
-    """Assemble and compile the planner harness graph.
+    """Assemble and compile the ultra harness graph.
 
     Args:
         react_graph: The compiled create_agent graph (AgentRunner.agent_graph).
@@ -239,8 +239,8 @@ def build_planner_graph(
         candidates: Instantiated reasoning modules per kind (registry-built).
         emitter: Status event emitter (ADR-106).
         workspace_info: Minimal workspace context for modules and events.
-        tools_summary: Tool names + descriptions for planner awareness.
-        run_context: Per-run mutable context re-armed by PlannerHarness.run().
+        tools_summary: Tool names + descriptions for ultra awareness.
+        run_context: Per-run mutable context re-armed by UltraHarness.run().
         checkpointer: Same instance as the inner runner's (None = stateless).
         inner_recursion_limit: recursion_limit for step-scoped inner runs.
         node_model_ids: Resolved model id per graph node name, for telemetry
@@ -321,7 +321,7 @@ def build_planner_graph(
                 },
             )
 
-    def _module_ctx(state: PlannerState, objective: str, model: BaseChatModel) -> ReasoningContext:
+    def _module_ctx(state: UltraState, objective: str, model: BaseChatModel) -> ReasoningContext:
         """Build the ReasoningContext a module needs (ADR-102)."""
         return ReasoningContext(
             task=objective,
@@ -333,12 +333,12 @@ def build_planner_graph(
             ideation=ideation_from_state(state),
         )
 
-    def _objective(state: PlannerState) -> str:
+    def _objective(state: UltraState) -> str:
         return state.get("objective") or _last_human_text(state.get("messages", []))[:500]
 
     # --- triage -------------------------------------------------------------
 
-    async def triage(state: PlannerState) -> Command[Literal["react", "ideate", "plan", "execute_step"]]:
+    async def triage(state: UltraState) -> Command[Literal["react", "ideate", "plan", "execute_step"]]:
         """Classify the batch and route (H2.1–H2.4); resume paused plan steps."""
         # Approval-resume path: jump straight back to the paused step. The
         # marker is cleared by execute_step, not here.
@@ -424,7 +424,7 @@ def build_planner_graph(
 
     # --- brief (ADR-108; node only added when briefing is on) -----------------
 
-    async def brief(state: PlannerState) -> Command[Literal["ideate", "plan"]]:
+    async def brief(state: UltraState) -> Command[Literal["ideate", "plan"]]:
         """Distill the full session history into a context brief (ADR-108).
 
         Entered from triage on the plan/ideate routes only — react traffic
@@ -467,14 +467,14 @@ def build_planner_graph(
                     )
             except Exception:
                 # Fail-open (ADR-108 §5): the brief must never make the
-                # planner less reliable than the digest-only keyhole.
+                # ultra less reliable than the digest-only keyhole.
                 logger.warning("Context brief failed; proceeding without it", exc_info=True)
                 rendered = None
         return Command(update={"context_brief": rendered}, goto=goto)
 
     # --- ideate ---------------------------------------------------------------
 
-    async def ideate(state: PlannerState) -> dict[str, Any]:
+    async def ideate(state: UltraState) -> dict[str, Any]:
         """Run the creative module; failure skips ideation (fail-open)."""
         await _emit(StatusEventKind.NODE_ENTERED, "ideate", {})
         objective = _objective(state)
@@ -497,7 +497,7 @@ def build_planner_graph(
 
     # --- plan -----------------------------------------------------------------
 
-    async def _plan_with_fallback(state: PlannerState, objective: str) -> Plan:
+    async def _plan_with_fallback(state: UltraState, objective: str) -> Plan:
         """Module -> DirectPlanner -> synthetic single step. Never dead-ends."""
         ctx = _module_ctx(state, objective, node_models.planning)
         try:
@@ -524,7 +524,7 @@ def build_planner_graph(
             logger.warning("DirectPlanner fallback failed; using synthetic plan", exc_info=True)
         return Plan(objective=objective, steps=(PlanStep(id="1", description=FALLBACK_STEP_DESCRIPTION),))
 
-    async def plan_node(state: PlannerState) -> dict[str, Any]:
+    async def plan_node(state: UltraState) -> dict[str, Any]:
         """Synthesize the plan via the configured module (H3.1–H3.2)."""
         await _emit(StatusEventKind.NODE_ENTERED, "plan", {})
         objective = _objective(state)
@@ -552,7 +552,7 @@ def build_planner_graph(
 
     # --- equip (ADR-104; node only added when equipment is provided) -------------
 
-    async def equip(state: PlannerState) -> Command[Literal["plan", "execute_step"]]:
+    async def equip(state: UltraState) -> Command[Literal["plan", "execute_step"]]:
         """Select the tool subset for this task (H5.1) or re-equip (H5.3).
 
         Entered from triage (plan route) before planning, or from
@@ -618,12 +618,12 @@ def build_planner_graph(
 
     # --- execute_step -----------------------------------------------------------
 
-    async def execute_step(state: PlannerState) -> dict[str, Any]:
+    async def execute_step(state: UltraState) -> dict[str, Any]:
         """Run the react subgraph scoped to the current plan step (H4.1).
 
         The inner run is intentionally unpersisted (fresh context per step);
         ApprovalRequiredError/InterruptSignalError propagate out exactly as
-        today — PlannerHarness.run() owns the resume/clear contracts.
+        today — UltraHarness.run() owns the resume/clear contracts.
         """
         live_plan = plan_from_state(state)
         step_id = state.get("current_step_id")
@@ -721,7 +721,7 @@ def build_planner_graph(
 
     # --- reflect ------------------------------------------------------------------
 
-    async def reflect(state: PlannerState) -> dict[str, Any]:
+    async def reflect(state: UltraState) -> dict[str, Any]:
         """Evaluate the step outcome and update plan state (H4.2/H4.3)."""
         live_plan = plan_from_state(state)
         step_id = state.get("current_step_id")
@@ -800,7 +800,7 @@ def build_planner_graph(
 
     # --- plan-loop conditional ------------------------------------------------------
 
-    def route_after_step(state: PlannerState) -> Literal["execute_step", "synthesize"]:
+    def route_after_step(state: UltraState) -> Literal["execute_step", "synthesize"]:
         """Loop while pending steps remain, within budget, and not aborted."""
         if state.get("abort_reason"):
             return "synthesize"
@@ -815,7 +815,7 @@ def build_planner_graph(
 
     # --- synthesize --------------------------------------------------------------------
 
-    async def synthesize(state: PlannerState) -> dict[str, Any]:
+    async def synthesize(state: UltraState) -> dict[str, Any]:
         """Compose the final user-facing response from plan + step results."""
         await _emit(StatusEventKind.NODE_ENTERED, "synthesize", {})
         live_plan = plan_from_state(state)
@@ -844,13 +844,13 @@ def build_planner_graph(
 
     # --- assembly -----------------------------------------------------------------------
 
-    def route_after_execute(state: PlannerState) -> Literal["equip", "execute_step", "synthesize", "reflect"]:
+    def route_after_execute(state: UltraState) -> Literal["equip", "execute_step", "synthesize", "reflect"]:
         """Equipping only: intercept a pending request_tools ask (H5.3)."""
         if state.get("requested_tools"):
             return "equip"
         return "reflect" if not reflection_off else route_after_step(state)
 
-    builder: StateGraph[PlannerState, None, PlannerState, PlannerState] = StateGraph(PlannerState)
+    builder: StateGraph[UltraState, None, UltraState, UltraState] = StateGraph(UltraState)
     builder.add_node("triage", triage)
     builder.add_node("react", react_graph)  # CompiledStateGraph embeds as a namespaced subgraph
     builder.add_node("ideate", ideate)
@@ -882,4 +882,4 @@ def build_planner_graph(
     builder.add_edge("react", END)
     builder.add_edge("synthesize", END)
 
-    return builder.compile(checkpointer=checkpointer, name="planner")
+    return builder.compile(checkpointer=checkpointer, name="ultra")

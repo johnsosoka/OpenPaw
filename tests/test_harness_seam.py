@@ -46,6 +46,6 @@ def test_agent_runner_satisfies_protocol(workspace: AgentWorkspace) -> None:
 
 
 def test_harness_kind_values() -> None:
-    """Config value spelling is pinned (harness.type: react | planner)."""
+    """Config value spelling is pinned (harness.type: react | ultra)."""
     assert HarnessKind.REACT.value == "react"
-    assert HarnessKind.PLANNER.value == "planner"
+    assert HarnessKind.ULTRA.value == "ultra"

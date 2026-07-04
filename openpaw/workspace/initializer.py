@@ -208,7 +208,7 @@ class WorkspaceInitializer:
 
         from langchain.agents.middleware import LLMToolSelectorMiddleware
 
-        from openpaw.agent.harness.planner.equipment import resolve_equip_floor
+        from openpaw.agent.harness.ultra.equipment import resolve_equip_floor
         from openpaw.agent.model_factory import create_chat_model
         from openpaw.core.config.providers import resolve_provider
 
@@ -347,7 +347,7 @@ class WorkspaceInitializer:
                 emitter=status_bus,
                 workspace=self._workspace.name,
             )
-            # Plan/node events (planner harness) render through the same
+            # Plan/node events (ultra harness) render through the same
             # middleware via its armed per-run context (T2.7).
             status_bus.add_sink(PlanChannelSink(status_update_middleware))
             # Skill lifecycle one-liners (PRD-001 F4.1) render the same way.
@@ -378,7 +378,7 @@ class WorkspaceInitializer:
             )
 
         # React-path tool selector (ADR-104 §5, T4.3): stock middleware that
-        # subsets request.tools per model call. Config-gated; planner-type
+        # subsets request.tools per model call. Config-gated; ultra-type
         # workspaces use the equip node instead.
         react_selector_mw = self._build_react_tool_selector(
             builtin_tools + workspace_tools

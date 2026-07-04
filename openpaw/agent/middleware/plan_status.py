@@ -1,4 +1,4 @@
-"""Plan checklist rendering for the planner harness (PRD-002 H3.3, ADR-106 §3).
+"""Plan checklist rendering for the ultra harness (PRD-002 H3.3, ADR-106 §3).
 
 The plan to-do list is its OWN edited-in-place channel message, distinct from
 the tool-status line. It is created on ``plan.created``, edited in place as

@@ -536,7 +536,7 @@ async def test_sink_forwards_plan_kinds_and_filters_the_rest():
 async def test_events_during_graph_run_use_armed_context():
     """Events emitted mid-run (same asyncio task chain) hit the armed context.
 
-    Simulates the planner graph emitting through the bus while
+    Simulates the ultra graph emitting through the bus while
     MessageProcessor's set_context is in effect for the run.
     """
     channel = MockChannel()

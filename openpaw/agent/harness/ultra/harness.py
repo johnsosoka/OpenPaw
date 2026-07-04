@@ -1,7 +1,7 @@
-"""PlannerHarness — the planner-topology implementation of AgentHarness.
+"""UltraHarness — the ultra-topology implementation of AgentHarness.
 
 Wraps the existing ``AgentRunner`` (the react execution engine) inside the
-ADR-101 planner StateGraph. All parity-critical contracts mirror the runner:
+ADR-101 ultra StateGraph. All parity-critical contracts mirror the runner:
 
 - run(): astream(stream_mode=["updates", "custom"], subgraphs=True),
   asyncio.timeout, usage-callback metrics, TIMEOUT_NOTIFICATION templates.
@@ -34,14 +34,14 @@ from langchain_core.messages import AIMessage, ToolMessage
 from openpaw.agent.harness.base import AgentHarness, HarnessKind
 from openpaw.agent.harness.modules.base import ModuleKind, ReasoningModule, ToolSummary, WorkspaceInfo
 from openpaw.agent.harness.modules.registry import candidates_for
-from openpaw.agent.harness.planner.equipment import (
+from openpaw.agent.harness.ultra.equipment import (
     EquipmentContext,
     build_tool_catalog,
     create_request_tools_tool,
     resolve_equip_floor,
 )
-from openpaw.agent.harness.planner.graph import PlannerNodeModels, build_planner_graph, extract_message_text
-from openpaw.agent.harness.planner.state import PlannerRunContext
+from openpaw.agent.harness.ultra.graph import UltraNodeModels, build_ultra_graph, extract_message_text
+from openpaw.agent.harness.ultra.state import UltraRunContext
 from openpaw.agent.metrics import (
     InvocationMetrics,
     NodeUsage,
@@ -76,8 +76,8 @@ class _NullEmitter:
         return None
 
 
-class PlannerHarness:
-    """Planner agent harness: triage -> (react | plan | ideate) -> execute/reflect.
+class UltraHarness:
+    """Ultra agent harness: triage -> (react | plan | ideate) -> execute/reflect.
 
     Satisfies :class:`AgentHarness`; ``MessageProcessor``/``WorkspaceRunner``
     hold the protocol and never see the graph topology.
@@ -126,7 +126,7 @@ class PlannerHarness:
             if harness_config.execution.timeout_seconds is not None
             else inner.timeout_seconds
         )
-        self._run_context = PlannerRunContext()
+        self._run_context = UltraRunContext()
         self._last_metrics: InvocationMetrics | None = None
         self._last_tools_used: list[str] = []
         # Per-node telemetry (H6.3): graph nodes append NodeUsage entries to
@@ -145,7 +145,7 @@ class PlannerHarness:
     @property
     def kind(self) -> HarnessKind:
         """Which harness topology this implements."""
-        return HarnessKind.PLANNER
+        return HarnessKind.ULTRA
 
     @property
     def model_id(self) -> str:
@@ -179,7 +179,7 @@ class PlannerHarness:
 
     @property
     def agent_graph(self) -> Any:
-        """The compiled outer planner graph (tests and diagnostics)."""
+        """The compiled outer ultra graph (tests and diagnostics)."""
         return self._graph
 
     @property
@@ -209,10 +209,10 @@ class PlannerHarness:
             for kind in ModuleKind
         }
 
-    def _build_node_models(self) -> PlannerNodeModels:
+    def _build_node_models(self) -> UltraNodeModels:
         """Instantiate the per-node models from config (cached until rebuild)."""
         r = self._node_resolver
-        return PlannerNodeModels(
+        return UltraNodeModels(
             triage=r.create_node_model(self._config.triage),
             planning=r.create_node_model(self._config.planning),
             creative=r.create_node_model(self._config.creative),
@@ -288,7 +288,7 @@ class PlannerHarness:
         return graph
 
     def _tools_summary(self) -> list[ToolSummary]:
-        """Name + first description line per tool, for planner awareness."""
+        """Name + first description line per tool, for ultra awareness."""
         summary = [
             ToolSummary(
                 name="filesystem",
@@ -310,7 +310,7 @@ class PlannerHarness:
             timezone=config.timezone if config else "UTC",
             workspace_path=self.workspace.path,
         )
-        return build_planner_graph(
+        return build_ultra_graph(
             react_graph=self._inner.agent_graph,
             node_models=self._node_models,
             harness_config=self._config,
@@ -411,7 +411,7 @@ class PlannerHarness:
         return final_text
 
     async def run(self, message: str, session_id: str | None = None, thread_id: str | None = None) -> str:
-        """Execute one turn through the planner graph.
+        """Execute one turn through the ultra graph.
 
         Stream-forwarded module events are not strictly FIFO-ordered relative
         to outer-node events emitted directly to the bus; payloads are
@@ -438,7 +438,7 @@ class PlannerHarness:
         start_time = time.monotonic()
 
         logger.info(
-            "Planner run starting (workspace: %s, model: %s, thread: %s)",
+            "Ultra run starting (workspace: %s, model: %s, thread: %s)",
             self.workspace.name,
             self.model_id,
             thread_id or "new",
@@ -475,7 +475,7 @@ class PlannerHarness:
             self._last_metrics.is_partial = True
             self._last_tools_used.extend(self._run_context.tools_used)
             logger.warning(
-                "Planner run timed out after %ss (workspace: %s)", self.timeout_seconds, self.workspace.name
+                "Ultra run timed out after %ss (workspace: %s)", self.timeout_seconds, self.workspace.name
             )
             if self._run_context.current_tool_name:
                 return TIMEOUT_NOTIFICATION_TEMPLATE.format(
@@ -651,8 +651,8 @@ class PlannerHarness:
         await self._graph.aupdate_state(config, {"messages": synthetic}, as_node="react")
 
 
-def _protocol_conformance(harness: PlannerHarness) -> AgentHarness:
-    """Compile-time check that PlannerHarness satisfies AgentHarness.
+def _protocol_conformance(harness: UltraHarness) -> AgentHarness:
+    """Compile-time check that UltraHarness satisfies AgentHarness.
 
     mypy strict verifies the structural match here; drift in either surface
     fails type checking rather than exploding at runtime.

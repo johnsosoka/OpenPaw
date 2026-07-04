@@ -26,9 +26,9 @@ def test_disabled_by_default() -> None:
     assert init._build_react_tool_selector([]) is None
 
 
-def test_planner_type_never_gets_selector() -> None:
+def test_ultra_type_never_gets_selector() -> None:
     init = make_initializer(
-        {"type": "planner", "tool_equipping": {"react_selector": True}}
+        {"type": "ultra", "tool_equipping": {"react_selector": True}}
     )
     assert init._build_react_tool_selector([]) is None
 

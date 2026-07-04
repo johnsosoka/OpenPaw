@@ -1,7 +1,7 @@
 """Tests for tool equipping (ADR-104, PRD-002 H5): catalog, floor, equip node,
 step-executor subsetting, and the request_tools recovery loop.
 
-Graph-level tests reuse the fakes from test_planner_graph; the step executor
+Graph-level tests reuse the fakes from test_ultra_graph; the step executor
 is a recording fake so factory calls (the subset contract) are observable.
 """
 
@@ -15,7 +15,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from openpaw.agent.harness.modules.base import ModuleKind, ReasoningModule, WorkspaceInfo
 from openpaw.agent.harness.modules.direct import _PlanSchema
-from openpaw.agent.harness.planner.equipment import (
+from openpaw.agent.harness.ultra.equipment import (
     REQUEST_TOOLS_NAME,
     EquipDecision,
     EquipmentContext,
@@ -25,11 +25,11 @@ from openpaw.agent.harness.planner.equipment import (
     detect_tool_request,
     resolve_equip_floor,
 )
-from openpaw.agent.harness.planner.graph import PlannerNodeModels, build_planner_graph
-from openpaw.agent.harness.planner.state import PlannerRunContext, PlannerState, plan_from_state
+from openpaw.agent.harness.ultra.graph import UltraNodeModels, build_ultra_graph
+from openpaw.agent.harness.ultra.state import UltraRunContext, UltraState, plan_from_state
 from openpaw.core.config.models import HarnessConfig
 from openpaw.model.plan import StepStatus
-from tests.test_planner_graph import (
+from tests.test_ultra_graph import (
     CaptureEmitter,
     FakeModel,
     advance,
@@ -109,7 +109,7 @@ def build_graph(
     step_executor_factory: Any = None,
     candidates: dict[ModuleKind, dict[str, ReasoningModule]] | None = None,
 ) -> Any:
-    node_models = PlannerNodeModels(
+    node_models = UltraNodeModels(
         triage=fake(*(triage or [])),
         planning=fake(*(planning or [])),
         creative=fake(),
@@ -117,15 +117,15 @@ def build_graph(
         selector=fake(),
         synthesize=fake(*(synthesize or [AIMessage(content="final answer")])),
     )
-    return build_planner_graph(
+    return build_ultra_graph(
         react_graph=react if react is not None else make_fake_react(["react reply"], []),
         node_models=node_models,
-        harness_config=HarnessConfig(type="planner"),
+        harness_config=HarnessConfig(type="ultra"),
         candidates=candidates or default_candidates(),
         emitter=emitter or CaptureEmitter(),
         workspace_info=WorkspaceInfo(name="testws", timezone="UTC", workspace_path=Path("/tmp/ws")),
         tools_summary=[],
-        run_context=PlannerRunContext(),
+        run_context=UltraRunContext(),
         checkpointer=None,
         inner_recursion_limit=20,
         equipment=equipment,
@@ -162,7 +162,7 @@ def test_catalog_lint_warns_on_missing_or_one_word_descriptions(
         fake_tool("terse", "Frobnicates"),
         fake_tool("fine", "Does a clearly described thing"),
     ]
-    with caplog.at_level(logging.WARNING, logger="openpaw.agent.harness.planner.equipment"):
+    with caplog.at_level(logging.WARNING, logger="openpaw.agent.harness.ultra.equipment"):
         build_tool_catalog(tools)
 
     warnings = [r.getMessage() for r in caplog.records]
@@ -352,7 +352,7 @@ async def test_request_tools_triggers_one_reequip_then_step_completes() -> None:
     assert result["requested_tools"] is None
     assert result["reequipped_steps"] == ["1"]
     assert result["step_results"] == ["step done with beta"]
-    final_plan = plan_from_state(cast(PlannerState, result))
+    final_plan = plan_from_state(cast(UltraState, result))
     assert final_plan is not None
     assert final_plan.steps[0].status is StepStatus.DONE
 
@@ -397,16 +397,16 @@ async def test_second_request_on_same_step_does_not_reequip_again() -> None:
 
 def equipping_config() -> HarnessConfig:
     return HarnessConfig.model_validate(
-        {"type": "planner", "tool_equipping": {"enabled": True, "always_equip": ["send_message"]}}
+        {"type": "ultra", "tool_equipping": {"enabled": True, "always_equip": ["send_message"]}}
     )
 
 
 def test_harness_executor_factory_builds_subset_and_caches(tmp_path: Path) -> None:
     from langchain_core.tools import tool
 
-    from openpaw.agent.harness.planner import PlannerHarness
+    from openpaw.agent.harness.ultra import UltraHarness
     from openpaw.agent.runner import AgentRunner
-    from tests.test_planner_harness import make_node_resolver, make_workspace
+    from tests.test_ultra_harness import make_node_resolver, make_workspace
 
     @tool
     def alpha_tool() -> str:
@@ -428,7 +428,7 @@ def test_harness_executor_factory_builds_subset_and_caches(tmp_path: Path) -> No
         built.append([t.name for t in tools])
         return SimpleNamespace(agent_graph=object())
 
-    harness = PlannerHarness(
+    harness = UltraHarness(
         workspace=workspace,
         inner=inner,
         harness_config=equipping_config(),
@@ -455,29 +455,29 @@ def test_harness_executor_factory_builds_subset_and_caches(tmp_path: Path) -> No
 
 
 def test_harness_enabled_adds_equip_node_and_disabled_does_not(tmp_path: Path) -> None:
-    from openpaw.agent.harness.planner import PlannerHarness
+    from openpaw.agent.harness.ultra import UltraHarness
     from openpaw.agent.runner import AgentRunner
-    from tests.test_planner_harness import make_node_resolver, make_workspace
+    from tests.test_ultra_harness import make_node_resolver, make_workspace
 
     workspace = make_workspace(tmp_path)
 
-    def harness_for(config: HarnessConfig) -> PlannerHarness:
+    def harness_for(config: HarnessConfig) -> UltraHarness:
         inner = AgentRunner(workspace=workspace, model="openai:gpt-4o-mini", api_key="test")
-        return PlannerHarness(
+        return UltraHarness(
             workspace=workspace,
             inner=inner,
             harness_config=config,
             node_resolver=make_node_resolver(),
         )
 
-    assert "equip" not in harness_for(HarnessConfig(type="planner")).agent_graph.nodes
+    assert "equip" not in harness_for(HarnessConfig(type="ultra")).agent_graph.nodes
     assert "equip" in harness_for(equipping_config()).agent_graph.nodes
 
 
 def test_agent_factory_tools_override_replaces_toolset(tmp_path: Path) -> None:
     from langchain_core.tools import tool
 
-    from tests.test_planner_harness import make_factory, make_workspace
+    from tests.test_ultra_harness import make_factory, make_workspace
 
     @tool
     def gamma_tool() -> str:

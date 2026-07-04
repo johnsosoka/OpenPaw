@@ -8,8 +8,8 @@ repair orphaned tool calls. Callers never see the underlying LangGraph shape.
 Implementations:
 - react: the existing single-loop ``create_agent`` path (``AgentRunner``
   satisfies the protocol structurally — see ``react.py``).
-- planner: triage -> (react | plan | ideate) -> execute/reflect multi-node
-  graph (``planner/``, ADR-101).
+- ultra: triage -> (react | plan | ideate) -> execute/reflect multi-node
+  graph (``ultra/``, ADR-101).
 """
 
 from openpaw.agent.harness.base import AgentHarness, HarnessKind
@@ -17,6 +17,6 @@ from openpaw.agent.harness.react import ReactHarness
 
 __all__ = ["AgentHarness", "HarnessKind", "ReactHarness"]
 
-# PlannerHarness is imported from openpaw.agent.harness.planner directly —
-# re-exporting here would import the full planner graph stack for every
+# UltraHarness is imported from openpaw.agent.harness.ultra directly —
+# re-exporting here would import the full ultra graph stack for every
 # consumer of the seam types.

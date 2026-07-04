@@ -1,9 +1,9 @@
-"""Tool-equipping support for the planner harness (ADR-104, PRD-002 H5).
+"""Tool-equipping support for the ultra harness (ADR-104, PRD-002 H5).
 
 Catalog construction, always-equip floor resolution, the equip-selection
 schema and prompts, and the ``request_tools`` recovery tool (H5.3). The
 selection call itself runs inside the graph's equip node (graph.py); the
-per-subset step executor lives on PlannerHarness.
+per-subset step executor lives on UltraHarness.
 
 Group and source attribution reuse the same mapping the sub-agent filter
 machinery resolves against (BuiltinRegistry metadata / get_group_members) —
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 REQUEST_TOOLS_NAME = "request_tools"
 
-# First-sentence cap for catalog lines (same shape as PlannerHarness._tools_summary).
+# First-sentence cap for catalog lines (same shape as UltraHarness._tools_summary).
 _DESCRIPTION_MAX_CHARS = 150
 
 EQUIP_SYSTEM_PROMPT = """\

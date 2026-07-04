@@ -233,7 +233,7 @@ class WorkspaceConfig(BaseModel):
     )
     harness: HarnessConfig = Field(
         default_factory=HarnessConfig,
-        description="Agent harness topology (react | planner) and per-node models (0.5.0).",
+        description="Agent harness topology (react | ultra) and per-node models (0.5.0).",
     )
     learning: LearningConfig = Field(
         default_factory=LearningConfig,

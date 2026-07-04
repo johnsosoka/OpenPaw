@@ -1,7 +1,7 @@
-"""Tests for the planner harness graph (ADR-101): routing, plan loop, events.
+"""Tests for the ultra harness graph (ADR-101): routing, plan loop, events.
 
 All model calls use fakes; the react subgraph is a tiny real compiled
-StateGraph injected via build_planner_graph's react_graph parameter.
+StateGraph injected via build_ultra_graph's react_graph parameter.
 """
 
 from pathlib import Path
@@ -18,15 +18,15 @@ from langgraph.graph.message import add_messages
 from openpaw.agent.harness.modules.base import ModuleKind, ReasoningContext, ReasoningModule, WorkspaceInfo
 from openpaw.agent.harness.modules.direct import DirectPlanner, _PlanSchema
 from openpaw.agent.harness.modules.reflection import FullReflection, LightReflection, _VerdictSchema
-from openpaw.agent.harness.planner.graph import (
-    PlannerNodeModels,
+from openpaw.agent.harness.ultra.graph import (
+    UltraNodeModels,
     TriageDecision,
-    build_planner_graph,
+    build_ultra_graph,
 )
-from openpaw.agent.harness.planner.prompts import FALLBACK_STEP_DESCRIPTION
-from openpaw.agent.harness.planner.state import (
-    PlannerRunContext,
-    PlannerState,
+from openpaw.agent.harness.ultra.prompts import FALLBACK_STEP_DESCRIPTION
+from openpaw.agent.harness.ultra.state import (
+    UltraRunContext,
+    UltraState,
     plan_from_state,
     plan_to_state,
 )
@@ -136,15 +136,15 @@ def build(
     candidates: dict[ModuleKind, dict[str, ReasoningModule]] | None = None,
     emitter: CaptureEmitter | None = None,
     checkpointer: Any | None = None,
-    run_context: PlannerRunContext | None = None,
+    run_context: UltraRunContext | None = None,
 ) -> Any:
-    """Assemble a planner graph with fake models everywhere.
+    """Assemble an ultra graph with fake models everywhere.
 
     ``brief`` is a MODEL (not an outputs list) so brief tests can inspect
     prompts on the instance; None keeps the brief node out of the graph —
     today's exact topology (ADR-108).
     """
-    node_models = PlannerNodeModels(
+    node_models = UltraNodeModels(
         triage=fake(*(triage or [])),
         planning=fake(*(planning or [])),
         creative=fake(),
@@ -153,15 +153,15 @@ def build(
         synthesize=fake(*(synthesize or [AIMessage(content="final answer")])),
         brief=brief,
     )
-    return build_planner_graph(
+    return build_ultra_graph(
         react_graph=react if react is not None else make_fake_react(["react reply"], []),
         node_models=node_models,
-        harness_config=harness_config or HarnessConfig(type="planner"),
+        harness_config=harness_config or HarnessConfig(type="ultra"),
         candidates=candidates or default_candidates(),
         emitter=emitter or CaptureEmitter(),
         workspace_info=WorkspaceInfo(name="testws", timezone="UTC", workspace_path=Path("/tmp/ws")),
         tools_summary=[],
-        run_context=run_context or PlannerRunContext(),
+        run_context=run_context or UltraRunContext(),
         checkpointer=checkpointer,
         inner_recursion_limit=20,
     )
@@ -180,7 +180,7 @@ def advance(succeeded: bool = True) -> _VerdictSchema:
 # ---------------------------------------------------------------------------
 
 
-async def test_planner_state_round_trips_through_sqlite_checkpointer(tmp_path: Path) -> None:
+async def test_ultra_state_round_trips_through_sqlite_checkpointer(tmp_path: Path) -> None:
     """Plan state survives a real AsyncSqliteSaver checkpoint round-trip."""
     plan = Plan(
         objective="obj",
@@ -191,7 +191,7 @@ async def test_planner_state_round_trips_through_sqlite_checkpointer(tmp_path: P
         revision=1,
     )
 
-    def seed(state: PlannerState) -> dict[str, Any]:
+    def seed(state: UltraState) -> dict[str, Any]:
         return {
             "messages": [AIMessage(content="ok")],
             "plan": plan_to_state(plan),
@@ -199,7 +199,7 @@ async def test_planner_state_round_trips_through_sqlite_checkpointer(tmp_path: P
             "step_results": ["did a"],
         }
 
-    builder = StateGraph(PlannerState)
+    builder = StateGraph(UltraState)
     builder.add_node("seed", seed)
     builder.add_edge(START, "seed")
     builder.add_edge("seed", END)
@@ -213,7 +213,7 @@ async def test_planner_state_round_trips_through_sqlite_checkpointer(tmp_path: P
         await graph.ainvoke({"messages": [HumanMessage("hi")]}, config=config)
 
         state = await graph.aget_state(config)
-        restored = plan_from_state(cast(PlannerState, state.values))
+        restored = plan_from_state(cast(UltraState, state.values))
         assert restored == plan
         assert isinstance(restored.steps, tuple)  # tuple survives (payload form)
         assert restored.steps[0].status is StepStatus.DONE
@@ -284,7 +284,7 @@ async def test_two_step_plan_executes_and_synthesizes() -> None:
     assert "Execute step 1: step one" in calls[0]
     assert "Execute step 2: step two" in calls[1]
 
-    final_plan = plan_from_state(cast(PlannerState, result))
+    final_plan = plan_from_state(cast(UltraState, result))
     assert final_plan is not None
     assert all(s.status is StepStatus.DONE for s in final_plan.steps)
     assert final_plan.steps[0].result_summary == "did step one"
@@ -336,7 +336,7 @@ async def test_reflection_insert_step_executes_inserted_step() -> None:
 
     assert len(calls) == 3
     assert "Execute step 1A: fix auth" in calls[1]
-    final_plan = plan_from_state(cast(PlannerState, result))
+    final_plan = plan_from_state(cast(UltraState, result))
     assert final_plan is not None
     assert [s.id for s in final_plan.steps] == ["1", "1A", "2"]
     assert final_plan.steps[0].status is StepStatus.FAILED  # step_succeeded=False
@@ -361,7 +361,7 @@ async def test_reflection_abort_to_user_short_circuits_to_synthesize() -> None:
 
 async def test_max_steps_budget_caps_the_loop() -> None:
     calls: list[str] = []
-    config = HarnessConfig.model_validate({"type": "planner", "execution": {"max_steps": 1}})
+    config = HarnessConfig.model_validate({"type": "ultra", "execution": {"max_steps": 1}})
     graph = build(
         triage=[plan_decision()],
         planning=[_PlanSchema(steps=["one", "two", "three"])],
@@ -377,10 +377,10 @@ async def test_max_steps_budget_caps_the_loop() -> None:
 async def test_reflection_off_omits_reflect_node_and_still_loops() -> None:
     calls: list[str] = []
     reflection_model = FakeModel()  # would raise if invoked
-    config = HarnessConfig.model_validate({"type": "planner", "reflection": {"module": "off"}})
-    graph = build_planner_graph(
+    config = HarnessConfig.model_validate({"type": "ultra", "reflection": {"module": "off"}})
+    graph = build_ultra_graph(
         react_graph=make_fake_react(["r1", "r2"], calls),
-        node_models=PlannerNodeModels(
+        node_models=UltraNodeModels(
             triage=fake(plan_decision()),
             planning=fake(_PlanSchema(steps=["one", "two"])),
             creative=fake(),
@@ -393,7 +393,7 @@ async def test_reflection_off_omits_reflect_node_and_still_loops() -> None:
         emitter=CaptureEmitter(),
         workspace_info=WorkspaceInfo(name="testws", timezone="UTC", workspace_path=Path("/tmp/ws")),
         tools_summary=[],
-        run_context=PlannerRunContext(),
+        run_context=UltraRunContext(),
         checkpointer=None,
         inner_recursion_limit=20,
     )
@@ -401,7 +401,7 @@ async def test_reflection_off_omits_reflect_node_and_still_loops() -> None:
     result = await graph.ainvoke({"messages": [HumanMessage("do it")]})
     assert len(calls) == 2
     assert reflection_model.call_count == 0
-    final_plan = plan_from_state(cast(PlannerState, result))
+    final_plan = plan_from_state(cast(UltraState, result))
     assert final_plan is not None
     assert all(s.status is StepStatus.DONE for s in final_plan.steps)
 
@@ -415,9 +415,9 @@ async def test_resume_marker_routes_triage_directly_to_execute_step() -> None:
     calls: list[str] = []
     triage_model = FakeModel()  # must NOT be called on the resume path
     saver = MemorySaver()
-    graph = build_planner_graph(
+    graph = build_ultra_graph(
         react_graph=make_fake_react(["resumed step done"], calls),
-        node_models=PlannerNodeModels(
+        node_models=UltraNodeModels(
             triage=cast(BaseChatModel, triage_model),
             planning=fake(),
             creative=fake(),
@@ -425,12 +425,12 @@ async def test_resume_marker_routes_triage_directly_to_execute_step() -> None:
             selector=fake(),
             synthesize=fake(AIMessage(content="wrapped up")),
         ),
-        harness_config=HarnessConfig(type="planner"),
+        harness_config=HarnessConfig(type="ultra"),
         candidates=default_candidates(),
         emitter=CaptureEmitter(),
         workspace_info=WorkspaceInfo(name="testws", timezone="UTC", workspace_path=Path("/tmp/ws")),
         tools_summary=[],
-        run_context=PlannerRunContext(),
+        run_context=UltraRunContext(),
         checkpointer=saver,
         inner_recursion_limit=20,
     )
@@ -481,7 +481,7 @@ async def test_module_failure_falls_back_to_direct_then_synthetic_plan() -> None
     )
     result = await graph.ainvoke({"messages": [HumanMessage("do it")]})
 
-    final_plan = plan_from_state(cast(PlannerState, result))
+    final_plan = plan_from_state(cast(UltraState, result))
     assert final_plan is not None
     assert [s.description for s in final_plan.steps] == [FALLBACK_STEP_DESCRIPTION]
     assert len(calls) == 1
@@ -500,7 +500,7 @@ async def test_module_failure_recovers_via_direct_planner() -> None:
         candidates=candidates,
     )
     result = await graph.ainvoke({"messages": [HumanMessage("do it")]})
-    final_plan = plan_from_state(cast(PlannerState, result))
+    final_plan = plan_from_state(cast(UltraState, result))
     assert final_plan is not None
     assert [s.description for s in final_plan.steps] == ["recovered step"]
 

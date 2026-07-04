@@ -2,7 +2,7 @@
 hardening, route-conditional topology, fail-open posture, and per-consumer
 prompt plumbing.
 
-Graph-level tests reuse the fakes from test_planner_graph; module-level
+Graph-level tests reuse the fakes from test_ultra_graph; module-level
 consumer tests call run() directly (module events are dropped outside a
 streaming graph context by design — emit_status is tolerant).
 """
@@ -37,23 +37,23 @@ from openpaw.agent.harness.modules.self_discover.planner import (
     _SelectSchema,
     _StructureStep,
 )
-from openpaw.agent.harness.planner.brief import (
+from openpaw.agent.harness.ultra.brief import (
     _BRIEF_HEADROOM,
     ContextBrief,
     render_brief,
     resolve_brief_budget,
     window_dialogue,
 )
-from openpaw.agent.harness.planner.equipment import EquipDecision
-from openpaw.agent.harness.planner.graph import (
-    PlannerNodeModels,
+from openpaw.agent.harness.ultra.equipment import EquipDecision
+from openpaw.agent.harness.ultra.graph import (
+    UltraNodeModels,
     TriageDecision,
     _conversation_digest,
-    build_planner_graph,
+    build_ultra_graph,
 )
-from openpaw.agent.harness.planner.state import PlannerRunContext
+from openpaw.agent.harness.ultra.state import UltraRunContext
 from openpaw.core.config.models import BriefNodeConfig, HarnessConfig
-from tests.test_planner_graph import (
+from tests.test_ultra_graph import (
     CaptureEmitter,
     FakeModel,
     advance,
@@ -120,8 +120,8 @@ def test_brief_config_max_input_tokens_floor() -> None:
 
 
 def test_zero_config_harness_validates_with_brief_enabled() -> None:
-    """H6.2/ADR-108 §7: bare harness: {type: planner} validates, brief on."""
-    config = HarnessConfig.model_validate({"type": "planner"})
+    """H6.2/ADR-108 §7: bare harness: {type: ultra} validates, brief on."""
+    config = HarnessConfig.model_validate({"type": "ultra"})
     assert config.brief.enabled is True
     assert config.brief.max_input_tokens is None
 
@@ -324,9 +324,9 @@ async def test_planning_and_synthesize_prompts_carry_the_brief() -> None:
     calls: list[str] = []
     planning_model = FakeModel(_PlanSchema(steps=["one"]))
     synthesize_model = FakeModel(AIMessage(content="done"))
-    graph = build_planner_graph(
+    graph = build_ultra_graph(
         react_graph=make_fake_react(["did it"], calls),
-        node_models=PlannerNodeModels(
+        node_models=UltraNodeModels(
             triage=fake(plan_decision()),
             planning=cast(BaseChatModel, planning_model),
             creative=fake(),
@@ -335,12 +335,12 @@ async def test_planning_and_synthesize_prompts_carry_the_brief() -> None:
             synthesize=cast(BaseChatModel, synthesize_model),
             brief=fake(BRIEF),
         ),
-        harness_config=HarnessConfig(type="planner"),
+        harness_config=HarnessConfig(type="ultra"),
         candidates=default_candidates(),
         emitter=CaptureEmitter(),
         workspace_info=WorkspaceInfo(name="testws", timezone="UTC", workspace_path=Path("/tmp/ws")),
         tools_summary=[],
-        run_context=PlannerRunContext(),
+        run_context=UltraRunContext(),
         checkpointer=None,
         inner_recursion_limit=20,
     )
@@ -389,7 +389,7 @@ async def test_ideate_route_briefs_before_ideation() -> None:
 
 
 async def test_brief_disabled_by_config_omits_the_node() -> None:
-    config = HarnessConfig.model_validate({"type": "planner", "brief": {"enabled": False}})
+    config = HarnessConfig.model_validate({"type": "ultra", "brief": {"enabled": False}})
     graph = build(
         triage=[plan_decision()],
         planning=[_PlanSchema(steps=["one"])],
@@ -460,9 +460,9 @@ async def test_brief_failure_fails_open_to_digest() -> None:
 async def test_brief_with_equipping_routes_brief_then_equip() -> None:
     emitter = CaptureEmitter()
     equipment = make_equipment(EquipDecision(equip=["alpha"], reason="picked"))
-    graph = build_planner_graph(
+    graph = build_ultra_graph(
         react_graph=make_fake_react(["did it"], []),
-        node_models=PlannerNodeModels(
+        node_models=UltraNodeModels(
             triage=fake(plan_decision()),
             planning=fake(_PlanSchema(steps=["one"])),
             creative=fake(),
@@ -471,12 +471,12 @@ async def test_brief_with_equipping_routes_brief_then_equip() -> None:
             synthesize=fake(AIMessage(content="done")),
             brief=fake(BRIEF),
         ),
-        harness_config=HarnessConfig(type="planner"),
+        harness_config=HarnessConfig(type="ultra"),
         candidates=default_candidates(),
         emitter=emitter,
         workspace_info=WorkspaceInfo(name="testws", timezone="UTC", workspace_path=Path("/tmp/ws")),
         tools_summary=[],
-        run_context=PlannerRunContext(),
+        run_context=UltraRunContext(),
         checkpointer=None,
         inner_recursion_limit=20,
         equipment=equipment,
