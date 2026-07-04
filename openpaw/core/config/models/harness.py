@@ -141,6 +141,11 @@ class ExecutionConfig(NodeModelConfig):
     node only (ADR-103 §4)."""
 
     max_steps: int = Field(default=12, ge=1, le=100)
+    timeout_seconds: float | None = Field(
+        default=None,
+        ge=1,
+        description="Wall-clock budget for one planner run; None inherits the workspace timeout.",
+    )
 
 
 class HarnessConfig(BaseModel):

@@ -121,7 +121,11 @@ class PlannerHarness:
         # Step executors per equipped-set, valid until the next recompile.
         self._executor_cache: dict[frozenset[str], Any] = {}
 
-        self.timeout_seconds: float = inner.timeout_seconds
+        self.timeout_seconds: float = (
+            harness_config.execution.timeout_seconds
+            if harness_config.execution.timeout_seconds is not None
+            else inner.timeout_seconds
+        )
         self._run_context = PlannerRunContext()
         self._last_metrics: InvocationMetrics | None = None
         self._last_tools_used: list[str] = []

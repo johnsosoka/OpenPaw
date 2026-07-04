@@ -24,6 +24,7 @@ The 0.5.0 theme: agents that **plan visibly and learn durably**. A pluggable age
 - **Unified status event backbone** (ADR-106): every observable happening (runs, tools, sub-agents, plan lifecycle, skill lifecycle, learning evaluations) is now a machine-readable `StatusEvent` fanned out through a per-workspace `StatusBus` to pluggable sinks — channel rendering, a JSONL event log, and (future) a web portal. Channel rendering behavior is unchanged; events flow alongside it.
 - **Provider catalog `model:` field**: catalog entries can now carry a default model id, so workspaces (and harness nodes) reference `model: fast` without repeating credentials or model ids.
 - **AgentHarness seam** (ADR-101): `MessageProcessor`/`WorkspaceRunner`/commands now program against a topology-agnostic protocol; all `create_agent` internals live behind it.
+- `harness.execution.timeout_seconds` — per-workspace wall-clock budget for planner runs, overriding the workspace timeout (planned multi-step runs need more headroom than single react turns).
 
 ### Changed
 

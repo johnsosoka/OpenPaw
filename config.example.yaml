@@ -300,6 +300,7 @@ builtins:
 #     react_selector: false     # React-path alternative: stock LLMToolSelectorMiddleware
 #   execution:
 #     max_steps: 12             # Step budget per plan (1-100)
+#     timeout_seconds: 900      # Wall-clock budget per planner run; unset inherits workspace timeout
 
 # Learning loop — agent-authored skills (workspace-level only, in agent.yaml —
 # not read from this file).

@@ -15,7 +15,7 @@ from openpaw.agent.harness.planner import PlannerHarness
 from openpaw.agent.middleware.approval import ApprovalRequiredError
 from openpaw.agent.middleware.queue_aware import InterruptSignalError
 from openpaw.agent.runner import AgentRunner
-from openpaw.core.config.models import HarnessConfig, WorkspaceConfig
+from openpaw.core.config.models import ExecutionConfig, HarnessConfig, WorkspaceConfig
 from openpaw.core.prompts.system_events import TIMEOUT_NOTIFICATION_GENERIC
 from openpaw.core.workspace import AgentWorkspace
 from openpaw.workspace.agent_factory import AgentFactory
@@ -126,6 +126,29 @@ def test_zero_config_planner_builds(tmp_path: Path) -> None:
         node_resolver=make_node_resolver(),
     )
     assert {"triage", "react", "plan", "execute_step", "reflect", "synthesize"} <= set(harness.agent_graph.nodes)
+
+
+def test_timeout_seconds_default_inherits_inner(harness: PlannerHarness) -> None:
+    assert harness.timeout_seconds == harness._inner.timeout_seconds
+
+
+def test_timeout_seconds_override_takes_precedence(tmp_path: Path) -> None:
+    workspace = make_workspace(tmp_path)
+    inner = AgentRunner(workspace=workspace, model="openai:gpt-4o-mini", api_key="test")
+    harness = PlannerHarness(
+        workspace=workspace,
+        inner=inner,
+        harness_config=HarnessConfig(type="planner", execution=ExecutionConfig(timeout_seconds=900)),
+        node_resolver=make_node_resolver(),
+    )
+    assert harness.timeout_seconds == 900
+    assert inner.timeout_seconds != 900
+
+
+@pytest.mark.parametrize("bad_timeout", [0, -5])
+def test_execution_timeout_seconds_rejects_non_positive(bad_timeout: float) -> None:
+    with pytest.raises(ValueError):
+        ExecutionConfig(timeout_seconds=bad_timeout)
 
 
 def test_update_model_applies_to_execution_only(harness: PlannerHarness) -> None:
