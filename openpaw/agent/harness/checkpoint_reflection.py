@@ -8,10 +8,11 @@ on a failed flip — the high-value trigger) this reflector fires ONE
 structured verdict call reusing :class:`LightReflection`'s schema and prompt
 shape against the current todo list, the flipped step, and recent context.
 
-Fail-open everywhere: a missing model, a slow call (internal 30s timeout —
-the write_todos tool call this rides inside is itself under the workspace
-ToolTimeoutMiddleware budget), or a malformed verdict logs and skips; a
-checkpoint never blocks the run.
+Fail-open everywhere: a missing model, a slow call (internal timeout — 30s
+by default, clamped by AgentFactory below the workspace write_todos tool
+timeout so the outer ToolTimeoutMiddleware budget can never discard an
+already-applied write mid-verdict), or a malformed verdict logs and skips;
+a checkpoint never blocks the run.
 """
 
 import asyncio
@@ -31,7 +32,12 @@ logger = logging.getLogger(__name__)
 
 # Conservative internal budget so a slow verdict model cannot trip the outer
 # per-tool timeout on the write_todos call it rides inside (default 120s).
+# AgentFactory clamps the effective value below smaller configured tool
+# timeouts (see AgentFactory._verdict_timeout).
 VERDICT_TIMEOUT_SECONDS = 30.0
+
+# Cap on per-thread completion counters retained between verdicts.
+_MAX_TRACKED_THREADS = 1024
 
 _MAX_CONTEXT_MESSAGES = 4
 _MAX_MESSAGE_CHARS = 400
@@ -141,6 +147,7 @@ class CheckpointReflector:
         self,
         every: int,
         model_factory: Callable[[], BaseChatModel] | None = None,
+        verdict_timeout: float = VERDICT_TIMEOUT_SECONDS,
     ) -> None:
         """Initialize the reflector.
 
@@ -149,12 +156,19 @@ class CheckpointReflector:
                 (``harness.reflection.every``).
             model_factory: Zero-arg factory for the configured verdict model
                 pointer; None falls back to the runner's workspace model.
+            verdict_timeout: Budget in seconds for one verdict call. The
+                factory clamps this below the workspace write_todos tool
+                timeout so the outer budget never fires mid-verdict.
         """
         self._every = every
         self._model_factory = model_factory
+        self._verdict_timeout = verdict_timeout
         self._model: BaseChatModel | None = None
         self._default_model_provider: Callable[[], BaseChatModel | None] | None = None
-        self._completed_since_verdict = 0
+        # Completed-flip counts keyed per thread: concurrent sessions must
+        # not advance each other's cadence. Keys drop whenever their thread
+        # fires a verdict (completion cycle or failed-flip reset).
+        self._completed_since_verdict: dict[str, int] = {}
 
     def set_default_model_provider(
         self, provider: Callable[[], BaseChatModel | None]
@@ -163,13 +177,17 @@ class CheckpointReflector:
         self._default_model_provider = provider
 
     def record_flips(
-        self, flips: Sequence[Mapping[str, Any]]
+        self,
+        flips: Sequence[Mapping[str, Any]],
+        thread_id: str | None = None,
     ) -> Mapping[str, Any] | None:
         """Update trigger counters from one write's completed/failed flips.
 
         Args:
             flips: plan.step_completed payloads emitted for this write
                 (a ``failed: True`` key marks a failed flip).
+            thread_id: The writing thread — counters are kept per thread so
+                concurrent sessions never advance each other's cadence.
 
         Returns:
             The flipped-step payload to reflect against when a checkpoint is
@@ -178,14 +196,22 @@ class CheckpointReflector:
         """
         if not flips:
             return None
+        key = thread_id or ""
         failed = next((payload for payload in flips if payload.get("failed")), None)
         if failed is not None:
-            self._completed_since_verdict = 0
+            self._completed_since_verdict.pop(key, None)
             return failed
-        self._completed_since_verdict += len(flips)
-        if self._completed_since_verdict >= self._every:
-            self._completed_since_verdict = 0
+        count = self._completed_since_verdict.get(key, 0) + len(flips)
+        if count >= self._every:
+            self._completed_since_verdict.pop(key, None)
             return flips[-1]
+        if key not in self._completed_since_verdict and (
+            len(self._completed_since_verdict) >= _MAX_TRACKED_THREADS
+        ):
+            # ponytail: FIFO eviction (dicts keep insertion order); losing an
+            # idle thread's partial count only delays its next checkpoint.
+            self._completed_since_verdict.pop(next(iter(self._completed_since_verdict)))
+        self._completed_since_verdict[key] = count
         return None
 
     async def observe(
@@ -193,13 +219,14 @@ class CheckpointReflector:
         flips: Sequence[Mapping[str, Any]],
         todos: Sequence[Mapping[str, Any]],
         state: Any,
+        thread_id: str | None = None,
     ) -> CheckpointOutcome | None:
         """Record this write's flips and reflect when a checkpoint is due.
 
         Fail-open: any failure in model resolution or the verdict call is
         logged and returns None — a checkpoint never blocks the run.
         """
-        trigger = self.record_flips(flips)
+        trigger = self.record_flips(flips, thread_id=thread_id)
         if trigger is None:
             return None
         return await self._reflect(todos, trigger, state)
@@ -231,7 +258,7 @@ class CheckpointReflector:
             return None
         prompt = _checkpoint_prompt(todos, flipped, _recent_context(state))
         try:
-            async with asyncio.timeout(VERDICT_TIMEOUT_SECONDS):
+            async with asyncio.timeout(self._verdict_timeout):
                 result = await model.with_structured_output(_VerdictSchema).ainvoke(
                     [HumanMessage(prompt)]
                 )

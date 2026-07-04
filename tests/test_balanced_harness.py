@@ -175,6 +175,104 @@ def test_timeout_defaults_to_workspace_timeout(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Turn budget (harness.execution.max_turns, DESIGN §6)
+# ---------------------------------------------------------------------------
+
+
+def test_execution_max_turns_applies_to_balanced(tmp_path: Path) -> None:
+    workspace = make_workspace(
+        tmp_path,
+        config=balanced_config({"type": "balanced", "execution": {"max_turns": 4}}),
+    )
+    harness = make_factory(workspace).create_harness()
+    assert harness.max_turns == 4
+
+
+def test_execution_max_turns_defaults_to_workspace_max_turns(tmp_path: Path) -> None:
+    workspace = make_workspace(tmp_path, config=balanced_config())
+    harness = make_factory(workspace).create_harness()
+    assert harness.max_turns == 10  # factory default from make_factory
+
+
+def test_execution_max_turns_applies_to_ultra_inner_runner(tmp_path: Path) -> None:
+    workspace = make_workspace(
+        tmp_path,
+        config=WorkspaceConfig.model_validate(
+            {"harness": {"type": "ultra", "execution": {"max_turns": 6}}}
+        ),
+    )
+    harness = make_factory(workspace).create_harness()
+    assert isinstance(harness, UltraHarness)
+    assert harness._inner.max_turns == 6
+
+
+def test_execution_max_turns_validation() -> None:
+    from openpaw.core.config.models.harness import ExecutionConfig
+
+    assert ExecutionConfig().max_turns is None
+    assert ExecutionConfig.model_validate({"max_turns": 1}).max_turns == 1
+    with pytest.raises(ValidationError):
+        ExecutionConfig.model_validate({"max_turns": 0})
+
+
+# ---------------------------------------------------------------------------
+# Verdict timeout clamp (F8: verdict budget vs write_todos tool timeout)
+# ---------------------------------------------------------------------------
+
+
+def test_verdict_timeout_defaults_to_30s(tmp_path: Path) -> None:
+    workspace = make_workspace(tmp_path, config=balanced_config())
+    assert make_factory(workspace)._verdict_timeout() == 30.0
+
+
+def test_verdict_timeout_clamps_under_small_tool_timeout(tmp_path: Path) -> None:
+    workspace = make_workspace(
+        tmp_path,
+        config=WorkspaceConfig.model_validate(
+            {
+                "harness": {"type": "balanced"},
+                "tool_timeouts": {"default_seconds": 20},
+            }
+        ),
+    )
+    assert make_factory(workspace)._verdict_timeout() == 10.0
+
+
+def test_verdict_timeout_honors_write_todos_override(tmp_path: Path) -> None:
+    workspace = make_workspace(
+        tmp_path,
+        config=WorkspaceConfig.model_validate(
+            {
+                "harness": {"type": "balanced"},
+                "tool_timeouts": {
+                    "default_seconds": 120,
+                    "overrides": {"write_todos": 30},
+                },
+            }
+        ),
+    )
+    assert make_factory(workspace)._verdict_timeout() == 15.0
+
+
+def test_clamped_verdict_timeout_reaches_the_reflector(tmp_path: Path) -> None:
+    workspace = make_workspace(
+        tmp_path,
+        config=WorkspaceConfig.model_validate(
+            {
+                "harness": {"type": "balanced", "reflection": {"mode": "checkpoint"}},
+                "tool_timeouts": {"default_seconds": 20},
+            }
+        ),
+    )
+    harness = make_factory(workspace).create_harness()
+    assert isinstance(harness, BalancedHarness)
+    assert harness._plan_bridge is not None
+    reflector = harness._plan_bridge.reflector
+    assert reflector is not None
+    assert reflector._verdict_timeout == 10.0
+
+
+# ---------------------------------------------------------------------------
 # Run-time behavior: bridge arming, todo state seam
 # ---------------------------------------------------------------------------
 
@@ -191,8 +289,7 @@ async def test_run_arms_bridge_with_session_identity(tmp_path: Path) -> None:
     inner_run.assert_awaited_once()
     bridge = harness._plan_bridge
     assert bridge is not None
-    assert bridge._session_key == "telegram:123"
-    assert bridge._run_id != ""
+    assert bridge._run_ids.get("telegram:123", "") != ""
 
 
 async def test_run_without_bridge_still_runs(tmp_path: Path) -> None:

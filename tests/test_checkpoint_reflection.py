@@ -103,6 +103,42 @@ def test_batched_completions_count_together() -> None:
     assert trigger == completed("B")  # reflects against the latest flip
 
 
+def test_counters_are_per_thread() -> None:
+    """F3 regression: concurrent threads must not advance each other's cadence."""
+    reflector = CheckpointReflector(every=2)
+
+    assert reflector.record_flips([completed("A")], thread_id="t1") is None
+    # t2 does not inherit t1's count: its first completion is below threshold.
+    assert reflector.record_flips([completed("B")], thread_id="t2") is None
+    # t1 reaches its own threshold independently.
+    assert reflector.record_flips([completed("C")], thread_id="t1") == completed("C")
+    # ...and t1's verdict did not reset t2.
+    assert reflector.record_flips([completed("D")], thread_id="t2") == completed("D")
+
+
+def test_failed_flip_resets_only_its_thread() -> None:
+    reflector = CheckpointReflector(every=2)
+    reflector.record_flips([completed("A")], thread_id="t1")
+    reflector.record_flips([completed("B")], thread_id="t2")
+
+    assert reflector.record_flips([failed("X")], thread_id="t2") is not None
+    # t2's counter was reset by its failure...
+    assert reflector.record_flips([completed("C")], thread_id="t2") is None
+    # ...but t1's partial count survived.
+    assert reflector.record_flips([completed("D")], thread_id="t1") == completed("D")
+
+
+def test_tracked_thread_counters_are_bounded() -> None:
+    from openpaw.agent.harness.checkpoint_reflection import _MAX_TRACKED_THREADS
+
+    reflector = CheckpointReflector(every=10)
+    for i in range(_MAX_TRACKED_THREADS + 5):
+        reflector.record_flips([completed("A")], thread_id=f"t{i}")
+    assert len(reflector._completed_since_verdict) <= _MAX_TRACKED_THREADS
+    # The newest threads survive eviction (FIFO drop of the oldest).
+    assert f"t{_MAX_TRACKED_THREADS + 4}" in reflector._completed_since_verdict
+
+
 # ---------------------------------------------------------------------------
 # Verdict call
 # ---------------------------------------------------------------------------
@@ -143,6 +179,22 @@ async def test_observe_below_threshold_makes_no_model_call() -> None:
 
 async def test_verdict_failure_is_fail_open() -> None:
     reflector, _ = reflector_with(RuntimeError("model down"))
+    assert await reflector.observe([completed("A")], [], state={}) is None
+
+
+async def test_verdict_timeout_is_configurable_and_fail_open() -> None:
+    """F8: a clamped verdict budget cuts off a slow model without raising."""
+    import asyncio
+
+    class SlowModel(FakeVerdictModel):
+        async def ainvoke(self, messages: list[Any]) -> Any:
+            await asyncio.sleep(0.2)
+            return await super().ainvoke(messages)
+
+    slow = SlowModel(_VerdictSchema(action="advance", step_succeeded=True))
+    reflector = CheckpointReflector(
+        every=1, model_factory=lambda: slow, verdict_timeout=0.01  # type: ignore[arg-type, return-value]
+    )
     assert await reflector.observe([completed("A")], [], state={}) is None
 
 

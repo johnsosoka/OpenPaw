@@ -2,7 +2,9 @@
 
 import logging
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from openpaw.agent.middleware.todo_list import render_todo_reminder
 from openpaw.channels.base import ChannelAdapter
@@ -43,7 +45,9 @@ async def run_flush_turn(
         None if nothing was saved or the flush turn failed.
     """
     timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    flush_path = f"memory/compact-flush-{timestamp}.md"
+    # uuid suffix: concurrent sessions compacting in the same second must
+    # not collide on one flush file.
+    flush_path = f"memory/compact-flush-{timestamp}-{uuid4().hex[:8]}.md"
     try:
         reply = await agent_runner.run(
             message=FLUSH_PROMPT_TEMPLATE.format(flush_path=flush_path),
@@ -51,6 +55,18 @@ async def run_flush_turn(
         )
         if reply and FLUSH_NOOP_MARKER in reply:
             logger.debug(f"Pre-compact flush: nothing to save for {thread_id}")
+            return None
+        # Don't trust the reply alone: only reference the flush file in the
+        # post-compact note if the agent actually wrote it. Skipped when the
+        # workspace root is unavailable (duck-typed runners in tests).
+        workspace_root = getattr(getattr(agent_runner, "workspace", None), "path", None)
+        if isinstance(workspace_root, (str, Path)) and not (
+            Path(workspace_root) / flush_path
+        ).is_file():
+            logger.warning(
+                f"Pre-compact flush reply did not produce {flush_path} for "
+                f"{thread_id}; omitting the flush note"
+            )
             return None
         logger.info(f"Pre-compact flush saved to {flush_path} for {thread_id}")
         return flush_path
@@ -168,6 +184,10 @@ class AutoCompactor:
             )
 
             # Flush turn: let the agent save durable context before it is lost
+            # ponytail: the flush turn runs on the already-over-trigger
+            # thread, so a borderline compaction can tip into overflow
+            # (emergency rotation without a summary); upgrade path: skip the
+            # flush above a utilization cap (e.g. 0.95).
             flush_path: str | None = None
             if self._auto_compact_config.flush:
                 flush_path = await run_flush_turn(agent_runner, thread_id, self._logger)

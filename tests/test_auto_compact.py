@@ -1,12 +1,15 @@
 """Tests for auto-compact pre-run context check."""
 
+import logging
+import re
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from openpaw.core.config.models import AutoCompactConfig
 from openpaw.core.prompts.commands import FLUSH_NOOP_MARKER
-from openpaw.workspace.processors.compactor import AutoCompactor
+from openpaw.workspace.processors.compactor import AutoCompactor, run_flush_turn
 
 
 def _make_compactor(config: AutoCompactConfig) -> AutoCompactor:
@@ -312,6 +315,54 @@ async def test_flush_failure_does_not_block_compaction(flush_compactor):
     assert "flush" in flush_compactor._logger.warning.call_args.args[0].lower()
     inject_call = agent_runner.run.call_args_list[2]
     assert "memory/compact-flush-" not in inject_call.kwargs["message"]
+
+
+_FLUSH_PATH_RE = re.compile(r"memory/compact-flush-\S+\.md")
+
+
+@pytest.mark.asyncio
+async def test_flush_paths_are_collision_free():
+    """Two flushes in the same second must not share a file (uuid suffix)."""
+    agent_runner = AsyncMock()
+    agent_runner.run = AsyncMock(return_value="Saved context.")
+
+    first = await run_flush_turn(agent_runner, "t1", logging.getLogger("test"))
+    second = await run_flush_turn(agent_runner, "t2", logging.getLogger("test"))
+
+    assert first is not None and second is not None
+    assert first != second
+
+
+@pytest.mark.asyncio
+async def test_flush_note_omitted_when_file_was_never_written(tmp_path):
+    """The reply alone is not trusted: no file on disk means no flush note."""
+    agent_runner = AsyncMock()
+    agent_runner.workspace = SimpleNamespace(path=tmp_path)
+    agent_runner.run = AsyncMock(return_value="Saved context.")
+
+    assert await run_flush_turn(agent_runner, "t1", logging.getLogger("test")) is None
+
+
+@pytest.mark.asyncio
+async def test_flush_note_returned_when_file_exists(tmp_path):
+    """When the agent actually wrote the flush file, the path is returned."""
+    agent_runner = AsyncMock()
+    agent_runner.workspace = SimpleNamespace(path=tmp_path)
+
+    async def fake_run(message: str, thread_id: str) -> str:
+        match = _FLUSH_PATH_RE.search(message)
+        assert match is not None
+        target = tmp_path / match.group(0)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("saved context")
+        return "Saved context."
+
+    agent_runner.run = AsyncMock(side_effect=fake_run)
+
+    result = await run_flush_turn(agent_runner, "t1", logging.getLogger("test"))
+
+    assert result is not None
+    assert (tmp_path / result).is_file()
 
 
 @pytest.mark.asyncio

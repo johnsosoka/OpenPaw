@@ -177,9 +177,23 @@ class PlanConfig(BaseModel):
 
 class ExecutionConfig(NodeModelConfig):
     """Execution node: step budget. Runtime /model overrides apply to this
-    node only (ADR-103 §4)."""
+    node only (ADR-103 §4).
+
+    Note: a graceful wrap-up nudge when ``max_turns`` nears exhaustion is
+    deferred — the v2 ``create_agent`` state exposes no remaining-turn
+    counter to middleware, and a middleware-side counter would be per-run
+    state on an instance shared across concurrent sessions.
+    """
 
     max_steps: int = Field(default=12, ge=1, le=100)
+    max_turns: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Cap on inner-runner agent turns per run (balanced and ultra); "
+            "None inherits the workspace model.max_turns."
+        ),
+    )
     timeout_seconds: float | None = Field(
         default=None,
         ge=1,

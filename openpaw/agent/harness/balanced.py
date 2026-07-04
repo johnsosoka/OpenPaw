@@ -16,6 +16,11 @@ applied by the factory) and per-run bridge arming, so inheritance is the
 honest shape; ``UltraHarness``-style wrapping exists for topology changes,
 and there is no topology change here.
 
+One harness (and one bridge) serves every concurrent session on the
+workspace, so ``run()`` registers the run's identity under its session key
+rather than mutating shared per-run state — the bridge re-derives the
+session from each tool call's own thread config (see PlanEventBridge).
+
 Checkpoint reflection (DESIGN §3) rides the bridge: when configured, the
 factory hands it a :class:`CheckpointReflector` and this harness wires the
 runner's model instance in as the default verdict model. The
@@ -106,7 +111,7 @@ class BalancedHarness(AgentRunner):
         session_id: str | None = None,
         thread_id: str | None = None,
     ) -> str:
-        """Arm the plan bridge with per-run identity, then run the react loop."""
+        """Register this run's identity with the plan bridge, then run the react loop."""
         if self._plan_bridge is not None:
             self._plan_bridge.arm(
                 session_key=self._session_key_from(thread_id, session_id),
@@ -120,7 +125,8 @@ class BalancedHarness(AgentRunner):
         Post-compact re-injection seam (DESIGN §2.1 wrinkle): auto-compact
         rotates threads, so the compaction path reads the old thread's todos
         here and re-injects ``render_todo_reminder(...)`` into the new one.
-        Wiring into MessageProcessor lands with the next phase.
+        MessageProcessor and the /compact handler re-inject these after
+        compaction via ``read_todo_reminder`` so the checklist survives.
 
         Returns:
             The last written todo list, or [] for unknown/stateless threads.

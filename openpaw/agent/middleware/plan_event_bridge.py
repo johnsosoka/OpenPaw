@@ -15,10 +15,13 @@ are not). A todo flipping to ``failed`` maps to ``plan.step_completed`` with
 additive ``failed``/``note`` payload keys (ADR-106 additive evolution,
 DESIGN §10.1).
 
-The emitter is injected (same wiring as ``StatusUpdateMiddleware``) and the
-per-run identity is armed by ``BalancedHarness.run()`` — instance state
-re-armed per run, never contextvars (invisible across LangGraph task
-boundaries).
+The emitter is injected (same wiring as ``StatusUpdateMiddleware``). One
+bridge instance is shared by every concurrent session on the workspace
+(main lane concurrency > 1), so event identity is never plain instance
+state: ``BalancedHarness.run()`` registers each run's ``run_id`` under its
+session key via :meth:`PlanEventBridge.arm`, and the session key itself is
+derived per tool call from the call's own graph config (``thread_id``) —
+arming session B mid-run can never re-stamp session A's events.
 """
 
 import logging
@@ -254,11 +257,14 @@ class PlanEventBridge(AgentMiddleware):
         self._workspace = workspace
         self._lens_count = lens_count
         self._reflector = reflector
-        self._session_key: str | None = None
-        self._run_id: str = ""
+        # Per-session identity and counters: one bridge serves all concurrent
+        # sessions, so nothing per-run may live in plain instance attributes.
+        # ponytail: maps grow one small entry per distinct session key — fine
+        # at chat scale; add eviction if session cardinality ever explodes.
+        self._run_ids: dict[str, str] = {}
         # ponytail: cosmetic revision counter, reset on plan.created; a
         # process restart mid-plan restarts the "(rev n)" numbering only.
-        self._revision: int = 0
+        self._revisions: dict[str, int] = {}
 
     @property
     def reflector(self) -> "CheckpointReflector | None":
@@ -266,9 +272,34 @@ class PlanEventBridge(AgentMiddleware):
         return self._reflector
 
     def arm(self, session_key: str | None, run_id: str) -> None:
-        """Set per-run event identity. Called by BalancedHarness.run()."""
-        self._session_key = session_key
-        self._run_id = run_id
+        """Register the run_id for one session's active run.
+
+        Called by ``BalancedHarness.run()``. Safe under concurrent sessions:
+        the run_id is keyed per session and looked up at emit time against
+        the session derived from each tool call's own thread config, so
+        arming one session never re-stamps another's in-flight events.
+        """
+        self._run_ids[session_key or ""] = run_id
+
+    @staticmethod
+    def _identity(request: Any) -> tuple[str | None, str | None]:
+        """Derive (thread_id, session_key) from this call's graph config.
+
+        Mirrors ``BalancedHarness._session_key_from``: a thread_id of
+        ``"{channel}:{id}:{conversation_id}"`` yields ``"{channel}:{id}"``;
+        a colon-less thread falls back to the configurable ``session_id``.
+        Fail-open to (None, None) outside a graph (e.g. unit stubs).
+        """
+        config = getattr(getattr(request, "runtime", None), "config", None)
+        configurable = config.get("configurable") if isinstance(config, dict) else None
+        if not isinstance(configurable, dict):
+            return None, None
+        thread_id = configurable.get("thread_id")
+        thread_id = thread_id if isinstance(thread_id, str) else None
+        if thread_id and ":" in thread_id:
+            return thread_id, thread_id.rsplit(":", 1)[0]
+        session_id = configurable.get("session_id")
+        return thread_id, session_id if isinstance(session_id, str) else None
 
     async def awrap_tool_call(self, request: Any, handler: Any) -> Any:
         """Intercept write_todos and explore_lenses. Never raises."""
@@ -283,17 +314,30 @@ class PlanEventBridge(AgentMiddleware):
         # State snapshot predates the tool's Command update -> previous list.
         prev = _normalize_todos((request.state or {}).get("todos"))
         result = await handler(request)
+        if not isinstance(result, Command):
+            # Failed or short-circuited call: a successful write_todos always
+            # returns a state-updating Command, so anything else (validation
+            # error ToolMessage, timeout stub) means state is unchanged —
+            # diffing the args would emit spurious events and feed phantom
+            # flips to the reflector.
+            return result
+        thread_id, session_key = self._identity(request)
         events: list[PlanEvent] = []
         try:
             new = _normalize_todos(request.tool_call.get("args", {}).get("todos"))
-            events, self._revision = compute_plan_events(prev, new, self._revision)
+            revision_key = session_key or ""
+            events, self._revisions[revision_key] = compute_plan_events(
+                prev, new, self._revisions.get(revision_key, 0)
+            )
             for kind, payload in events:
-                await self._emit(kind, payload)
+                await self._emit(kind, payload, session_key)
         except Exception:
             logger.debug("Plan event bridging failed", exc_info=True)
             return result
         if self._reflector is not None:
-            result = await self._checkpoint(events, new, request, result)
+            result = await self._checkpoint(
+                events, new, request, result, thread_id, session_key
+            )
         return result
 
     async def _announce_lenses(self, request: Any) -> None:
@@ -308,6 +352,7 @@ class PlanEventBridge(AgentMiddleware):
 
             topic = str(request.tool_call.get("args", {}).get("topic", ""))
             lenses = select_lenses(topic, self._lens_count)
+            _, session_key = self._identity(request)
             await self._emit(
                 StatusEventKind.MODULE_PHASE,
                 {
@@ -317,12 +362,19 @@ class PlanEventBridge(AgentMiddleware):
                     "total": len(lenses),
                     "detail": " · ".join(lens.theme for lens in lenses),
                 },
+                session_key,
             )
         except Exception:
             logger.debug("Lens announcement failed", exc_info=True)
 
     async def _checkpoint(
-        self, events: list[PlanEvent], todos: list[Todo], request: Any, result: Any
+        self,
+        events: list[PlanEvent],
+        todos: list[Todo],
+        request: Any,
+        result: Any,
+        thread_id: str | None,
+        session_key: str | None,
     ) -> Any:
         """Run checkpoint reflection over this write's completed/failed flips.
 
@@ -340,7 +392,7 @@ class PlanEventBridge(AgentMiddleware):
                 if kind is StatusEventKind.PLAN_STEP_COMPLETED
             ]
             outcome: CheckpointOutcome | None = await reflector.observe(
-                flips, todos, request.state
+                flips, todos, request.state, thread_id=thread_id
             )
             if outcome is None:
                 return result
@@ -351,6 +403,7 @@ class PlanEventBridge(AgentMiddleware):
                     "reason": outcome.notes,
                     "step_succeeded": outcome.step_succeeded,
                 },
+                session_key,
             )
             if not outcome.ok:
                 advisory = _ADVISORY_TEMPLATE.format(
@@ -361,8 +414,18 @@ class PlanEventBridge(AgentMiddleware):
             logger.debug("Checkpoint reflection failed", exc_info=True)
         return result
 
-    async def _emit(self, kind: StatusEventKind, payload: dict[str, JsonValue]) -> None:
-        """Best-effort emission — status plumbing never breaks an agent run."""
+    async def _emit(
+        self,
+        kind: StatusEventKind,
+        payload: dict[str, JsonValue],
+        session_key: str | None,
+    ) -> None:
+        """Best-effort emission — status plumbing never breaks an agent run.
+
+        Identity is per-call: the session key comes from the emitting tool
+        call's own thread config, the run_id from the arm-time map (unknown
+        session -> "").
+        """
         if self._emitter is None:
             return
         try:
@@ -370,8 +433,8 @@ class PlanEventBridge(AgentMiddleware):
                 StatusEvent(
                     kind=kind,
                     workspace=self._workspace,
-                    session_key=self._session_key,
-                    run_id=self._run_id,
+                    session_key=session_key,
+                    run_id=self._run_ids.get(session_key or "", ""),
                     payload=payload,
                 )
             )

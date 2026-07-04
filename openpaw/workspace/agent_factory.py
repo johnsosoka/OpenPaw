@@ -9,7 +9,10 @@ from typing import Any
 from openpaw.agent import AgentRunner
 from openpaw.agent.harness import AgentHarness, HarnessKind
 from openpaw.agent.harness.balanced import BalancedHarness, build_balanced_middleware
-from openpaw.agent.harness.checkpoint_reflection import CheckpointReflector
+from openpaw.agent.harness.checkpoint_reflection import (
+    VERDICT_TIMEOUT_SECONDS,
+    CheckpointReflector,
+)
 from openpaw.agent.harness.lenses import create_explore_lenses_tool
 from openpaw.agent.harness.ultra import UltraHarness
 from openpaw.core.config.models import HarnessConfig, ProviderDefinition
@@ -177,6 +180,8 @@ class AgentFactory:
             return self.create_agent(checkpointer=checkpointer)
 
         inner = self.create_agent(checkpointer=checkpointer)
+        if harness_config.execution.max_turns is not None:
+            inner.max_turns = harness_config.execution.max_turns
         node_resolver = self._build_node_resolver()
         self._logger.info("Creating ultra harness for workspace: %s", self._workspace.name)
         return UltraHarness(
@@ -225,7 +230,30 @@ class AgentFactory:
             model_factory = partial(
                 self._build_node_resolver().create_node_model, reflection
             )
-        return CheckpointReflector(every=reflection.every, model_factory=model_factory)
+        return CheckpointReflector(
+            every=reflection.every,
+            model_factory=model_factory,
+            verdict_timeout=self._verdict_timeout(),
+        )
+
+    def _verdict_timeout(self) -> float:
+        """Clamp the checkpoint-verdict budget under the write_todos tool timeout.
+
+        The verdict call rides inside a write_todos tool call that is itself
+        under ToolTimeoutMiddleware. An operator-configured tool timeout
+        below ~35s would otherwise fire mid-verdict and discard an
+        already-applied write after its events were emitted, so the
+        effective budget is min(default, tool timeout / 2).
+        """
+        tool_timeouts = getattr(
+            getattr(self._workspace, "config", None), "tool_timeouts", None
+        )
+        if tool_timeouts is None:
+            return VERDICT_TIMEOUT_SECONDS
+        tool_timeout: float = tool_timeouts.overrides.get(
+            "write_todos", tool_timeouts.default_seconds
+        )
+        return min(VERDICT_TIMEOUT_SECONDS, tool_timeout * 0.5)
 
     def _create_balanced_harness(
         self, harness_config: HarnessConfig, checkpointer: Any | None
@@ -261,6 +289,8 @@ class AgentFactory:
         harness = BalancedHarness(**kwargs)
         if harness_config.execution.timeout_seconds is not None:
             harness.timeout_seconds = harness_config.execution.timeout_seconds
+        if harness_config.execution.max_turns is not None:
+            harness.max_turns = harness_config.execution.max_turns
         return harness
 
     def _runner_kwargs(
