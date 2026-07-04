@@ -614,7 +614,7 @@ Status updates are sent directly to the user channel and do not create extra che
 
 ```yaml
 harness:
-  type: ultra              # react (default) | ultra
+  type: ultra              # react (default) | balanced | ultra
   triage:     {model: fast}
   planning:   {module: auto, model: strong}
   creative:   {module: ideonomy}
@@ -629,15 +629,17 @@ harness:
     model: null
   execution:
     max_steps: 12
+    max_turns: null
+    timeout_seconds: null
 ```
 
-Selects the agent topology. `react` (the default) is the existing ReAct loop, unchanged. `ultra` adds a triage step that routes each message to the plain react loop (simple turns), a planning path (multi-step work), or an ideation path (open-ended asks), then executes the plan step by step with optional reflection and a final synthesis.
+Selects the agent topology. `react` (the default) is the existing ReAct loop, unchanged. `balanced` is the react loop plus a todo-driven live plan checklist — multi-step visibility at zero extra harness LLM calls. `ultra` adds a triage step that routes each message to the plain react loop (simple turns), a planning path (multi-step work), or an ideation path (open-ended asks), then executes the plan step by step with optional reflection and a final synthesis.
 
-**Zero-config:** a bare `harness: {type: ultra}` is a complete, valid configuration — every node inherits the workspace model. Everything below is optional tuning.
+**Zero-config:** a bare `harness: {type: ultra}` (or `{type: balanced}`) is a complete, valid configuration — every node inherits the workspace model. Everything below is optional tuning.
 
 **Typos fail fast:** unlike the legacy config groups, `harness:` uses `extra="forbid"` — an unrecognized key is a startup error, not a silently ignored field.
 
-**type** — `react` (default) or `ultra`.
+**type** — `react` (default), `balanced`, or `ultra`.
 
 ##### Per-Node Models
 
@@ -683,6 +685,26 @@ Off by default. When enabled on the ultra planning path, an equip step selects a
 
 **execution.max_steps** — Step budget for a single plan. Default: `12`. Range: 1–100. Also accepts the per-node model fields above.
 
+**execution.max_turns** — Cap on inner-runner agent turns per run (ultra and balanced). Default: unset (inherit the workspace `model.max_turns`). Minimum: 1.
+
+**execution.timeout_seconds** — Wall-clock budget for one harness run (ultra and balanced), overriding the workspace timeout — planned multi-step runs need more headroom than single react turns. Default: unset (inherit the workspace timeout). Minimum: 1.
+
+##### Balanced Harness
+
+The `balanced` tier reads three groups. `plan:` and `ideation:` are ignored by `react` and `ultra` workspaces; `reflection:` is shared with ultra — `mode`/`every` are balanced-only, `module`/`allowed` are ultra-only.
+
+**plan.visibility** — When `true` (default), every `write_todos` call the agent makes is diffed into `plan.*` status events that drive the live edited-in-place checklist in-channel (failed steps render ✗, per-item notes surface as one-line progress updates). Set to `false` to keep the todo discipline without the channel checklist.
+
+**ideation.lens_tool** — When `true` (default), registers the zero-LLM `explore_lenses` tool: deterministic ideonomic question lenses for open-ended asks, no extra model calls. The full IdeonomyModule remains ultra-exclusive.
+
+**ideation.lens_count** — How many lenses each `explore_lenses` call selects. Default: `3`. Range: 1–7.
+
+**reflection.mode** — `organic` (default) relies on in-context self-correction at zero cost; `checkpoint` fires one structured verdict call every `every` completed todos — immediately on a failed one — injected as a course-correction nudge.
+
+**reflection.every** — Checkpoint mode: completed steps between verdicts. Default: `3`. Minimum: 1.
+
+**reflection.model** — In checkpoint mode, doubles as the verdict-model pointer (a cheap model is the natural fit). Unset = the workspace model.
+
 ##### Examples
 
 Zero-config ultra (every node inherits the workspace model):
@@ -690,6 +712,14 @@ Zero-config ultra (every node inherits the workspace model):
 ```yaml
 harness:
   type: ultra
+```
+
+Balanced with checkpoint reflection on a cheap model:
+
+```yaml
+harness:
+  type: balanced
+  reflection: {mode: checkpoint, every: 3, model: fast}
 ```
 
 Per-node models from the provider catalog (cheap model for routing, strong model for planning):

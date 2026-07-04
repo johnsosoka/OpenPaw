@@ -214,10 +214,11 @@ The `delivery` field controls output routing: `channel` sends directly to the co
 
 `openpaw/agent/harness/` introduces a topology seam: `MessageProcessor`, `WorkspaceRunner`, and commands program against an `AgentHarness` protocol rather than a concrete agent graph. All `create_agent` internals live behind it, so agent topologies can vary per workspace without touching the layers above.
 
-Two harness types ship in 0.5.0, selected by `harness.type` in the workspace config:
+Three harness tiers ship in 0.5.0, selected by `harness.type` in the workspace config:
 
 - **`react`** (default) — the existing compiled `create_agent` ReAct loop, wrapped unchanged. Workspaces that don't set `harness:` behave exactly as before.
-- **`ultra`** — a LangGraph `StateGraph` around the react loop:
+- **`balanced`** — the react loop plus a todo-driven live plan checklist: multi-step visibility at react cost, zero extra harness LLM calls.
+- **`ultra`** — a LangGraph `StateGraph` around the react loop for long-horizon work needing step isolation and per-node model routing:
 
 ```
 START → triage ──→ react ──────────────────────────→ END       (simple turns)
@@ -227,6 +228,8 @@ START → triage ──→ react ───────────────�
 ```
 
 A triage node routes each message: simple turns go straight to the plain react loop, multi-step work goes to planning, open-ended asks go through an ideation step first. On the plan and ideate paths, a **brief** node (`harness.brief`, on by default) first distills the full session history — token-budgeted against the brief model's context window, not a fixed cutoff — into a structured brief consumed by the reasoning modules, step execution, synthesis, and tool equipping; react turns skip it, and a brief failure falls open to a role-labeled, dialogue-only digest. Plans are first-class state — checkpointed, revisable, and rendered as a live edited-in-place checklist in the channel. Each `execute_step` invokes the **same compiled react graph** as an embedded subgraph, so middleware — steer/interrupt, approval gates, tool timeouts, status updates — applies to every planned step by construction. Triage and module calls fail open to the react path: a routing or module failure degrades to the current loop, never to an error.
+
+**The balanced tier** is a single shared-context loop — no triage, no brief, no synthesis: the session context *is* the context, and the loop's final message is the answer. A todo middleware contributes a `write_todos` tool (statuses `pending`/`in_progress`/`completed`/`failed`, plus an optional one-line `note`), and a `PlanEventBridge` middleware diffs every write into the same `plan.*` status events the ultra checklist renderer consumes — failed steps render ✗, notes surface as one-line progress updates — so the live edited-in-place checklist costs nothing extra: updates ride inside turns the model was already taking. Because balanced *is* the react loop, all existing middleware (approval gates, steer/interrupt, tool timeouts, status updates) applies by construction, and the current todos are re-injected after auto-compact so the checklist survives conversation rotation. Reflection is organic by default — the model sees its own failures and checklist and self-corrects next turn; `harness.reflection.mode: checkpoint` escalates to one structured verdict call every N completed steps (immediately on a failed one), injected as a course-correction nudge. For open-ended asks, the `explore_lenses` tool (`harness.ideation`) hands the model deterministic ideonomic question lenses with zero LLM calls — the full parallel IdeonomyModule remains ultra-exclusive.
 
 **Reasoning modules** (`agent/harness/modules/`) make the planning, creative, and reflection nodes pluggable behind one `ReasoningModule` interface with a registry. Shipped modules: `direct` (single-call planning), `self_discover` (SELECT/ADAPT/IMPLEMENT over the Self-Discover seed modules with a per-task-type cache), `ideonomy` (creative ideation through curated lenses), and `light`/`full` reflection. `module: auto` inserts a selector that picks per task over module taglines, short-circuiting without an LLM call when only one candidate exists.
 

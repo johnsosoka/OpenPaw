@@ -233,6 +233,8 @@ builtins:
 #   enabled: false
 #   trigger: 0.8                  # Trigger at 80% context window utilization
 #   summary_model: null           # Model for summary generation (null = workspace model)
+#   flush: true                   # One agent turn to save working context to a
+#                                 # memory/compact-flush-*.md file before summarization
 
 # Lifecycle notifications — best-effort channel messages on workspace events
 # lifecycle:
@@ -283,7 +285,7 @@ builtins:
 # Unknown keys are a startup error (extra="forbid").
 # /harness prints the resolved node→model table.
 # harness:
-#   type: ultra               # react (default) | ultra
+#   type: ultra               # react (default) | balanced | ultra
 #   triage:     {model: fast}   # optional per-node pointers: model, temperature, max_tokens
 #   planning:   {module: auto, model: strong}   # direct (default) | self_discover | auto
 #   creative:   {module: ideonomy}              # ideonomy (default) | auto
@@ -300,7 +302,23 @@ builtins:
 #     react_selector: false     # React-path alternative: stock LLMToolSelectorMiddleware
 #   execution:
 #     max_steps: 12             # Step budget per plan (1-100)
-#     timeout_seconds: 900      # Wall-clock budget per ultra run; unset inherits workspace timeout
+#     timeout_seconds: 900      # Wall-clock budget per harness run; unset inherits workspace timeout
+
+# Balanced harness — the middle tier: the react loop plus a todo-driven live
+# plan checklist at zero extra harness LLM calls (workspace-level only, in agent.yaml).
+# harness:
+#   type: balanced
+#   plan:
+#     visibility: true          # Live in-channel checklist from the agent's todos
+#   ideation:
+#     lens_tool: true           # Zero-LLM explore_lenses ideonomy tool (balanced-only)
+#     lens_count: 3             # Lenses selected per call (1-7)
+#   reflection:
+#     mode: organic             # organic (default, free) | checkpoint (structured verdicts)
+#     every: 3                  # Checkpoint mode: verdict every N completed steps
+#     model: fast               # Optional verdict-model pointer; unset = workspace model
+#   execution:
+#     timeout_seconds: 900      # Wall-clock budget per run; unset inherits workspace timeout
 
 # Learning loop — agent-authored skills (workspace-level only, in agent.yaml —
 # not read from this file).
