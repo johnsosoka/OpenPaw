@@ -172,7 +172,7 @@ async def test_plan_revised_rerenders_with_rev_suffix():
     assert "(rev 2)" in text
     # Full payload is authoritative: overlay cleared, statuses from payload
     assert "[ ] 1. First step" in text
-    assert "[!] 2. Second step" in text
+    assert "[✗] 2. Second step" in text  # first-class failure mark (ADR-111 §10.1)
 
 
 @pytest.mark.asyncio

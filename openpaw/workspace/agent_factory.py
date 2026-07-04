@@ -7,6 +7,7 @@ from typing import Any
 
 from openpaw.agent import AgentRunner
 from openpaw.agent.harness import AgentHarness, HarnessKind
+from openpaw.agent.harness.balanced import BalancedHarness, build_balanced_middleware
 from openpaw.agent.harness.ultra import UltraHarness
 from openpaw.core.config.models import HarnessConfig, ProviderDefinition
 from openpaw.model.spawn_profile import SpawnProfile
@@ -154,8 +155,9 @@ class AgentFactory:
         The seam callers (WorkspaceRunner/MessageProcessor/connector) hold —
         they never depend on the underlying graph topology (ADR-101 §2).
         Dispatches on ``workspace.config.harness.type``: react (default) is
-        the exact current AgentRunner path; ultra wraps that runner as the
-        execution engine inside the ADR-101 graph.
+        the exact current AgentRunner path; balanced is that same runner with
+        the todo/plan middleware appended (ADR-111); ultra wraps the runner
+        as the execution engine inside the ADR-101 graph.
 
         Args:
             checkpointer: Optional checkpointer for conversation state.
@@ -166,6 +168,8 @@ class AgentFactory:
         harness_config: HarnessConfig | None = (
             self._workspace.config.harness if getattr(self._workspace, "config", None) else None
         )
+        if harness_config is not None and harness_config.type == HarnessKind.BALANCED.value:
+            return self._create_balanced_harness(harness_config, checkpointer)
         if harness_config is None or harness_config.type != HarnessKind.ULTRA.value:
             return self.create_agent(checkpointer=checkpointer)
 
@@ -193,20 +197,34 @@ class AgentFactory:
             step_agent_builder=lambda tools: self.create_agent(checkpointer=None, tools_override=tools),
         )
 
-    def create_agent(
-        self, checkpointer: Any | None = None, tools_override: list[Any] | None = None
-    ) -> AgentRunner:
-        """Create a configured AgentRunner instance.
+    def _create_balanced_harness(
+        self, harness_config: HarnessConfig, checkpointer: Any | None
+    ) -> BalancedHarness:
+        """Construct the balanced harness (ADR-111).
 
-        Args:
-            checkpointer: Optional checkpointer for conversation state.
-            tools_override: Replace the additional-tools set (builtin +
-                workspace + MCP) with an explicit list. Used by tool
-                equipping to build step-scoped executors over a subset.
-
-        Returns:
-            Configured AgentRunner instance.
+        Same runner kwargs as the react path, with the todo/plan middleware
+        appended after the workspace stack and the optional
+        ``harness.execution.timeout_seconds`` override applied.
         """
+        kwargs = self._runner_kwargs(checkpointer, tools_override=None)
+        kwargs["middleware"] = [
+            *kwargs["middleware"],
+            *build_balanced_middleware(
+                emitter=self._status_emitter,
+                workspace_name=self._workspace.name,
+                plan_visibility=harness_config.plan.visibility,
+            ),
+        ]
+        self._logger.info("Creating balanced harness for workspace: %s", self._workspace.name)
+        harness = BalancedHarness(**kwargs)
+        if harness_config.execution.timeout_seconds is not None:
+            harness.timeout_seconds = harness_config.execution.timeout_seconds
+        return harness
+
+    def _runner_kwargs(
+        self, checkpointer: Any | None, tools_override: list[Any] | None
+    ) -> dict[str, Any]:
+        """Resolve the constructor kwargs shared by the react and balanced paths."""
         all_tools = (
             list(tools_override)
             if tools_override is not None
@@ -238,21 +256,37 @@ class AgentFactory:
         merged_extra = {**resolved.extra_kwargs, **self._resolver._extra_model_kwargs}
         region = resolved.region or self._resolver._region
 
-        return AgentRunner(
-            workspace=self._workspace,
-            model=resolved.model_str,
-            api_key=api_key,
-            max_turns=self._max_turns,
-            temperature=temperature,
-            checkpointer=checkpointer,
-            tools=all_tools if all_tools else None,
-            region=region,
-            timeout_seconds=self._timeout_seconds,
-            enabled_builtins=self._enabled_builtin_names,
-            extra_model_kwargs=merged_extra,
-            middleware=self._middleware,
-            channel_logging_enabled=self._channel_logging_enabled,
-        )
+        return {
+            "workspace": self._workspace,
+            "model": resolved.model_str,
+            "api_key": api_key,
+            "max_turns": self._max_turns,
+            "temperature": temperature,
+            "checkpointer": checkpointer,
+            "tools": all_tools if all_tools else None,
+            "region": region,
+            "timeout_seconds": self._timeout_seconds,
+            "enabled_builtins": self._enabled_builtin_names,
+            "extra_model_kwargs": merged_extra,
+            "middleware": self._middleware,
+            "channel_logging_enabled": self._channel_logging_enabled,
+        }
+
+    def create_agent(
+        self, checkpointer: Any | None = None, tools_override: list[Any] | None = None
+    ) -> AgentRunner:
+        """Create a configured AgentRunner instance.
+
+        Args:
+            checkpointer: Optional checkpointer for conversation state.
+            tools_override: Replace the additional-tools set (builtin +
+                workspace + MCP) with an explicit list. Used by tool
+                equipping to build step-scoped executors over a subset.
+
+        Returns:
+            Configured AgentRunner instance.
+        """
+        return AgentRunner(**self._runner_kwargs(checkpointer, tools_override))
 
     def create_stateless_agent(
         self, extra_overrides: dict[str, Any] | None = None

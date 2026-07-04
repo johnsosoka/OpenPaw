@@ -16,13 +16,15 @@ from openpaw.model.status_event import StatusEvent, StatusEventKind
 
 logger = logging.getLogger(__name__)
 
-# Checklist marks mirror Plan.render_checklist() (openpaw/model/plan.py).
+# Checklist marks mirror Plan.render_checklist() (openpaw/model/plan.py),
+# except failed: the channel display uses ✗ (first-class failure rendering,
+# ADR-111 §10.1) while the prompt-facing checklist keeps "!".
 _MARKS: dict[str, str] = {
     "pending": " ",
     "in_progress": "~",
     "done": "x",
     "skipped": "-",
-    "failed": "!",
+    "failed": "✗",
 }
 
 # Node-phase vocabulary for the tool-status line (PRD-002 H7.2; wording per
@@ -132,9 +134,21 @@ class PlanStatusRenderer:
             return self._step_phase_line(step_id)
 
         if kind is StatusEventKind.PLAN_STEP_COMPLETED:
+            step_id = str(payload.get("step_id", ""))
+            if payload.get("failed"):
+                # Balanced-harness failure (additive payload keys, §10.1):
+                # ✗ in the checklist, note surfaced as the phase line.
+                self._overlay[step_id] = "failed"
+                await self._send_or_edit(channel, session_key)
+                note = str(payload.get("note") or "").strip()
+                if note:
+                    if len(note) > _MAX_INSIGHT_LEN:
+                        note = note[: _MAX_INSIGHT_LEN - 1] + "…"
+                    return note
+                return None
             # ponytail: optimistic done — a failed verdict is corrected by
             # the next plan.revised payload (last-event-wins overlay).
-            self._overlay[str(payload.get("step_id", ""))] = "done"
+            self._overlay[step_id] = "done"
             await self._send_or_edit(channel, session_key)
             return None
 
@@ -186,7 +200,8 @@ class PlanStatusRenderer:
     def _render(self) -> str:
         """Render the full checklist (header + per-step marks)."""
         prefix = "📋 " if self._use_emojis else ""
-        header = f"{prefix}Plan: {self._objective}"
+        # Todo-driven plans (balanced harness) carry no objective.
+        header = f"{prefix}Plan: {self._objective}" if self._objective else f"{prefix}Plan"
         if self._revision:
             header += f" (rev {self._revision})"
         lines = [header]

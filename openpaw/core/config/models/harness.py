@@ -136,6 +136,19 @@ class ToolEquippingConfig(BaseModel):
         return v
 
 
+class PlanConfig(BaseModel):
+    """Plan-checklist controls for the balanced harness (ADR-111 §10.1).
+
+    ``visibility`` gates the PlanEventBridge: when true (default), every
+    ``write_todos`` call is diffed into ``plan.*`` status events that drive
+    the live edited-in-place checklist. Ignored by react/ultra workspaces.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    visibility: bool = True
+
+
 class ExecutionConfig(NodeModelConfig):
     """Execution node: step budget. Runtime /model overrides apply to this
     node only (ADR-103 §4)."""
@@ -168,7 +181,8 @@ class HarnessConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["react", "ultra"] = "react"
+    type: Literal["react", "balanced", "ultra"] = "react"
+    plan: PlanConfig = Field(default_factory=PlanConfig)
     triage: NodeModelConfig = Field(default_factory=NodeModelConfig)
     planning: PlanningNodeConfig = Field(default_factory=PlanningNodeConfig)
     creative: CreativeNodeConfig = Field(default_factory=CreativeNodeConfig)

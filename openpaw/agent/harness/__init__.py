@@ -8,6 +8,8 @@ repair orphaned tool calls. Callers never see the underlying LangGraph shape.
 Implementations:
 - react: the existing single-loop ``create_agent`` path (``AgentRunner``
   satisfies the protocol structurally — see ``react.py``).
+- balanced: the react loop plus todo-driven plan middleware
+  (``balanced.py``, ADR-111).
 - ultra: triage -> (react | plan | ideate) -> execute/reflect multi-node
   graph (``ultra/``, ADR-101).
 """

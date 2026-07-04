@@ -81,7 +81,11 @@ class StatusEventKind(StrEnum):
         plan.created        — {plan: dict} (full serialized Plan: objective,
                               revision, steps[{id, description, status}])
         plan.step_started   — {step_id: str, description: str}
-        plan.step_completed — {step_id: str, description: str}
+        plan.step_completed — {step_id: str, description: str}. Additive
+                              keys (ADR-111 §10.1, balanced harness): a todo
+                              flipping to failed carries {failed: true,
+                              note: str} — the renderer marks ✗ and surfaces
+                              the note as a phase line.
         plan.revised        — {plan: dict} (full serialized Plan)
         reflection.verdict  — {verdict: str, reason: str,
                               step_succeeded: bool}

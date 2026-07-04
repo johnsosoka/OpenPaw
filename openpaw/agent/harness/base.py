@@ -19,11 +19,14 @@ class HarnessKind(StrEnum):
     Attributes:
         REACT: The existing single-loop create_agent path. Default;
             byte-for-byte current behavior.
+        BALANCED: The react loop plus todo-driven plan middleware — live
+            checklist visibility at react cost (ADR-111).
         ULTRA: Triage -> (react | plan | ideate) -> execute/reflect
             multi-node graph (ADR-101).
     """
 
     REACT = "react"
+    BALANCED = "balanced"
     ULTRA = "ultra"
 
 
