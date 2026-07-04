@@ -500,6 +500,39 @@ class TestCompactCommand:
         assert second_call.kwargs["thread_id"] == new_thread_id
 
     @pytest.mark.asyncio
+    async def test_compact_reinjects_balanced_todos(self, mock_message, mock_context):
+        """/compact parity with auto-compact: a runner exposing get_todos
+        (balanced harness) has its live checklist appended to the injected
+        summary, read from the old thread before rotation."""
+        old_thread_id = "telegram:123456:conv_old"
+        new_thread_id = "telegram:123456:conv_new"
+
+        mock_state = MagicMock()
+        mock_state.conversation_id = "conv_old"
+        mock_context.session_manager.get_state.return_value = mock_state
+        mock_context.session_manager.get_thread_id.side_effect = [
+            old_thread_id,
+            new_thread_id,
+        ]
+        mock_context.agent_runner.run = AsyncMock(side_effect=["Summary text", None])
+        mock_context.agent_runner.get_todos = AsyncMock(
+            return_value=[{"content": "Build", "status": "in_progress"}]
+        )
+        mock_archive = MagicMock()
+        mock_archive.message_count = 10
+        mock_context.conversation_archiver.archive = AsyncMock(return_value=mock_archive)
+
+        handler = CompactCommand()
+        result = await handler.handle(mock_message, "", mock_context)
+
+        assert result.new_thread_id == new_thread_id
+        mock_context.agent_runner.get_todos.assert_awaited_once_with(old_thread_id)
+        inject_call = mock_context.agent_runner.run.call_args_list[-1]
+        message = inject_call.kwargs["message"]
+        assert "restored after context compaction" in message
+        assert "[~] Build" in message
+
+    @pytest.mark.asyncio
     async def test_compact_flush_turn_runs_before_summary(self, mock_message, mock_context):
         """With flush enabled (default), /compact runs a flush turn first and
         references the flush file in the injected summary."""

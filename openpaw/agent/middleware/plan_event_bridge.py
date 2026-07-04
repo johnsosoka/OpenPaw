@@ -22,9 +22,11 @@ boundaries).
 """
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain.agents.middleware.types import AgentMiddleware
+from langchain_core.messages import ToolMessage
+from langgraph.types import Command
 
 from openpaw.agent.middleware.todo_list import Todo
 from openpaw.model.status_event import (
@@ -34,7 +36,21 @@ from openpaw.model.status_event import (
     StatusEventKind,
 )
 
+if TYPE_CHECKING:
+    from openpaw.agent.harness.checkpoint_reflection import (
+        CheckpointOutcome,
+        CheckpointReflector,
+    )
+
 logger = logging.getLogger(__name__)
+
+# Checkpoint-reflection nudge, appended to the write_todos ToolMessage when a
+# verdict is not-ok. The tool result already flows back into the
+# conversation, so the course-correction rides it — zero new machinery.
+_ADVISORY_TEMPLATE = (
+    "\n\n[checkpoint reflection — {verdict}] {notes} "
+    "Review the todo list and course-correct before proceeding."
+)
 
 # One diffed happening: the event kind plus its renderer-ready payload.
 PlanEvent = tuple[StatusEventKind, dict[str, JsonValue]]
@@ -173,6 +189,28 @@ def compute_plan_events(
     return events, revision
 
 
+def _append_advisory(result: Any, advisory: str) -> Any:
+    """Append the checkpoint advisory to the write_todos ToolMessage.
+
+    Least-invasive injection seam (DESIGN §3): the tool result is already
+    headed into conversation history, so the nudge is appended to its
+    content in place. Unknown result shapes are left untouched (fail-open).
+    """
+    messages: Any = None
+    if isinstance(result, Command):
+        update = result.update
+        messages = update.get("messages") if isinstance(update, dict) else None
+    elif isinstance(result, ToolMessage):
+        messages = [result]
+    if not isinstance(messages, list):
+        return result
+    for message in messages:
+        if isinstance(message, ToolMessage) and isinstance(message.content, str):
+            message.content += advisory
+            break
+    return result
+
+
 def _normalize_todos(raw: Any) -> list[Todo]:
     """Coerce tool args / state values into a clean list of Todo dicts."""
     if not isinstance(raw, list):
@@ -191,22 +229,41 @@ class PlanEventBridge(AgentMiddleware):
     wrapper is the outer layer around the write_todos handler.
     """
 
-    def __init__(self, emitter: StatusEmitter | None, workspace: str) -> None:
+    def __init__(
+        self,
+        emitter: StatusEmitter | None,
+        workspace: str,
+        lens_count: int = 3,
+        reflector: "CheckpointReflector | None" = None,
+    ) -> None:
         """Initialize the bridge.
 
         Args:
             emitter: Status event emitter (the workspace StatusBus). None
                 makes the bridge a pass-through (plan visibility with no bus).
             workspace: Workspace name stamped onto emitted events.
+            lens_count: ``harness.ideation.lens_count`` — used to recompute
+                the deterministic lens selection when announcing an
+                ``explore_lenses`` call (the tool itself stays pure).
+            reflector: Checkpoint reflector when
+                ``harness.reflection.mode: checkpoint`` (DESIGN §3); None
+                means organic reflection only.
         """
         super().__init__()
         self._emitter = emitter
         self._workspace = workspace
+        self._lens_count = lens_count
+        self._reflector = reflector
         self._session_key: str | None = None
         self._run_id: str = ""
         # ponytail: cosmetic revision counter, reset on plan.created; a
         # process restart mid-plan restarts the "(rev n)" numbering only.
         self._revision: int = 0
+
+    @property
+    def reflector(self) -> "CheckpointReflector | None":
+        """The checkpoint reflector, if configured (BalancedHarness wiring seam)."""
+        return self._reflector
 
     def arm(self, session_key: str | None, run_id: str) -> None:
         """Set per-run event identity. Called by BalancedHarness.run()."""
@@ -214,13 +271,19 @@ class PlanEventBridge(AgentMiddleware):
         self._run_id = run_id
 
     async def awrap_tool_call(self, request: Any, handler: Any) -> Any:
-        """Intercept write_todos: execute, then diff-and-emit. Never raises."""
-        if request.tool_call.get("name") != "write_todos":
+        """Intercept write_todos and explore_lenses. Never raises."""
+        tool_name = request.tool_call.get("name")
+        if tool_name == "explore_lenses":
+            result = await handler(request)
+            await self._announce_lenses(request)
+            return result
+        if tool_name != "write_todos":
             return await handler(request)
 
         # State snapshot predates the tool's Command update -> previous list.
         prev = _normalize_todos((request.state or {}).get("todos"))
         result = await handler(request)
+        events: list[PlanEvent] = []
         try:
             new = _normalize_todos(request.tool_call.get("args", {}).get("todos"))
             events, self._revision = compute_plan_events(prev, new, self._revision)
@@ -228,6 +291,74 @@ class PlanEventBridge(AgentMiddleware):
                 await self._emit(kind, payload)
         except Exception:
             logger.debug("Plan event bridging failed", exc_info=True)
+            return result
+        if self._reflector is not None:
+            result = await self._checkpoint(events, new, request, result)
+        return result
+
+    async def _announce_lenses(self, request: Any) -> None:
+        """Emit the ideonomy lenses_selected phase for an explore_lenses call.
+
+        Recomputes the deterministic selection (zero cost) so the existing
+        module.phase renderer announces "Exploring through N lenses: ...".
+        Best-effort — never breaks the tool call.
+        """
+        try:
+            from openpaw.agent.harness.modules.ideonomy.selector import select_lenses
+
+            topic = str(request.tool_call.get("args", {}).get("topic", ""))
+            lenses = select_lenses(topic, self._lens_count)
+            await self._emit(
+                StatusEventKind.MODULE_PHASE,
+                {
+                    "kind": "creative",
+                    "module": "ideonomy",
+                    "phase": "lenses_selected",
+                    "total": len(lenses),
+                    "detail": " · ".join(lens.theme for lens in lenses),
+                },
+            )
+        except Exception:
+            logger.debug("Lens announcement failed", exc_info=True)
+
+    async def _checkpoint(
+        self, events: list[PlanEvent], todos: list[Todo], request: Any, result: Any
+    ) -> Any:
+        """Run checkpoint reflection over this write's completed/failed flips.
+
+        Emits ``reflection.verdict`` and, on a not-ok verdict, appends the
+        course-correction advisory to the tool result. Fail-open: any error
+        logs and returns the result unchanged.
+        """
+        reflector = self._reflector
+        if reflector is None:
+            return result
+        try:
+            flips = [
+                payload
+                for kind, payload in events
+                if kind is StatusEventKind.PLAN_STEP_COMPLETED
+            ]
+            outcome: CheckpointOutcome | None = await reflector.observe(
+                flips, todos, request.state
+            )
+            if outcome is None:
+                return result
+            await self._emit(
+                StatusEventKind.REFLECTION_VERDICT,
+                {
+                    "verdict": outcome.verdict,
+                    "reason": outcome.notes,
+                    "step_succeeded": outcome.step_succeeded,
+                },
+            )
+            if not outcome.ok:
+                advisory = _ADVISORY_TEMPLATE.format(
+                    verdict=outcome.verdict, notes=outcome.notes
+                ).rstrip()
+                result = _append_advisory(result, advisory)
+        except Exception:
+            logger.debug("Checkpoint reflection failed", exc_info=True)
         return result
 
     async def _emit(self, kind: StatusEventKind, payload: dict[str, JsonValue]) -> None:

@@ -4,6 +4,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from openpaw.agent.middleware.todo_list import render_todo_reminder
 from openpaw.channels.base import ChannelAdapter
 from openpaw.core.config.models import AutoCompactConfig
 from openpaw.core.prompts.commands import (
@@ -57,6 +58,44 @@ async def run_flush_turn(
         logger.warning(
             f"Pre-compact flush turn failed for {thread_id}, "
             f"proceeding to compact: {e}"
+        )
+        return None
+
+
+async def read_todo_reminder(
+    agent_runner: Any,
+    thread_id: str,
+    logger: logging.Logger,
+) -> str | None:
+    """Render the balanced harness's live todo list for post-compact re-injection.
+
+    Compaction rotates to a fresh thread, stripping the ToolMessage echoes
+    the model relies on to remember its plan (DESIGN §2.1 wrinkle). This
+    reads the checkpointed todos from the thread being compacted so the
+    checklist can ride the post-compact injection.
+
+    Duck-typed and fail-open: react/ultra runners have no ``get_todos`` and
+    return None (no-op); any read error is logged at debug and skipped.
+
+    Args:
+        agent_runner: The harness that ran the compacted thread.
+        thread_id: The thread being compacted (pre-rotation).
+        logger: Logger for the fail-open path.
+
+    Returns:
+        The reminder text, or None when there is nothing worth reciting.
+    """
+    get_todos = getattr(agent_runner, "get_todos", None)
+    if get_todos is None:
+        return None
+    try:
+        todos = await get_todos(thread_id)
+        if not isinstance(todos, list):
+            return None
+        return render_todo_reminder(todos)
+    except Exception:
+        logger.debug(
+            "Post-compact todo read failed for %s", thread_id, exc_info=True
         )
         return None
 
@@ -133,6 +172,9 @@ class AutoCompactor:
             if self._auto_compact_config.flush:
                 flush_path = await run_flush_turn(agent_runner, thread_id, self._logger)
 
+            # Balanced harness: capture the live todo list before rotation
+            todo_reminder = await read_todo_reminder(agent_runner, thread_id, self._logger)
+
             # Parse conversation_id from thread_id (format: "{session_key}:{conversation_id}")
             # session_key contains one colon (e.g., "telegram:123"), so split from the right
             parts = thread_id.rsplit(":", 1)
@@ -161,6 +203,8 @@ class AutoCompactor:
             summary_message = AUTO_COMPACT_TEMPLATE.format(summary=summary)
             if flush_path:
                 summary_message += FLUSH_NOTE_TEMPLATE.format(flush_path=flush_path)
+            if todo_reminder:
+                summary_message += f"\n\n{todo_reminder}"
             await agent_runner.run(
                 message=summary_message,
                 thread_id=new_thread_id,

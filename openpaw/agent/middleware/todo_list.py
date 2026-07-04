@@ -99,6 +99,13 @@ this checklist live — it is your progress report, so keep it truthful in real 
 
 For simple few-step requests, skip the todo list and just do the task."""
 
+# Appended when the balanced harness registers the explore_lenses tool
+# (harness.ideation.lens_tool, DESIGN §4).
+LENS_GUIDANCE = (
+    "\n\nFor open-ended or creative asks, call `explore_lenses` first and think "
+    "each lens through against the task — note the strongest ideas before planning."
+)
+
 _PARALLEL_CALL_ERROR = (
     "Error: The `write_todos` tool should never be called multiple times "
     "in parallel. Please call it only once per model invocation to update "
@@ -171,9 +178,17 @@ class TodoListMiddleware(AgentMiddleware):
 
     state_schema = TodoPlanningState  # type: ignore[assignment]
 
-    def __init__(self) -> None:
-        """Register the ``write_todos`` tool."""
+    def __init__(self, include_lens_guidance: bool = False) -> None:
+        """Register the ``write_todos`` tool.
+
+        Args:
+            include_lens_guidance: Append the explore_lenses recitation line
+                (set when the balanced workspace registers the lens tool).
+        """
         super().__init__()
+        self._guidance = TODO_SYSTEM_PROMPT + (
+            LENS_GUIDANCE if include_lens_guidance else ""
+        )
         self.tools = [
             StructuredTool.from_function(
                 name="write_todos",
@@ -185,16 +200,15 @@ class TodoListMiddleware(AgentMiddleware):
             )
         ]
 
-    @staticmethod
-    def _with_guidance(request: ModelRequest[Any]) -> ModelRequest[Any]:
+    def _with_guidance(self, request: ModelRequest[Any]) -> ModelRequest[Any]:
         """Append the recitation guidance block to the system message."""
         if request.system_message is not None:
             content = [
                 *request.system_message.content_blocks,
-                {"type": "text", "text": f"\n\n{TODO_SYSTEM_PROMPT}"},
+                {"type": "text", "text": f"\n\n{self._guidance}"},
             ]
         else:
-            content = [{"type": "text", "text": TODO_SYSTEM_PROMPT}]
+            content = [{"type": "text", "text": self._guidance}]
         system_message = SystemMessage(content=cast("list[str | dict[str, str]]", content))
         return request.override(system_message=system_message)
 

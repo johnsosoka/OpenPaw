@@ -80,14 +80,25 @@ class CreativeNodeConfig(ModuleNodeConfig):
 
 
 class ReflectionNodeConfig(ModuleNodeConfig):
-    """Reflection node: pluggable module kind (PRD-002 H4.3).
+    """Reflection config — one group shared by the ultra and balanced harnesses.
 
+    Ultra (reflect node, PRD-002 H4.3): ``module`` selects the node behavior.
     ``off`` omits the reflect node from the graph entirely; ``light``
     (default) is a single structured check per step; ``full`` may rewrite
     the remaining plan; ``auto`` lets the selector choose per task.
+    ``mode``/``every`` are ignored by ultra.
+
+    Balanced (checkpoint reflection, ADR-111 §3/§10.2): ``mode: organic``
+    (default) relies on in-context self-correction at zero cost;
+    ``mode: checkpoint`` fires one structured verdict call every ``every``
+    completed todos (immediately on a failed todo). ``model`` doubles as the
+    optional cheap verdict-model pointer, resolved like ultra's node models.
+    ``module``/``allowed`` are ignored by balanced.
     """
 
     module: Literal["off", "light", "full", "auto"] = "light"
+    mode: Literal["organic", "checkpoint"] = "organic"
+    every: int = Field(default=3, ge=1)
 
 
 class SelectorNodeConfig(NodeModelConfig):
@@ -134,6 +145,21 @@ class ToolEquippingConfig(BaseModel):
         if any(not entry.strip() for entry in v):
             raise ValueError("always_equip entries must be non-empty tool/group names")
         return v
+
+
+class IdeationConfig(BaseModel):
+    """Lightweight ideonomy for the balanced harness (ADR-111 §4, §10.3).
+
+    ``lens_tool`` registers the zero-LLM ``explore_lenses`` tool (balanced
+    workspaces only — the full IdeonomyModule remains ultra-exclusive);
+    ``lens_count`` is how many deterministic lenses each call selects.
+    Ignored by react/ultra workspaces.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    lens_tool: bool = True
+    lens_count: int = Field(default=3, ge=1, le=7)
 
 
 class PlanConfig(BaseModel):
@@ -183,6 +209,7 @@ class HarnessConfig(BaseModel):
 
     type: Literal["react", "balanced", "ultra"] = "react"
     plan: PlanConfig = Field(default_factory=PlanConfig)
+    ideation: IdeationConfig = Field(default_factory=IdeationConfig)
     triage: NodeModelConfig = Field(default_factory=NodeModelConfig)
     planning: PlanningNodeConfig = Field(default_factory=PlanningNodeConfig)
     creative: CreativeNodeConfig = Field(default_factory=CreativeNodeConfig)

@@ -3,11 +3,14 @@
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 from openpaw.agent import AgentRunner
 from openpaw.agent.harness import AgentHarness, HarnessKind
 from openpaw.agent.harness.balanced import BalancedHarness, build_balanced_middleware
+from openpaw.agent.harness.checkpoint_reflection import CheckpointReflector
+from openpaw.agent.harness.lenses import create_explore_lenses_tool
 from openpaw.agent.harness.ultra import UltraHarness
 from openpaw.core.config.models import HarnessConfig, ProviderDefinition
 from openpaw.model.spawn_profile import SpawnProfile
@@ -174,14 +177,7 @@ class AgentFactory:
             return self.create_agent(checkpointer=checkpointer)
 
         inner = self.create_agent(checkpointer=checkpointer)
-        node_resolver = NodeModelResolver(
-            resolver=self._resolver,
-            workspace_model=self._configured_model,
-            workspace_api_key=self._resolver.resolve_api_key(self._configured_model),
-            workspace_temperature=self._temperature,
-            workspace_region=self._resolver._region,
-            workspace_extra_kwargs=self._resolver._extra_model_kwargs,
-        )
+        node_resolver = self._build_node_resolver()
         self._logger.info("Creating ultra harness for workspace: %s", self._workspace.name)
         return UltraHarness(
             workspace=self._workspace,
@@ -197,15 +193,53 @@ class AgentFactory:
             step_agent_builder=lambda tools: self.create_agent(checkpointer=None, tools_override=tools),
         )
 
+    def _build_node_resolver(self) -> NodeModelResolver:
+        """Node-model resolution over the workspace baseline (ADR-103).
+
+        Shared by the ultra harness (per-node models) and the balanced
+        harness (optional checkpoint-verdict model pointer).
+        """
+        return NodeModelResolver(
+            resolver=self._resolver,
+            workspace_model=self._configured_model,
+            workspace_api_key=self._resolver.resolve_api_key(self._configured_model),
+            workspace_temperature=self._temperature,
+            workspace_region=self._resolver._region,
+            workspace_extra_kwargs=self._resolver._extra_model_kwargs,
+        )
+
+    def _build_checkpoint_reflector(
+        self, harness_config: HarnessConfig
+    ) -> CheckpointReflector | None:
+        """The checkpoint reflector when ``harness.reflection.mode: checkpoint``.
+
+        An explicit ``reflection.model`` pointer resolves like ultra's node
+        models (NodeModelResolver -> create_node_model, lazily); unset falls
+        back to the runner's workspace model, wired by BalancedHarness.
+        """
+        reflection = harness_config.reflection
+        if reflection.mode != "checkpoint":
+            return None
+        model_factory = None
+        if reflection.model is not None:
+            model_factory = partial(
+                self._build_node_resolver().create_node_model, reflection
+            )
+        return CheckpointReflector(every=reflection.every, model_factory=model_factory)
+
     def _create_balanced_harness(
         self, harness_config: HarnessConfig, checkpointer: Any | None
     ) -> BalancedHarness:
         """Construct the balanced harness (ADR-111).
 
         Same runner kwargs as the react path, with the todo/plan middleware
-        appended after the workspace stack and the optional
+        appended after the workspace stack, the ``explore_lenses`` tool
+        registered when ``harness.ideation.lens_tool`` is enabled (balanced
+        workspaces only, DESIGN §10.3), checkpoint reflection wired when
+        configured (DESIGN §3), and the optional
         ``harness.execution.timeout_seconds`` override applied.
         """
+        ideation = harness_config.ideation
         kwargs = self._runner_kwargs(checkpointer, tools_override=None)
         kwargs["middleware"] = [
             *kwargs["middleware"],
@@ -213,8 +247,16 @@ class AgentFactory:
                 emitter=self._status_emitter,
                 workspace_name=self._workspace.name,
                 plan_visibility=harness_config.plan.visibility,
+                lens_guidance=ideation.lens_tool,
+                lens_count=ideation.lens_count,
+                reflector=self._build_checkpoint_reflector(harness_config),
             ),
         ]
+        if ideation.lens_tool:
+            kwargs["tools"] = [
+                *(kwargs["tools"] or []),
+                create_explore_lenses_tool(ideation.lens_count),
+            ]
         self._logger.info("Creating balanced harness for workspace: %s", self._workspace.name)
         harness = BalancedHarness(**kwargs)
         if harness_config.execution.timeout_seconds is not None:

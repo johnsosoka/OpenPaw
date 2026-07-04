@@ -293,6 +293,54 @@ async def test_emitter_failure_never_breaks_the_tool_call() -> None:
     assert await bridge.awrap_tool_call(make_request(todos=[todo("A")]), handler) == "ok"
 
 
+async def test_explore_lenses_call_emits_lenses_selected_phase() -> None:
+    """DESIGN §4: intercepting explore_lenses emits the existing ideonomy
+    module.phase payload so the renderer announces the lens exploration."""
+    from openpaw.agent.harness.modules.ideonomy.selector import select_lenses
+
+    emitter = CaptureEmitter()
+    bridge = PlanEventBridge(emitter=emitter, workspace=WORKSPACE, lens_count=3)
+    bridge.arm(session_key=SESSION, run_id="run-7")
+    handler = AsyncMock(return_value="lens scaffold")
+
+    topic = "brainstorm a product name"
+    request = SimpleNamespace(
+        tool_call={"name": "explore_lenses", "args": {"topic": topic}, "id": "c1"},
+        state={},
+    )
+    result = await bridge.awrap_tool_call(request, handler)
+
+    assert result == "lens scaffold"
+    handler.assert_awaited_once_with(request)
+    assert emitter.kinds() == [StatusEventKind.MODULE_PHASE]
+    event = emitter.events[0]
+    expected_themes = " · ".join(lens.theme for lens in select_lenses(topic, 3))
+    assert event.payload == {
+        "kind": "creative",
+        "module": "ideonomy",
+        "phase": "lenses_selected",
+        "total": 3,
+        "detail": expected_themes,
+    }
+    assert event.session_key == SESSION
+    assert event.run_id == "run-7"
+    assert event.workspace == WORKSPACE
+
+
+async def test_explore_lenses_emission_failure_never_breaks_the_tool_call() -> None:
+    class ExplodingEmitter:
+        async def emit(self, event: StatusEvent) -> None:
+            raise RuntimeError("bus down")
+
+    bridge = PlanEventBridge(emitter=ExplodingEmitter(), workspace=WORKSPACE)
+    handler = AsyncMock(return_value="scaffold")
+    request = SimpleNamespace(
+        tool_call={"name": "explore_lenses", "args": {"topic": "t"}, "id": "c1"},
+        state={},
+    )
+    assert await bridge.awrap_tool_call(request, handler) == "scaffold"
+
+
 async def test_malformed_args_never_break_the_tool_call() -> None:
     emitter = CaptureEmitter()
     bridge = PlanEventBridge(emitter=emitter, workspace=WORKSPACE)

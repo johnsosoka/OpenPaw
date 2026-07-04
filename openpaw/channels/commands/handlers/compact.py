@@ -9,7 +9,7 @@ from openpaw.core.prompts.commands import (
     FLUSH_NOTE_TEMPLATE,
     SUMMARIZE_PROMPT,
 )
-from openpaw.workspace.processors.compactor import run_flush_turn
+from openpaw.workspace.processors.compactor import read_todo_reminder, run_flush_turn
 
 if TYPE_CHECKING:
     from openpaw.channels.base import Message
@@ -66,6 +66,11 @@ class CompactCommand(CommandHandler):
                 context.agent_runner, old_thread_id, logger
             )
 
+        # Balanced harness: capture the live todo list before rotation
+        todo_reminder = await read_todo_reminder(
+            context.agent_runner, old_thread_id, logger
+        )
+
         # Step 1: Generate summary using the agent
         summary = None
         try:
@@ -115,6 +120,8 @@ class CompactCommand(CommandHandler):
                 injection_prompt = COMPACTED_TEMPLATE.format(summary=summary)
                 if flush_path:
                     injection_prompt += FLUSH_NOTE_TEMPLATE.format(flush_path=flush_path)
+                if todo_reminder:
+                    injection_prompt += f"\n\n{todo_reminder}"
                 await context.agent_runner.run(
                     message=injection_prompt,
                     thread_id=new_thread_id,

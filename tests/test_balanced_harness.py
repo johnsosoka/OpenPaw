@@ -345,11 +345,133 @@ def test_harness_config_rejects_plan_typos() -> None:
         HarnessConfig.model_validate({"type": "balanced", "plan": {"visibilty": True}})
 
 
-def test_harness_config_rejects_unknown_groups() -> None:
-    # reflection/ideation groups arrive with the next phase — a premature
-    # `ideation:` key must fail fast rather than silently no-op.
+def test_harness_config_ideation_defaults() -> None:
+    config = HarnessConfig.model_validate({"type": "balanced"})
+    assert config.ideation.lens_tool is True
+    assert config.ideation.lens_count == 3
+
+
+def test_harness_config_ideation_group_validates() -> None:
+    config = HarnessConfig.model_validate(
+        {"type": "balanced", "ideation": {"lens_tool": False, "lens_count": 5}}
+    )
+    assert config.ideation.lens_tool is False
+    assert config.ideation.lens_count == 5
+
+
+def test_harness_config_ideation_rejects_bad_values() -> None:
     with pytest.raises(ValidationError):
-        HarnessConfig.model_validate({"type": "balanced", "ideation": {"lens_tool": True}})
+        HarnessConfig.model_validate({"type": "balanced", "ideation": {"lens_count": 0}})
+    with pytest.raises(ValidationError):
+        HarnessConfig.model_validate({"type": "balanced", "ideation": {"lens_count": 8}})
+    with pytest.raises(ValidationError):
+        HarnessConfig.model_validate({"type": "balanced", "ideation": {"lens_tools": True}})
+
+
+# ---------------------------------------------------------------------------
+# Lens tool registration (DESIGN §4/§10.3: balanced-only, config-gated)
+# ---------------------------------------------------------------------------
+
+
+def _tool_names(harness: Any) -> list[str]:
+    return [getattr(t, "name", "") for t in (harness.additional_tools or [])]
+
+
+def test_lens_tool_registered_by_default_on_balanced(tmp_path: Path) -> None:
+    workspace = make_workspace(tmp_path, config=balanced_config())
+    harness = make_factory(workspace).create_harness()
+    assert "explore_lenses" in _tool_names(harness)
+
+
+def test_lens_tool_disabled_by_config(tmp_path: Path) -> None:
+    workspace = make_workspace(
+        tmp_path,
+        config=balanced_config({"type": "balanced", "ideation": {"lens_tool": False}}),
+    )
+    harness = make_factory(workspace).create_harness()
+    assert "explore_lenses" not in _tool_names(harness)
+
+
+def test_lens_tool_absent_on_react_even_when_configured(tmp_path: Path) -> None:
+    workspace = make_workspace(
+        tmp_path,
+        config=WorkspaceConfig.model_validate(
+            {"harness": {"type": "react", "ideation": {"lens_tool": True}}}
+        ),
+    )
+    harness = make_factory(workspace).create_harness()
+    assert "explore_lenses" not in _tool_names(harness)
+
+
+def test_recitation_line_present_when_lens_tool_enabled(tmp_path: Path) -> None:
+    workspace = make_workspace(tmp_path, config=balanced_config())
+    harness = make_factory(workspace).create_harness()
+    todo_mw = next(m for m in harness._middleware if isinstance(m, TodoListMiddleware))
+    assert "explore_lenses" in todo_mw._guidance
+
+
+def test_recitation_line_absent_when_lens_tool_disabled(tmp_path: Path) -> None:
+    workspace = make_workspace(
+        tmp_path,
+        config=balanced_config({"type": "balanced", "ideation": {"lens_tool": False}}),
+    )
+    harness = make_factory(workspace).create_harness()
+    todo_mw = next(m for m in harness._middleware if isinstance(m, TodoListMiddleware))
+    assert "explore_lenses" not in todo_mw._guidance
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint reflection wiring (DESIGN §3/§10.2)
+# ---------------------------------------------------------------------------
+
+
+def test_organic_mode_wires_no_reflector(tmp_path: Path) -> None:
+    workspace = make_workspace(tmp_path, config=balanced_config())
+    harness = make_factory(workspace).create_harness()
+    assert isinstance(harness, BalancedHarness)
+    assert harness._plan_bridge is not None
+    assert harness._plan_bridge.reflector is None
+
+
+def test_checkpoint_mode_wires_reflector_with_runner_model_fallback(tmp_path: Path) -> None:
+    workspace = make_workspace(
+        tmp_path,
+        config=balanced_config(
+            {"type": "balanced", "reflection": {"mode": "checkpoint", "every": 2}}
+        ),
+    )
+    harness = make_factory(workspace).create_harness()
+    assert isinstance(harness, BalancedHarness)
+    bridge = harness._plan_bridge
+    assert bridge is not None
+    reflector = bridge.reflector
+    assert reflector is not None
+    assert reflector._every == 2
+    # No explicit model pointer -> the runner's model instance is the fallback.
+    assert reflector._model_factory is None
+    assert reflector._default_model_provider is not None
+    assert reflector._resolve_model() is harness._model_instance
+
+
+def test_checkpoint_with_visibility_off_keeps_bridge_without_emitter(tmp_path: Path) -> None:
+    """The bridge is reflection's counting seam: visibility off suppresses
+    status events (no emitter) but the checkpoint nudge path stays alive."""
+    workspace = make_workspace(
+        tmp_path,
+        config=balanced_config(
+            {
+                "type": "balanced",
+                "plan": {"visibility": False},
+                "reflection": {"mode": "checkpoint"},
+            }
+        ),
+    )
+    harness = make_factory(workspace).create_harness()
+    assert isinstance(harness, BalancedHarness)
+    bridge = harness._plan_bridge
+    assert bridge is not None
+    assert bridge._emitter is None
+    assert bridge.reflector is not None
 
 
 # ---------------------------------------------------------------------------

@@ -16,15 +16,18 @@ applied by the factory) and per-run bridge arming, so inheritance is the
 honest shape; ``UltraHarness``-style wrapping exists for topology changes,
 and there is no topology change here.
 
-Checkpoint-reflection and the ``explore_lenses`` tool (DESIGN §3/§4) are a
-later phase; their seams are the middleware stack assembled in
-:func:`build_balanced_middleware` and the ``get_todos`` state reader below.
+Checkpoint reflection (DESIGN §3) rides the bridge: when configured, the
+factory hands it a :class:`CheckpointReflector` and this harness wires the
+runner's model instance in as the default verdict model. The
+``explore_lenses`` tool (DESIGN §4) is registered by the factory alongside
+this middleware stack.
 """
 
 import uuid
 from typing import Any
 
 from openpaw.agent.harness.base import AgentHarness, HarnessKind
+from openpaw.agent.harness.checkpoint_reflection import CheckpointReflector
 from openpaw.agent.middleware.plan_event_bridge import PlanEventBridge
 from openpaw.agent.middleware.todo_list import Todo, TodoListMiddleware
 from openpaw.agent.runner import AgentRunner
@@ -35,16 +38,31 @@ def build_balanced_middleware(
     emitter: StatusEmitter | None,
     workspace_name: str,
     plan_visibility: bool = True,
+    lens_guidance: bool = False,
+    lens_count: int = 3,
+    reflector: CheckpointReflector | None = None,
 ) -> list[Any]:
     """The middleware additions that make a runner balanced.
 
     Order matters: the bridge precedes the todo middleware so its tool
     wrapper is the outer layer around the write_todos handler.
+
+    The bridge is included when plan visibility is on OR checkpoint
+    reflection is configured (the bridge is reflection's counting seam).
+    With visibility off, the bridge gets no emitter — no status events, but
+    the checkpoint nudge still lands in the conversation.
     """
     extras: list[Any] = []
-    if plan_visibility:
-        extras.append(PlanEventBridge(emitter=emitter, workspace=workspace_name))
-    extras.append(TodoListMiddleware())
+    if plan_visibility or reflector is not None:
+        extras.append(
+            PlanEventBridge(
+                emitter=emitter if plan_visibility else None,
+                workspace=workspace_name,
+                lens_count=lens_count,
+                reflector=reflector,
+            )
+        )
+    extras.append(TodoListMiddleware(include_lens_guidance=lens_guidance))
     return extras
 
 
@@ -62,6 +80,13 @@ class BalancedHarness(AgentRunner):
         self._plan_bridge: PlanEventBridge | None = next(
             (m for m in self._middleware if isinstance(m, PlanEventBridge)), None
         )
+        # Checkpoint reflection's default verdict model is the workspace
+        # model already on this runner; read fresh per call so agent
+        # rebuilds are picked up (an explicit reflection.model wins).
+        if self._plan_bridge is not None and self._plan_bridge.reflector is not None:
+            self._plan_bridge.reflector.set_default_model_provider(
+                lambda: getattr(self, "_model_instance", None)
+            )
 
     @property
     def kind(self) -> HarnessKind:

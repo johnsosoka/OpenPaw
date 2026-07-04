@@ -799,13 +799,21 @@ class MessageProcessor:
             )
 
             # Flush turn: let the agent save durable context before it is lost
-            from openpaw.workspace.processors.compactor import run_flush_turn
+            from openpaw.workspace.processors.compactor import (
+                read_todo_reminder,
+                run_flush_turn,
+            )
 
             flush_path: str | None = None
             if getattr(self._auto_compact_config, "flush", True):
                 flush_path = await run_flush_turn(
                     self._agent_runner, thread_id, self._logger
                 )
+
+            # Balanced harness: capture the live todo list before rotation
+            todo_reminder = await read_todo_reminder(
+                self._agent_runner, thread_id, self._logger
+            )
 
             # Parse conversation_id from thread_id (format: "{session_key}:{conversation_id}")
             # session_key contains one colon (e.g., "telegram:123"), so split from the right
@@ -837,6 +845,8 @@ class MessageProcessor:
             summary_message = AUTO_COMPACT_TEMPLATE.format(summary=summary)
             if flush_path:
                 summary_message += FLUSH_NOTE_TEMPLATE.format(flush_path=flush_path)
+            if todo_reminder:
+                summary_message += f"\n\n{todo_reminder}"
             await self._agent_runner.run(
                 message=summary_message,
                 thread_id=new_thread_id,

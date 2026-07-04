@@ -91,7 +91,7 @@ def _guidance_request(system_message: Any) -> Any:
 
 def test_guidance_appended_to_existing_system_message() -> None:
     existing = SimpleNamespace(content_blocks=[{"type": "text", "text": "You are Gilfoyle."}])
-    out = TodoListMiddleware._with_guidance(_guidance_request(existing))
+    out = TodoListMiddleware()._with_guidance(_guidance_request(existing))
 
     rendered = str(out["system_message"].content)
     assert "You are Gilfoyle." in rendered
@@ -100,7 +100,7 @@ def test_guidance_appended_to_existing_system_message() -> None:
 
 
 def test_guidance_creates_system_message_when_absent() -> None:
-    out = TodoListMiddleware._with_guidance(_guidance_request(None))
+    out = TodoListMiddleware()._with_guidance(_guidance_request(None))
     blocks = out["system_message"].content
     assert blocks == [{"type": "text", "text": TODO_SYSTEM_PROMPT}]
 

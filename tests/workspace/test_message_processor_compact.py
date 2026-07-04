@@ -103,3 +103,96 @@ async def test_flush_failure_does_not_block_compaction():
     assert runner.run.call_count == 3
     inject_call = runner.run.call_args_list[2]
     assert "memory/compact-flush-" not in inject_call.kwargs["message"]
+
+
+# ---------------------------------------------------------------------------
+# Post-compact todo re-injection (balanced harness, DESIGN §2.1 wrinkle)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_balanced_todos_survive_auto_compact():
+    """A runner exposing get_todos (balanced) has its live checklist rendered
+    into the post-compact injection, read from the OLD thread."""
+    processor = _make_processor(
+        AutoCompactConfig(enabled=True, trigger=0.8, flush=False),
+        ["Summary", None],
+    )
+    runner = processor._agent_runner
+    runner.get_todos = AsyncMock(
+        return_value=[
+            {"content": "Research", "status": "completed"},
+            {"content": "Build", "status": "in_progress"},
+        ]
+    )
+
+    result = await processor._check_auto_compact(
+        "telegram:123", "telegram:123:conv_old", AsyncMock()
+    )
+
+    assert result == "telegram:123:conv_new"
+    runner.get_todos.assert_awaited_once_with("telegram:123:conv_old")
+    inject_call = runner.run.call_args_list[-1]
+    message = inject_call.kwargs["message"]
+    assert "restored after context compaction" in message
+    assert "[x] Research" in message
+    assert "[~] Build" in message
+
+
+@pytest.mark.asyncio
+async def test_react_runner_without_get_todos_is_a_noop():
+    """No get_todos attribute (react/ultra) -> injection unchanged."""
+    processor = _make_processor(
+        AutoCompactConfig(enabled=True, trigger=0.8, flush=False),
+        ["Summary", None],
+    )
+    runner = processor._agent_runner
+    del runner.get_todos  # AsyncMock auto-creates attributes; make it react-like
+
+    result = await processor._check_auto_compact(
+        "telegram:123", "telegram:123:conv_old", AsyncMock()
+    )
+
+    assert result == "telegram:123:conv_new"
+    inject_call = runner.run.call_args_list[-1]
+    assert "restored after context compaction" not in inject_call.kwargs["message"]
+
+
+@pytest.mark.asyncio
+async def test_all_completed_todos_are_not_reinjected():
+    """A finished checklist is noise, not context -> no reminder."""
+    processor = _make_processor(
+        AutoCompactConfig(enabled=True, trigger=0.8, flush=False),
+        ["Summary", None],
+    )
+    runner = processor._agent_runner
+    runner.get_todos = AsyncMock(
+        return_value=[{"content": "Done thing", "status": "completed"}]
+    )
+
+    result = await processor._check_auto_compact(
+        "telegram:123", "telegram:123:conv_old", AsyncMock()
+    )
+
+    assert result == "telegram:123:conv_new"
+    inject_call = runner.run.call_args_list[-1]
+    assert "restored after context compaction" not in inject_call.kwargs["message"]
+
+
+@pytest.mark.asyncio
+async def test_todo_read_failure_never_blocks_compaction():
+    """A failing get_todos is fail-open: compaction proceeds without it."""
+    processor = _make_processor(
+        AutoCompactConfig(enabled=True, trigger=0.8, flush=False),
+        ["Summary", None],
+    )
+    runner = processor._agent_runner
+    runner.get_todos = AsyncMock(side_effect=Exception("state boom"))
+
+    result = await processor._check_auto_compact(
+        "telegram:123", "telegram:123:conv_old", AsyncMock()
+    )
+
+    assert result == "telegram:123:conv_new"
+    inject_call = runner.run.call_args_list[-1]
+    assert "restored after context compaction" not in inject_call.kwargs["message"]
