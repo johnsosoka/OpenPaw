@@ -331,13 +331,18 @@ class WorkspaceRunner:
             skill_reloader=self.reload_skills,
             skill_store=self._skill_store,
             harness_info=self._harness_info,
+            auto_compact_config=(
+                self._workspace.config.auto_compact
+                if self._workspace.config
+                else None
+            ),
         )
 
     def _harness_info(self) -> str:
         """Render harness type + resolved node→model table for /harness (C9).
 
         React: harness type and the active (possibly runtime-overridden)
-        model. Planner: one row per node with the resolved display string,
+        model. Ultra: one row per node with the resolved display string,
         an inherited marker, and module names for module kinds; the
         execution row shows the factory's active model because runtime
         /model overrides apply to execution only (ADR-103 §4).
@@ -346,14 +351,14 @@ class WorkspaceRunner:
         harness_config = (
             self._workspace.config.harness if self._workspace.config else None
         )
-        if harness_config is None or harness_config.type != "planner":
+        if harness_config is None or harness_config.type != "ultra":
             return f"Harness: react\nModel: {factory.active_model}"
 
         resolver = getattr(self._agent_runner, "node_resolver", None)
         if resolver is None:
-            # Config says planner but the running harness has no resolver
+            # Config says ultra but the running harness has no resolver
             # (should not happen) — degrade to the execution model.
-            return f"Harness: planner\nExecution model: {factory.active_model}"
+            return f"Harness: ultra\nExecution model: {factory.active_model}"
 
         def row(node_config: Any, module: str | None = None) -> str:
             resolved = resolver.resolve_node(node_config)
@@ -365,7 +370,7 @@ class WorkspaceRunner:
             return text
 
         lines = [
-            "Harness: planner",
+            "Harness: ultra",
             f"triage: {row(harness_config.triage)}",
         ]
         if harness_config.brief.enabled:

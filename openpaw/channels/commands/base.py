@@ -56,6 +56,7 @@ class CommandContext:
     # Returns (workspace_count, framework_count, errors).
     skill_reloader: Callable[[], tuple[int, int, list[str]]] | None = None
     skill_store: Any = None  # SkillStore, for /skills list/approve/reject
+    auto_compact_config: Any = None  # AutoCompactConfig, for /compact flush gating
     # Renders harness type + resolved node→model table, for /harness (C9).
     harness_info: Callable[[], str] | None = None
 

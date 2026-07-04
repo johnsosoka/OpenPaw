@@ -1,13 +1,64 @@
 """Auto-compaction and context-overflow recovery logic."""
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from openpaw.channels.base import ChannelAdapter
 from openpaw.core.config.models import AutoCompactConfig
-from openpaw.core.prompts.commands import AUTO_COMPACT_TEMPLATE, SUMMARIZE_PROMPT
+from openpaw.core.prompts.commands import (
+    AUTO_COMPACT_TEMPLATE,
+    FLUSH_NOOP_MARKER,
+    FLUSH_NOTE_TEMPLATE,
+    FLUSH_PROMPT_TEMPLATE,
+    SUMMARIZE_PROMPT,
+)
 from openpaw.core.utils import is_context_overflow_error
 from openpaw.runtime.session.manager import SessionManager
+
+
+async def run_flush_turn(
+    agent_runner: Any,
+    thread_id: str,
+    logger: logging.Logger,
+) -> str | None:
+    """Give the agent one turn to persist working context before compaction.
+
+    Injects a flush instruction into the conversation that is about to be
+    compacted. The agent writes anything it must not lose (task state,
+    decisions, gathered facts, open threads) to a workspace file, or replies
+    with a no-op marker if nothing needs saving.
+
+    Fail-open by design: a failing or timed-out flush turn never blocks
+    compaction — the error is logged and compaction proceeds without a flush.
+
+    Args:
+        agent_runner: Agent runner used for the flush turn (same thread).
+        thread_id: The thread that is about to be compacted.
+        logger: Logger for the fail-open warning path.
+
+    Returns:
+        The workspace-relative flush file path if the agent saved context,
+        None if nothing was saved or the flush turn failed.
+    """
+    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    flush_path = f"memory/compact-flush-{timestamp}.md"
+    try:
+        reply = await agent_runner.run(
+            message=FLUSH_PROMPT_TEMPLATE.format(flush_path=flush_path),
+            thread_id=thread_id,
+        )
+        if reply and FLUSH_NOOP_MARKER in reply:
+            logger.debug(f"Pre-compact flush: nothing to save for {thread_id}")
+            return None
+        logger.info(f"Pre-compact flush saved to {flush_path} for {thread_id}")
+        return flush_path
+    except Exception as e:
+        logger.warning(
+            f"Pre-compact flush turn failed for {thread_id}, "
+            f"proceeding to compact: {e}"
+        )
+        return None
 
 
 class AutoCompactor:
@@ -77,12 +128,17 @@ class AutoCompactor:
                 f"for session {session_key}"
             )
 
+            # Flush turn: let the agent save durable context before it is lost
+            flush_path: str | None = None
+            if self._auto_compact_config.flush:
+                flush_path = await run_flush_turn(agent_runner, thread_id, self._logger)
+
             # Parse conversation_id from thread_id (format: "{session_key}:{conversation_id}")
             # session_key contains one colon (e.g., "telegram:123"), so split from the right
             parts = thread_id.rsplit(":", 1)
             conversation_id = parts[-1] if len(parts) == 2 else thread_id
 
-            # Archive the current conversation
+            # Archive the current conversation (includes the flush exchange)
             await self._conversation_archiver.archive(
                 checkpointer=agent_runner.checkpointer,
                 thread_id=thread_id,
@@ -103,6 +159,8 @@ class AutoCompactor:
 
             # Inject summary into new thread
             summary_message = AUTO_COMPACT_TEMPLATE.format(summary=summary)
+            if flush_path:
+                summary_message += FLUSH_NOTE_TEMPLATE.format(flush_path=flush_path)
             await agent_runner.run(
                 message=summary_message,
                 thread_id=new_thread_id,

@@ -798,12 +798,21 @@ class MessageProcessor:
                 f"for session {session_key}"
             )
 
+            # Flush turn: let the agent save durable context before it is lost
+            from openpaw.workspace.processors.compactor import run_flush_turn
+
+            flush_path: str | None = None
+            if getattr(self._auto_compact_config, "flush", True):
+                flush_path = await run_flush_turn(
+                    self._agent_runner, thread_id, self._logger
+                )
+
             # Parse conversation_id from thread_id (format: "{session_key}:{conversation_id}")
             # session_key contains one colon (e.g., "telegram:123"), so split from the right
             parts = thread_id.rsplit(":", 1)
             conversation_id = parts[-1] if len(parts) == 2 else thread_id
 
-            # Archive the current conversation
+            # Archive the current conversation (includes the flush exchange)
             await self._conversation_archiver.archive(
                 checkpointer=self._agent_runner.checkpointer,
                 thread_id=thread_id,
@@ -824,8 +833,10 @@ class MessageProcessor:
             new_thread_id = f"{session_key}:{new_conversation_id}"
 
             # Inject summary into new thread
-            from openpaw.core.prompts.commands import AUTO_COMPACT_TEMPLATE
+            from openpaw.core.prompts.commands import AUTO_COMPACT_TEMPLATE, FLUSH_NOTE_TEMPLATE
             summary_message = AUTO_COMPACT_TEMPLATE.format(summary=summary)
+            if flush_path:
+                summary_message += FLUSH_NOTE_TEMPLATE.format(flush_path=flush_path)
             await self._agent_runner.run(
                 message=summary_message,
                 thread_id=new_thread_id,
