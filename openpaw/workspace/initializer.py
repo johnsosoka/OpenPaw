@@ -342,10 +342,17 @@ class WorkspaceInitializer:
             # harness nodes via AgentFactory.set_status_emitter below.
             status_bus = StatusBus(self._workspace.name)
             status_bus.add_sink(SessionLogSink(self._workspace.path))
+            cfg = self._workspace.config
+            start_label = (
+                "Considering..."
+                if cfg is not None and cfg.harness.type == "balanced"
+                else "Starting work..."
+            )
             status_update_middleware = StatusUpdateMiddleware(
                 status_update_config,
                 emitter=status_bus,
                 workspace=self._workspace.name,
+                start_label=start_label,
             )
             # Plan/node events (ultra harness) render through the same
             # middleware via its armed per-run context (T2.7).

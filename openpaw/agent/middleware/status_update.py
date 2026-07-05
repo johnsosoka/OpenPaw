@@ -163,6 +163,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         config: StatusUpdatesConfig,
         emitter: StatusEmitter | None = None,
         workspace: str = "",
+        start_label: str = "Starting work...",
     ) -> None:
         """Initialize the middleware.
 
@@ -172,10 +173,14 @@ class StatusUpdateMiddleware(AgentMiddleware):
             emitter: Optional StatusEmitter (ADR-106). When set, hooks emit
                 machine-readable StatusEvents alongside channel rendering.
             workspace: Workspace name stamped onto emitted events.
+            start_label: Label shown at the first run start. Balanced harness
+                passes "Considering..." (its first turn decides answer vs. plan);
+                react/default keeps "Starting work...".
         """
         self._config = config
         self._emitter = emitter
         self._workspace = workspace
+        self._start_label = start_label
         self._run_id: str = uuid4().hex
         self._channel: Any | None = None
         self._session_key: str | None = None
@@ -496,7 +501,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
             return None
 
         label = (
-            "Starting work..."
+            self._start_label
             if getattr(self, "_run_count", 1) == 1
             else "Continuing work..."
         )
