@@ -265,6 +265,10 @@ class PlanEventBridge(AgentMiddleware):
         # ponytail: cosmetic revision counter, reset on plan.created; a
         # process restart mid-plan restarts the "(rev n)" numbering only.
         self._revisions: dict[str, int] = {}
+        # Module-agnostic route intents ("plan"/"ideate") already announced
+        # this run, per session — the two-tier UX (route line, then module
+        # specifics). Cleared in arm() so each new run re-announces.
+        self._announced_intents: dict[str, set[str]] = {}
 
     @property
     def reflector(self) -> "CheckpointReflector | None":
@@ -280,6 +284,7 @@ class PlanEventBridge(AgentMiddleware):
         arming one session never re-stamps another's in-flight events.
         """
         self._run_ids[session_key or ""] = run_id
+        self._announced_intents[session_key or ""] = set()
 
     @staticmethod
     def _identity(request: Any) -> tuple[str | None, str | None]:
@@ -306,6 +311,8 @@ class PlanEventBridge(AgentMiddleware):
         tool_name = request.tool_call.get("name")
         if tool_name == "explore_lenses":
             result = await handler(request)
+            _, session_key = self._identity(request)
+            await self._announce_intent("ideate", session_key)  # before the module line
             await self._announce_lenses(request)
             return result
         if tool_name != "write_todos":
@@ -329,6 +336,10 @@ class PlanEventBridge(AgentMiddleware):
             events, self._revisions[revision_key] = compute_plan_events(
                 prev, new, self._revisions.get(revision_key, 0)
             )
+            if any(kind is StatusEventKind.PLAN_CREATED for kind, _ in events):
+                # First plan of the run: announce the planning intent before
+                # the checklist renders (not on later revisions / step flips).
+                await self._announce_intent("plan", session_key)
             for kind, payload in events:
                 await self._emit(kind, payload, session_key)
         except Exception:
@@ -339,6 +350,21 @@ class PlanEventBridge(AgentMiddleware):
                 events, new, request, result, thread_id, session_key
             )
         return result
+
+    async def _announce_intent(self, route: str, session_key: str | None) -> None:
+        """Emit the module-agnostic route line once per run per session.
+
+        Mirrors ultra's post-triage route announcement (NODE_ENTERED carrying
+        a ``route``, node left None) so PlanStatusRenderer draws the same
+        two-tier UX — the intent line ("I need to form a plan for this...")
+        before any module-specific narration. Fires at most once per
+        (run, route) per session; arm() clears the set for a fresh run.
+        """
+        announced = self._announced_intents.setdefault(session_key or "", set())
+        if route in announced:
+            return
+        announced.add(route)
+        await self._emit(StatusEventKind.NODE_ENTERED, {"route": route}, session_key)
 
     async def _announce_lenses(self, request: Any) -> None:
         """Emit the ideonomy lenses_selected phase for an explore_lenses call.

@@ -266,6 +266,22 @@ async def test_triage_decision_announces_route():
 
 
 @pytest.mark.asyncio
+async def test_nodeless_route_renders_shared_route_line():
+    """Balanced's tool-time intent carries a route with node=None; it renders
+    the same _ROUTE_LINES text as ultra's triage route. A resume_step_id on a
+    node=None event is NOT the triage resume path — it still renders the route
+    line (only node=='triage' gets 'Resuming the plan...')."""
+    channel = MockChannel()
+    mw = _make_middleware(channel)
+
+    await mw.handle_plan_event(_event(StatusEventKind.NODE_ENTERED, {"route": "plan"}))
+    await mw.handle_plan_event(_event(StatusEventKind.NODE_ENTERED, {"route": "ideate"}))
+
+    assert channel.sent_messages[0][1] == "I need to form a plan for this..."
+    assert channel.edited_messages[0][2] == "I need to think about this creatively..."
+
+
+@pytest.mark.asyncio
 async def test_module_selected_announces_creative_and_planning_only():
     channel = MockChannel()
     mw = _make_middleware(channel)

@@ -274,9 +274,11 @@ async def test_bridge_emits_stamped_events() -> None:
     assert result is command
     handler.assert_awaited_once_with(request)
     assert emitter.kinds() == [
+        StatusEventKind.NODE_ENTERED,  # module-agnostic "plan" intent, first
         StatusEventKind.PLAN_CREATED,
         StatusEventKind.PLAN_STEP_STARTED,
     ]
+    assert emitter.events[0].payload == {"route": "plan"}
     for event in emitter.events:
         assert event.workspace == WORKSPACE
         assert event.session_key == SESSION
@@ -455,8 +457,12 @@ async def test_explore_lenses_call_emits_lenses_selected_phase() -> None:
 
     assert result == "lens scaffold"
     handler.assert_awaited_once_with(request)
-    assert emitter.kinds() == [StatusEventKind.MODULE_PHASE]
-    event = emitter.events[0]
+    # Two-tier UX: the module-agnostic ideate intent precedes the lens phase.
+    assert emitter.kinds() == [StatusEventKind.NODE_ENTERED, StatusEventKind.MODULE_PHASE]
+    intent = emitter.events[0]
+    assert intent.payload == {"route": "ideate"}
+    assert intent.node is None
+    event = emitter.events[1]
     expected_themes = " · ".join(lens.theme for lens in select_lenses(topic, 3))
     assert event.payload == {
         "kind": "creative",
@@ -483,6 +489,128 @@ async def test_explore_lenses_emission_failure_never_breaks_the_tool_call() -> N
         runtime=make_runtime(f"{SESSION}:conv-1"),
     )
     assert await bridge.awrap_tool_call(request, handler) == "scaffold"
+
+
+# ---------------------------------------------------------------------------
+# Module-agnostic route intent (two-tier UX: route line, then module specifics)
+# ---------------------------------------------------------------------------
+
+
+def _lens_request(topic: str = "t", session: str = SESSION) -> Any:
+    return SimpleNamespace(
+        tool_call={"name": "explore_lenses", "args": {"topic": topic}, "id": "c1"},
+        state={},
+        runtime=make_runtime(f"{session}:conv-1"),
+    )
+
+
+async def test_ideate_intent_fires_once_per_run() -> None:
+    """A second explore_lenses in the same run does not re-announce ideate."""
+    emitter = CaptureEmitter()
+    bridge = PlanEventBridge(emitter=emitter, workspace=WORKSPACE)
+    bridge.arm(session_key=SESSION, run_id="run-1")
+    handler = AsyncMock(return_value="scaffold")
+
+    await bridge.awrap_tool_call(_lens_request(), handler)
+    await bridge.awrap_tool_call(_lens_request(), handler)
+
+    routes = [e for e in emitter.events if e.kind is StatusEventKind.NODE_ENTERED]
+    assert len(routes) == 1
+    assert routes[0].payload == {"route": "ideate"}
+    # Both calls still produced their module.phase line.
+    phases = [e for e in emitter.events if e.kind is StatusEventKind.MODULE_PHASE]
+    assert len(phases) == 2
+
+
+async def test_ideate_intent_re_announces_after_arm() -> None:
+    """A fresh run (re-arm) resets the announced set, so ideate fires again."""
+    emitter = CaptureEmitter()
+    bridge = PlanEventBridge(emitter=emitter, workspace=WORKSPACE)
+    handler = AsyncMock(return_value="scaffold")
+
+    bridge.arm(session_key=SESSION, run_id="run-1")
+    await bridge.awrap_tool_call(_lens_request(), handler)
+    bridge.arm(session_key=SESSION, run_id="run-2")
+    await bridge.awrap_tool_call(_lens_request(), handler)
+
+    routes = [e for e in emitter.events if e.kind is StatusEventKind.NODE_ENTERED]
+    assert [e.run_id for e in routes] == ["run-1", "run-2"]
+
+
+async def test_plan_intent_only_on_first_plan_not_revisions() -> None:
+    """The plan intent fires on plan.created, not on later step flips/revisions."""
+    emitter = CaptureEmitter()
+    bridge = PlanEventBridge(emitter=emitter, workspace=WORKSPACE)
+    bridge.arm(session_key=SESSION, run_id="run-1")
+    handler = AsyncMock(return_value=todo_command())
+
+    # First write creates the plan -> intent.
+    await bridge.awrap_tool_call(
+        make_request(todos=[todo("A", "in_progress"), todo("B")]), handler
+    )
+    # Step flip (A done, B started): no new plan, no re-announce.
+    await bridge.awrap_tool_call(
+        make_request(
+            todos=[todo("A", "completed"), todo("B", "in_progress")],
+            state_todos=[todo("A", "in_progress"), todo("B")],
+        ),
+        handler,
+    )
+    # Content revision: still no re-announce.
+    await bridge.awrap_tool_call(
+        make_request(
+            todos=[todo("A", "completed"), todo("B", "in_progress"), todo("C")],
+            state_todos=[todo("A", "completed"), todo("B", "in_progress")],
+        ),
+        handler,
+    )
+
+    routes = [e for e in emitter.events if e.kind is StatusEventKind.NODE_ENTERED]
+    assert len(routes) == 1
+    assert routes[0].payload == {"route": "plan"}
+    # Intent precedes plan.created in emission order.
+    assert emitter.kinds()[0] is StatusEventKind.NODE_ENTERED
+    assert emitter.kinds()[1] is StatusEventKind.PLAN_CREATED
+
+
+async def test_plan_intent_re_announces_after_arm() -> None:
+    emitter = CaptureEmitter()
+    bridge = PlanEventBridge(emitter=emitter, workspace=WORKSPACE)
+    handler = AsyncMock(return_value=todo_command())
+
+    bridge.arm(session_key=SESSION, run_id="run-1")
+    await bridge.awrap_tool_call(make_request(todos=[todo("A", "in_progress")]), handler)
+    bridge.arm(session_key=SESSION, run_id="run-2")
+    await bridge.awrap_tool_call(make_request(todos=[todo("B", "in_progress")]), handler)
+
+    routes = [e for e in emitter.events if e.kind is StatusEventKind.NODE_ENTERED]
+    assert [e.run_id for e in routes] == ["run-1", "run-2"]
+
+
+async def test_route_intent_is_per_session() -> None:
+    """Two sessions on one bridge each announce their own intent independently."""
+    emitter = CaptureEmitter()
+    bridge = PlanEventBridge(emitter=emitter, workspace=WORKSPACE)
+    session_a, session_b = "telegram:111", "telegram:222"
+    handler = AsyncMock(return_value=todo_command())
+
+    bridge.arm(session_key=session_a, run_id="run-A")
+    bridge.arm(session_key=session_b, run_id="run-B")
+
+    await bridge.awrap_tool_call(
+        make_request(todos=[todo("A", "in_progress")], thread_id=f"{session_a}:conv"),
+        handler,
+    )
+    await bridge.awrap_tool_call(
+        make_request(todos=[todo("B", "in_progress")], thread_id=f"{session_b}:conv"),
+        handler,
+    )
+
+    routes = [e for e in emitter.events if e.kind is StatusEventKind.NODE_ENTERED]
+    assert {(e.session_key, e.run_id) for e in routes} == {
+        (session_a, "run-A"),
+        (session_b, "run-B"),
+    }
 
 
 async def test_malformed_args_never_break_the_tool_call() -> None:
@@ -512,6 +640,7 @@ async def test_request_without_runtime_is_fail_open() -> None:
     )
 
     assert emitter.kinds() == [
+        StatusEventKind.NODE_ENTERED,  # "plan" intent, even out-of-graph
         StatusEventKind.PLAN_CREATED,
         StatusEventKind.PLAN_STEP_STARTED,
     ]

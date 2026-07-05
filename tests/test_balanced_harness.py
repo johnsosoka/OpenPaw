@@ -406,10 +406,21 @@ async def test_todos_checkpoint_per_thread_and_bridge_emits(tmp_path: Path) -> N
     # Todos checkpointed on THIS thread, absent on others.
     assert await harness.get_todos("telegram:1:conv1") == todos
     assert await harness.get_todos("telegram:1:conv2") == []
-    # Bridge emitted the checklist events with run identity stamped.
+    # Bridge emitted the checklist events with run identity stamped, preceded
+    # by the module-agnostic planning intent (two-tier UX: route line, then
+    # the checklist).
     kinds = [e.kind for e in emitter.events]
     assert StatusEventKind.PLAN_CREATED in kinds
     assert StatusEventKind.PLAN_STEP_STARTED in kinds
+    intent = next(
+        e
+        for e in emitter.events
+        if e.kind is StatusEventKind.NODE_ENTERED and e.payload == {"route": "plan"}
+    )
+    assert kinds.index(StatusEventKind.NODE_ENTERED) < kinds.index(
+        StatusEventKind.PLAN_CREATED
+    )
+    assert intent.node is None
     assert all(e.session_key == "telegram:1" for e in emitter.events)
     assert all(e.workspace == "balanced-test" for e in emitter.events)
 

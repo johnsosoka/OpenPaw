@@ -202,8 +202,12 @@ class PlanStatusRenderer:
             return None
 
         if kind is StatusEventKind.NODE_ENTERED:
-            if event.node == "triage" and "route" in payload:
-                if payload.get("resume_step_id"):
+            if "route" in payload:
+                # triage's resume-jump keeps its bespoke line; every other
+                # route renders the shared _ROUTE_LINES vocabulary — ultra's
+                # triage (node=="triage") and balanced's tool-time intent
+                # (node is None) alike.
+                if event.node == "triage" and payload.get("resume_step_id"):
                     return "Resuming the plan..."
                 return _ROUTE_LINES.get(str(payload.get("route")))
             return _PHASE_LINES.get(event.node or "")
