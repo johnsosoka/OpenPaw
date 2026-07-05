@@ -70,12 +70,13 @@ def _event(
     payload: dict[str, Any] | None = None,
     session_key: str | None = SESSION,
     node: str | None = None,
+    run_id: str = "run-1",
 ) -> StatusEvent:
     return StatusEvent(
         kind=kind,
         workspace="ws",
         session_key=session_key,
-        run_id="run-1",
+        run_id=run_id,
         node=node,
         payload=payload or {},
     )
@@ -673,16 +674,119 @@ async def test_redelivered_plan_created_is_idempotent_same_run():
 
 @pytest.mark.asyncio
 async def test_new_run_plan_created_starts_fresh_message():
-    """Ultra parity: each run legitimately starts a NEW plan message. After a
-    reset (per-run set_context), a plan.created sends a fresh checklist."""
+    """Ultra parity: each run legitimately starts a NEW plan message.
+
+    The renderer no longer resets on the run boundary (set_context), so ultra
+    parity rides on the run_id: each ultra run emits its own plan.created with
+    a fresh run_context.run_id, which re-keys (run_id, signature) and starts a
+    new checklist — even for byte-identical plan content."""
     channel = NoOpEditChannel()
     mw = _make_middleware(channel)
 
-    await mw.handle_plan_event(_event(StatusEventKind.PLAN_CREATED, _plan_step1_in_progress()))
-    mw.set_context(channel, SESSION)  # MessageProcessor re-arms per run (resets renderer)
     await mw.handle_plan_event(
-        _event(StatusEventKind.PLAN_CREATED, _plan_step1_in_progress(), session_key=SESSION)
+        _event(StatusEventKind.PLAN_CREATED, _plan_step1_in_progress(), run_id="run-1")
+    )
+    mw.reset()  # MessageProcessor tears down the run
+    mw.set_context(channel, SESSION)  # ...then re-arms for the next run
+    await mw.handle_plan_event(
+        _event(StatusEventKind.PLAN_CREATED, _plan_step1_in_progress(), run_id="run-2")
     )
 
     checklists = [c for _, c in channel.sent_messages if "Plan" in c]
     assert len(checklists) == 2  # a fresh message per run, as ultra expects
+
+
+# ---------------------------------------------------------------------------
+# Multi-turn balanced continuation (regression: the final step tick is lost
+# when a todo plan spans more than one user turn — the renderer used to be
+# reset on the run boundary, orphaning the checklist)
+# ---------------------------------------------------------------------------
+
+
+def _multi_step_plan(statuses: list[str], revision: int = 0) -> dict[str, Any]:
+    """A todo-driven (no objective) plan payload with per-step statuses."""
+    return {
+        "plan": {
+            "objective": "",
+            "revision": revision,
+            "steps": [
+                {"id": str(i), "description": f"Step {i}", "status": status}
+                for i, status in enumerate(statuses, start=1)
+            ],
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_balanced_plan_step_survives_turn_boundary():
+    """A balanced plan spanning two turns must tick its final step.
+
+    Turn 1 renders a checklist with step 6 in_progress. The run ends
+    (reset -> channel dropped) and the next user turn re-arms (set_context).
+    Turn 2 emits ONLY a bare plan.step_completed for step 6 (no plan.created —
+    the todo list persists in thread state, so the bridge diffs a pure status
+    flip). The SAME checklist must edit to [x] 6, with no second message."""
+    channel = NoOpEditChannel()
+    mw = _make_middleware(channel)
+
+    # Turn 1: steps 1-5 done, step 6 in_progress.
+    await mw.handle_plan_event(
+        _event(
+            StatusEventKind.PLAN_CREATED,
+            _multi_step_plan(["done"] * 5 + ["in_progress"]),
+            run_id="run-1",
+        )
+    )
+    checklists = [c for _, c in channel.sent_messages if "Plan" in c]
+    assert len(checklists) == 1
+    assert "[~] 6. Step 6" in checklists[0]
+
+    # Run boundary: MessageProcessor tears the run down, next turn re-arms.
+    mw.reset()
+    mw.set_context(channel, SESSION)
+
+    # Turn 2: the continuing run flips step 6 to completed (bare step event,
+    # new run_id — the plan was NOT recreated so no plan.created is emitted).
+    await mw.handle_plan_event(
+        _event(
+            StatusEventKind.PLAN_STEP_COMPLETED,
+            {"step_id": "6", "description": "Step 6"},
+            run_id="run-2",
+        )
+    )
+
+    # Same checklist edited to the final tick; no duplicate message spawned.
+    checklists = [c for _, c in channel.sent_messages if "Plan" in c]
+    assert len(checklists) == 1
+    assert len(channel.edited_messages) == 1
+    _, edited_id, text = channel.edited_messages[-1]
+    assert edited_id == "1"  # the turn-1 checklist message
+    assert "[x] 6. Step 6" in text
+
+
+@pytest.mark.asyncio
+async def test_new_balanced_task_after_completed_plan_starts_fresh_message():
+    """A genuinely new balanced task (fresh plan.created, different content,
+    new run_id) after a finished plan starts a NEW checklist — no bleed from
+    the previous task's surviving renderer state."""
+    channel = NoOpEditChannel()
+    mw = _make_middleware(channel)
+
+    # Task 1 completes.
+    await mw.handle_plan_event(
+        _event(StatusEventKind.PLAN_CREATED, _multi_step_plan(["done", "done"]), run_id="run-1")
+    )
+    mw.reset()
+    mw.set_context(channel, SESSION)
+
+    # Task 2: a fresh plan.created with different steps and a new run_id.
+    await mw.handle_plan_event(
+        _event(
+            StatusEventKind.PLAN_CREATED,
+            _multi_step_plan(["in_progress", "pending", "pending"]),
+            run_id="run-2",
+        )
+    )
+
+    checklists = [c for _, c in channel.sent_messages if "Plan" in c]
+    assert len(checklists) == 2  # distinct message for the distinct task

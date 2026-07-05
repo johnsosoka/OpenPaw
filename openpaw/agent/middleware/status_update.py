@@ -229,7 +229,13 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._status_message_id = None
         self._steer_notified = False
         self._harness_narrating = False
-        self._plan_renderer.reset()
+        # Plan-renderer state is NOT reset on the run boundary: a balanced
+        # todo plan persists across turns, so a continuing run's bare step
+        # events must keep editing the SAME checklist. plan.created is the
+        # sole reset trigger (keyed on (run_id, signature) in the renderer) —
+        # ultra's fresh per-run plan.created self-resets unchanged, while a
+        # genuinely new balanced plan (new run_id, or cleared+recreated
+        # todos) re-keys and starts a fresh message.
 
     def reset(self) -> None:
         """Reset per-invocation state. Called by MessageProcessor after each run."""
@@ -242,9 +248,10 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._status_message_id = None
         self._steer_notified = False
         self._harness_narrating = False
-        # Dropping renderer state stops further edits; the plan message
-        # itself stays in the channel as the record of what was done.
-        self._plan_renderer.reset()
+        # Plan-renderer state intentionally NOT reset (see set_context): the
+        # checklist survives the run boundary so a balanced plan spanning
+        # multiple turns keeps ticking the same message. plan.created re-keys
+        # it for a genuinely new plan.
         # _run_id intentionally NOT cleared: late sub-agent events after
         # reset() still correlate with the run that dispatched them.
 

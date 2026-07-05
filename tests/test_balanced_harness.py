@@ -526,6 +526,89 @@ async def test_balanced_plan_checklist_renders_once_end_to_end(tmp_path: Path) -
     assert len(checklists) == 1, channel.sends
 
 
+async def test_balanced_plan_final_tick_survives_two_turns_end_to_end(
+    tmp_path: Path,
+) -> None:
+    """Regression (multi-turn checklist): a balanced plan spanning two user
+    turns must tick its final step. Turn 1 leaves the last step in_progress;
+    the run ends and the next turn re-arms (reset -> set_context, as
+    MessageProcessor does). Turn 2's write_todos flips the last step to
+    completed — a bare plan.step_completed (the todo list persists in the
+    checkpointer, so no plan.created). The SAME checklist must edit to the
+    final [x], with no duplicate message. Driven through the real bus ->
+    PlanChannelSink -> StatusUpdateMiddleware -> PlanStatusRenderer."""
+    from openpaw.agent.middleware.status_update import StatusUpdateMiddleware
+    from openpaw.core.config.models import StatusUpdatesConfig
+    from openpaw.runtime.status_bus import PlanChannelSink, StatusBus
+
+    turn1: list[Todo] = [
+        {"content": "Draft outline", "status": "completed"},
+        {"content": "Write section", "status": "completed"},
+        {"content": "Final review", "status": "in_progress"},
+    ]
+    turn2 = [{**t, "status": "completed"} if t["content"] == "Final review" else t for t in turn1]
+    model = ToolCallingFakeModel(
+        messages=iter(
+            [
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "write_todos", "args": {"todos": turn1}, "id": "c1"}],
+                ),
+                AIMessage(content="turn 1 done"),
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "write_todos", "args": {"todos": turn2}, "id": "c2"}],
+                ),
+                AIMessage(content="turn 2 done"),
+            ]
+        )
+    )
+
+    bus = StatusBus("balanced-test")
+    mw = StatusUpdateMiddleware(
+        StatusUpdatesConfig(enabled=True, min_interval_seconds=0),
+        emitter=bus,
+        workspace="balanced-test",
+    )
+    bus.add_sink(PlanChannelSink(mw))
+
+    workspace = make_workspace(tmp_path, config=balanced_config())
+    factory = AgentFactory(
+        workspace=workspace,
+        model="openai:gpt-4o-mini",
+        api_key="test",
+        max_turns=10,
+        temperature=0.7,
+        region=None,
+        timeout_seconds=30.0,
+        builtin_tools=[],
+        workspace_tools=[],
+        enabled_builtin_names=[],
+        extra_model_kwargs={},
+        middleware=[mw],
+        logger=logging.getLogger("test"),
+    )
+    factory.set_status_emitter(bus)
+
+    channel = _NoOpEditChannel()
+
+    with patch.object(AgentRunner, "_create_model", return_value=model):
+        harness = factory.create_harness(checkpointer=MemorySaver())
+
+        # Turn 1: same thread; leaves "Final review" in_progress.
+        mw.set_context(channel, "telegram:1")
+        await harness.run("start the doc", thread_id="telegram:1:conv1")
+        mw.reset()
+
+        # Turn 2: continue on the SAME thread; ticks the final step.
+        mw.set_context(channel, "telegram:1")
+        await harness.run("finish it", thread_id="telegram:1:conv1")
+
+    checklists = [s for s in channel.sends if "Plan" in s]
+    assert len(checklists) == 1, channel.sends  # no duplicate across turns
+    assert any("[x] 3. Final review" in e for e in channel.edits), channel.edits
+
+
 # ---------------------------------------------------------------------------
 # Config validation
 # ---------------------------------------------------------------------------

@@ -93,7 +93,14 @@ def _plan_signature(plan: Any) -> tuple[Any, ...]:
 
 
 class PlanStatusRenderer:
-    """Maintains one plan checklist message per run, edited in place.
+    """Maintains one plan checklist message per plan, edited in place.
+
+    State survives run/turn boundaries — the middleware no longer resets it —
+    so a balanced todo plan spanning multiple user turns keeps editing the
+    same checklist. ``plan.created`` is the sole reset trigger: keyed on
+    ``(run_id, plan signature)``, a fresh run's plan (ultra every run; a
+    balanced new/cleared-and-recreated plan) re-keys and starts a new message,
+    while a continuing run's bare step events keep the existing one.
 
     State is re-rendered wholesale from every ``plan.*`` payload (no diffing).
     A local last-event-wins overlay tracks live step transitions between full
@@ -126,16 +133,6 @@ class PlanStatusRenderer:
         # for plan.created so a re-delivered/re-armed identical plan edits in
         # place instead of spawning a second checklist message.
         self._shown: tuple[str | None, tuple[Any, ...]] | None = None
-
-    def reset(self) -> None:
-        """Drop per-run state. The completed run's channel message survives."""
-        self._message_id = None
-        self._objective = ""
-        self._revision = 0
-        self._steps = []
-        self._overlay = {}
-        self._last_rendered = None
-        self._shown = None
 
     async def handle(
         self, event: StatusEvent, channel: Any, session_key: str
