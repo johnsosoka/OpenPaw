@@ -107,6 +107,7 @@ def _create_workspace(
     name: str,
     channel: str | None,
     model: str | None,
+    harness: str = "balanced",
 ) -> Path:
     """Create a new workspace directory with all required template files.
 
@@ -115,6 +116,7 @@ def _create_workspace(
         name: Workspace name (used as the directory name and in templates).
         channel: Optional channel type for agent.yaml.
         model: Optional model string for agent.yaml.
+        harness: Reasoning harness tier (``react``, ``balanced``, or ``ultra``).
 
     Returns:
         Path to the newly created workspace directory.
@@ -160,7 +162,7 @@ def _create_workspace(
 
     # Write config files under config/.
     (workspace_path / str(AGENT_YAML)).write_text(
-        _build_agent_yaml(name, channel, model), encoding="utf-8"
+        _build_agent_yaml(name, channel, model, harness), encoding="utf-8"
     )
     (workspace_path / str(DOT_ENV)).write_text(TEMPLATE_ENV, encoding="utf-8")
 
@@ -225,7 +227,7 @@ def _print_next_steps(
         print(f"  Config: {config_path} (global defaults — edit as needed)")
     print()
     print("Next steps:")
-    print("  1. Edit config/agent.yaml with your model and channel settings")
+    print("  1. Edit config/agent.yaml with your model, channel, and harness settings")
     print("  2. Add API keys to config/.env")
     print("  3. Customize agent/AGENT.md, agent/USER.md, and agent/SOUL.md")
     print("  4. Review agent/team/ for default sub-agent profiles (edit or remove)")

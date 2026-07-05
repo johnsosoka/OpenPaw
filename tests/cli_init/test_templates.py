@@ -86,6 +86,21 @@ class TestBuildAgentYaml:
         yaml_text = _build_agent_yaml("mybot", None, "mycustom:my-model")
         assert "# Or use shorthand with a configured provider:" not in yaml_text
 
+    def test_default_harness_is_balanced(self) -> None:
+        yaml_text = _build_agent_yaml("mybot", None, None)
+        parsed = yaml.safe_load(yaml_text)
+        assert parsed["harness"]["type"] == "balanced"
+
+    @pytest.mark.parametrize("harness", ["react", "balanced", "ultra"])
+    def test_harness_type_emitted(self, harness: str) -> None:
+        yaml_text = _build_agent_yaml("mybot", None, None, harness)
+        parsed = yaml.safe_load(yaml_text)
+        assert parsed["harness"]["type"] == harness
+
+    def test_harness_comment_block_present(self) -> None:
+        yaml_text = _build_agent_yaml("mybot", None, None, "balanced")
+        assert "# Reasoning harness (react | balanced | ultra):" in yaml_text
+
 
 class TestParseModelString:
     """Tests for _parse_model_string()."""

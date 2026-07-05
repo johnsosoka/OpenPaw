@@ -10,6 +10,7 @@ import yaml
 from openpaw.cli_init.commands import (
     _handle_init,
     _handle_list,
+    _resolve_harness_choice,
     dispatch_command,
 )
 
@@ -80,6 +81,39 @@ class TestHandleInit:
         _handle_init(["agent_y", "--path", str(tmp_path), "--channel", "telegram"])
         data = yaml.safe_load((tmp_path / "agent_y" / "config" / "agent.yaml").read_text())
         assert data["channel"]["type"] == "telegram"
+
+    def test_harness_flag_passed_through(self, tmp_path: Path) -> None:
+        _handle_init(["agent_h", "--path", str(tmp_path), "--harness", "ultra"])
+        data = yaml.safe_load((tmp_path / "agent_h" / "config" / "agent.yaml").read_text())
+        assert data["harness"]["type"] == "ultra"
+
+    def test_default_harness_non_tty_is_balanced(self, tmp_path: Path) -> None:
+        """Without --harness on a non-TTY stdin/stdout, the default is balanced."""
+        with patch.object(sys.stdin, "isatty", return_value=False):
+            _handle_init(["agent_d", "--path", str(tmp_path)])
+        data = yaml.safe_load((tmp_path / "agent_d" / "config" / "agent.yaml").read_text())
+        assert data["harness"]["type"] == "balanced"
+
+
+class TestResolveHarnessChoice:
+    """Unit tests for _resolve_harness_choice() (TTY-free selection logic)."""
+
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("1", "react"),
+            ("react", "react"),
+            ("2", "balanced"),
+            ("balanced", "balanced"),
+            ("", "balanced"),
+            ("3", "ultra"),
+            ("ultra", "ultra"),
+            ("nonsense", "balanced"),
+            ("  ULTRA  ", "ultra"),
+        ],
+    )
+    def test_resolve(self, raw: str, expected: str) -> None:
+        assert _resolve_harness_choice(raw) == expected
 
 
 class TestHandleList:

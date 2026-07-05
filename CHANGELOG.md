@@ -27,6 +27,7 @@ The 0.5.0 theme: agents that **plan visibly and learn durably**. A pluggable age
 - **AgentHarness seam** (ADR-101): `MessageProcessor`/`WorkspaceRunner`/commands now program against a topology-agnostic protocol; all `create_agent` internals live behind it.
 - `harness.execution.timeout_seconds` — per-workspace wall-clock budget for harness runs (ultra and balanced), overriding the workspace timeout (planned multi-step runs need more headroom than single react turns).
 - **Flush-before-compact**: before auto-compact or `/compact` summarizes a conversation, the agent gets one turn to save durable working context to a workspace file (`memory/compact-flush-*.md`); on by default, disable with `auto_compact.flush: false`.
+- `openpaw init` now selects a harness tier (`--harness`, interactive prompt when a TTY), defaulting to balanced.
 
 ### Changed
 

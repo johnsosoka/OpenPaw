@@ -14,6 +14,44 @@ from .scaffolder import (
 )
 from .templates import _parse_model_string
 
+_HARNESS_CHOICES = ("react", "balanced", "ultra")
+_DEFAULT_HARNESS = "balanced"
+_HARNESS_MENU = {"1": "react", "2": "balanced", "3": "ultra"}
+
+
+def _resolve_harness_choice(raw: str) -> str:
+    """Map raw interactive input to a harness name, defaulting to balanced.
+
+    Accepts either the menu number (``1``/``2``/``3``) or the harness name.
+    Empty or unrecognized input falls back to ``balanced``.
+
+    Args:
+        raw: Raw user input from the interactive prompt.
+
+    Returns:
+        A valid harness tier name.
+    """
+    choice = raw.strip().lower()
+    if choice in _HARNESS_MENU:
+        return _HARNESS_MENU[choice]
+    if choice in _HARNESS_CHOICES:
+        return choice
+    return _DEFAULT_HARNESS
+
+
+def _prompt_harness() -> str:
+    """Prompt the user to choose a reasoning harness (interactive TTY only).
+
+    Returns:
+        The chosen harness tier, defaulting to balanced on empty/invalid input.
+    """
+    print("Choose a reasoning harness for this agent:")
+    print("  1) react    — fast single-loop, no plan tracking")
+    print("  2) balanced — single-loop with a live plan checklist + creative lenses (recommended)")
+    print("  3) ultra    — full planning graph, per-node models, step isolation (most capable, most expensive)")
+    raw = input("Harness [2]: ")
+    return _resolve_harness_choice(raw)
+
 
 def _handle_init(args: list[str]) -> None:
     """Handle the ``openpaw init <name>`` command.
@@ -45,8 +83,25 @@ def _handle_init(args: list[str]) -> None:
         default=None,
         help="Pre-configure model (e.g., anthropic:claude-sonnet-4-20250514)",
     )
+    parser.add_argument(
+        "--harness",
+        choices=list(_HARNESS_CHOICES),
+        default=None,
+        help=(
+            "Reasoning harness tier: react (fast single-loop), balanced "
+            "(plan checklist + creative lenses, recommended), or ultra "
+            "(full planning graph). Prompts interactively when a TTY; "
+            "defaults to balanced otherwise."
+        ),
+    )
 
     parsed = parser.parse_args(args)
+
+    if parsed.harness is None:
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            parsed.harness = _prompt_harness()
+        else:
+            parsed.harness = _DEFAULT_HARNESS
 
     try:
         _validate_workspace_name(parsed.name)
@@ -63,7 +118,7 @@ def _handle_init(args: list[str]) -> None:
 
     try:
         workspace_path = _create_workspace(
-            parsed.path, parsed.name, parsed.channel, parsed.model
+            parsed.path, parsed.name, parsed.channel, parsed.model, parsed.harness
         )
     except FileExistsError as exc:
         print(f"Error: {exc}", file=sys.stderr)

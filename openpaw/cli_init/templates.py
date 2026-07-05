@@ -167,7 +167,9 @@ def _provider_api_key_env(provider: str) -> str | None:
     return f"{provider.upper()}_API_KEY"
 
 
-def _build_agent_yaml(name: str, channel: str | None, model: str | None) -> str:
+def _build_agent_yaml(
+    name: str, channel: str | None, model: str | None, harness: str = "balanced"
+) -> str:
     """Build agent.yaml content for a new workspace.
 
     When --model is provided the model section is uncommented and populated.
@@ -178,6 +180,7 @@ def _build_agent_yaml(name: str, channel: str | None, model: str | None) -> str:
         name: Workspace name (used in the ``name`` field).
         channel: Optional channel type string (e.g., ``telegram``).
         model: Optional combined model string (e.g., ``anthropic:claude-sonnet-4-20250514``).
+        harness: Reasoning harness tier (``react``, ``balanced``, or ``ultra``).
 
     Returns:
         YAML string suitable for writing to ``agent.yaml``.
@@ -273,6 +276,18 @@ def _build_agent_yaml(name: str, channel: str | None, model: str | None) -> str:
             "#   allowed_users: []",
             "",
         ]
+
+    # Harness section — chosen reasoning tier (see docs/config.example.yaml
+    # for the full set of per-node knobs).
+    lines += [
+        "# Reasoning harness (react | balanced | ultra):",
+        "#   react    — fast single-loop, no plan tracking",
+        "#   balanced — single-loop with a live plan checklist + creative lenses",
+        "#   ultra    — full planning graph, per-node models, step isolation",
+        "harness:",
+        f"  type: {harness}",
+        "",
+    ]
 
     # Queue section (always included, valid defaults)
     lines += [
