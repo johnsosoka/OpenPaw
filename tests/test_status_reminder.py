@@ -180,6 +180,112 @@ class TestStatusReminderDetectorSendMessageDetection:
         assert detector.should_remind() is True  # still above threshold
 
 
+class TestStatusReminderDetectorDeliveryTools:
+    """Any USER_DELIVERY_TOOLS call resets the silent counter; staging does not."""
+
+    def test_send_file_resets_counter(self):
+        detector = StatusReminderDetector(threshold=3)
+        for _ in range(2):
+            detector.record_turn(["read_file"])
+        detector.record_turn(["read_file", "send_file"])
+        assert detector.should_remind() is False
+
+    def test_request_followup_resets_counter(self):
+        detector = StatusReminderDetector(threshold=3)
+        for _ in range(2):
+            detector.record_turn(["read_file"])
+        detector.record_turn(["request_followup"])
+        assert detector.should_remind() is False
+
+    def test_text_to_speech_does_not_reset_counter(self):
+        # text_to_speech only STAGES audio — it is not a delivery. The reminder
+        # should still fire.
+        detector = StatusReminderDetector(threshold=3)
+        for _ in range(3):
+            detector.record_turn(["text_to_speech"])
+        assert detector.should_remind() is True
+
+
+class TestStatusReminderDetectorRepeatGuard:
+    """Repeated-tool anti-spin guard."""
+
+    def test_guard_fires_at_limit(self):
+        detector = StatusReminderDetector(repeat_tool_limit=6)
+        for _ in range(5):
+            detector.record_turn(["text_to_speech"])
+        assert detector.should_guard() is False
+        detector.record_turn(["text_to_speech"])
+        assert detector.should_guard() is True
+
+    def test_guard_message_names_tool_and_count(self):
+        detector = StatusReminderDetector(repeat_tool_limit=3)
+        for _ in range(3):
+            detector.record_turn(["text_to_speech"])
+        guard = detector.build_guard()
+        assert "text_to_speech" in guard
+        assert "3" in guard
+
+    def test_different_tool_resets_repeat_count(self):
+        detector = StatusReminderDetector(repeat_tool_limit=3)
+        for _ in range(2):
+            detector.record_turn(["text_to_speech"])
+        detector.record_turn(["read_file"])  # breaks the pattern
+        assert detector.repeat_count == 1
+        detector.record_turn(["read_file"])
+        detector.record_turn(["read_file"])
+        assert detector.should_guard() is True  # now read_file has spun 3x
+
+    def test_multi_tool_turn_resets_repeat_count(self):
+        detector = StatusReminderDetector(repeat_tool_limit=3)
+        for _ in range(2):
+            detector.record_turn(["text_to_speech"])
+        detector.record_turn(["text_to_speech", "read_file"])  # not a single-tool turn
+        assert detector.repeat_count == 0
+
+    def test_delivery_tool_turn_is_not_a_repeat(self):
+        detector = StatusReminderDetector(repeat_tool_limit=3)
+        for _ in range(3):
+            detector.record_turn(["send_message"])
+        assert detector.repeat_count == 0
+        assert detector.should_guard() is False
+
+    def test_guard_fires_at_most_repeat_guard_max_times(self):
+        detector = StatusReminderDetector(repeat_tool_limit=2, repeat_guard_max=2)
+        fires = 0
+        for _ in range(30):
+            detector.record_turn(["text_to_speech"])
+            if detector.should_guard():
+                detector.record_guard()
+                fires += 1
+        assert fires == 2
+
+    def test_record_guard_rearms_by_clearing_tracker(self):
+        detector = StatusReminderDetector(repeat_tool_limit=2, repeat_guard_max=5)
+        detector.record_turn(["text_to_speech"])
+        detector.record_turn(["text_to_speech"])
+        assert detector.should_guard() is True
+        detector.record_guard()
+        # Tracker cleared — must rebuild before firing again
+        assert detector.should_guard() is False
+        assert detector.repeat_count == 0
+
+    def test_repeat_count_from_duplicate_calls_in_one_turn(self):
+        # Two calls to the same tool in one turn is still a "set of one".
+        detector = StatusReminderDetector(repeat_tool_limit=2)
+        detector.record_turn(["text_to_speech", "text_to_speech"])
+        assert detector.repeat_count == 1
+
+    def test_reset_clears_guard_state(self):
+        detector = StatusReminderDetector(repeat_tool_limit=2, repeat_guard_max=1)
+        detector.record_turn(["text_to_speech"])
+        detector.record_turn(["text_to_speech"])
+        detector.record_guard()  # exhausts budget
+        detector.reset()
+        detector.record_turn(["text_to_speech"])
+        detector.record_turn(["text_to_speech"])
+        assert detector.should_guard() is True  # budget restored, tracker rebuilt
+
+
 class TestStatusReminderDetectorReset:
     """reset() clears all counter state."""
 
@@ -479,6 +585,65 @@ class TestStatusReminderMiddlewareBeforeModel:
         assert second is None
 
 
+class TestStatusReminderMiddlewareRepeatGuard:
+    """before_model() injects the anti-spin guard when a tool spins."""
+
+    def _make_state(self) -> dict:
+        return {
+            "messages": [
+                HumanMessage(content="do work"),
+                _ai_with_tool_calls("text_to_speech"),
+                ToolMessage(content="[Audio generated]", tool_call_id="call_text_to_speech"),
+            ]
+        }
+
+    def test_guard_injected_after_repeat_limit(self):
+        config = StatusReminderConfig(threshold=50, repeat_tool_limit=6)
+        middleware = StatusReminderMiddleware(config)
+        for _ in range(6):
+            middleware.after_model(
+                {"messages": [_ai_with_tool_calls("text_to_speech")]}, runtime=None
+            )
+
+        result = middleware.before_model(self._make_state(), runtime=None)
+        assert result is not None
+        assert "text_to_speech" in result["messages"][-1].content
+        assert "Stop repeating this tool" in result["messages"][-1].content
+
+    def test_guard_capped_per_run(self):
+        config = StatusReminderConfig(threshold=50, repeat_tool_limit=2, repeat_guard_max=2)
+        middleware = StatusReminderMiddleware(config)
+        injections = 0
+        for _ in range(30):
+            middleware.after_model(
+                {"messages": [_ai_with_tool_calls("text_to_speech")]}, runtime=None
+            )
+            if middleware.before_model(self._make_state(), runtime=None) is not None:
+                injections += 1
+        assert injections == 2
+
+    def test_reset_restores_guard(self):
+        config = StatusReminderConfig(threshold=50, repeat_tool_limit=2, repeat_guard_max=1)
+        middleware = StatusReminderMiddleware(config)
+        for _ in range(2):
+            middleware.after_model(
+                {"messages": [_ai_with_tool_calls("text_to_speech")]}, runtime=None
+            )
+        assert middleware.before_model(self._make_state(), runtime=None) is not None
+        middleware.reset()
+        for _ in range(2):
+            middleware.after_model(
+                {"messages": [_ai_with_tool_calls("text_to_speech")]}, runtime=None
+            )
+        assert middleware.before_model(self._make_state(), runtime=None) is not None
+
+    def test_send_file_resets_silent_counter_via_middleware(self):
+        middleware = _make_middleware(threshold=2)
+        middleware.after_model({"messages": [_ai_with_tool_calls("read_file")]}, runtime=None)
+        middleware.after_model({"messages": [_ai_with_tool_calls("send_file")]}, runtime=None)
+        assert middleware._detector.should_remind() is False
+
+
 class TestStatusReminderMiddlewareReset:
     """reset() clears detector state between runs."""
 
@@ -523,6 +688,15 @@ class TestStatusReminderConfig:
         assert config.threshold == 5
         assert config.max_reminders == 3
         assert config.cooldown_turns == 1
+        assert config.repeat_tool_limit == 6
+        assert config.repeat_guard_max == 2
+
+    def test_repeat_guard_bounds(self):
+        with pytest.raises(Exception):
+            StatusReminderConfig(repeat_tool_limit=1)  # ge=2
+
+        with pytest.raises(Exception):
+            StatusReminderConfig(repeat_guard_max=-1)  # ge=0
 
     def test_custom_values(self):
         config = StatusReminderConfig(

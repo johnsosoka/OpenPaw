@@ -38,3 +38,15 @@ class StatusReminderConfig(BaseModel):
         le=10,
         description="Min turns between consecutive reminders",
     )
+    repeat_tool_limit: int = Field(
+        default=6,
+        ge=2,
+        le=50,
+        description="Consecutive identical single-tool turns before the anti-spin guard fires",
+    )
+    repeat_guard_max: int = Field(
+        default=2,
+        ge=0,
+        le=10,
+        description="Max anti-spin guard injections per agent run",
+    )
