@@ -13,13 +13,14 @@ import json
 import logging
 import operator
 from collections.abc import Sequence
-from typing import Annotated, TypedDict, cast
+from typing import Annotated, cast
 
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 from pydantic import BaseModel, Field
+from typing_extensions import TypedDict
 
 from openpaw.agent.harness.modules.base import (
     ModuleKind,

@@ -24,12 +24,13 @@ are ephemeral, nothing inside can pause (ADR-109 §1).
 
 import json
 import logging
-from typing import TypedDict, TypeVar, cast
+from typing import TypeVar, cast
 
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field
+from typing_extensions import TypedDict
 
 from openpaw.agent.harness.modules.base import (
     ModuleKind,

@@ -17,7 +17,7 @@ ordinary tool call, which is what :class:`PlanEventBridge` intercepts to emit
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Annotated, Any, Literal, NotRequired, TypedDict, cast
+from typing import Annotated, Any, Literal, NotRequired, cast
 
 from langchain.agents.middleware.types import (
     AgentMiddleware,
@@ -32,6 +32,7 @@ from langchain_core.tools import StructuredTool
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from pydantic import BaseModel
+from typing_extensions import TypedDict
 
 logger = logging.getLogger(__name__)
 
