@@ -1,13 +1,14 @@
 """Base abstractions for the command system."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from openpaw.agent import AgentRunner
+    from openpaw.agent.harness import AgentHarness
     from openpaw.channels.base import ChannelAdapter, Message
     from openpaw.runtime.queue.manager import QueueManager
     from openpaw.runtime.session.manager import SessionManager
@@ -39,7 +40,7 @@ class CommandContext:
     channel: "ChannelAdapter"
     session_manager: "SessionManager"
     checkpointer: Any  # AsyncSqliteSaver
-    agent_runner: "AgentRunner"
+    agent_runner: "AgentHarness"
     workspace_name: str
     workspace_path: Path
     queue_manager: "QueueManager"
@@ -51,6 +52,13 @@ class CommandContext:
     subagent_store: Any = None  # SubAgentStore, for /status subagent info
     agent_factory: Any = None  # AgentFactory, for /model command
     channels: dict[str, Any] | None = None  # dict[str, ChannelAdapter], for /status channel info
+    # Reloads workspace skills and rebuilds the agent, for /reload.
+    # Returns (workspace_count, framework_count, errors).
+    skill_reloader: Callable[[], tuple[int, int, list[str]]] | None = None
+    skill_store: Any = None  # SkillStore, for /skills list/approve/reject
+    auto_compact_config: Any = None  # AutoCompactConfig, for /compact flush gating
+    # Renders harness type + resolved node→model table, for /harness (C9).
+    harness_info: Callable[[], str] | None = None
 
 
 @dataclass

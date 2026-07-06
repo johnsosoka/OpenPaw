@@ -374,6 +374,25 @@ timezone: America/Denver  # IANA timezone identifier
 
 #### Model Configuration
 
+Catalog-first (recommended): define credentials once in the global
+`providers:` catalog and reference the entry from the workspace.
+
+```yaml
+# Global config.yaml
+providers:
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+    model: claude-sonnet-4-20250514   # optional default model id
+
+# Workspace agent.yaml
+model: anthropic                       # bare catalog name — uses the catalog's model id
+# or, to pick a different model on the same provider entry:
+model: anthropic:claude-haiku-4-20250514
+```
+
+Inline form (legacy — still supported, but inline `api_key`/`base_url`/`region`
+log a deprecation warning when a `providers:` catalog exists):
+
 ```yaml
 model:
   provider: anthropic
@@ -385,9 +404,9 @@ model:
 
 **provider** — Model provider: `anthropic`, `openai`, `xai`, `fireworks`, `bedrock_converse`, or any OpenAI-compatible API via `openai` with `base_url`.
 
-**model** — Model identifier (provider-specific).
+**model** — Model identifier (provider-specific), or a catalog reference (`name` / `name:model_id`).
 
-**api_key** — API key for the model provider. Use `${VAR}` syntax for environment variables.
+**api_key** — API key for the model provider. Use `${VAR}` syntax for environment variables. Prefer the catalog.
 
 **temperature** — Model temperature (0.0-1.0).
 
@@ -589,7 +608,190 @@ status_updates:
 
 **use_emojis** — When `true` (default), status messages are prefixed with relevant emoji for visual clarity (e.g., `⚙️` for tool calls, `🚀` for starting work, `🤖` for sub-agent dispatch). Set to `false` for plain text status messages.
 
-Status updates are sent directly to the user channel and do not create extra checkpoint entries or consume additional API calls. Agent-driven `report_progress` tool calls bypass all throttling.
+Status updates are sent directly to the user channel and do not create extra checkpoint entries or consume additional API calls. Harness plan/phase events bypass all throttling.
+
+#### Agent Harness
+
+```yaml
+harness:
+  type: ultra              # react (default) | balanced | ultra
+  triage:     {model: fast}
+  planning:   {module: auto, model: strong}
+  creative:   {module: ideonomy}
+  reflection: {module: auto, allowed: [light, full]}
+  selector:   {model: fast}
+  synthesize: {}
+  tool_equipping:
+    enabled: false
+    always_equip: [group:filesystem, send_message]
+    max_tools: 25
+    react_selector: false
+    model: null
+  execution:
+    max_steps: 12
+    max_turns: null
+    timeout_seconds: null
+```
+
+Selects the agent topology. `react` (the default) is the existing ReAct loop, unchanged. `balanced` is the react loop plus a todo-driven live plan checklist — multi-step visibility at zero extra harness LLM calls. `ultra` adds a triage step that routes each message to the plain react loop (simple turns), a planning path (multi-step work), or an ideation path (open-ended asks), then executes the plan step by step with optional reflection and a final synthesis.
+
+**Zero-config:** a bare `harness: {type: ultra}` (or `{type: balanced}`) is a complete, valid configuration — every node inherits the workspace model. Everything below is optional tuning.
+
+**Typos fail fast:** unlike the legacy config groups, `harness:` uses `extra="forbid"` — an unrecognized key is a startup error, not a silently ignored field.
+
+**type** — `react` (default), `balanced`, or `ultra`.
+
+##### Per-Node Models
+
+Each node — `triage`, `planning`, `creative`, `reflection`, `selector`, `synthesize`, and `execution` — accepts the same model-pointer fields:
+
+**model** — A provider-catalog name (e.g. `fast`, `strong`) or a `provider:model` string. Unset = inherit the workspace model. Credentials (`api_key`, `base_url`, `region`) are **never** set here — they stay in the global `providers:` catalog.
+
+**temperature** — Sampling temperature for this node. Range: 0.0–2.0.
+
+**max_tokens** — Output token cap for this node. Minimum: 1.
+
+The `/harness` command prints the resolved node→model table. The runtime `/model` command overrides the **execution** node only — all other nodes keep their configured models.
+
+##### Reasoning Modules
+
+The `planning`, `creative`, and `reflection` nodes each select a reasoning module via `module`:
+
+**planning.module** — `direct` (default; single-call planning), `self_discover` (SELECT/ADAPT/IMPLEMENT over the 39 Self-Discover seed modules, with a per-task-type structure cache), or `auto`.
+
+**creative.module** — `ideonomy` (default; ideation through curated ideonomic lenses) or `auto`.
+
+**reflection.module** — `light` (default; a single structured check per step), `full` (may rewrite the remaining plan), `off` (the reflect node is omitted from the graph entirely), or `auto`.
+
+**allowed** — Restricts the candidate pool when `module: auto`. Only valid with `auto` — setting it on a pinned module is a config error. Example: `reflection: {module: auto, allowed: [light, full]}`.
+
+With `module: auto`, a selector step picks the module per task over module taglines. When only one candidate exists it binds directly without an LLM call; when the selection call fails, it falls back to the kind's default module. The `selector:` node config points the selection call at a model (a fast model is the natural fit; unset inherits the workspace model). Pinned modules never materialize a selector.
+
+##### Tool Equipping
+
+Off by default. When enabled on the ultra planning path, an equip step selects a task-relevant tool subset before planning, and a `request_tools` recovery loop lets the executor re-equip (at most once per step) if a needed tool was filtered out.
+
+**tool_equipping.enabled** — Enable the equip phase. Default: `false`.
+
+**tool_equipping.always_equip** — Floor of tools that can never be filtered out. Supports `group:` prefixes like the builtin allow/deny lists. Default: `[group:filesystem, send_message]`.
+
+**tool_equipping.max_tools** — Maximum tools equipped per task. Default: `25`. Minimum: 1.
+
+**tool_equipping.react_selector** — React-path alternative: enable the stock LangChain `LLMToolSelectorMiddleware` instead of the ultra equip node. Default: `false`. Independent of `enabled`.
+
+**tool_equipping.model** — Model pointer (catalog name) for the selection call. Unset = inherit.
+
+##### Execution
+
+**execution.max_steps** — Step budget for a single plan. Default: `12`. Range: 1–100. Also accepts the per-node model fields above.
+
+**execution.max_turns** — Cap on inner-runner agent turns per run (ultra and balanced). Default: unset (inherit the workspace `model.max_turns`). Minimum: 1.
+
+**execution.timeout_seconds** — Wall-clock budget for one harness run (ultra and balanced), overriding the workspace timeout — planned multi-step runs need more headroom than single react turns. Default: unset (inherit the workspace timeout). Minimum: 1.
+
+##### Balanced Harness
+
+The `balanced` tier reads three groups. `plan:` and `ideation:` are ignored by `react` and `ultra` workspaces; `reflection:` is shared with ultra — `mode`/`every` are balanced-only, `module`/`allowed` are ultra-only.
+
+**plan.visibility** — When `true` (default), every `write_todos` call the agent makes is diffed into `plan.*` status events that drive the live edited-in-place checklist in-channel (failed steps render ✗, per-item notes surface as one-line progress updates). Set to `false` to keep the todo discipline without the channel checklist.
+
+**ideation.lens_tool** — When `true` (default), registers the zero-LLM `explore_lenses` tool: deterministic ideonomic question lenses for open-ended asks, no extra model calls. The full IdeonomyModule remains ultra-exclusive.
+
+**ideation.lens_count** — How many lenses each `explore_lenses` call selects. Default: `3`. Range: 1–7.
+
+**reflection.mode** — `organic` (default) relies on in-context self-correction at zero cost; `checkpoint` fires one structured verdict call every `every` completed todos — immediately on a failed one — injected as a course-correction nudge.
+
+**reflection.every** — Checkpoint mode: completed steps between verdicts. Default: `3`. Minimum: 1.
+
+**reflection.model** — In checkpoint mode, doubles as the verdict-model pointer (a cheap model is the natural fit). Unset = the workspace model.
+
+##### Examples
+
+Zero-config ultra (every node inherits the workspace model):
+
+```yaml
+harness:
+  type: ultra
+```
+
+Balanced with checkpoint reflection on a cheap model:
+
+```yaml
+harness:
+  type: balanced
+  reflection: {mode: checkpoint, every: 3, model: fast}
+```
+
+Per-node models from the provider catalog (cheap model for routing, strong model for planning):
+
+```yaml
+# Global config.yaml
+providers:
+  fast:
+    type: openai
+    api_key: ${FAST_API_KEY}
+    base_url: https://api.example.com/v1
+    model: small-model
+  strong:
+    api_key: ${ANTHROPIC_API_KEY}
+    model: claude-sonnet-4-20250514
+
+# Workspace agent.yaml
+harness:
+  type: ultra
+  triage:     {model: fast}
+  planning:   {model: strong}
+  selector:   {model: fast}
+  synthesize: {model: strong, temperature: 0.3}
+```
+
+Automatic module selection with a restricted pool:
+
+```yaml
+harness:
+  type: ultra
+  planning:   {module: auto}                       # direct vs self_discover, per task
+  reflection: {module: auto, allowed: [light, full]}
+```
+
+---
+
+#### Learning Loop
+
+```yaml
+learning:
+  enabled: false             # Default: false
+  approval: immediate        # immediate | staged
+  phase2:
+    enabled: false           # Default: false
+    every_n_runs: 25
+    approval: staged         # immediate | staged
+  budget:
+    daily_tokens: 200000
+  limits:
+    max_skills: 30
+    max_skill_tokens: 1200
+```
+
+Lets the agent codify learned procedures, preferences, and tool recipes as workspace skills (see [Workspaces](workspaces.md) for the skills format). Like `harness:`, this group uses `extra="forbid"` — typos fail at startup.
+
+**enabled** — Master switch (Phase 1). Gates the learning section of the framework prompt, the `skill-authoring` framework skill, and the `manage_skill` tool. Default: `false`.
+
+**approval** — What happens when the agent writes a skill: `immediate` (default) makes it active and hot-reloads the prompt; `staged` holds it for human approval via `/skills approve <name>`.
+
+**phase2.enabled** — Background skill evaluation. Every N completed main-lane runs, a single evaluation call reviews a rolling activity digest; when it proposes a skill, a constrained `skill-builder` sub-agent drafts it. Requires `learning.enabled`. Default: `false`.
+
+**phase2.every_n_runs** — Runs between evaluations. Default: `25`. Minimum: 1.
+
+**phase2.approval** — Approval mode for Phase 2 skill writes. Default: `staged` (drafted skills await `/skills approve`). **Warning:** setting this to `immediate` removes the human gate on middleware-authored skills — background-drafted content would enter the agent's prompt with only the content lint as defense. Keep `staged` unless you have a specific reason not to.
+
+**budget.daily_tokens** — Daily token budget gating Phase 2. The check is coarse: it compares the **whole workspace's** token usage for the current UTC day against the budget, and quietly skips evaluations until the next day when exceeded. Default: `200000`.
+
+**limits.max_skills** — Maximum active skills per workspace, enforced on create by the SkillStore. Default: `30`.
+
+**limits.max_skill_tokens** — Maximum tokens per skill body, enforced on every write. Default: `1200`.
+
+**Reserved for 0.5.1:** the config model also accepts a `dream:` block (`enabled`, `schedule`, `approval`) for the Phase 3 dream sequence. It validates but has no execution code in 0.5.0 — setting `dream.enabled: true` does nothing yet.
 
 ---
 
@@ -625,6 +827,32 @@ model:
   temperature: 0.5                      # From workspace
   max_turns: 50                         # From global
 ```
+
+---
+
+### Resolution Precedence
+
+The general rule is **defaults < global < workspace < node/profile**, but the
+exact mechanics differ per key family. This table documents actual current
+behavior (0.5.0).
+
+| Key family | Resolution (lowest → highest precedence) |
+|---|---|
+| Model id | `agent.model` default < global `agent.model` < workspace `model.provider`/`model.model` (deep merge, only set keys override). A bare catalog name (`model: fast`) takes the model id from `providers.fast.model`; an explicit id (`model: fast:some-model`) wins over the catalog's `model:`. Runtime `/model` override beats everything, for the interactive agent only. |
+| API key | Provider env var (`ANTHROPIC_API_KEY`, …; consulted only when the target provider differs from the configured one, e.g. after `/model`) < global `agent.api_key` (deprecated) < workspace `model.api_key` (deprecated when a catalog exists) < `providers.<name>.api_key`. When the model references a catalog entry that defines `api_key`, the catalog value **always wins**. |
+| Region / base_url / extra model kwargs | Workspace `model.region`: used only when the catalog entry defines none (catalog `region` wins). `base_url` and unknown model keys flow through as extra kwargs: catalog extras < workspace extras (workspace wins). |
+| Builtins allow/deny | Global and workspace lists are **concatenated** (not overridden). Deny always wins over allow. Empty combined allow list = allow all available. |
+| Builtins `enabled` | Default `true` < global setting < workspace setting (first explicit value found, workspace checked first). |
+| Builtins per-builtin config | Injected context (workspace_path, timezone, channel routing) < global typed fields < workspace typed fields < global `config:` dict < workspace `config:` dict. |
+| approval_gates | **No merge.** The workspace block is used wholesale if it has `enabled: true`; otherwise the global block if it has `enabled: true`; otherwise disabled. A workspace cannot disable globally-enabled gates with `enabled: false` — the lookup falls through to global. |
+| tool_timeouts | **No merge.** If the workspace has an `agent.yaml` at all, its `tool_timeouts` (including defaults) is used and the global block is ignored. Global `tool_timeouts` applies only to workspaces without `agent.yaml`. |
+| queue | Global `queue.mode`/`queue.debounce_ms` < workspace overrides (deep merge). `cap`, `drop_policy`, and `lanes` are global-only. |
+
+**Catalog-first credentials (0.5.0+):** the `providers:` catalog is the
+recommended single home for credentials. Inline workspace `model.api_key`,
+`model.base_url`, and `model.region` (when a catalog exists) and global
+`agent.api_key` log deprecation warnings at startup; removal is targeted
+for 0.6.
 
 ---
 

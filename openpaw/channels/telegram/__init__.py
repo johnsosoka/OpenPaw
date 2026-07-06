@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from telegram import Update
+from telegram.error import BadRequest, NetworkError, RetryAfter, TimedOut
 from telegram.ext import Application, CallbackQueryHandler, MessageHandler, filters
 
 from openpaw.channels.base import ChannelAdapter
@@ -36,6 +37,16 @@ class TelegramChannel(ChannelAdapter, SecurityMixin):
 
     MAX_MESSAGE_LENGTH = MAX_MESSAGE_LENGTH
     MAX_FILE_SIZE = MAX_FILE_SIZE
+
+    # Transient Telegram transport failures worth retrying (channel retry
+    # interface, ChannelAdapter). NetworkError covers httpx ConnectError /
+    # read timeouts (TimedOut is a NetworkError subclass); RetryAfter is
+    # flood control and carries a server delay the retry runner honors.
+    RETRYABLE_SEND_ERRORS = (NetworkError, TimedOut, RetryAfter)
+    # BadRequest subclasses NetworkError in python-telegram-bot but is a
+    # permanent 4xx (bad chat, unparseable HTML, message-not-modified) — it
+    # must surface immediately, not loop. The deny-list overrides the above.
+    NON_RETRYABLE_SEND_ERRORS = (BadRequest,)
 
     def __init__(
         self,
@@ -101,13 +112,24 @@ class TelegramChannel(ChannelAdapter, SecurityMixin):
             logger.debug("Bot username: @%s", self._bot_username)
 
         self._approval_sender = TelegramApprovalSender(self._app)
-        self._outbound_sender = TelegramOutboundSender(
-            app=self._app,
-            channel_name=self.name,
-            bot_id=self._app.bot.id,
-        )
+        self._outbound_sender = self._build_outbound_sender()
 
         logger.info("Telegram channel started")
+
+    def _build_outbound_sender(self) -> TelegramOutboundSender:
+        """Construct the outbound sender wired to this channel's retry runner.
+
+        Single construction point (the sender is (re)built lazily in several
+        outbound methods); injecting ``send_with_retry`` here gives every
+        content-bearing call transient-failure backoff without per-call
+        plumbing.
+        """
+        return TelegramOutboundSender(
+            app=self._app,
+            channel_name=self.name,
+            bot_id=self._app.bot.id,  # type: ignore[union-attr]
+            retry=self.send_with_retry,
+        )
 
     async def stop(self) -> None:
         """Stop the Telegram bot."""
@@ -126,11 +148,7 @@ class TelegramChannel(ChannelAdapter, SecurityMixin):
         if not self._outbound_sender:
             if not self._app:
                 raise RuntimeError("Telegram channel not started")
-            self._outbound_sender = TelegramOutboundSender(
-                app=self._app,
-                channel_name=self.name,
-                bot_id=self._app.bot.id,
-            )
+            self._outbound_sender = self._build_outbound_sender()
         return await self._outbound_sender.send_message(session_key, content, **kwargs)
 
     async def send_audio(self, session_key: str, audio_data: bytes, filename: str = "audio.mp3", **kwargs: Any) -> Any:
@@ -138,11 +156,7 @@ class TelegramChannel(ChannelAdapter, SecurityMixin):
         if not self._outbound_sender:
             if not self._app:
                 raise RuntimeError("Telegram channel not started")
-            self._outbound_sender = TelegramOutboundSender(
-                app=self._app,
-                channel_name=self.name,
-                bot_id=self._app.bot.id,
-            )
+            self._outbound_sender = self._build_outbound_sender()
         return await self._outbound_sender.send_audio(session_key, audio_data, filename, **kwargs)
 
     async def send_file(
@@ -157,11 +171,7 @@ class TelegramChannel(ChannelAdapter, SecurityMixin):
         if not self._outbound_sender:
             if not self._app:
                 raise RuntimeError("Telegram channel not started")
-            self._outbound_sender = TelegramOutboundSender(
-                app=self._app,
-                channel_name=self.name,
-                bot_id=self._app.bot.id,
-            )
+            self._outbound_sender = self._build_outbound_sender()
         await self._outbound_sender.send_file(session_key, file_data, filename, mime_type, caption)
 
     def _is_allowed(self, update: Update) -> bool:
@@ -317,11 +327,7 @@ class TelegramChannel(ChannelAdapter, SecurityMixin):
         if not self._outbound_sender:
             if not self._app:
                 raise RuntimeError("Telegram channel not started")
-            self._outbound_sender = TelegramOutboundSender(
-                app=self._app,
-                channel_name=self.name,
-                bot_id=self._app.bot.id,
-            )
+            self._outbound_sender = self._build_outbound_sender()
         return await self._outbound_sender.edit_message(session_key, message_id, content)
 
     async def delete_message(
@@ -333,11 +339,7 @@ class TelegramChannel(ChannelAdapter, SecurityMixin):
         if not self._outbound_sender:
             if not self._app:
                 raise RuntimeError("Telegram channel not started")
-            self._outbound_sender = TelegramOutboundSender(
-                app=self._app,
-                channel_name=self.name,
-                bot_id=self._app.bot.id,
-            )
+            self._outbound_sender = self._build_outbound_sender()
         return await self._outbound_sender.delete_message(session_key, message_id)
 
     async def send_typing(self, session_key: str) -> None:
@@ -345,11 +347,7 @@ class TelegramChannel(ChannelAdapter, SecurityMixin):
         if not self._outbound_sender:
             if not self._app:
                 raise RuntimeError("Telegram channel not started")
-            self._outbound_sender = TelegramOutboundSender(
-                app=self._app,
-                channel_name=self.name,
-                bot_id=self._app.bot.id,
-            )
+            self._outbound_sender = self._build_outbound_sender()
         await self._outbound_sender.send_typing(session_key)
 
     async def add_reaction(self, session_key: str, message_id: str, emoji: str) -> bool:
@@ -357,11 +355,7 @@ class TelegramChannel(ChannelAdapter, SecurityMixin):
         if not self._outbound_sender:
             if not self._app:
                 raise RuntimeError("Telegram channel not started")
-            self._outbound_sender = TelegramOutboundSender(
-                app=self._app,
-                channel_name=self.name,
-                bot_id=self._app.bot.id,
-            )
+            self._outbound_sender = self._build_outbound_sender()
         return await self._outbound_sender.add_reaction(session_key, message_id, emoji)
 
     async def remove_reaction(self, session_key: str, message_id: str, emoji: str) -> bool:
@@ -369,11 +363,7 @@ class TelegramChannel(ChannelAdapter, SecurityMixin):
         if not self._outbound_sender:
             if not self._app:
                 raise RuntimeError("Telegram channel not started")
-            self._outbound_sender = TelegramOutboundSender(
-                app=self._app,
-                channel_name=self.name,
-                bot_id=self._app.bot.id,
-            )
+            self._outbound_sender = self._build_outbound_sender()
         return await self._outbound_sender.remove_reaction(session_key, message_id, emoji)
 
     async def replace_reaction(
@@ -383,11 +373,7 @@ class TelegramChannel(ChannelAdapter, SecurityMixin):
         if not self._outbound_sender:
             if not self._app:
                 raise RuntimeError("Telegram channel not started")
-            self._outbound_sender = TelegramOutboundSender(
-                app=self._app,
-                channel_name=self.name,
-                bot_id=self._app.bot.id,
-            )
+            self._outbound_sender = self._build_outbound_sender()
         return await self._outbound_sender.replace_reaction(
             session_key, message_id, old_emoji, new_emoji
         )

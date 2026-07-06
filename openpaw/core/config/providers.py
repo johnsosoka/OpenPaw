@@ -50,9 +50,15 @@ def resolve_provider(
     through unchanged so that all existing behaviour (native LangChain
     providers, bare model strings) continues to work without modification.
 
+    A bare catalog name (no colon) resolves fully when the catalog entry
+    carries a ``model:`` field. Precedence: an explicit model id in
+    ``model_input`` (``"name:model_id"``) always wins over the catalog
+    entry's ``model``; entries without ``model`` behave exactly as before.
+
     Args:
         model_input: Model string in ``"provider:model_id"`` format, e.g.
-            ``"moonshot:kimi-k2.5"`` or ``"anthropic:claude-sonnet-4-20250514"``.
+            ``"moonshot:kimi-k2.5"``, or a bare catalog name whose entry
+            defines ``model:``.
         catalog: Named provider map loaded from ``Config.providers``.
 
     Returns:
@@ -62,15 +68,20 @@ def resolve_provider(
     if ":" in model_input:
         provider_name, _, model_id = model_input.partition(":")
     else:
-        # No colon — treat the whole string as a model ID with no provider.
-        # Pass through unchanged; LangChain will handle or raise.
-        return ResolvedProvider(
-            model_str=model_input,
-            display_str=model_input,
-            api_key=None,
-            region=None,
-            extra_kwargs={},
-        )
+        entry = catalog.get(model_input)
+        if entry is None or entry.model is None:
+            # No colon and not a fully-specified catalog entry — treat the
+            # whole string as a model ID with no provider. Pass through
+            # unchanged; LangChain will handle or raise.
+            return ResolvedProvider(
+                model_str=model_input,
+                display_str=model_input,
+                api_key=None,
+                region=None,
+                extra_kwargs={},
+            )
+        # Bare catalog name whose entry defines a model id (S-A1).
+        provider_name, model_id = model_input, entry.model
 
     definition = catalog.get(provider_name)
     if definition is None:
@@ -90,7 +101,7 @@ def resolve_provider(
     # then exclude None values.  This captures base_url plus any arbitrary
     # provider-specific kwargs stored via model_config extra="allow".
     extra_kwargs: dict[str, Any] = definition.model_dump(
-        exclude={"type", "api_key", "region"},
+        exclude={"type", "api_key", "region", "model"},
         exclude_none=True,
     )
 

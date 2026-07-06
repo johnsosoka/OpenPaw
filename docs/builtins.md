@@ -10,13 +10,13 @@ Builtins are optional capabilities conditionally loaded based on API key availab
 
 ## Overview
 
-OpenPaw ships with 17 built-in tools and 4 message processors. Builtins are discovered at runtime — if prerequisites (API keys, packages) are missing, the builtin is unavailable. The allow/deny system provides fine-grained control over which capabilities are active in each workspace.
+OpenPaw ships with 18 built-in tools and 4 message processors. Builtins are discovered at runtime — if prerequisites (API keys, packages) are missing, the builtin is unavailable. The allow/deny system provides fine-grained control over which capabilities are active in each workspace.
 
 **Architecture:**
 
 ```
 BuiltinRegistry
-├─ Tools (17)
+├─ Tools (18)
 │  ├─ browser          Web automation via Playwright
 │  ├─ email            Email send/receive via Gmail
 │  ├─ brave_search     Web search
@@ -26,7 +26,6 @@ BuiltinRegistry
 │  ├─ acknowledge      Optional audit note for system events
 │  ├─ task_tracker     Persistent task management
 │  ├─ send_message     Mid-execution messaging
-│  ├─ report_progress  Structured progress reporting
 │  ├─ send_file        Send workspace files to users
 │  ├─ followup         Self-continuation
 │  ├─ plan             Session-scoped planning
@@ -34,6 +33,7 @@ BuiltinRegistry
 │  ├─ memory_search    Semantic conversation search
 │  ├─ shell            Local command execution
 │  ├─ md2pdf            Markdown-to-PDF conversion
+│  ├─ manage_skill     Agent-authored skills (requires learning.enabled)
 │  └─ elevenlabs       Text-to-speech
 │
 └─ Processors (4)
@@ -382,46 +382,6 @@ Agent: [Finishes and responds with full results]
 
 ---
 
-### report_progress
-
-**Group:** `communication`
-**Type:** Tool
-**Prerequisites:** None (always available)
-
-Structured progress reporting for long operations. Unlike `send_message`, this tool provides a dedicated schema with status label, optional detail, and optional percentage. Use it when you want to give the user more structured progress information than a plain text message.
-
-**Configuration:**
-
-```yaml
-builtins:
-  report_progress:
-    enabled: true
-```
-
-**Usage Example:**
-
-```
-User: "Process this large dataset"
-Agent: [Calls report_progress("Analyzing data", detail="Processing batch 1 of 10", percent=10)]
-Agent: [Continues processing]
-Agent: [Calls report_progress("Analyzing data", detail="Processing batch 5 of 10", percent=50, emoji="📊")]
-Agent: [Finishes and responds with full results]
-```
-
-**Optional Emoji Parameter:**
-
-Pass an `emoji` to prefix the status message with a custom emoji. If omitted, the framework uses a default emoji based on the status label.
-
-```
-Agent: [Calls report_progress("Deploying", detail="Pushing to staging", percent=30, emoji="🚀")]
-User sees: "🚀 Deploying — Pushing to staging (30%)"
-```
-
-**Implementation:**
-
-Uses shared `_channel_context` for session-safe state access to the active channel. Formats messages as: `Status — Detail (Percent%)` with an optional emoji prefix.
-
----
 
 ### send_file
 
@@ -710,6 +670,53 @@ To find voice IDs, visit the [ElevenLabs Voice Library](https://elevenlabs.io/vo
 
 ---
 
+### manage_skill
+
+**Group:** `learning`
+**Type:** Tool
+**Prerequisites:** None — but only equipped when `learning.enabled: true` in the workspace config
+
+The agent's paved path for writing its own skills. A single tool call validates the skill, writes it atomically to `agent/skills/<name>/SKILL.md`, emits lifecycle events, and triggers a hot-reload so the skill takes effect without a restart. Direct sandbox writes into `agent/skills/` remain possible but skip all of that.
+
+**Operations:**
+
+- `create` — New skill. Requires `name`, `description`, and `content` (body markdown only — the framework stamps the frontmatter). Optional `source` records provenance (e.g. the conversation the lesson came from).
+- `update` — Revise an existing skill. Requires `content`; `description` is optional (keeps the existing one if omitted). Bumps the skill version.
+- `deprecate` — Retire a skill. It is no longer loaded but remains on disk.
+
+**Validation gates** (applied in order by the `SkillStore` before any write):
+
+1. **schema** — name is a valid slug (lowercase letters, digits, hyphens), does not shadow the reserved `_framework/*` namespace, and does not collide on create.
+2. **budget** — content within `learning.limits.max_skill_tokens`; workspace under `learning.limits.max_skills` active skills (on create).
+3. **content** — deny-pattern lint rejecting credential-shaped and gate-bypass content.
+4. **policy** — the workspace's `learning.approval` mode decides the written status: `immediate` → active + hot-reload; `staged` → held for `/skills approve <name>`.
+
+Gate failures are returned to the agent verbatim so it can fix the skill and retry.
+
+**Configuration:**
+
+Loading is gated by the `learning:` config group, not a builtin block:
+
+```yaml
+learning:
+  enabled: true
+  approval: immediate   # or staged — writes await /skills approve
+```
+
+See [Configuration](configuration.md) for the full `learning:` reference.
+
+**Usage Example:**
+
+```
+User: "No — digests should always be bullet points, newest first. Remember that."
+Agent: [Calls manage_skill(operation="create", name="digest-format",
+        description="How digests should be formatted",
+        content="...", source="telegram:123456:conv_2026-07-02")]
+Agent: "Noted — I've saved that as a skill, so it applies from now on."
+```
+
+---
+
 ### email
 
 **Group:** `communication`
@@ -849,7 +856,7 @@ status_updates:
 - **System events skip**: Cron, heartbeat, and sub-agent completion events do not trigger status updates to avoid mid-task confusion.
 - Time-based throttle: `min_interval_seconds` between auto-detected status messages
 - Deduplication: if the same tool set is detected twice, only report once
-- Agent-driven `report_progress` tool calls bypass all throttling
+- Harness plan/phase events bypass all throttling
 - Resets between agent runs (each user message starts a fresh count)
 - Disabled entirely with `enabled: false`
 
@@ -1138,6 +1145,7 @@ builtins:
 | `communication` | email |
 | `memory` | memory_search |
 | `document` | md2pdf |
+| `learning` | manage_skill |
 
 **Usage:**
 

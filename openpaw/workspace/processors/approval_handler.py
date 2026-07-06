@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from openpaw.agent import AgentRunner
+from openpaw.agent.harness import AgentHarness
 from openpaw.agent.middleware import ApprovalRequiredError
 from openpaw.channels.base import ChannelAdapter
 from openpaw.core.prompts.system_events import TOOL_DENIED_TEMPLATE
@@ -54,7 +54,7 @@ class ApprovalGateHandler:
         self._workspace_name = workspace_name
         self._logger = logger
 
-    def log_partial_metrics(self, agent_runner: AgentRunner, session_key: str) -> None:
+    def log_partial_metrics(self, agent_runner: AgentHarness, session_key: str) -> None:
         """Log any partial metrics available from an interrupted run.
 
         Args:
@@ -74,7 +74,7 @@ class ApprovalGateHandler:
         self,
         error: ApprovalRequiredError,
         channel: ChannelAdapter | None,
-        agent_runner: AgentRunner,
+        agent_runner: AgentHarness,
         thread_id: str,
         session_key: str,
     ) -> ApprovalResult:
@@ -136,7 +136,7 @@ class ApprovalGateHandler:
 
     async def _resolve_orphaned(
         self,
-        agent_runner: AgentRunner,
+        agent_runner: AgentHarness,
         thread_id: str,
         error: ApprovalRequiredError,
         approved: bool,

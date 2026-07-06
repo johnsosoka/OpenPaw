@@ -57,13 +57,20 @@ agent:
 #                         # Bedrock is excluded — boto3 manages its own retry strategy.
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Provider catalog — define provider connection details once, reference by name.
-# Workspaces use shorthand: model: "provider_name:model_id"
+# Provider catalog — the recommended single home for credentials (catalog-first).
+# Define connection details once, reference by name from workspaces:
+#   model: "provider_name:model_id"   # explicit model id (wins over catalog model:)
+#   model: "provider_name"            # bare name — uses the entry's model: field
 # The /model command can switch between any configured provider.
+#
+# Inline workspace model.api_key/base_url/region are deprecated when a catalog
+# exists (removal targeted for 0.6) — move credentials here instead.
 # ──────────────────────────────────────────────────────────────────────────────
 # providers:
 #   anthropic:
 #     api_key: ${ANTHROPIC_API_KEY}
+#     model: claude-sonnet-4-20250514 # Optional default model id — lets workspaces
+#                                     # reference this entry as just `model: anthropic`
 #   openai:
 #     api_key: ${OPENAI_API_KEY}
 #   moonshot:                         # Native Kimi via ChatMoonshot
@@ -77,6 +84,11 @@ agent:
 #   bedrock:
 #     type: bedrock_converse
 #     region: us-east-1
+#   fast:                             # Alias entries need an explicit type
+#     type: openai                    # (LangChain provider the entry maps to)
+#     base_url: https://api.inceptionlabs.ai/v1
+#     api_key: ${MERCURY_API_KEY}
+#     model: mercury-2                # Workspaces can then use: model: fast
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Builtins — tools and processors conditionally loaded based on API key
@@ -221,6 +233,8 @@ builtins:
 #   enabled: false
 #   trigger: 0.8                  # Trigger at 80% context window utilization
 #   summary_model: null           # Model for summary generation (null = workspace model)
+#   flush: true                   # One agent turn to save working context to a
+#                                 # memory/compact-flush-*.md file before summarization
 
 # Lifecycle notifications — best-effort channel messages on workspace events
 # lifecycle:
@@ -263,9 +277,76 @@ builtins:
 #     model: text-embedding-3-small
 #     api_key: ${OPENAI_API_KEY}
 
+# Agent harness — topology and per-node models (workspace-level only, in agent.yaml —
+# not read from this file).
+# A bare `harness: {type: ultra}` is complete — every node inherits the
+# workspace model. Node model: entries are provider-catalog names or
+# provider:model strings (credentials stay in the providers: catalog).
+# Unknown keys are a startup error (extra="forbid").
+# /harness prints the resolved node→model table.
+# harness:
+#   type: ultra               # react (default) | balanced | ultra
+#   triage:     {model: fast}   # optional per-node pointers: model, temperature, max_tokens
+#   planning:   {module: auto, model: strong}   # direct (default) | self_discover | auto
+#   creative:   {module: ideonomy}              # ideonomy (default) | auto
+#   reflection: {module: auto, allowed: [light, full]}  # off | light (default) | full | auto
+#   selector:   {model: fast}   # model for module-selection calls (auto paths)
+#   brief:                      # Session-context brief before plan/ideate (ADR-108)
+#     enabled: true             # On by default; react routes never pay for it
+#     model: fast               # Optional pointer; a fast large-context model fits
+#     max_input_tokens: null    # Optional transcript cost ceiling (>=1024); null = model window
+#   tool_equipping:
+#     enabled: false            # Equip a task-relevant tool subset before planning
+#     always_equip: [group:filesystem, send_message]  # Never-filtered floor
+#     max_tools: 25
+#     react_selector: false     # React-path alternative: stock LLMToolSelectorMiddleware
+#   execution:
+#     max_steps: 12             # Step budget per plan (1-100)
+#     timeout_seconds: 900      # Wall-clock budget per harness run; unset inherits workspace timeout
+
+# Balanced harness — the middle tier: the react loop plus a todo-driven live
+# plan checklist at zero extra harness LLM calls (workspace-level only, in agent.yaml).
+# harness:
+#   type: balanced
+#   plan:
+#     visibility: true          # Live in-channel checklist from the agent's todos
+#   ideation:
+#     lens_tool: true           # Zero-LLM explore_lenses ideonomy tool (balanced-only)
+#     lens_count: 3             # Lenses selected per call (1-7)
+#   reflection:
+#     mode: organic             # organic (default, free) | checkpoint (structured verdicts)
+#     every: 3                  # Checkpoint mode: verdict every N completed steps
+#     model: fast               # Optional verdict-model pointer; unset = workspace model
+#   execution:
+#     timeout_seconds: 900      # Wall-clock budget per run; unset inherits workspace timeout
+
+# Learning loop — agent-authored skills (workspace-level only, in agent.yaml —
+# not read from this file).
+# Enables the manage_skill tool and the skill-authoring framework skill.
+# Unknown keys are a startup error (extra="forbid").
+# learning:
+#   enabled: false
+#   approval: immediate         # immediate (active + hot-reload) | staged (/skills approve)
+#   phase2:
+#     enabled: false            # Background skill evaluation every N main-lane runs
+#     every_n_runs: 25
+#     approval: staged
+#   budget:
+#     daily_tokens: 200000      # Daily workspace token budget gating phase 2
+#   limits:
+#     max_skills: 30            # Max active skills per workspace
+#     max_skill_tokens: 1200    # Max tokens per skill body
+#   # dream: reserved for 0.5.1 — validates but has no effect in 0.5.0
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Per-workspace model config (typically in agent.yaml, not here)
-# Two equivalent formats:
+#
+# Catalog-first (recommended — credentials live in the providers: catalog):
+#   model: anthropic                                # bare catalog name (entry defines model:)
+#   model: "anthropic:claude-sonnet-4-20250514"     # catalog name + explicit model id
+#
+# Inline formats (still supported; inline api_key/base_url/region are
+# deprecated when a providers: catalog exists — removal targeted for 0.6):
 #   Combined:  model: "anthropic:claude-sonnet-4-20250514"
 #   Explicit:
 #     model:

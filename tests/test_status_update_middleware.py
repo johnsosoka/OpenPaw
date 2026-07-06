@@ -81,11 +81,13 @@ def _make_middleware(
     config: StatusUpdatesConfig | None = None,
     channel: MockChannel | None = None,
     session_key: str = "telegram:123456",
+    start_label: str = "Starting work...",
+    run_count: int = 1,
 ) -> StatusUpdateMiddleware:
     cfg = config or _make_config()
-    mw = StatusUpdateMiddleware(cfg)
+    mw = StatusUpdateMiddleware(cfg, start_label=start_label)
     if channel:
-        mw.set_context(channel, session_key)
+        mw.set_context(channel, session_key, run_count=run_count)
     return mw
 
 
@@ -120,6 +122,30 @@ async def test_abefore_agent_sends_message_when_enabled():
     assert result is None
     assert len(channel.sent_messages) == 1
     assert channel.sent_messages[0] == ("telegram:123456", "Starting work...")
+
+
+@pytest.mark.asyncio
+async def test_abefore_agent_uses_custom_start_label_on_first_run():
+    channel = MockChannel()
+    mw = _make_middleware(channel=channel, start_label="Considering...")
+
+    result = await mw.abefore_agent({}, None)
+
+    assert result is None
+    assert channel.sent_messages[0] == ("telegram:123456", "Considering...")
+
+
+@pytest.mark.asyncio
+async def test_abefore_agent_uses_continuing_label_on_later_run_despite_start_label():
+    channel = MockChannel()
+    mw = _make_middleware(
+        channel=channel, start_label="Considering...", run_count=2
+    )
+
+    result = await mw.abefore_agent({}, None)
+
+    assert result is None
+    assert channel.sent_messages[0] == ("telegram:123456", "Continuing work...")
 
 
 @pytest.mark.asyncio

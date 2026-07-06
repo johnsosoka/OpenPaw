@@ -161,13 +161,6 @@ class BuiltinRegistry:
             logger.debug(f"Acknowledge tool not available: {e}")
 
         try:
-            from openpaw.builtins.tools.report_progress import ReportProgressTool
-
-            self.register_tool(ReportProgressTool)
-        except ImportError as e:
-            logger.debug(f"Report progress tool not available: {e}")
-
-        try:
             from openpaw.builtins.tools.gpt_researcher import GptResearcherTool
 
             self.register_tool(GptResearcherTool)
@@ -180,6 +173,13 @@ class BuiltinRegistry:
             self.register_tool(EmailToolBuiltin)
         except ImportError as e:
             logger.debug(f"Email tool not available: {e}")
+
+        try:
+            from openpaw.builtins.tools.manage_skill import ManageSkillTool
+
+            self.register_tool(ManageSkillTool)
+        except ImportError as e:
+            logger.debug(f"Manage skill tool not available: {e}")
 
         # Processors (sorted by metadata.priority in BuiltinLoader.load_processors)
         try:

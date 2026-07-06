@@ -607,6 +607,9 @@ Framework commands are handled by `CommandRouter` before messages reach the agen
 - `/queue <mode>` - Change queue mode (`collect`, `steer`, `followup`, `interrupt`)
 - `/status` - Show workspace info: model, conversation stats, active tasks, token usage
 - `/model <provider:model>` - Switch LLM model at runtime
+- `/harness` - Show harness type and the resolved node→model table
+- `/reload [skills]` - Reload skills from disk without restarting the workspace
+- `/skills [approve|reject <name>]` - List skills with provenance; approve or reject staged skills (requires `learning.enabled`)
 
 **Command Registration:**
 

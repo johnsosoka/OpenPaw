@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from openpaw.core.workspace import AgentWorkspace
-from openpaw.model.skill import SkillInfo, SkillInjectMode
+from openpaw.model.skill import SkillCreatedBy, SkillInfo, SkillInjectMode, SkillStatus
 from openpaw.workspace.skill_loader import load_workspace_skills
 
 # ---------------------------------------------------------------------------
@@ -546,7 +546,7 @@ class TestSkillInjectMode:
             skills = load_workspace_skills(tmp_path)
 
         assert skills[0].inject == SkillInjectMode.SUMMARY
-        assert "invalid inject mode" in caplog.text.lower()
+        assert "invalid inject" in caplog.text.lower()
 
     def test_inject_case_insensitive(self, tmp_path: Path) -> None:
         """inject: FULL (uppercase) is accepted."""
@@ -694,3 +694,146 @@ class TestSkillSource:
 
         skills = load_workspace_skills(tmp_path)
         assert skills[0].source == "workspace"
+
+
+# ---------------------------------------------------------------------------
+# TestLifecycleFrontmatter (ADR-105)
+# ---------------------------------------------------------------------------
+
+
+class TestLifecycleFrontmatter:
+    """Extended frontmatter keys: version, created_by, source, updated_at, status."""
+
+    def test_lifecycle_keys_parsed(self, tmp_path: Path) -> None:
+        skills_dir = _make_skills_dir(tmp_path)
+        _make_skill(
+            skills_dir,
+            "managed-skill",
+            "---\n"
+            "name: managed-skill\n"
+            "description: Managed by the store\n"
+            "inject: summary\n"
+            "version: 3\n"
+            "created_by: agent\n"
+            "source: 'telegram:1:conv_x'\n"
+            "updated_at: 2026-07-02T14:11:00+00:00\n"
+            "status: active\n"
+            "---\n\nBody.\n",
+        )
+
+        skills = load_workspace_skills(skills_dir)
+
+        assert len(skills) == 1
+        skill = skills[0]
+        assert skill.version == 3
+        assert skill.created_by is SkillCreatedBy.AGENT
+        assert skill.source_ref == "telegram:1:conv_x"
+        assert skill.updated_at is not None
+        assert skill.updated_at.year == 2026
+        assert skill.status is SkillStatus.ACTIVE
+
+    def test_lifecycle_keys_defaulted_when_absent(self, tmp_path: Path) -> None:
+        """Pre-0.5.0 skill files parse unchanged with defaults."""
+        skills_dir = _make_skills_dir(tmp_path)
+        _make_skill(
+            skills_dir,
+            "legacy-skill",
+            "---\nname: legacy-skill\ndescription: Old file\n---\n\nBody.\n",
+        )
+
+        skills = load_workspace_skills(skills_dir)
+
+        skill = skills[0]
+        assert skill.version == 1
+        assert skill.created_by is SkillCreatedBy.HUMAN
+        assert skill.source_ref == ""
+        assert skill.updated_at is None
+        assert skill.status is SkillStatus.ACTIVE
+
+    def test_invalid_lifecycle_values_fall_back_to_defaults(self, tmp_path: Path) -> None:
+        skills_dir = _make_skills_dir(tmp_path)
+        _make_skill(
+            skills_dir,
+            "odd-skill",
+            "---\n"
+            "name: odd-skill\n"
+            "version: banana\n"
+            "created_by: martian\n"
+            "status: exploded\n"
+            "updated_at: not-a-date\n"
+            "---\n\nBody.\n",
+        )
+
+        skills = load_workspace_skills(skills_dir)
+
+        skill = skills[0]
+        assert skill.version == 1
+        assert skill.created_by is SkillCreatedBy.HUMAN
+        assert skill.status is SkillStatus.ACTIVE
+        assert skill.updated_at is None
+
+    def test_deprecated_skill_skipped(self, tmp_path: Path) -> None:
+        skills_dir = _make_skills_dir(tmp_path)
+        _make_skill(
+            skills_dir,
+            "dead-skill",
+            "---\nname: dead-skill\nstatus: deprecated\n---\n\nBody.\n",
+        )
+        _make_skill(
+            skills_dir,
+            "live-skill",
+            "---\nname: live-skill\n---\n\nBody.\n",
+        )
+
+        skills = load_workspace_skills(skills_dir)
+
+        assert [s.name for s in skills] == ["live-skill"]
+
+    def test_staged_skill_loaded_and_marked(self, tmp_path: Path) -> None:
+        skills_dir = _make_skills_dir(tmp_path)
+        _make_skill(
+            skills_dir,
+            "pending-skill",
+            "---\nname: pending-skill\nstatus: staged\n---\n\nBody.\n",
+        )
+
+        skills = load_workspace_skills(skills_dir)
+
+        assert len(skills) == 1
+        assert skills[0].status is SkillStatus.STAGED
+
+
+# ---------------------------------------------------------------------------
+# TestStagedSkillPromptExclusion
+# ---------------------------------------------------------------------------
+
+
+class TestStagedSkillPromptExclusion:
+    """Staged skills exist for /skills listing only — never in the prompt."""
+
+    def test_staged_skill_excluded_from_prompt(self, tmp_path: Path) -> None:
+        active = SkillInfo(
+            name="active-skill", description="In the prompt.", content="Body.",
+            path=tmp_path / "active", status=SkillStatus.ACTIVE,
+            read_path="agent/skills/active/SKILL.md",
+        )
+        staged = SkillInfo(
+            name="staged-skill", description="Awaiting approval.", content="Body.",
+            path=tmp_path / "staged", status=SkillStatus.STAGED,
+            read_path="agent/skills/staged/SKILL.md",
+        )
+        workspace = _make_workspace(tmp_path, skills=[active, staged])
+        prompt = workspace.build_system_prompt(enabled_builtins=[])
+
+        assert "active-skill" in prompt
+        assert "staged-skill" not in prompt
+
+    def test_all_staged_yields_no_skills_section(self, tmp_path: Path) -> None:
+        staged = SkillInfo(
+            name="staged-skill", description="Desc", content="Body.",
+            path=tmp_path / "staged", status=SkillStatus.STAGED,
+        )
+        workspace = _make_workspace(tmp_path, skills=[staged])
+        prompt = workspace.build_system_prompt(enabled_builtins=[])
+
+        assert "<skills>" not in prompt

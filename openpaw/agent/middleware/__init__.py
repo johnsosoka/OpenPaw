@@ -15,6 +15,7 @@ from openpaw.agent.middleware.llm_hooks import (
     build_post_model_hook,
     build_pre_model_hook,
 )
+from openpaw.agent.middleware.plan_event_bridge import PlanEventBridge
 from openpaw.agent.middleware.queue_aware import InterruptSignalError, QueueAwareToolMiddleware
 from openpaw.agent.middleware.status_reminder import (
     StatusReminderMiddleware,
@@ -22,18 +23,21 @@ from openpaw.agent.middleware.status_reminder import (
 )
 from openpaw.agent.middleware.status_update import StatusUpdateMiddleware
 from openpaw.agent.middleware.subagent_status import SubAgentToolMiddleware
+from openpaw.agent.middleware.todo_list import TodoListMiddleware
 from openpaw.agent.middleware.tool_timeout import ToolTimeoutMiddleware
 
 __all__ = [
     "ApprovalRequiredError",
     "ApprovalToolMiddleware",
     "InterruptSignalError",
+    "PlanEventBridge",
     "QueueAwareToolMiddleware",
     "THINKING_TAG_PATTERN",
     "StatusReminderMiddleware",
     "StatusUpdateMiddleware",
     "SubAgentToolMiddleware",
     "ThinkingTokenMiddleware",
+    "TodoListMiddleware",
     "ToolTimeoutMiddleware",
     "build_post_model_hook",
     "build_pre_model_hook",

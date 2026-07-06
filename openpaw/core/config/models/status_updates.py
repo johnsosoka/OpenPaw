@@ -4,11 +4,11 @@ from pydantic import BaseModel, Field
 
 
 class StatusUpdatesConfig(BaseModel):
-    """Configuration for automatic and agent-driven status updates.
+    """Configuration for automatic status updates.
 
     Controls when the framework sends intermediary status messages to the user
     while the agent is working. Auto-detected events (tool calls, sub-agent
-    dispatch) are throttled; agent-driven report_progress calls are not.
+    dispatch) are throttled; harness plan/phase events are not.
     """
 
     enabled: bool = Field(default=True, description="Enable status updates middleware")

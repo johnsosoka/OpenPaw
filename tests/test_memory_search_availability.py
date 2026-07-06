@@ -276,7 +276,7 @@ def _make_mock_runner(
     # Agent factory (real or mock)
     if agent_factory is None:
         runner._agent_factory = MagicMock()
-        runner._agent_factory.create_agent.return_value = MagicMock()
+        runner._agent_factory.create_harness.return_value = MagicMock()
     else:
         runner._agent_factory = agent_factory
 
@@ -330,7 +330,7 @@ class TestConnectMemorySearchTool:
 
         WorkspaceRunner._connect_memory_search_tool(runner)
 
-        runner._agent_factory.create_agent.assert_not_called()
+        runner._agent_factory.create_harness.assert_not_called()
 
     def test_tools_removed_when_vector_store_unavailable(self):
         """When vector store is None, broken tool is removed from factory."""
@@ -373,11 +373,11 @@ class TestConnectMemorySearchTool:
             vector_store=None,
             embedding_provider=None,
         )
-        runner._agent_factory.create_agent.return_value = new_agent
+        runner._agent_factory.create_harness.return_value = new_agent
 
         WorkspaceRunner._connect_memory_search_tool(runner)
 
-        runner._agent_factory.create_agent.assert_called_once_with(
+        runner._agent_factory.create_harness.assert_called_once_with(
             checkpointer=runner._checkpointer
         )
         assert runner._agent_runner is new_agent
@@ -391,7 +391,7 @@ class TestConnectMemorySearchTool:
             vector_store=None,
             embedding_provider=None,
         )
-        runner._agent_factory.create_agent.return_value = new_agent
+        runner._agent_factory.create_harness.return_value = new_agent
 
         WorkspaceRunner._connect_memory_search_tool(runner)
 
@@ -429,7 +429,7 @@ class TestConnectMemorySearchTool:
 
         runner._agent_factory.remove_builtin_tools.assert_not_called()
         runner._agent_factory.remove_enabled_builtin.assert_not_called()
-        runner._agent_factory.create_agent.assert_not_called()
+        runner._agent_factory.create_harness.assert_not_called()
 
     def test_exception_is_caught_and_logged_as_warning(self):
         """If an unexpected exception occurs, it is caught and logged as warning."""

@@ -7,6 +7,7 @@ from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from typing import Any
 
+import aiohttp
 import discord
 from discord import app_commands
 
@@ -38,6 +39,23 @@ class DiscordChannel(ChannelAdapter, SecurityMixin):
 
     MAX_MESSAGE_LENGTH = MAX_MESSAGE_LENGTH
     MAX_FILE_SIZE = MAX_FILE_SIZE
+
+    # Transient Discord transport failures worth retrying (channel retry
+    # interface). DiscordServerError = 5xx; ClientConnectionError = dropped
+    # connection. HTTPException (4xx base) and Forbidden/NotFound stay off —
+    # they are permanent. DiscordServerError subclasses HTTPException, so it
+    # is listed explicitly rather than via the base.
+    #
+    # Resolved via getattr: under pytest's prepend-import mode the test dir
+    # `tests/channels/discord/` shadows the installed `discord` package as a
+    # namespace, so top-level attributes aren't materialized at collection
+    # time. Dropping a missing type (never crashing import) keeps behavior
+    # correct in production while tolerating that test-env artifact.
+    RETRYABLE_SEND_ERRORS = tuple(
+        e
+        for e in (getattr(discord, "DiscordServerError", None), aiohttp.ClientConnectionError)
+        if e is not None
+    )
 
     def __init__(
         self,
@@ -114,11 +132,7 @@ class DiscordChannel(ChannelAdapter, SecurityMixin):
             logger.error("Discord bot did not become ready within 30 seconds")
             raise RuntimeError("Discord bot failed to connect in time") from exc
 
-        self._outbound_sender = DiscordOutboundSender(
-            client=self._client,
-            channel_name=self.name,
-            bot_id=self._client.user.id,  # type: ignore[union-attr]
-        )
+        self._outbound_sender = self._build_outbound_sender()
         self._history_fetcher = DiscordHistoryFetcher(
             client=self._client,
             resolve_channel=self._resolve_channel,
@@ -133,6 +147,21 @@ class DiscordChannel(ChannelAdapter, SecurityMixin):
         )
 
         logger.info("Discord channel started (workspace: %s)", self.workspace_name)
+
+    def _build_outbound_sender(self) -> DiscordOutboundSender:
+        """Construct the outbound sender wired to this channel's retry runner.
+
+        Single construction point (the sender is rebuilt lazily in several
+        outbound methods); injecting ``send_with_retry`` here gives every
+        content-bearing call transient-failure backoff without per-call
+        plumbing.
+        """
+        return DiscordOutboundSender(
+            client=self._client,
+            channel_name=self.name,
+            bot_id=self._client.user.id,  # type: ignore[union-attr]
+            retry=self.send_with_retry,
+        )
 
     async def stop(self) -> None:
         """Stop the Discord bot gracefully."""
@@ -225,11 +254,7 @@ class DiscordChannel(ChannelAdapter, SecurityMixin):
         if not self._outbound_sender:
             if not self._client:
                 raise RuntimeError("Discord channel not started")
-            self._outbound_sender = DiscordOutboundSender(
-                client=self._client,
-                channel_name=self.name,
-                bot_id=self._client.user.id,  # type: ignore[union-attr]
-            )
+            self._outbound_sender = self._build_outbound_sender()
         await self._outbound_sender.send_file(session_key, file_data, filename, mime_type, caption)
 
     async def send_approval_request(
@@ -265,11 +290,7 @@ class DiscordChannel(ChannelAdapter, SecurityMixin):
         if not self._outbound_sender:
             if not self._client:
                 raise RuntimeError("Discord channel not started")
-            self._outbound_sender = DiscordOutboundSender(
-                client=self._client,
-                channel_name=self.name,
-                bot_id=self._client.user.id,  # type: ignore[union-attr]
-            )
+            self._outbound_sender = self._build_outbound_sender()
         return await self._outbound_sender.edit_message(session_key, message_id, content)
 
     async def delete_message(
@@ -281,11 +302,7 @@ class DiscordChannel(ChannelAdapter, SecurityMixin):
         if not self._outbound_sender:
             if not self._client:
                 raise RuntimeError("Discord channel not started")
-            self._outbound_sender = DiscordOutboundSender(
-                client=self._client,
-                channel_name=self.name,
-                bot_id=self._client.user.id,  # type: ignore[union-attr]
-            )
+            self._outbound_sender = self._build_outbound_sender()
         return await self._outbound_sender.delete_message(session_key, message_id)
 
     async def send_typing(self, session_key: str) -> None:
@@ -293,11 +310,7 @@ class DiscordChannel(ChannelAdapter, SecurityMixin):
         if not self._outbound_sender:
             if not self._client:
                 raise RuntimeError("Discord channel not started")
-            self._outbound_sender = DiscordOutboundSender(
-                client=self._client,
-                channel_name=self.name,
-                bot_id=self._client.user.id,  # type: ignore[union-attr]
-            )
+            self._outbound_sender = self._build_outbound_sender()
         await self._outbound_sender.send_typing(session_key)
 
     async def add_reaction(self, session_key: str, message_id: str, emoji: str) -> bool:
@@ -305,11 +318,7 @@ class DiscordChannel(ChannelAdapter, SecurityMixin):
         if not self._outbound_sender:
             if not self._client:
                 raise RuntimeError("Discord channel not started")
-            self._outbound_sender = DiscordOutboundSender(
-                client=self._client,
-                channel_name=self.name,
-                bot_id=self._client.user.id,  # type: ignore[union-attr]
-            )
+            self._outbound_sender = self._build_outbound_sender()
         return await self._outbound_sender.add_reaction(session_key, message_id, emoji)
 
     async def remove_reaction(self, session_key: str, message_id: str, emoji: str) -> bool:
@@ -317,11 +326,7 @@ class DiscordChannel(ChannelAdapter, SecurityMixin):
         if not self._outbound_sender:
             if not self._client:
                 raise RuntimeError("Discord channel not started")
-            self._outbound_sender = DiscordOutboundSender(
-                client=self._client,
-                channel_name=self.name,
-                bot_id=self._client.user.id,  # type: ignore[union-attr]
-            )
+            self._outbound_sender = self._build_outbound_sender()
         return await self._outbound_sender.remove_reaction(session_key, message_id, emoji)
 
     async def register_commands(self, commands: list[Any]) -> None:
@@ -429,11 +434,7 @@ class DiscordChannel(ChannelAdapter, SecurityMixin):
             if self._client is None:
                 raise RuntimeError("Discord channel not started")
             # Fallback for tests that set _client but not _outbound_sender
-            self._outbound_sender = DiscordOutboundSender(
-                client=self._client,
-                channel_name=self.name,
-                bot_id=self._client.user.id,  # type: ignore[union-attr]
-            )
+            self._outbound_sender = self._build_outbound_sender()
         return await self._outbound_sender._resolve_channel(channel_id)
 
     @staticmethod

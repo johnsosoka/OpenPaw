@@ -4,7 +4,12 @@ import logging
 from typing import TYPE_CHECKING
 
 from openpaw.channels.commands.base import CommandDefinition, CommandHandler, CommandResult
-from openpaw.core.prompts.commands import COMPACTED_TEMPLATE, SUMMARIZE_PROMPT
+from openpaw.core.prompts.commands import (
+    COMPACTED_TEMPLATE,
+    FLUSH_NOTE_TEMPLATE,
+    SUMMARIZE_PROMPT,
+)
+from openpaw.workspace.processors.compactor import read_todo_reminder, run_flush_turn
 
 if TYPE_CHECKING:
     from openpaw.channels.base import Message
@@ -53,6 +58,19 @@ class CompactCommand(CommandHandler):
         old_state = context.session_manager.get_state(message.session_key)
         old_conv_id = old_state.conversation_id if old_state else "unknown"
 
+        # Step 0: Flush turn — let the agent save durable context before it is
+        # lost to summarization. Fail-open: never blocks compaction.
+        flush_path = None
+        if getattr(context.auto_compact_config, "flush", True):
+            flush_path = await run_flush_turn(
+                context.agent_runner, old_thread_id, logger
+            )
+
+        # Balanced harness: capture the live todo list before rotation
+        todo_reminder = await read_todo_reminder(
+            context.agent_runner, old_thread_id, logger
+        )
+
         # Step 1: Generate summary using the agent
         summary = None
         try:
@@ -100,6 +118,10 @@ class CompactCommand(CommandHandler):
         if summary:
             try:
                 injection_prompt = COMPACTED_TEMPLATE.format(summary=summary)
+                if flush_path:
+                    injection_prompt += FLUSH_NOTE_TEMPLATE.format(flush_path=flush_path)
+                if todo_reminder:
+                    injection_prompt += f"\n\n{todo_reminder}"
                 await context.agent_runner.run(
                     message=injection_prompt,
                     thread_id=new_thread_id,

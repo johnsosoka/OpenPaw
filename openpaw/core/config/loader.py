@@ -12,6 +12,10 @@ from typing import Any
 
 import yaml
 
+from openpaw.core.config.deprecations import (
+    warn_deprecated_global_keys,
+    warn_misplaced_workspace_keys,
+)
 from openpaw.core.config.models.base import Config
 
 
@@ -149,4 +153,7 @@ def load_config(path: Path | str) -> Config:
     data = expand_env_vars_recursive(data)
     check_unexpanded_vars(data, source=str(config_path))
 
-    return Config(**data)
+    config = Config(**data)
+    warn_deprecated_global_keys(config)
+    warn_misplaced_workspace_keys(data)
+    return config

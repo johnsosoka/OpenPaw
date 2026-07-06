@@ -2,9 +2,10 @@
 
 import logging
 import time
+from collections.abc import Callable
 from typing import Any
 
-from openpaw.agent import AgentRunner
+from openpaw.agent.harness import AgentHarness
 from openpaw.agent.middleware import (
     ApprovalRequiredError,
     InterruptSignalError,
@@ -31,7 +32,7 @@ class MessageProcessor:
 
     def __init__(
         self,
-        agent_runner: AgentRunner,
+        agent_runner: AgentHarness,
         session_manager: SessionManager,
         queue_manager: QueueManager,
         builtin_loader: BuiltinLoader,
@@ -48,6 +49,7 @@ class MessageProcessor:
         lifecycle_config: Any = None,
         status_reminder_middleware: Any = None,
         status_update_middleware: Any = None,
+        learning_recorder: Callable[[str, str], None] | None = None,
     ):
         """Initialize message processor.
 
@@ -73,6 +75,9 @@ class MessageProcessor:
             status_update_middleware: Optional StatusUpdateMiddleware instance.
                 When provided, its set_context() is called before agent runs and
                 reset() is called in the finally block.
+            learning_recorder: Optional fire-and-forget callable invoked with
+                (user_content, response) after each successful non-system
+                agent run (PRD-001 F2.1). Must never raise.
         """
         self._agent_runner = agent_runner
         self._session_manager = session_manager
@@ -91,14 +96,26 @@ class MessageProcessor:
         self._lifecycle_config = lifecycle_config
         self._status_reminder_middleware = status_reminder_middleware
         self._status_update_middleware = status_update_middleware
+        self._learning_recorder = learning_recorder
 
-    def update_agent_runner(self, runner: "AgentRunner") -> None:
-        """Update the agent runner instance.
+    def set_learning_recorder(
+        self, recorder: Callable[[str, str], None] | None
+    ) -> None:
+        """Wire the learning-loop run recorder (set post-construction).
+
+        Args:
+            recorder: Callable invoked with (user_content, response) after
+                each successful non-system agent run, or None to disable.
+        """
+        self._learning_recorder = recorder
+
+    def update_agent_runner(self, runner: "AgentHarness") -> None:
+        """Update the agent harness instance.
 
         Used when the agent is rebuilt (e.g., after removing broken tools).
 
         Args:
-            runner: The new AgentRunner instance.
+            runner: The new AgentHarness instance.
         """
         self._agent_runner = runner
 
@@ -468,6 +485,12 @@ class MessageProcessor:
                         fallback = "I processed your message but my response was empty. Please try again."
                         await channel.send_message(session_key, fallback)
 
+                # Learning loop hook (PRD-001 F2.1): count successful
+                # non-system agent invocations. Fire-and-forget — the
+                # recorder owns its own error containment.
+                if self._learning_recorder and not is_system_batch:
+                    self._learning_recorder(combined_content, response or "")
+
             except ApprovalRequiredError as e:
                 # Log partial metrics if available
                 if self._agent_runner.last_metrics:
@@ -754,81 +777,25 @@ class MessageProcessor:
     ) -> str | None:
         """Check if auto-compact should trigger and perform it if needed.
 
+        Delegates to :meth:`AutoCompactor.check_compact` — the single
+        implementation of the compaction sequence (flush turn, todo capture,
+        archive, summarize, rotate, inject, notify).
+
         Returns:
             New thread_id if compaction occurred, None otherwise.
         """
-        if not self._auto_compact_config or not self._auto_compact_config.enabled:
-            return None
-        if not self._conversation_archiver:
-            return None
+        from openpaw.workspace.processors.compactor import AutoCompactor
 
-        try:
-            context_info = await self._agent_runner.get_context_info(thread_id)
-            utilization = context_info.get("utilization", 0.0)
-
-            if utilization < self._auto_compact_config.trigger:
-                return None
-
-            self._logger.info(
-                f"Auto-compact triggered: {utilization:.1%} utilization "
-                f"(threshold: {self._auto_compact_config.trigger:.0%}) "
-                f"for session {session_key}"
-            )
-
-            # Parse conversation_id from thread_id (format: "{session_key}:{conversation_id}")
-            # session_key contains one colon (e.g., "telegram:123"), so split from the right
-            parts = thread_id.rsplit(":", 1)
-            conversation_id = parts[-1] if len(parts) == 2 else thread_id
-
-            # Archive the current conversation
-            await self._conversation_archiver.archive(
-                checkpointer=self._agent_runner.checkpointer,
-                thread_id=thread_id,
-                session_key=session_key,
-                conversation_id=conversation_id,
-                tags=["auto-compact"],
-            )
-
-            # Generate summary using agent
-            from openpaw.core.prompts.commands import SUMMARIZE_PROMPT
-            summary = await self._agent_runner.run(
-                message=SUMMARIZE_PROMPT,
-                thread_id=thread_id,
-            )
-
-            # Rotate to new conversation
-            new_conversation_id = self._session_manager.new_conversation(session_key)
-            new_thread_id = f"{session_key}:{new_conversation_id}"
-
-            # Inject summary into new thread
-            from openpaw.core.prompts.commands import AUTO_COMPACT_TEMPLATE
-            summary_message = AUTO_COMPACT_TEMPLATE.format(summary=summary)
-            await self._agent_runner.run(
-                message=summary_message,
-                thread_id=new_thread_id,
-            )
-
-            # Notify user if configured
-            if channel:
-                msg_count = context_info.get("message_count", 0)
-                approx_tokens = context_info.get("approximate_tokens", 0)
-                await channel.send_message(
-                    session_key,
-                    f"Conversation auto-compacted ({msg_count} messages, ~{approx_tokens:,} tokens). "
-                    f"Summary preserved in new conversation."
-                )
-
-            self._logger.info(
-                f"Auto-compact complete: {conversation_id} -> {new_conversation_id} "
-                f"({context_info.get('message_count', 0)} messages, "
-                f"~{context_info.get('approximate_tokens', 0):,} tokens)"
-            )
-
-            return new_thread_id
-
-        except Exception as e:
-            self._logger.error(f"Auto-compact failed for {session_key}: {e}", exc_info=True)
-            return None
+        compactor = AutoCompactor(
+            session_manager=self._session_manager,
+            conversation_archiver=self._conversation_archiver,
+            auto_compact_config=self._auto_compact_config,
+            lifecycle_config=self._lifecycle_config,
+            logger=self._logger,
+        )
+        return await compactor.check_compact(
+            session_key, thread_id, channel, self._agent_runner
+        )
 
     async def _recover_context_overflow(
         self,

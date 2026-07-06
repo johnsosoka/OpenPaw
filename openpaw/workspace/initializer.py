@@ -3,6 +3,7 @@
 import logging
 from typing import Any, cast
 
+from openpaw.agent.harness import AgentHarness
 from openpaw.agent.metrics import TokenUsageLogger
 from openpaw.agent.middleware import (
     ApprovalToolMiddleware,
@@ -11,7 +12,6 @@ from openpaw.agent.middleware import (
     ToolTimeoutMiddleware,
 )
 from openpaw.agent.middleware.status_reminder import StatusReminderMiddleware
-from openpaw.agent.runner import AgentRunner
 from openpaw.builtins.base import BaseBuiltinProcessor
 from openpaw.builtins.loader import BuiltinLoader
 from openpaw.core.config import Config, merge_configs
@@ -19,6 +19,12 @@ from openpaw.core.config.models import ApprovalGatesConfig, StatusUpdatesConfig,
 from openpaw.runtime.approval import ApprovalGateManager
 from openpaw.runtime.session.archiver import ConversationArchiver
 from openpaw.runtime.session.manager import SessionManager
+from openpaw.runtime.status_bus import (
+    PlanChannelSink,
+    SessionLogSink,
+    SkillChannelSink,
+    StatusBus,
+)
 from openpaw.stores.subagent import SubAgentStore
 from openpaw.stores.task import TaskStore
 from openpaw.workspace.agent_factory import AgentFactory, filter_workspace_tools
@@ -182,6 +188,53 @@ class WorkspaceInitializer:
             channel_logging_enabled,
         )
 
+    def _build_react_tool_selector(self, tools: list[Any]) -> Any | None:
+        """Build the config-gated LLMToolSelectorMiddleware for react workspaces.
+
+        Only active when ``harness.type: react`` and
+        ``harness.tool_equipping.react_selector: true`` (ADR-104 §5). The
+        selection model is the ``tool_equipping.model`` catalog pointer,
+        instantiated via create_chat_model so provider quirks stay central;
+        unset inherits the agent's main model (middleware default).
+        The always_equip floor maps to ``always_include`` (group: prefixes
+        expanded against the live tool list).
+        """
+        cfg = self._workspace.config
+        if cfg is None or cfg.harness.type != "react":
+            return None
+        equip_cfg = cfg.harness.tool_equipping
+        if not equip_cfg.react_selector:
+            return None
+
+        from langchain.agents.middleware import LLMToolSelectorMiddleware
+
+        from openpaw.agent.harness.ultra.equipment import resolve_equip_floor
+        from openpaw.agent.model_factory import create_chat_model
+        from openpaw.core.config.providers import resolve_provider
+
+        selection_model: Any | None = None
+        if equip_cfg.model:
+            resolved = resolve_provider(equip_cfg.model, self._config.providers)
+            selection_model = create_chat_model(
+                model_str=resolved.model_str,
+                api_key=resolved.api_key,
+                temperature=0.0,
+                region=resolved.region,
+                extra_kwargs=dict(resolved.extra_kwargs),
+            )
+
+        always_include = sorted(resolve_equip_floor(equip_cfg.always_equip, tools))
+        self._logger.info(
+            "React tool selector enabled (max_tools=%d, always_include=%s)",
+            equip_cfg.max_tools,
+            always_include,
+        )
+        return LLMToolSelectorMiddleware(
+            model=selection_model,
+            max_tools=equip_cfg.max_tools,
+            always_include=always_include,
+        )
+
     def init_agent(
         self,
         builtin_loader: BuiltinLoader,
@@ -199,7 +252,7 @@ class WorkspaceInitializer:
         ApprovalToolMiddleware,
         ApprovalGateManager | None,
         AgentFactory,
-        AgentRunner,
+        AgentHarness,
         MessageProcessor,
         ToolTimeoutMiddleware,
         StatusReminderMiddleware | None,
@@ -282,8 +335,30 @@ class WorkspaceInitializer:
             else StatusUpdatesConfig()
         )
         status_update_middleware: StatusUpdateMiddleware | None = None
+        status_bus: StatusBus | None = None
         if status_update_config.enabled:
-            status_update_middleware = StatusUpdateMiddleware(status_update_config)
+            # ADR-106 Phase A: status events flow to a per-workspace bus
+            # alongside unchanged channel rendering. The same bus feeds the
+            # harness nodes via AgentFactory.set_status_emitter below.
+            status_bus = StatusBus(self._workspace.name)
+            status_bus.add_sink(SessionLogSink(self._workspace.path))
+            cfg = self._workspace.config
+            start_label = (
+                "Considering..."
+                if cfg is not None and cfg.harness.type == "balanced"
+                else "Starting work..."
+            )
+            status_update_middleware = StatusUpdateMiddleware(
+                status_update_config,
+                emitter=status_bus,
+                workspace=self._workspace.name,
+                start_label=start_label,
+            )
+            # Plan/node events (ultra harness) render through the same
+            # middleware via its armed per-run context (T2.7).
+            status_bus.add_sink(PlanChannelSink(status_update_middleware))
+            # Skill lifecycle one-liners (PRD-001 F4.1) render the same way.
+            status_bus.add_sink(SkillChannelSink(status_update_middleware))
             middlewares.insert(0, status_update_middleware)
             self._logger.info("Status update middleware enabled")
 
@@ -309,6 +384,15 @@ class WorkspaceInitializer:
                 status_reminder_config.threshold,
             )
 
+        # React-path tool selector (ADR-104 §5, T4.3): stock middleware that
+        # subsets request.tools per model call. Config-gated; ultra-type
+        # workspaces use the equip node instead.
+        react_selector_mw = self._build_react_tool_selector(
+            builtin_tools + workspace_tools
+        )
+        if react_selector_mw is not None:
+            middlewares.append(react_selector_mw)
+
         # Create agent factory and initial agent runner (checkpointer added in start())
         agent_factory = AgentFactory(
             workspace=self._workspace,
@@ -333,7 +417,9 @@ class WorkspaceInitializer:
             provider_catalog=self._config.providers,
             channel_logging_enabled=channel_logging_enabled,
         )
-        agent_runner = agent_factory.create_agent(checkpointer=None)
+        if status_bus is not None:
+            agent_factory.set_status_emitter(status_bus)
+        agent_runner = agent_factory.create_harness(checkpointer=None)
 
         # Create message processor
         message_processor = MessageProcessor(
@@ -385,6 +471,15 @@ class WorkspaceInitializer:
         """Merge workspace config over global config."""
         if not workspace.config:
             return {}
+
+        # One-time deprecation warnings for inline model credentials (S-A2).
+        # This is the single point where global and workspace config meet,
+        # once per workspace at startup.
+        from openpaw.core.config.deprecations import warn_deprecated_workspace_model_keys
+
+        warn_deprecated_workspace_model_keys(
+            global_config, workspace.config.model, workspace.name
+        )
 
         global_dict: dict[str, Any] = {
             "model": {

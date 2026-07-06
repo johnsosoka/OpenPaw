@@ -2,20 +2,18 @@
 
 import logging
 from pathlib import Path
-from typing import Any
 
-import yaml
-
-from openpaw.model.skill import SkillInfo, SkillInjectMode
+from openpaw.core.skill_file import SKILL_FILENAME as _SKILL_FILENAME
+from openpaw.core.skill_file import load_skill_file
+from openpaw.model.skill import SkillInfo, SkillStatus
 
 logger = logging.getLogger(__name__)
 
-_FRONTMATTER_DELIMITER = "---"
-_MAX_DESCRIPTION_LENGTH = 1024
-_SKILL_FILENAME = "SKILL.md"
 
-
-def load_workspace_skills(skills_path: Path) -> list[SkillInfo]:
+def load_workspace_skills(
+    skills_path: Path,
+    errors: list[str] | None = None,
+) -> list[SkillInfo]:
     """Load all skills from a workspace's agent/skills/ directory.
 
     Scans for SKILL.md files in immediate subdirectories of skills_path.
@@ -27,12 +25,22 @@ def load_workspace_skills(skills_path: Path) -> list[SkillInfo]:
 
     - ``name``: Skill display name (falls back to directory name)
     - ``description``: Short description (truncated to 1024 chars)
+    - ``inject``, ``version``, ``created_by``, ``source``, ``updated_at``,
+      ``status``: ADR-105 lifecycle keys, all optional and defaulted
 
     Any content after the frontmatter block (or the full file if no
     frontmatter is present) becomes the skill's ``content``.
 
+    Skills with ``status: deprecated`` are skipped entirely (like the ``_``
+    prefix). Skills with ``status: staged`` ARE returned — marked staged —
+    so they appear in ``/skills``, but they are excluded from system-prompt
+    injection by AgentWorkspace.
+
     Args:
         skills_path: Absolute path to the workspace's agent/skills/ directory.
+        errors: Optional list that per-skill load error messages are appended
+            to, so callers can surface failures (broken skills are skipped
+            regardless).
 
     Returns:
         List of SkillInfo instances, sorted by directory name.
@@ -62,10 +70,15 @@ def load_workspace_skills(skills_path: Path) -> list[SkillInfo]:
             continue
 
         try:
-            skill = _load_skill(skill_dir, skill_file)
+            skill = load_skill_file(skill_dir, skill_file)
+            if skill.status is SkillStatus.DEPRECATED:
+                logger.debug(f"Skipping deprecated skill: {skill_dir.name}")
+                continue
             skills.append(skill)
         except Exception as e:
             logger.error(f"Failed to load skill from {skill_dir.name}: {e}")
+            if errors is not None:
+                errors.append(f"Failed to load skill '{skill_dir.name}': {e}")
             continue
 
     if skills:
@@ -105,7 +118,9 @@ def load_framework_skills() -> list[SkillInfo]:
             continue
 
         try:
-            skill = _load_skill(skill_dir, skill_file)
+            skill = load_skill_file(skill_dir, skill_file)
+            if skill.status is SkillStatus.DEPRECATED:
+                continue
             skill.source = "framework"
             # Framework skills are materialized into the workspace at startup,
             # so read_path points to the materialized location.
@@ -168,97 +183,3 @@ def materialize_framework_skills(
         logger.debug(
             "Materialized %d framework skill(s) into workspace", framework_count
         )
-
-
-def _load_skill(skill_dir: Path, skill_file: Path) -> SkillInfo:
-    """Parse a SKILL.md file and return a SkillInfo instance.
-
-    Args:
-        skill_dir: Path to the skill's directory (used for name fallback).
-        skill_file: Path to the SKILL.md file.
-
-    Returns:
-        Populated SkillInfo instance.
-    """
-    raw = skill_file.read_text(encoding="utf-8")
-    frontmatter, content = _parse_frontmatter(raw)
-
-    name = str(frontmatter.get("name") or skill_dir.name)
-    raw_description = str(frontmatter.get("description") or "")
-    description = raw_description[:_MAX_DESCRIPTION_LENGTH]
-
-    # Parse inject mode from frontmatter
-    raw_inject = frontmatter.get("inject")
-    if raw_inject is None:
-        inject = SkillInjectMode.SUMMARY
-    else:
-        raw_inject_str = str(raw_inject).strip().lower()
-        try:
-            inject = SkillInjectMode(raw_inject_str)
-        except ValueError:
-            logger.warning(
-                "Skill '%s' has invalid inject mode '%s' — defaulting to summary",
-                skill_dir.name,
-                raw_inject,
-            )
-            inject = SkillInjectMode.SUMMARY
-
-    # Compute read_path: workspace-relative path for agent read_file() access
-    read_path = f"agent/skills/{skill_dir.name}/SKILL.md"
-
-    return SkillInfo(
-        name=name,
-        description=description,
-        content=content,
-        path=skill_dir,
-        inject=inject,
-        read_path=read_path,
-    )
-
-
-def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    """Extract YAML frontmatter and body content from a markdown string.
-
-    Frontmatter is an optional YAML block at the very start of the file,
-    enclosed between two ``---`` delimiter lines::
-
-        ---
-        name: my-skill
-        description: Does something useful
-        ---
-
-        # Skill Content
-
-    Args:
-        text: Full file content to parse.
-
-    Returns:
-        A two-tuple of (frontmatter_dict, body_content). If no valid
-        frontmatter block is present, returns ({}, original_text).
-    """
-    lines = text.split("\n")
-
-    # Frontmatter must start on the very first line
-    if not lines or lines[0].strip() != _FRONTMATTER_DELIMITER:
-        return {}, text
-
-    # Find the closing delimiter
-    try:
-        closing_index = next(
-            i for i, line in enumerate(lines[1:], start=1)
-            if line.strip() == _FRONTMATTER_DELIMITER
-        )
-    except StopIteration:
-        # Opening delimiter found but no closing delimiter — treat as plain content
-        return {}, text
-
-    frontmatter_block = "\n".join(lines[1:closing_index])
-    body = "\n".join(lines[closing_index + 1:]).lstrip("\n")
-
-    try:
-        parsed = yaml.safe_load(frontmatter_block) or {}
-    except yaml.YAMLError as e:
-        logger.warning(f"Failed to parse frontmatter YAML: {e}")
-        parsed = {}
-
-    return parsed, body

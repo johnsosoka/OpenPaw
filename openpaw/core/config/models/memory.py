@@ -40,6 +40,13 @@ class AutoCompactConfig(BaseModel):
     summary_model: str | None = Field(
         default=None, description="Model for summary generation (null = use workspace model)"
     )
+    flush: bool = Field(
+        default=True,
+        description=(
+            "Give the agent one turn to write durable working context to a "
+            "workspace file before compaction summarizes the conversation"
+        ),
+    )
 
     @field_validator("trigger")
     @classmethod

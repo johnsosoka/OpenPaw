@@ -1,6 +1,6 @@
 # Architecture
 
-OpenPaw is a multi-workspace AI agent framework built on [LangGraph](https://langchain-ai.github.io/langgraph/) (`create_react_agent`) and [LangChain](https://www.langchain.com/). This page covers system design, data flows, and architectural decisions for developers who want to understand, contribute to, or extend the framework.
+OpenPaw is a multi-workspace AI agent framework built on [LangGraph](https://langchain-ai.github.io/langgraph/) (`create_agent`) and [LangChain](https://www.langchain.com/). This page covers system design, data flows, and architectural decisions for developers who want to understand, contribute to, or extend the framework.
 
 <div align="center">
   <img src="../assets/images/openpaw-multi-agent.png" alt="OpenPaw Architecture Overview" width="650">
@@ -73,7 +73,7 @@ Cross-cutting infrastructure used by all higher layers. Nothing in `core/` impor
 
 ### `openpaw/agent/`
 
-The LangGraph execution layer. `AgentRunner` wraps `create_react_agent()`, composes the middleware stack, and manages model instantiation via `init_chat_model()`.
+The LangGraph execution layer. `AgentRunner` wraps `create_agent()` (from `langchain.agents`), composes the middleware stack, and manages model instantiation via `create_chat_model()` in `agent/model_factory.py`.
 
 **Key responsibilities:**
 
@@ -210,6 +210,47 @@ The `delivery` field controls output routing: `channel` sends directly to the co
 
 ---
 
+## Agent Harness
+
+`openpaw/agent/harness/` introduces a topology seam: `MessageProcessor`, `WorkspaceRunner`, and commands program against an `AgentHarness` protocol rather than a concrete agent graph. All `create_agent` internals live behind it, so agent topologies can vary per workspace without touching the layers above.
+
+Three harness tiers ship in 0.5.0, selected by `harness.type` in the workspace config:
+
+- **`react`** (default) — the existing compiled `create_agent` ReAct loop, wrapped unchanged. Workspaces that don't set `harness:` behave exactly as before.
+- **`balanced`** — the react loop plus a todo-driven live plan checklist: multi-step visibility at react cost, zero extra harness LLM calls.
+- **`ultra`** — a LangGraph `StateGraph` around the react loop for long-horizon work needing step isolation and per-node model routing:
+
+```
+START → triage ──→ react ──────────────────────────→ END       (simple turns)
+              ├──→ brief → [ideate →] plan → execute_step      (multi-step / open-ended)
+                                      execute_step ⇄ reflect
+                                            └──→ synthesize → END
+```
+
+A triage node routes each message: simple turns go straight to the plain react loop, multi-step work goes to planning, open-ended asks go through an ideation step first. On the plan and ideate paths, a **brief** node (`harness.brief`, on by default) first distills the full session history — token-budgeted against the brief model's context window, not a fixed cutoff — into a structured brief consumed by the reasoning modules, step execution, synthesis, and tool equipping; react turns skip it, and a brief failure falls open to a role-labeled, dialogue-only digest. Plans are first-class state — checkpointed, revisable, and rendered as a live edited-in-place checklist in the channel. Each `execute_step` invokes the **same compiled react graph** as an embedded subgraph, so middleware — steer/interrupt, approval gates, tool timeouts, status updates — applies to every planned step by construction. Triage and module calls fail open to the react path: a routing or module failure degrades to the current loop, never to an error.
+
+**The balanced tier** is a single shared-context loop — no triage, no brief, no synthesis: the session context *is* the context, and the loop's final message is the answer. A todo middleware contributes a `write_todos` tool (statuses `pending`/`in_progress`/`completed`/`failed`, plus an optional one-line `note`), and a `PlanEventBridge` middleware diffs every write into the same `plan.*` status events the ultra checklist renderer consumes — failed steps render ✗, notes surface as one-line progress updates — so the live edited-in-place checklist costs nothing extra: updates ride inside turns the model was already taking. Because balanced *is* the react loop, all existing middleware (approval gates, steer/interrupt, tool timeouts, status updates) applies by construction, and the current todos are re-injected after auto-compact so the checklist survives conversation rotation. Reflection is organic by default — the model sees its own failures and checklist and self-corrects next turn; `harness.reflection.mode: checkpoint` escalates to one structured verdict call every N completed steps (immediately on a failed one), injected as a course-correction nudge. For open-ended asks, the `explore_lenses` tool (`harness.ideation`) hands the model deterministic ideonomic question lenses with zero LLM calls — the full parallel IdeonomyModule remains ultra-exclusive.
+
+**Reasoning modules** (`agent/harness/modules/`) make the planning, creative, and reflection nodes pluggable behind one `ReasoningModule` interface with a registry. Shipped modules: `direct` (single-call planning), `self_discover` (SELECT/ADAPT/IMPLEMENT over the Self-Discover seed modules with a per-task-type cache), `ideonomy` (creative ideation through curated lenses), and `light`/`full` reflection. `module: auto` inserts a selector that picks per task over module taglines, short-circuiting without an LLM call when only one candidate exists.
+
+**Module subgraphs** — `self_discover` and `ideonomy` are implemented internally as compiled LangGraph subgraphs behind the unchanged `ReasoningModule.run()` contract. They run unpersisted (no checkpointer), their stages appear as namespaced nodes in the outer stream for per-stage visibility, ideonomy's lens explorations fan out concurrently via `Send`, and every self-discover discovery stage (SELECT/ADAPT/IMPLEMENT) uses structured outputs. The registry, selector, and fallback machinery are untouched.
+
+**Per-node models** — each node (triage, planning, creative, reflection, selector, synthesize, execution) can point at a provider-catalog entry; credentials stay in the catalog and resolution flows through the same `create_chat_model()` path. A bare `harness: {type: ultra}` runs with every node inheriting the workspace model. `/harness` prints the resolved node→model table; the runtime `/model` override applies to the execution node only.
+
+**Status event backbone** (`model/status_event.py`, `runtime/status_bus.py`) — every observable happening (runs, tools, sub-agents, plan lifecycle, skill lifecycle, learning evaluations) is a machine-readable `StatusEvent` fanned out through a per-workspace `StatusBus` to pluggable sinks: channel rendering (the live plan checklist), a JSONL event log, and future consumers such as a web portal. Emission is best-effort and never blocks or fails an agent run. Inside the ultra graph, reasoning-module stages emit their events over LangGraph's custom stream; `UltraHarness` forwards them to the bus, stamping run identity centrally. Out-of-graph producers (skill store, learning evaluator, middleware) keep the injected emitter — the `StatusEmitter`/`StatusBus` contract and event payloads are unchanged.
+
+**Per-node telemetry** — harness nodes emit `node.completed` events with token counts and latency; per-node rows land in `token_usage.jsonl` alongside the unchanged run-level records.
+
+See [Configuration](configuration.md) for the full `harness:` field reference.
+
+### Learning Loop
+
+When `learning.enabled` is set, agents can codify learned procedures as workspace skills. Every programmatic skill write flows through the `SkillStore` (`stores/skill.py`) validation gates — name schema, per-skill token budget, per-workspace skill cap, and a content lint that rejects credential- and injection-shaped content — then writes atomically and triggers `WorkspaceRunner.reload_skills()`, hot-swapping the skill into the system prompt without a restart. The `/skills` command lists skills with provenance and approves or rejects staged ones; `/reload` re-reads skills from disk.
+
+Phase 2 (`learning.phase2.enabled`, off by default) adds background evaluation: every N main-lane runs, `LearningEvaluator` (`runtime/learning/`) reviews a rolling activity digest with a single LLM call; proposals are drafted by a constrained `skill-builder` sub-agent and land **staged** for human approval by default. Evaluations are debounced to one in flight, capped by a daily token budget, and never user-facing on failure.
+
+---
+
 ## Configuration Resolution
 
 Global defaults merge with workspace overrides, environment variables expand, and provider catalog entries resolve connection details before any workspace starts.
@@ -226,9 +267,9 @@ See [Configuration](configuration.md) for the full field reference and provider 
 
 ## Design Decisions
 
-### Why LangGraph `create_react_agent`?
+### Why LangGraph `create_agent`?
 
-LangGraph provides a proven ReAct loop with native tool calling, conversation checkpointing via `AsyncSqliteSaver`, and first-class middleware support for tool interception. Building equivalent infrastructure from scratch would duplicate significant work with fewer correctness guarantees. LangChain's `init_chat_model()` handles multi-provider model instantiation behind a single interface, removing the need for per-provider adapter code and making runtime model switching straightforward to implement.
+LangGraph provides a proven ReAct loop with native tool calling, conversation checkpointing via `AsyncSqliteSaver`, and first-class middleware support for tool interception. Building equivalent infrastructure from scratch would duplicate significant work with fewer correctness guarantees. Multi-provider model instantiation is handled by `create_chat_model()` (`agent/model_factory.py`), which instantiates providers directly (`ChatOpenAI`, `ChatAnthropic`, `ChatBedrockConverse`, `ChatXAI`, `ChatMoonshot`, and others) behind a single interface — direct instantiation gives per-provider control over kwargs (e.g., Moonshot thinking config) that generic factories silently drop.
 
 ### Why workspace isolation?
 
@@ -322,7 +363,7 @@ Secrets never appear in config files directly. The `${VAR}` expansion system rea
 
 ## Testing
 
-The test suite (1,100+ tests as of the current release) covers three levels:
+The test suite (3,200+ tests) covers three levels:
 
 **Unit tests** target individual components in isolation: config parsing and deep-merge logic, queue mode behaviors and lane concurrency, channel message format conversion, builtin registration and conditional loading, timezone utilities, filename sanitization, and sandbox path validation. Mock-heavy by design — no external services required.
 

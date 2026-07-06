@@ -10,7 +10,7 @@ import aiosqlite
 from dotenv import load_dotenv
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from openpaw.agent.metrics import TokenUsageLogger
+from openpaw.agent.metrics import TokenUsageLogger, TokenUsageReader
 from openpaw.agent.session_logger import SessionLogger
 from openpaw.builtins.loader import BuiltinLoader
 from openpaw.channels.base import ChannelAdapter
@@ -23,20 +23,34 @@ from openpaw.core.logging import setup_workspace_logger
 from openpaw.core.paths import CONVERSATIONS_DB, DOT_ENV, TEAM_DIR
 from openpaw.core.utils import resolve_user_name
 from openpaw.model.message import Message, MessageDirection
+from openpaw.model.skill import SkillInfo
 from openpaw.model.spawn_profile import SpawnProfile
+from openpaw.runtime.learning import (
+    SKILL_BUILDER_PROFILE_NAME,
+    LearningEvaluator,
+    build_skill_builder_profile,
+)
 from openpaw.runtime.mcp.manager import MCPManager
 from openpaw.runtime.queue.lane import LaneQueue, QueueItem, QueueMode
 from openpaw.runtime.queue.manager import QueueManager
 from openpaw.runtime.session.manager import SessionManager
+from openpaw.runtime.status_bus import NullStatusEmitter
 from openpaw.runtime.subagent import SubAgentRunner
+from openpaw.stores.skill import SkillLimits, SkillStore
 from openpaw.workspace.connector import BuiltinToolConnector
 from openpaw.workspace.initializer import WorkspaceInitializer
 from openpaw.workspace.lifecycle import LifecycleManager
 from openpaw.workspace.lifecycle_notifier import _notify_lifecycle_impl
 from openpaw.workspace.loader import WorkspaceLoader
+from openpaw.workspace.node_model_resolver import NodeModelResolver
 from openpaw.workspace.profile_loader import load_spawn_profiles
 from openpaw.workspace.profile_resolver import SpawnProfileResolver
 from openpaw.workspace.roster import TeamRosterBuilder
+from openpaw.workspace.skill_loader import (
+    load_framework_skills,
+    load_workspace_skills,
+    materialize_framework_skills,
+)
 from openpaw.workspace.task_service import TaskMaintenanceService
 from openpaw.workspace.tool_loader import load_workspace_tools  # noqa: F401
 
@@ -170,6 +184,15 @@ class WorkspaceRunner:
             builtin_loader=builtin_loader,
         )
 
+        # Learning loop gating (PRD-001 F1.3): manage_skill only equips when
+        # learning.enabled — filter before the agent is built.
+        if not self._workspace.learning_enabled:
+            self._builtin_tools = [
+                t for t in self._builtin_tools if getattr(t, "name", "") != "manage_skill"
+            ]
+            if "manage_skill" in self._enabled_builtin_names:
+                self._enabled_builtin_names.remove("manage_skill")
+
         # Middleware, agent factory, agent runner, and message processor
         (
             self._queue_middleware,
@@ -193,6 +216,16 @@ class WorkspaceRunner:
             queue_manager=self._queue_manager,
             channel_logging_enabled=self._channel_logging_enabled,
         )
+
+        # Learning loop wiring (PRD-001 F1.3): SkillStore + manage_skill
+        self._skill_store = self._init_skill_store()
+
+        # Learning loop Phase 2 (PRD-001 F2.x): background skill evaluation
+        self._learning_evaluator = self._init_learning_evaluator()
+        if self._learning_evaluator is not None:
+            self._message_processor.set_learning_recorder(
+                self._learning_evaluator.record_run
+            )
 
         # Tool connector (channels updated in start())
         self._tool_connector = BuiltinToolConnector(
@@ -295,7 +328,198 @@ class WorkspaceRunner:
             subagent_store=self._subagent_store,
             agent_factory=self._agent_factory,
             channels=self._channels,
+            skill_reloader=self.reload_skills,
+            skill_store=self._skill_store,
+            harness_info=self._harness_info,
+            auto_compact_config=(
+                self._workspace.config.auto_compact
+                if self._workspace.config
+                else None
+            ),
         )
+
+    def _harness_info(self) -> str:
+        """Render harness type + resolved node→model table for /harness (C9).
+
+        React: harness type and the active (possibly runtime-overridden)
+        model. Ultra: one row per node with the resolved display string,
+        an inherited marker, and module names for module kinds; the
+        execution row shows the factory's active model because runtime
+        /model overrides apply to execution only (ADR-103 §4).
+        """
+        factory = self._agent_factory
+        harness_config = (
+            self._workspace.config.harness if self._workspace.config else None
+        )
+        if harness_config is None or harness_config.type != "ultra":
+            return f"Harness: react\nModel: {factory.active_model}"
+
+        resolver = getattr(self._agent_runner, "node_resolver", None)
+        if resolver is None:
+            # Config says ultra but the running harness has no resolver
+            # (should not happen) — degrade to the execution model.
+            return f"Harness: ultra\nExecution model: {factory.active_model}"
+
+        def row(node_config: Any, module: str | None = None) -> str:
+            resolved = resolver.resolve_node(node_config)
+            text = str(resolved.display_str)
+            if resolved.inherited:
+                text += " (inherited)"
+            if module is not None:
+                text += f" [module: {module}]"
+            return text
+
+        lines = [
+            "Harness: ultra",
+            f"triage: {row(harness_config.triage)}",
+        ]
+        if harness_config.brief.enabled:
+            lines.append(f"brief: {row(harness_config.brief)}")
+        lines += [
+            f"planning: {row(harness_config.planning, harness_config.planning.module)}",
+            f"creative: {row(harness_config.creative, harness_config.creative.module)}",
+            f"reflection: {row(harness_config.reflection, harness_config.reflection.module)}",
+            f"selector: {row(harness_config.selector)}",
+            f"synthesize: {row(harness_config.synthesize)}",
+            f"execution: {factory.active_model}",
+        ]
+        return "\n".join(lines)
+
+    def _init_skill_store(self) -> "SkillStore | None":
+        """Build the SkillStore and wire it into manage_skill when learning is on.
+
+        The store is the single validated write path for skills (ADR-105 §2):
+        gates + atomic writes + lifecycle events + hot-reload trigger.
+        Returns None when learning.enabled is false.
+        """
+        if not self._workspace.learning_enabled or self._workspace.config is None:
+            return None
+
+        learning = self._workspace.config.learning
+        emitter = self._agent_factory.status_emitter or NullStatusEmitter()
+
+        async def _reload() -> None:
+            await asyncio.to_thread(self.reload_skills)
+
+        store = SkillStore(
+            workspace_path=self._workspace.path,
+            workspace=self.workspace_name,
+            limits=SkillLimits(
+                max_skill_tokens=learning.limits.max_skill_tokens,
+                max_skills=learning.limits.max_skills,
+            ),
+            emitter=emitter,
+            reload_trigger=_reload,
+        )
+
+        tool = self._builtin_loader.get_tool_instance("manage_skill")
+        if tool is not None:
+            tool.set_skill_store(store, approval=learning.approval)
+            self.logger.info(
+                "Learning loop enabled: manage_skill wired (approval=%s)", learning.approval
+            )
+        return store
+
+    def _init_learning_evaluator(self) -> "LearningEvaluator | None":
+        """Build the Phase 2 learning evaluator when enabled (PRD-001 F2.x).
+
+        Requires learning.enabled (the SkillStore exists) AND
+        learning.phase2.enabled (F2.5 — off by default). The sub-agent
+        runner is late-bound in start() via set_subagent_runner().
+        """
+        if self._skill_store is None or self._workspace.config is None:
+            return None
+        learning = self._workspace.config.learning
+        if not learning.phase2.enabled:
+            return None
+
+        factory = self._agent_factory
+
+        def _pocket_model() -> Any:
+            # Same construction pattern as AgentFactory.create_harness
+            # (ADR-103): NodeModelConfig() with no overrides inherits the
+            # workspace model. Reaches factory privates the way the factory
+            # itself does — a public seam can come with the portal work.
+            from openpaw.core.config.models import NodeModelConfig
+
+            resolver = NodeModelResolver(
+                resolver=factory._resolver,
+                workspace_model=factory._configured_model,
+                workspace_api_key=factory._resolver.resolve_api_key(
+                    factory._configured_model
+                ),
+                workspace_temperature=factory._temperature,
+                workspace_region=factory._resolver._region,
+                workspace_extra_kwargs=factory._resolver._extra_model_kwargs,
+            )
+            return resolver.create_node_model(NodeModelConfig())
+
+        evaluator = LearningEvaluator(
+            workspace_name=self.workspace_name,
+            config=learning,
+            skill_store=self._skill_store,
+            usage_reader=TokenUsageReader(self._workspace.path),
+            model_factory=_pocket_model,
+            skills_provider=lambda: list(self._workspace.skills),
+            emitter=self._agent_factory.status_emitter or NullStatusEmitter(),
+        )
+        self.logger.info(
+            "Learning loop Phase 2 enabled: evaluating every %d run(s) "
+            "(approval=%s)",
+            learning.phase2.every_n_runs,
+            learning.phase2.approval,
+        )
+        return evaluator
+
+    def reload_skills(self) -> tuple[int, int, list[str]]:
+        """Re-scan skills from disk and rebuild the agent with the new set.
+
+        Workspace skills override framework skills by name (same merge logic
+        as WorkspaceLoader.load). The skills list is replaced atomically —
+        never mutated in place — so concurrent readers (sub-agents, stateless
+        cron/heartbeat agents) see either the old or the new list, never a
+        partial state.
+
+        Returns:
+            Tuple of (workspace_count, framework_count, errors) where errors
+            are per-skill load failure messages for broken skills that were
+            skipped.
+        """
+        errors: list[str] = []
+        workspace_skills = load_workspace_skills(
+            self._workspace.skills_path, errors=errors
+        )
+        framework_skills = load_framework_skills()
+
+        # Merge: workspace skills override framework skills by name
+        skills_by_name: dict[str, SkillInfo] = {}
+        for skill in framework_skills:
+            skills_by_name[skill.name] = skill
+        for skill in workspace_skills:
+            if skill.name in skills_by_name:
+                self.logger.info(
+                    "Workspace skill '%s' overrides framework skill with same name",
+                    skill.name,
+                )
+            skills_by_name[skill.name] = skill
+        merged = list(skills_by_name.values())
+
+        materialize_framework_skills(self._workspace.path, merged)
+
+        # Atomic list replace (thread-safe via GIL) — do not mutate in place
+        self._workspace.skills = merged
+
+        self._agent_runner.rebuild_agent()
+
+        workspace_count = sum(1 for s in merged if s.source == "workspace")
+        framework_count = sum(1 for s in merged if s.source == "framework")
+        self.logger.info(
+            "Reloaded skills: %d workspace, %d framework, %d error(s)",
+            workspace_count,
+            framework_count,
+            len(errors),
+        )
+        return workspace_count, framework_count, errors
 
     async def _handle_inbound_message(self, message: Message) -> None:
         """Handle an inbound message from any channel."""
@@ -576,6 +800,19 @@ class WorkspaceRunner:
                 profile_resolver
             ).build()
 
+        # Framework skill-builder profile for the learning loop (PRD-001
+        # F2.3). Registered AFTER the roster is built so it stays out of the
+        # agent-visible team roster; a workspace profile of the same name
+        # takes precedence. ponytail: private-dict insert — the resolver has
+        # no register API and this is its only post-construction writer.
+        if (
+            self._learning_evaluator is not None
+            and profile_resolver.resolve(SKILL_BUILDER_PROFILE_NAME) is None
+        ):
+            profile_resolver._profiles[SKILL_BUILDER_PROFILE_NAME] = (
+                build_skill_builder_profile()
+            )
+
         # Start sub-agent runner
         subagent_session_logger = SessionLogger(
             self._workspace.path, session_type="subagent"
@@ -617,6 +854,13 @@ class WorkspaceRunner:
         )
         self._tool_connector.connect_spawn_tool(self._subagent_runner)
         self._tool_connector.connect_channel_history_tool(self._checkpointer)
+
+        # Late-bind the learning evaluator's builder path (F2.3) — the
+        # sub-agent runner only exists from this point on.
+        if self._learning_evaluator is not None:
+            self._learning_evaluator.set_subagent_runner(
+                self._subagent_runner, self._subagent_store
+            )
 
         self._running = True
         self._task_service.start()
@@ -939,6 +1183,10 @@ class WorkspaceRunner:
         # Stop schedulers
         await self._lifecycle_manager.stop_cron_scheduler()
         await self._lifecycle_manager.stop_heartbeat_scheduler()
+
+        # Cancel any in-flight learning evaluation
+        if self._learning_evaluator is not None:
+            self._learning_evaluator.cancel()
 
         # Shutdown sub-agent runner
         if self._subagent_runner:

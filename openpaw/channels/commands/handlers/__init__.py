@@ -2,10 +2,13 @@
 
 from openpaw.channels.commands.base import CommandHandler
 from openpaw.channels.commands.handlers.compact import CompactCommand
+from openpaw.channels.commands.handlers.harness import HarnessCommand
 from openpaw.channels.commands.handlers.help import HelpCommand
 from openpaw.channels.commands.handlers.model import ModelCommand
 from openpaw.channels.commands.handlers.new import NewCommand
 from openpaw.channels.commands.handlers.queue_mode import QueueModeCommand
+from openpaw.channels.commands.handlers.reload import ReloadCommand
+from openpaw.channels.commands.handlers.skills import SkillsCommand
 from openpaw.channels.commands.handlers.start import StartCommand
 from openpaw.channels.commands.handlers.status import StatusCommand
 
@@ -24,16 +27,22 @@ def get_framework_commands() -> list[CommandHandler]:
         QueueModeCommand(),
         StatusCommand(),
         ModelCommand(),
+        ReloadCommand(),
+        SkillsCommand(),
+        HarnessCommand(),
     ]
 
 
 __all__ = [
     "CompactCommand",
     "get_framework_commands",
+    "HarnessCommand",
     "HelpCommand",
     "ModelCommand",
     "NewCommand",
     "QueueModeCommand",
+    "ReloadCommand",
+    "SkillsCommand",
     "StartCommand",
     "StatusCommand",
 ]

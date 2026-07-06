@@ -39,12 +39,21 @@ class ProviderDefinition(BaseModel):
 
     Defines connection details (type, api_key, base_url, region) that can be
     referenced by name from workspace model configurations.
+
+    When ``model`` is set, a workspace may reference the entry by bare name
+    (``model: fast``) and the catalog supplies the model id. An explicit
+    workspace model id (``model: fast:some-model``) always wins over the
+    catalog's ``model`` value.
     """
 
     type: str | None = Field(default=None, description="LangChain provider type. Defaults to catalog key name.")
     api_key: str | None = Field(default=None, description="API key for the provider")
     base_url: str | None = Field(default=None, description="Custom API endpoint URL")
     region: str | None = Field(default=None, description="AWS region for Bedrock models")
+    model: str | None = Field(
+        default=None,
+        description="Default model id for this entry, so workspaces can reference the catalog name alone",
+    )
 
     model_config = {"extra": "allow"}
 
@@ -60,7 +69,13 @@ class LoggingConfig(BaseModel):
 
 
 class Config(BaseModel):
-    """Root configuration for OpenPaw."""
+    """Root configuration for OpenPaw.
+
+    Convention (0.5.0+): new config groups (e.g. ``harness:``, ``learning:``)
+    must use ``model_config = {"extra": "forbid"}`` so typos fail fast at load
+    time. Legacy sections keep ``extra="allow"`` because unknown keys
+    intentionally flow through as provider kwargs (see PRD-003 §A / S-A4).
+    """
 
     workspaces_path: Path = Field(default=Path("agent_workspaces"), description="Path to agent workspaces")
     logging: LoggingConfig = Field(default_factory=LoggingConfig, description="Logging configuration")

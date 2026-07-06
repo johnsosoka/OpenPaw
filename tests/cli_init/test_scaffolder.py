@@ -133,6 +133,30 @@ class TestCreateWorkspace:
         assert cfg.model.provider == "moonshot"
         assert cfg.model.thinking is False
 
+    def test_default_harness_is_balanced_and_valid(self, tmp_path: Path) -> None:
+        """No harness argument defaults to a balanced tier that Pydantic accepts."""
+        from openpaw.core.config.models import WorkspaceConfig
+
+        _create_workspace(tmp_path, "balanced_agent", None, None)
+        data = yaml.safe_load(
+            (tmp_path / "balanced_agent" / "config" / "agent.yaml").read_text()
+        )
+        assert data["harness"]["type"] == "balanced"
+        cfg = WorkspaceConfig(**data)
+        assert cfg.harness.type == "balanced"
+
+    def test_ultra_harness_scaffolds_and_validates(self, tmp_path: Path) -> None:
+        """`harness=ultra` writes a workspace whose agent.yaml validates as ultra."""
+        from openpaw.core.config.models import WorkspaceConfig
+
+        _create_workspace(tmp_path, "ultra_agent", None, None, "ultra")
+        data = yaml.safe_load(
+            (tmp_path / "ultra_agent" / "config" / "agent.yaml").read_text()
+        )
+        assert data["harness"]["type"] == "ultra"
+        cfg = WorkspaceConfig(**data)
+        assert cfg.harness.type == "ultra"
+
     def test_scaffolds_ollama_workspace_keyless(self, tmp_path: Path) -> None:
         """`--model ollama:llama3.1` produces a keyless config with base_url + num_ctx."""
         from openpaw.core.config.models import WorkspaceConfig

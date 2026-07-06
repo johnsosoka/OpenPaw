@@ -5,10 +5,17 @@ This package contains store classes for managing persistent state:
 - SubAgentStore: Sub-agent request and result persistence
 - DynamicCronStore: Agent self-scheduled task storage
 - ApprovalGateManager: Human-in-the-loop approval state
+- SkillStore: Validated, atomic skill writes with lifecycle events
 """
 
 from openpaw.runtime.approval import ApprovalGateManager, PendingApproval
 from openpaw.stores.cron import DynamicCronStore, create_interval_task, create_once_task
+from openpaw.stores.skill import (
+    SkillLimits,
+    SkillRejectedError,
+    SkillStore,
+    SkillValidationError,
+)
 from openpaw.stores.subagent import SubAgentStore, create_subagent_request
 from openpaw.stores.task import TaskStore, create_task
 
@@ -26,4 +33,9 @@ __all__ = [
     # Approval store
     "ApprovalGateManager",
     "PendingApproval",
+    # Skill store
+    "SkillStore",
+    "SkillLimits",
+    "SkillRejectedError",
+    "SkillValidationError",
 ]

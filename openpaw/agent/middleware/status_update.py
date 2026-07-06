@@ -5,8 +5,8 @@ Hooks into LangGraph's AgentMiddleware protocol to emit status messages:
 - aafter_model: Detect tool_calls in AIMessage, report "Using tools: X, Y..."
 - awrap_tool_call: Report "Running tool: X..." / "Completed: X" and sub-agent dispatch
 
-Throttling prevents spam during rapid tool-call sequences. Agent-driven
-report_progress tool calls bypass throttling.
+Throttling prevents spam during rapid tool-call sequences. Harness plan/
+phase events bypass throttling (they are LLM-call-paced and user-meaningful).
 
 Edit-in-place pattern (default):
 - Sends one initial status message
@@ -17,10 +17,12 @@ Edit-in-place pattern (default):
 import logging
 import time
 from typing import Any
+from uuid import uuid4
 
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import AIMessage, ToolMessage
 
+from openpaw.agent.middleware.plan_status import PlanStatusRenderer
 from openpaw.agent.middleware.queue_aware import InterruptSignalError
 from openpaw.builtins.tools._channel_context import get_channel_context
 from openpaw.core.config.models.status_updates import StatusUpdatesConfig
@@ -28,6 +30,12 @@ from openpaw.core.prompts.system_events import (
     INTERRUPT_USER_NOTIFICATION,
     STEER_SKIP_MESSAGE,
     STEER_USER_NOTIFICATION,
+)
+from openpaw.model.status_event import (
+    JsonValue,
+    StatusEmitter,
+    StatusEvent,
+    StatusEventKind,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,7 +45,6 @@ _EMOJI_MAP: dict[str, str] = {
     "memory_search": "🔍",
     "send_message": "📤",
     "send_file": "📎",
-    "report_progress": "📊",
     "shell": "💻",
     "browser": "🌐",
     "read_file": "📖",
@@ -119,6 +126,18 @@ def _extract_tool_detail(tool_name: str, args: dict[str, Any]) -> str | None:
     return None
 
 
+# One-line renderings for skill lifecycle events (PRD-001 F4.1, ADR-106 §3).
+_SKILL_STATUS_VERBS: dict[StatusEventKind, str] = {
+    StatusEventKind.SKILL_CREATED: "Skill created",
+    StatusEventKind.SKILL_UPDATED: "Skill updated",
+    StatusEventKind.SKILL_STAGED: "Skill staged for approval",
+    StatusEventKind.SKILL_APPROVED: "Skill approved",
+    StatusEventKind.SKILL_EQUIPPED: "Skill equipped",
+    StatusEventKind.SKILL_DEPRECATED: "Skill deprecated",
+    StatusEventKind.SKILL_REJECTED: "Skill rejected",
+}
+
+
 class StatusUpdateMiddleware(AgentMiddleware):
     """Middleware that emits automatic status updates to the user channel.
 
@@ -131,7 +150,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
     Throttling:
     - Time-based: min_interval_seconds between auto-detected updates.
     - Deduplication: if the same set of tools is detected twice, only report once.
-    - Agent-driven report_progress bypasses all throttling.
+    - Harness plan/phase events bypass all throttling.
 
     Edit-in-place pattern:
     - When edit_in_place is True (default), a single status message is maintained
@@ -139,20 +158,43 @@ class StatusUpdateMiddleware(AgentMiddleware):
     - When False, each update sends a separate message (legacy behavior).
     """
 
-    def __init__(self, config: StatusUpdatesConfig) -> None:
+    def __init__(
+        self,
+        config: StatusUpdatesConfig,
+        emitter: StatusEmitter | None = None,
+        workspace: str = "",
+        start_label: str = "Starting work...",
+    ) -> None:
         """Initialize the middleware.
 
         Args:
             config: StatusUpdatesConfig instance controlling which events
                 to report and throttling parameters.
+            emitter: Optional StatusEmitter (ADR-106). When set, hooks emit
+                machine-readable StatusEvents alongside channel rendering.
+            workspace: Workspace name stamped onto emitted events.
+            start_label: Label shown at the first run start. Balanced harness
+                passes "Considering..." (its first turn decides answer vs. plan);
+                react/default keeps "Starting work...".
         """
         self._config = config
+        self._emitter = emitter
+        self._workspace = workspace
+        self._start_label = start_label
+        self._run_id: str = uuid4().hex
         self._channel: Any | None = None
         self._session_key: str | None = None
         self._last_update_time: float = 0.0
         self._last_reported_tools: frozenset[str] = frozenset()
         self._status_message_id: str | None = None
         self._steer_notified: bool = False
+        # True once an ultra-harness event has rendered for this run: the
+        # harness narrates its own phases, so the generic "Starting work..."
+        # from inner react runs is suppressed (feedback round 1).
+        self._harness_narrating: bool = False
+        # Plan checklist rendering (PRD-002 H3.3): its own edited-in-place
+        # message, distinct from the tool-status line above.
+        self._plan_renderer = PlanStatusRenderer(use_emojis=config.use_emojis)
         # Per-sub-agent status tracking: subagent_id -> (msg_id, label, channel, session_key).
         # Not cleared on reset() — sub-agents may outlive the main agent run.
         self._subagent_status_ids: dict[str, tuple[str, str, Any, str]] = {}
@@ -181,10 +223,19 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._session_key = session_key
         self._run_count = run_count
         self._is_system_batch = is_system_batch
+        self._run_id = uuid4().hex
         self._last_update_time = 0.0
         self._last_reported_tools = frozenset()
         self._status_message_id = None
         self._steer_notified = False
+        self._harness_narrating = False
+        # Plan-renderer state is NOT reset on the run boundary: a balanced
+        # todo plan persists across turns, so a continuing run's bare step
+        # events must keep editing the SAME checklist. plan.created is the
+        # sole reset trigger (keyed on (run_id, signature) in the renderer) —
+        # ultra's fresh per-run plan.created self-resets unchanged, while a
+        # genuinely new balanced plan (new run_id, or cleared+recreated
+        # todos) re-keys and starts a fresh message.
 
     def reset(self) -> None:
         """Reset per-invocation state. Called by MessageProcessor after each run."""
@@ -196,6 +247,36 @@ class StatusUpdateMiddleware(AgentMiddleware):
         self._last_reported_tools = frozenset()
         self._status_message_id = None
         self._steer_notified = False
+        self._harness_narrating = False
+        # Plan-renderer state intentionally NOT reset (see set_context): the
+        # checklist survives the run boundary so a balanced plan spanning
+        # multiple turns keeps ticking the same message. plan.created re-keys
+        # it for a genuinely new plan.
+        # _run_id intentionally NOT cleared: late sub-agent events after
+        # reset() still correlate with the run that dispatched them.
+
+    async def _emit(
+        self, kind: StatusEventKind, payload: dict[str, JsonValue] | None = None
+    ) -> None:
+        """Emit a StatusEvent to the injected emitter (ADR-106 Phase A).
+
+        Best-effort: emission failures are debug-logged and swallowed so
+        status plumbing never breaks an agent run. No-op without an emitter.
+        """
+        if self._emitter is None:
+            return
+        try:
+            await self._emitter.emit(
+                StatusEvent(
+                    kind=kind,
+                    workspace=self._workspace,
+                    session_key=self._session_key,
+                    run_id=self._run_id,
+                    payload=payload or {},
+                )
+            )
+        except Exception:
+            logger.debug("Status event emission failed for %s", kind, exc_info=True)
 
     async def delete_status(self) -> None:
         """Delete the tracked status message if one exists.
@@ -215,6 +296,81 @@ class StatusUpdateMiddleware(AgentMiddleware):
         except Exception as e:
             logger.debug("Failed to delete status message: %s", e)
 
+    async def handle_plan_event(self, event: StatusEvent) -> None:
+        """Render ultra-harness plan/node events (PRD-002 H3.3, H7.2).
+
+        Called by PlanChannelSink during a graph run — the armed per-run
+        context (set_context) is valid because events arrive on the same
+        asyncio task chain as the run. Maintains ONE plan checklist message
+        per run (created on plan.created, edited in place on step/revision
+        events; never deleted at completion) and pushes short node-phase
+        lines through the existing tool-status machinery.
+
+        Events for other sessions (mismatched session_key vs the armed
+        context) are ignored. All failures are swallowed at debug level —
+        plan rendering must never break a run.
+        """
+        if not self._config.enabled:
+            return
+        channel = self._channel
+        session_key = self._session_key
+        if not channel or not session_key:
+            logger.debug("Plan event %s ignored: no armed channel context", event.kind)
+            return
+        if event.session_key != session_key:
+            logger.debug(
+                "Plan event %s ignored: session %s does not match armed %s",
+                event.kind,
+                event.session_key,
+                session_key,
+            )
+            return
+        self._harness_narrating = True
+        try:
+            phase_line = await self._plan_renderer.handle(event, channel, session_key)
+            if phase_line:
+                emoji = None
+                if self._config.use_emojis:
+                    emoji = (
+                        "💡"
+                        if event.kind is StatusEventKind.MODULE_INSIGHT
+                        else "📋"
+                    )
+                # Forced: phase transitions are LLM-call-paced (bounded rate)
+                # and each one is user-meaningful — throttling here is what
+                # made module/routing lines vanish in round-1 testing.
+                await self._send_status(phase_line, emoji=emoji, force=True)
+        except Exception:
+            logger.debug("Plan event rendering failed for %s", event.kind, exc_info=True)
+
+    async def send_skill_status(self, event: StatusEvent) -> None:
+        """Render a skill lifecycle event as a forced one-line status (F4.1).
+
+        Called by SkillChannelSink. Skill events carry ``session_key=None``
+        when they originate from background paths (learning loop, dream);
+        those render to the armed context's channel when one exists. Events
+        stamped with a session that does not match the armed context are
+        skipped — same gate as :meth:`handle_plan_event`.
+        """
+        if not self._config.enabled:
+            return
+        if not self._channel or not self._session_key:
+            return  # no armed context (background path) — skip silently
+        if event.session_key is not None and event.session_key != self._session_key:
+            return
+        verb = _SKILL_STATUS_VERBS.get(event.kind)
+        if verb is None:
+            return
+        name = event.payload.get("name", "?")
+        created_by = event.payload.get("created_by")
+        line = f"{verb}: {name}"
+        if created_by:
+            line += f" (by {created_by})"
+        emoji = "🧠" if self._config.use_emojis else None
+        if emoji:
+            line = f"{emoji} {line}"
+        await self._send_status(line, force=True)
+
     async def create_subagent_status(self, subagent_id: str, label: str) -> None:
         """Send a new status message for a sub-agent and store its message ID.
 
@@ -222,7 +378,13 @@ class StatusUpdateMiddleware(AgentMiddleware):
             subagent_id: Unique identifier for the sub-agent request.
             label: Display name shown in the status header.
         """
-        if not self._config.enabled or not self._config.subagent_status:
+        if not self._config.enabled:
+            return
+        await self._emit(
+            StatusEventKind.SUBAGENT_DISPATCHED,
+            {"subagent_id": subagent_id, "label": label},
+        )
+        if not self._config.subagent_status:
             return
         channel = self._channel
         session_key = self._session_key
@@ -247,7 +409,13 @@ class StatusUpdateMiddleware(AgentMiddleware):
             status: Status text to display below the header line.
             emoji: Optional emoji prefix for the status line.
         """
-        if not self._config.enabled or not self._config.subagent_status:
+        if not self._config.enabled:
+            return
+        await self._emit(
+            StatusEventKind.SUBAGENT_TOOL,
+            {"subagent_id": subagent_id, "status": status},
+        )
+        if not self._config.subagent_status:
             return
         entry = self._subagent_status_ids.get(subagent_id)
         if not entry:
@@ -270,7 +438,13 @@ class StatusUpdateMiddleware(AgentMiddleware):
             subagent_id: Unique identifier for the sub-agent request.
             outcome: One of "completed", "failed", or "cancelled".
         """
-        if not self._config.enabled or not self._config.subagent_status:
+        if not self._config.enabled:
+            return
+        await self._emit(
+            StatusEventKind.SUBAGENT_COMPLETED,
+            {"subagent_id": subagent_id, "outcome": outcome},
+        )
+        if not self._config.subagent_status:
             return
         entry = self._subagent_status_ids.pop(subagent_id, None)
         if not entry:
@@ -311,14 +485,30 @@ class StatusUpdateMiddleware(AgentMiddleware):
         Returns:
             None (no state modifications).
         """
-        if not self._config.enabled or not self._config.agent_start:
+        if not self._config.enabled:
+            return None
+
+        await self._emit(
+            StatusEventKind.RUN_STARTED,
+            {
+                "run_count": getattr(self, "_run_count", 1),
+                "is_system_batch": getattr(self, "_is_system_batch", False),
+            },
+        )
+
+        if not self._config.agent_start:
             return None
 
         if getattr(self, "_is_system_batch", False):
             return None
 
+        # Ultra harness runs narrate their own phases (Thinking...,
+        # routing, steps); the generic label would stomp them.
+        if self._harness_narrating:
+            return None
+
         label = (
-            "Starting work..."
+            self._start_label
             if getattr(self, "_run_count", 1) == 1
             else "Continuing work..."
         )
@@ -341,7 +531,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
         Returns:
             None (no state modifications).
         """
-        if not self._config.enabled or not self._config.tool_calls_detected:
+        if not self._config.enabled:
             return None
 
         messages = state.get("messages", [])
@@ -358,6 +548,13 @@ class StatusUpdateMiddleware(AgentMiddleware):
 
         tool_names = [tc.get("name", "") for tc in tool_calls if tc.get("name")]
         if not tool_names:
+            return None
+
+        await self._emit(
+            StatusEventKind.TOOL_SELECTED, {"tools": list(tool_names)}
+        )
+
+        if not self._config.tool_calls_detected:
             return None
 
         current_tools = frozenset(tool_names)
@@ -412,6 +609,11 @@ class StatusUpdateMiddleware(AgentMiddleware):
             tool_detail,
         )
 
+        await self._emit(
+            StatusEventKind.TOOL_STARTED,
+            {"tool": tool_name, "detail": tool_detail},
+        )
+
         # Report sub-agent dispatch
         if tool_name == "spawn_agent" and self._config.subagent_spawned:
             label = tool_args.get("label", "sub-agent")
@@ -433,11 +635,17 @@ class StatusUpdateMiddleware(AgentMiddleware):
         try:
             result = await handler(request)
         except InterruptSignalError:
+            await self._emit(StatusEventKind.RUN_INTERRUPTED, {"tool": tool_name})
             if self._config.run_interrupted:
                 await self._send_status(
                     INTERRUPT_USER_NOTIFICATION, force=True
                 )
             raise
+
+        await self._emit(
+            StatusEventKind.TOOL_COMPLETED,
+            {"tool": tool_name, "detail": tool_detail},
+        )
 
         # Tool complete notification
         if self._config.tool_complete:
@@ -454,6 +662,7 @@ class StatusUpdateMiddleware(AgentMiddleware):
             and result.content == STEER_SKIP_MESSAGE
             and not self._steer_notified
         ):
+            await self._emit(StatusEventKind.RUN_STEERED, {"tool": tool_name})
             await self._send_status(STEER_USER_NOTIFICATION, force=True)
             self._steer_notified = True
 

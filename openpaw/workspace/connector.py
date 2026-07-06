@@ -50,7 +50,7 @@ class BuiltinToolConnector:
                 agent_factory.remove_builtin_tools({"search_conversations"})
                 agent_factory.remove_enabled_builtin("memory_search")
                 # Rebuild agent without the broken tool.
-                new_agent_runner = agent_factory.create_agent(
+                new_agent_runner = agent_factory.create_harness(
                     checkpointer=checkpointer
                 )
                 logger.info(
@@ -117,7 +117,7 @@ class BuiltinToolConnector:
                 # sees a broken capability
                 agent_factory.remove_builtin_tools({"browse_channel_history"})
                 agent_factory.remove_enabled_builtin("channel_history")
-                new_agent_runner = agent_factory.create_agent(
+                new_agent_runner = agent_factory.create_harness(
                     checkpointer=checkpointer
                 )
                 logger.info(

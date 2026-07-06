@@ -1,15 +1,18 @@
 """Base channel adapter interface."""
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Coroutine
-from typing import TYPE_CHECKING, Any
+from collections.abc import Awaitable, Callable, Coroutine
+from typing import TYPE_CHECKING, Any, TypeVar
 
+from openpaw.channels.retry import DEFAULT_RETRY_POLICY, RetryPolicy, retry_async
 from openpaw.model.message import Message
 
 if TYPE_CHECKING:
     from openpaw.model.channel import ChannelEvent, ChannelHistoryEntry
 
 __all__ = ["ChannelAdapter", "Message"]
+
+_T = TypeVar("_T")
 
 
 class ChannelAdapter(ABC):
@@ -19,10 +22,50 @@ class ChannelAdapter(ABC):
     - Protocol adaptation (platform-specific API to common Message format)
     - Access control (allowlists, pairing flows)
     - Message sending/receiving
+
+    Outbound-delivery resilience is part of the interface: a subclass
+    declares which of its transport exceptions are transient
+    (``RETRYABLE_SEND_ERRORS``) and routes its network sends through
+    :meth:`send_with_retry`. The default empty tuple means no retry, so
+    channels without a remote API (stdio) inherit inert behavior.
     """
 
     name: str = "base"
     _channel_event_callback: Callable[["ChannelEvent"], Coroutine[Any, Any, None]] | None = None
+
+    # --- Outbound retry contract (shared across all channels) --------------
+    # Transport exceptions a channel considers transient (network blips,
+    # timeouts, flood-control). Empty ⇒ outbound sends run once, no retry.
+    RETRYABLE_SEND_ERRORS: tuple[type[BaseException], ...] = ()
+    # Deny-list overriding the above — for permanent errors that subclass a
+    # retryable type (e.g. Telegram BadRequest is a NetworkError subclass).
+    NON_RETRYABLE_SEND_ERRORS: tuple[type[BaseException], ...] = ()
+    # Backoff schedule; a subclass or future config may override per channel.
+    retry_policy: RetryPolicy = DEFAULT_RETRY_POLICY
+
+    async def send_with_retry(
+        self, describe: str, operation: Callable[[], Awaitable[_T]]
+    ) -> _T:
+        """Run an outbound ``operation`` with this channel's retry policy.
+
+        Senders call this for each content-bearing network operation; the
+        adapter supplies the transient-error classification and backoff, so
+        senders stay ignorant of both (see :mod:`openpaw.channels.retry`).
+
+        Args:
+            describe: Short label for logs (e.g. "send_message").
+            operation: Zero-arg coroutine factory, re-invoked per attempt.
+
+        Returns:
+            The operation's result on first success.
+        """
+        return await retry_async(
+            operation,
+            retryable=self.RETRYABLE_SEND_ERRORS,
+            non_retryable=self.NON_RETRYABLE_SEND_ERRORS,
+            policy=self.retry_policy,
+            describe=f"{self.name}.{describe}",
+        )
 
     @abstractmethod
     async def start(self) -> None:

@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from openpaw.core.config.models.builtin import WorkspaceBuiltinsConfig
 from openpaw.core.config.models.channel import WorkspaceChannelConfig
 from openpaw.core.config.models.cron import HeartbeatConfig
+from openpaw.core.config.models.harness import HarnessConfig
+from openpaw.core.config.models.learning import LearningConfig
 from openpaw.core.config.models.lifecycle import LifecycleConfig, StatusReminderConfig
 from openpaw.core.config.models.mcp import WorkspaceMCPConfig
 from openpaw.core.config.models.memory import AutoCompactConfig, MemoryConfig
@@ -228,6 +230,14 @@ class WorkspaceConfig(BaseModel):
     mcp: WorkspaceMCPConfig = Field(
         default_factory=WorkspaceMCPConfig,
         description="MCP (Model Context Protocol) server bindings for this workspace.",
+    )
+    harness: HarnessConfig = Field(
+        default_factory=HarnessConfig,
+        description="Agent harness topology (react | balanced | ultra) and per-node models (0.5.0).",
+    )
+    learning: LearningConfig = Field(
+        default_factory=LearningConfig,
+        description="Learning loop configuration (agent-authored skills, 0.5.0).",
     )
 
     @field_validator("session_ttl_minutes")

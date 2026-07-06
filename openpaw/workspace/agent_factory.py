@@ -3,12 +3,23 @@
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 from openpaw.agent import AgentRunner
-from openpaw.core.config.models import ProviderDefinition
+from openpaw.agent.harness import AgentHarness, HarnessKind
+from openpaw.agent.harness.balanced import BalancedHarness, build_balanced_middleware
+from openpaw.agent.harness.checkpoint_reflection import (
+    VERDICT_TIMEOUT_SECONDS,
+    CheckpointReflector,
+)
+from openpaw.agent.harness.lenses import create_explore_lenses_tool
+from openpaw.agent.harness.ultra import UltraHarness
+from openpaw.core.config.models import HarnessConfig, ProviderDefinition
 from openpaw.model.spawn_profile import SpawnProfile
+from openpaw.model.status_event import StatusEmitter
 from openpaw.workspace.model_resolver import ModelResolver
+from openpaw.workspace.node_model_resolver import NodeModelResolver
 from openpaw.workspace.tool_filter import filter_workspace_tools
 
 __all__ = ["AgentFactory", "RuntimeModelOverride", "filter_workspace_tools"]
@@ -85,6 +96,7 @@ class AgentFactory:
             extra_model_kwargs=extra_model_kwargs,
         )
         self._runtime_override: RuntimeModelOverride | None = None
+        self._status_emitter: StatusEmitter | None = None
 
     # ------------------------------------------------------------------
     # Public properties
@@ -131,16 +143,165 @@ class AgentFactory:
         """
         self._mcp_tools = list(tools)
 
-    def create_agent(self, checkpointer: Any | None = None) -> AgentRunner:
-        """Create a configured AgentRunner instance.
+    @property
+    def status_emitter(self) -> StatusEmitter | None:
+        """The wired status event emitter, if any (used by SkillStore wiring)."""
+        return self._status_emitter
+
+    def set_status_emitter(self, emitter: StatusEmitter) -> None:
+        """Wire the status event emitter used by harness nodes (ADR-106).
+
+        Call before create_harness(); defaults to a no-op emitter when unset.
+        """
+        self._status_emitter = emitter
+
+    def create_harness(self, checkpointer: Any | None = None) -> AgentHarness:
+        """Create the interactive agent harness for this workspace.
+
+        The seam callers (WorkspaceRunner/MessageProcessor/connector) hold —
+        they never depend on the underlying graph topology (ADR-101 §2).
+        Dispatches on ``workspace.config.harness.type``: react (default) is
+        the exact current AgentRunner path; balanced is that same runner with
+        the todo/plan middleware appended (ADR-111); ultra wraps the runner
+        as the execution engine inside the ADR-101 graph.
 
         Args:
             checkpointer: Optional checkpointer for conversation state.
 
         Returns:
-            Configured AgentRunner instance.
+            The configured AgentHarness.
         """
-        all_tools = list(self._builtin_tools) + list(self._workspace_tools) + list(self._mcp_tools)
+        harness_config: HarnessConfig | None = (
+            self._workspace.config.harness if getattr(self._workspace, "config", None) else None
+        )
+        if harness_config is not None and harness_config.type == HarnessKind.BALANCED.value:
+            return self._create_balanced_harness(harness_config, checkpointer)
+        if harness_config is None or harness_config.type != HarnessKind.ULTRA.value:
+            return self.create_agent(checkpointer=checkpointer)
+
+        inner = self.create_agent(checkpointer=checkpointer)
+        if harness_config.execution.max_turns is not None:
+            inner.max_turns = harness_config.execution.max_turns
+        node_resolver = self._build_node_resolver()
+        self._logger.info("Creating ultra harness for workspace: %s", self._workspace.name)
+        return UltraHarness(
+            workspace=self._workspace,
+            inner=inner,
+            harness_config=harness_config,
+            node_resolver=node_resolver,
+            emitter=self._status_emitter,
+            # Tool equipping (ADR-104): step-scoped executors are built here,
+            # in the factory, because it owns every construction param — the
+            # subset agent matches the inner runner's workspace, model
+            # resolution, and middleware, just with fewer tools and no
+            # checkpointer (step runs are unpersisted by design).
+            step_agent_builder=lambda tools: self.create_agent(checkpointer=None, tools_override=tools),
+        )
+
+    def _build_node_resolver(self) -> NodeModelResolver:
+        """Node-model resolution over the workspace baseline (ADR-103).
+
+        Shared by the ultra harness (per-node models) and the balanced
+        harness (optional checkpoint-verdict model pointer).
+        """
+        return NodeModelResolver(
+            resolver=self._resolver,
+            workspace_model=self._configured_model,
+            workspace_api_key=self._resolver.resolve_api_key(self._configured_model),
+            workspace_temperature=self._temperature,
+            workspace_region=self._resolver._region,
+            workspace_extra_kwargs=self._resolver._extra_model_kwargs,
+        )
+
+    def _build_checkpoint_reflector(
+        self, harness_config: HarnessConfig
+    ) -> CheckpointReflector | None:
+        """The checkpoint reflector when ``harness.reflection.mode: checkpoint``.
+
+        An explicit ``reflection.model`` pointer resolves like ultra's node
+        models (NodeModelResolver -> create_node_model, lazily); unset falls
+        back to the runner's workspace model, wired by BalancedHarness.
+        """
+        reflection = harness_config.reflection
+        if reflection.mode != "checkpoint":
+            return None
+        model_factory = None
+        if reflection.model is not None:
+            model_factory = partial(
+                self._build_node_resolver().create_node_model, reflection
+            )
+        return CheckpointReflector(
+            every=reflection.every,
+            model_factory=model_factory,
+            verdict_timeout=self._verdict_timeout(),
+        )
+
+    def _verdict_timeout(self) -> float:
+        """Clamp the checkpoint-verdict budget under the write_todos tool timeout.
+
+        The verdict call rides inside a write_todos tool call that is itself
+        under ToolTimeoutMiddleware. An operator-configured tool timeout
+        below ~35s would otherwise fire mid-verdict and discard an
+        already-applied write after its events were emitted, so the
+        effective budget is min(default, tool timeout / 2).
+        """
+        tool_timeouts = getattr(
+            getattr(self._workspace, "config", None), "tool_timeouts", None
+        )
+        if tool_timeouts is None:
+            return VERDICT_TIMEOUT_SECONDS
+        tool_timeout: float = tool_timeouts.overrides.get(
+            "write_todos", tool_timeouts.default_seconds
+        )
+        return min(VERDICT_TIMEOUT_SECONDS, tool_timeout * 0.5)
+
+    def _create_balanced_harness(
+        self, harness_config: HarnessConfig, checkpointer: Any | None
+    ) -> BalancedHarness:
+        """Construct the balanced harness (ADR-111).
+
+        Same runner kwargs as the react path, with the todo/plan middleware
+        appended after the workspace stack, the ``explore_lenses`` tool
+        registered when ``harness.ideation.lens_tool`` is enabled (balanced
+        workspaces only, DESIGN §10.3), checkpoint reflection wired when
+        configured (DESIGN §3), and the optional
+        ``harness.execution.timeout_seconds`` override applied.
+        """
+        ideation = harness_config.ideation
+        kwargs = self._runner_kwargs(checkpointer, tools_override=None)
+        kwargs["middleware"] = [
+            *kwargs["middleware"],
+            *build_balanced_middleware(
+                emitter=self._status_emitter,
+                workspace_name=self._workspace.name,
+                plan_visibility=harness_config.plan.visibility,
+                lens_guidance=ideation.lens_tool,
+                lens_count=ideation.lens_count,
+                reflector=self._build_checkpoint_reflector(harness_config),
+            ),
+        ]
+        if ideation.lens_tool:
+            kwargs["tools"] = [
+                *(kwargs["tools"] or []),
+                create_explore_lenses_tool(ideation.lens_count),
+            ]
+        self._logger.info("Creating balanced harness for workspace: %s", self._workspace.name)
+        harness = BalancedHarness(**kwargs)
+        if harness_config.execution.timeout_seconds is not None:
+            harness.timeout_seconds = harness_config.execution.timeout_seconds
+        if harness_config.execution.max_turns is not None:
+            harness.max_turns = harness_config.execution.max_turns
+        return harness
+
+    def _runner_kwargs(
+        self, checkpointer: Any | None, tools_override: list[Any] | None
+    ) -> dict[str, Any]:
+        """Resolve the constructor kwargs shared by the react and balanced paths."""
+        all_tools = (
+            list(tools_override)
+            if tools_override is not None
+            else list(self._builtin_tools) + list(self._workspace_tools) + list(self._mcp_tools)
+        )
 
         raw_model = (
             self._runtime_override.model
@@ -167,21 +328,37 @@ class AgentFactory:
         merged_extra = {**resolved.extra_kwargs, **self._resolver._extra_model_kwargs}
         region = resolved.region or self._resolver._region
 
-        return AgentRunner(
-            workspace=self._workspace,
-            model=resolved.model_str,
-            api_key=api_key,
-            max_turns=self._max_turns,
-            temperature=temperature,
-            checkpointer=checkpointer,
-            tools=all_tools if all_tools else None,
-            region=region,
-            timeout_seconds=self._timeout_seconds,
-            enabled_builtins=self._enabled_builtin_names,
-            extra_model_kwargs=merged_extra,
-            middleware=self._middleware,
-            channel_logging_enabled=self._channel_logging_enabled,
-        )
+        return {
+            "workspace": self._workspace,
+            "model": resolved.model_str,
+            "api_key": api_key,
+            "max_turns": self._max_turns,
+            "temperature": temperature,
+            "checkpointer": checkpointer,
+            "tools": all_tools if all_tools else None,
+            "region": region,
+            "timeout_seconds": self._timeout_seconds,
+            "enabled_builtins": self._enabled_builtin_names,
+            "extra_model_kwargs": merged_extra,
+            "middleware": self._middleware,
+            "channel_logging_enabled": self._channel_logging_enabled,
+        }
+
+    def create_agent(
+        self, checkpointer: Any | None = None, tools_override: list[Any] | None = None
+    ) -> AgentRunner:
+        """Create a configured AgentRunner instance.
+
+        Args:
+            checkpointer: Optional checkpointer for conversation state.
+            tools_override: Replace the additional-tools set (builtin +
+                workspace + MCP) with an explicit list. Used by tool
+                equipping to build step-scoped executors over a subset.
+
+        Returns:
+            Configured AgentRunner instance.
+        """
+        return AgentRunner(**self._runner_kwargs(checkpointer, tools_override))
 
     def create_stateless_agent(
         self, extra_overrides: dict[str, Any] | None = None
