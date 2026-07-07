@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Annotated, Any, TypedDict, cast
 
 import aiosqlite
+import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
@@ -21,6 +22,7 @@ from openpaw.agent.harness.modules.reflection import FullReflection, LightReflec
 from openpaw.agent.harness.ultra.graph import (
     UltraNodeModels,
     TriageDecision,
+    _is_terminal_acknowledgment,
     build_ultra_graph,
 )
 from openpaw.agent.harness.ultra.prompts import FALLBACK_STEP_DESCRIPTION
@@ -258,6 +260,124 @@ async def test_system_batch_routes_react_without_llm_call() -> None:
     # The short-circuit (not the fail-open fallback) handled it — no LLM call.
     triage_events = [e for e in emitter.events if e.node == "triage"]
     assert triage_events[0].payload["reason"] == "system batch"
+
+
+# ---------------------------------------------------------------------------
+# Terminal-acknowledgment short-circuit (A2) + latest-message weighting (B)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "great work dude!",
+        "thanks!",
+        "thanks so much",
+        "nice",
+        "ok",
+        "lol",
+        "perfect 👍",
+        "great job",
+        "well done",
+    ],
+)
+def test_terminal_acknowledgment_matches(text: str) -> None:
+    assert _is_terminal_acknowledgment(text) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "summarize that",
+        "do it",
+        "great, now do the next step",
+        "thanks, can you also fix X",
+        "nice — one more thing",
+        "",
+        "Please research the top ten films. Then cross-reference every rating. "
+        "Finally write a ranked summary for me.",
+    ],
+)
+def test_terminal_acknowledgment_falls_through(text: str) -> None:
+    # Fail toward the LLM: any content word / imperative / long message must not match.
+    assert _is_terminal_acknowledgment(text) is False
+
+
+async def test_terminal_ack_short_circuits_to_react_without_triage_llm() -> None:
+    """A bare compliment routes react deterministically — the triage LLM is skipped."""
+    calls: list[str] = []
+    triage_model = FakeModel()  # must NOT be called
+    emitter = CaptureEmitter()
+    graph = build_ultra_graph(
+        react_graph=make_fake_react(["you're welcome"], calls),
+        node_models=UltraNodeModels(
+            triage=cast(BaseChatModel, triage_model),
+            planning=fake(),
+            creative=fake(),
+            reflection=fake(),
+            selector=fake(),
+            synthesize=fake(),
+        ),
+        harness_config=HarnessConfig(type="ultra"),
+        candidates=default_candidates(),
+        emitter=emitter,
+        workspace_info=WorkspaceInfo(name="testws", timezone="UTC", workspace_path=Path("/tmp/ws")),
+        tools_summary=[],
+        run_context=UltraRunContext(),
+        checkpointer=None,
+        inner_recursion_limit=20,
+    )
+    result = await graph.ainvoke({"messages": [HumanMessage("great work dude!")]})
+
+    assert triage_model.call_count == 0  # deterministic short-circuit, no LLM
+    assert result["route"] == "react"
+    assert result["messages"][-1].content == "you're welcome"
+    triage_events = [e for e in emitter.events if e.node == "triage"]
+    assert triage_events[0].payload["reason"] == "acknowledgment"
+
+
+async def test_triage_input_isolates_latest_message_and_does_not_force_react() -> None:
+    """B: the model receives the latest message set apart; the route is the model's.
+
+    A non-ack follow-up ("summarize that") after a large prior project reaches
+    the triage LLM with a distinct LATEST-MESSAGE section, and the mechanism
+    honors whatever the model returns (here: plan) — it does not hard-code react.
+    """
+    triage_model = FakeModel(plan_decision("summarize the ghibli research"))
+    graph = build_ultra_graph(
+        react_graph=make_fake_react(["r1"], []),
+        node_models=UltraNodeModels(
+            triage=cast(BaseChatModel, triage_model),
+            planning=fake(_PlanSchema(steps=["one"])),
+            creative=fake(),
+            reflection=fake(advance()),
+            selector=fake(),
+            synthesize=fake(AIMessage(content="done")),
+        ),
+        harness_config=HarnessConfig(type="ultra"),
+        candidates=default_candidates(),
+        emitter=CaptureEmitter(),
+        workspace_info=WorkspaceInfo(name="testws", timezone="UTC", workspace_path=Path("/tmp/ws")),
+        tools_summary=[],
+        run_context=UltraRunContext(),
+        checkpointer=None,
+        inner_recursion_limit=20,
+    )
+    messages = [
+        HumanMessage("build me a huge ranked zine of every studio ghibli film"),
+        AIMessage("...massive multi-step research output about every ghibli film..."),
+        HumanMessage("summarize that"),
+    ]
+    result = await graph.ainvoke({"messages": messages})
+
+    prompt = triage_model.prompts[0]
+    latest_section = prompt.split("LATEST MESSAGE TO CLASSIFY:")[1]
+    assert "summarize that" in latest_section
+    # The digest is framed as reference context, not work to resume.
+    assert "context only" in prompt
+    assert "massive multi-step research output" in prompt  # prior project in the digest
+    # Not forced to react — the model's plan route is honored.
+    assert result["route"] == "plan"
 
 
 # ---------------------------------------------------------------------------

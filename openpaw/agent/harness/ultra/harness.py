@@ -470,6 +470,10 @@ class UltraHarness:
             await self._record_resume_marker(config)
             raise
         except TimeoutError:
+            # A timed-out run is, from the plan's perspective, abandoned —
+            # clear plan state exactly as the interrupt path does so stale,
+            # live-looking plan state cannot outlive the concluded turn.
+            await self._clear_plan_state(config)
             duration_ms = (time.monotonic() - start_time) * 1000
             self._last_metrics = extract_metrics_from_callback(usage_callback, duration_ms, self.model_id)
             self._last_metrics.is_partial = True
