@@ -241,7 +241,7 @@ A triage node routes each message: simple turns go straight to the plain react l
 
 **Per-node telemetry** — harness nodes emit `node.completed` events with token counts and latency; per-node rows land in `token_usage.jsonl` alongside the unchanged run-level records.
 
-See [Configuration](configuration.md) for the full `harness:` field reference.
+See [Harnesses](harnesses.md) for a full tour of the three tiers, the ultra graph, and the reasoning modules — and [Configuration](configuration.md) for the full `harness:` field reference.
 
 ### Learning Loop
 
