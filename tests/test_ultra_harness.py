@@ -260,6 +260,23 @@ async def test_timeout_returns_notification_with_partial_metrics(harness: UltraH
     assert harness.last_metrics.is_partial is True
 
 
+async def test_timeout_clears_plan_state(harness: UltraHarness) -> None:
+    """A timed-out run abandons the plan — same cleanup as the interrupt path."""
+    stub = StubGraph(delay=5.0)
+    harness._graph = stub
+    harness.timeout_seconds = 0.05
+
+    response = await harness.run("long task", thread_id="telegram:1:conv1")
+
+    assert response == TIMEOUT_NOTIFICATION_GENERIC.format(timeout=0)  # notification unchanged
+    assert len(stub.state_updates) == 1
+    values, as_node = stub.state_updates[0]
+    assert values["plan"] is None
+    assert values["current_step_id"] is None
+    assert values["resume_step_id"] is None
+    assert as_node == "plan"
+
+
 # ---------------------------------------------------------------------------
 # run() end-to-end over a fake ultra graph (real astream/updates parsing)
 # ---------------------------------------------------------------------------

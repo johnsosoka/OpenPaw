@@ -47,6 +47,7 @@ fake subgraph.
 """
 
 import logging
+import re
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -101,6 +102,7 @@ from openpaw.agent.harness.ultra.prompts import (
     STEP_EXECUTION_TEMPLATE,
     SYNTHESIZE_ABORT_BLOCK,
     SYNTHESIZE_TEMPLATE,
+    TRIAGE_INPUT_TEMPLATE,
     TRIAGE_SYSTEM_PROMPT,
 )
 from openpaw.agent.harness.ultra.state import (
@@ -178,6 +180,45 @@ def _last_human_text(messages: list[Any]) -> str:
         if isinstance(msg, HumanMessage):
             return extract_message_text(msg.content)
     return ""
+
+
+# ponytail: hand-curated word sets — a heuristic, not a classifier. It exists
+# to short-circuit the obvious "great work!" case; the triage LLM (fed the
+# latest message, see TRIAGE_INPUT_TEMPLATE) is the correctness backstop, so
+# this is *allowed* to miss. Upgrade path: swap for a tiny "is this a task?"
+# classifier model if paraphrased or multilingual acks ("merci!", "you rock",
+# "top job") start slipping through in practice.
+_ACK_WORDS = frozenset({
+    "thanks", "thank", "thankyou", "thx", "ty", "great", "nice", "awesome",
+    "perfect", "cool", "ok", "okay", "k", "kk", "yes", "yep", "yup", "yeah",
+    "lol", "haha", "hahaha", "good", "love", "loved", "wow", "gg", "sweet",
+    "excellent", "amazing", "brilliant", "fantastic", "wonderful", "beautiful",
+    "solid", "legend", "done", "nailed", "best", "congrats",
+})
+
+# Removed before the all-ack check so filler around an ack word ("great WORK
+# DUDE", "thanks SO MUCH", "well done" → "well") does not block a match.
+_ACK_FILLER = frozenset({
+    "work", "job", "dude", "man", "bro", "buddy", "mate", "you", "u", "so",
+    "much", "very", "really", "the", "that", "this", "it", "a", "for", "well",
+    "there", "my", "friend", "and", "all",
+})
+
+
+def _is_terminal_acknowledgment(text: str) -> bool:
+    """True IFF ``text`` is a bare acknowledgment (thanks/compliment/ok).
+
+    Conservative by construction — fails toward the LLM (§6): any content word
+    that is not an ack ("do", "summarize", "fix") blocks the match, and messages
+    longer than the brevity gate never match. False negatives are harmless (the
+    ack goes to triage, which routes it correctly anyway); false positives —
+    swallowing a real task — are what this must avoid.
+    """
+    tokens = re.sub(r"[^\w\s]", " ", text.lower()).split()
+    if not tokens or len(tokens) > 6:  # real multi-step asks are longer
+        return False
+    content = [t for t in tokens if t not in _ACK_FILLER]
+    return bool(content) and all(t in _ACK_WORDS for t in content)
 
 
 def _conversation_digest(messages: list[Any]) -> str:
@@ -368,6 +409,21 @@ def build_ultra_graph(
                 goto="react",
             )
 
+        # Deterministic ack short-circuit: a bare "thanks"/"great work!" never
+        # needs the triage LLM and must never resurrect a concluded task. Same
+        # Command shape as the [SYSTEM] block above; fails toward the LLM by
+        # construction (any content word blocks the match).
+        if _is_terminal_acknowledgment(last_text):
+            await _emit(
+                StatusEventKind.NODE_ENTERED,
+                "triage",
+                {"route": "react", "reason": "acknowledgment"},
+            )
+            return Command(
+                update={"route": "react", "objective": last_text[:200], "context_brief": None},
+                goto="react",
+            )
+
         # Entry event (no "route" key) — renders the "Thinking..." status
         # while the triage model decides; the post-decision event below
         # carries the chosen route (feedback round 1).
@@ -377,7 +433,12 @@ def build_ultra_graph(
                 decision = await node_models.triage.with_structured_output(TriageDecision).ainvoke(
                     [
                         SystemMessage(TRIAGE_SYSTEM_PROMPT),
-                        HumanMessage(_conversation_digest(state.get("messages", []))),
+                        HumanMessage(
+                            TRIAGE_INPUT_TEMPLATE.format(
+                                digest=_conversation_digest(state.get("messages", [])),
+                                latest=last_text,
+                            )
+                        ),
                     ]
                 )
                 if not isinstance(decision, TriageDecision):
